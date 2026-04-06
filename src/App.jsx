@@ -1,32 +1,10 @@
 import { useState, useEffect } from "react";
+import { createClient } from "@supabase/supabase-js";
 
-// ── SAMPLE DATA ────────────────────────────────────────────────────────────────
-const SAMPLE_PRODUCTS = [
-  { id: "P001", name: "ProCam X200", code: "CAM-X200", price: 899, category: "Camera", stock: 12, warrantyMonths: 24, specs: "4K, 20MP, Weather-sealed" },
-  { id: "P002", name: "LensKit Pro 50mm", code: "LENS-50P", price: 349, category: "Lens", stock: 8, warrantyMonths: 12, specs: "f/1.4, Full-frame, Stabilized" },
-  { id: "P003", name: "TriPod Elite", code: "TRP-ELT", price: 199, category: "Accessory", stock: 20, warrantyMonths: 24, specs: "Carbon fiber, Max 5kg load" },
-  { id: "P004", name: "FlashPack Ultra", code: "FLS-ULT", price: 129, category: "Accessory", stock: 5, warrantyMonths: 12, specs: "600W/s, TTL compatible" },
-];
-
-const SAMPLE_CUSTOMERS = [
-  { id: "C001", name: "Alice Wong", email: "alice@studio.hk", phone: "+852 9123 4567", company: "Wong Studio", address: "12 Hollywood Rd, Central, HK", type: "VIP" },
-  { id: "C002", name: "James Lau", email: "james@creativeco.hk", phone: "+852 9876 5432", company: "Creative Co.", address: "8 Queen's Rd, Wan Chai, HK", type: "Regular" },
-  { id: "C003", name: "Mei Lin", email: "mei@photoart.com", phone: "+852 6543 2109", company: "Photo Art", address: "3 Canton Rd, TST, HK", type: "Regular" },
-];
-
-const SAMPLE_INVENTORY = [
-  { id: "INV001", productId: "P001", serialNo: "SN-X200-001", status: "Sold", customerId: "C001", soldDate: "2024-03-15", warrantyEnd: "2026-03-15", extended: true, extendedEnd: "2027-03-15", notes: "Custom engraving" },
-  { id: "INV002", productId: "P001", serialNo: "SN-X200-002", status: "In Stock", customerId: null, soldDate: null, warrantyEnd: null, extended: false, extendedEnd: null, notes: "" },
-  { id: "INV003", productId: "P002", serialNo: "SN-50P-007", status: "Sold", customerId: "C002", soldDate: "2024-06-01", warrantyEnd: "2025-06-01", extended: false, extendedEnd: null, notes: "" },
-  { id: "INV004", productId: "P003", serialNo: "SN-ELT-022", status: "In Stock", customerId: null, soldDate: null, warrantyEnd: null, extended: false, extendedEnd: null, notes: "" },
-  { id: "INV005", productId: "P001", serialNo: "SN-X200-003", status: "Warranty Expiring", customerId: "C003", soldDate: "2023-07-10", warrantyEnd: "2025-07-10", extended: false, extendedEnd: null, notes: "Client contacted about extension" },
-];
-
-const SAMPLE_INVOICES = [
-  { id: "INV-2024-001", customerId: "C001", date: "2024-03-15", items: [{ productId: "P001", qty: 1, price: 899 }], status: "Paid", total: 899, notes: "Shopify Order #1042" },
-  { id: "INV-2024-002", customerId: "C002", date: "2024-06-01", items: [{ productId: "P002", qty: 1, price: 349 }, { productId: "P004", qty: 2, price: 129 }], status: "Paid", total: 607, notes: "WhatsApp order" },
-  { id: "INV-2024-003", customerId: "C003", date: "2023-07-10", items: [{ productId: "P001", qty: 1, price: 899 }, { productId: "P003", qty: 1, price: 199 }], status: "Paid", total: 1098, notes: "Walk-in" },
-];
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+);
 
 // ── ICONS ──────────────────────────────────────────────────────────────────────
 const Icon = ({ name, size = 18 }) => {
@@ -87,14 +65,44 @@ const StatCard = ({ label, value, sub, accent, icon }) => (
 // ── MAIN APP ───────────────────────────────────────────────────────────────────
 export default function App() {
   const [tab, setTab] = useState("dashboard");
-  const [products] = useState(SAMPLE_PRODUCTS);
-  const [inventory] = useState(SAMPLE_INVENTORY);
-  const [customers] = useState(SAMPLE_CUSTOMERS);
-  const [invoices] = useState(SAMPLE_INVOICES);
+  const [products, setProducts] = useState([]);
+  const [inventory, setInventory] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [invoices, setInvoices] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showNewInvoice, setShowNewInvoice] = useState(false);
   const [newInvoice, setNewInvoice] = useState({ customerId: "", items: [{ productId: "", qty: 1 }], notes: "", warranty: false });
   const [invoiceGenerated, setInvoiceGenerated] = useState(false);
+
+  useEffect(() => {
+    async function fetchData() {
+      setLoading(true);
+      const [prodRes, custRes, invRes, invtRes] = await Promise.all([
+        supabase.from("products").select("*"),
+        supabase.from("customers").select("*"),
+        supabase.from("invoices").select("*").order("invoice_number", { ascending: false }),
+        supabase.from("inventory").select("*"),
+      ]);
+      if (prodRes.data) setProducts(prodRes.data.map(p => ({
+        ...p, code: p.code || "", category: p.category || "", stock: p.stock || 0,
+        warrantyMonths: p.warranty_months || 12, specs: p.specs || ""
+      })));
+      if (custRes.data) setCustomers(custRes.data.map(c => ({
+        ...c, company: c.company || "", type: c.type || "Regular"
+      })));
+      if (invRes.data) setInvoices(invRes.data.map(i => ({
+        ...i, customerId: i.customer_id, invoiceNumber: i.invoice_number,
+        items: i.items || [], total: Number(i.total) || 0
+      })));
+      if (invtRes.data) setInventory(invtRes.data.map(v => ({
+        ...v, productId: v.product_id, serialNo: v.serial_no, customerId: v.customer_id,
+        soldDate: v.sold_date, warrantyEnd: v.warranty_end, extendedEnd: v.extended_end
+      })));
+      setLoading(false);
+    }
+    fetchData();
+  }, []);
 
   const getProduct = (id) => products.find(p => p.id === id);
   const getCustomer = (id) => customers.find(c => c.id === id);
@@ -124,6 +132,17 @@ export default function App() {
     const p = getProduct(item.productId);
     return sum + (p ? p.price * item.qty : 0);
   }, 0);
+
+  if (loading) {
+    return (
+      <div style={{ display: "flex", height: "100vh", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', 'Helvetica Neue', sans-serif", background: "#f7f8fc", color: "#1a1a2e" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 24, fontWeight: 800 }}>BizFlow</div>
+          <div style={{ fontSize: 14, color: "#888", marginTop: 8 }}>Loading data...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "'DM Sans', 'Helvetica Neue', sans-serif", background: "#f7f8fc", color: "#1a1a2e" }}>
