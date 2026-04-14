@@ -184,6 +184,14 @@ function printInvoice(inv, customer, items) {
 
 // ── MAIN APP ───────────────────────────────────────────────────────────────────
 export default function App() {
+  // Supabase Auth：session 由 Supabase SDK 管理（localStorage 自動持久化 + 自動 refresh）
+  const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPw, setLoginPw] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [loginBusy, setLoginBusy] = useState(false);
+
   const [tab, setTab] = useState("dashboard");
   const [products, setProducts] = useState([]);
   const [inventory, setInventory] = useState([]);
@@ -259,7 +267,21 @@ export default function App() {
     });
   }, [invoices, customers, search]);
 
+  // Supabase Auth：初始化 + 監聽 session 變化
   useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setAuthLoading(false);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // 登入後才加載數據
+  useEffect(() => {
+    if (!session) return;
     async function fetchAll(table, orderCol, ascending = true) {
       let all = [];
       let from = 0;
@@ -297,7 +319,7 @@ export default function App() {
       }
     }
     load();
-  }, []);
+  }, [session]);
 
   const getProduct = (id) => products.find(p => p.id === id);
   const getCustomer = (id) => customers.find(c => c.id === id);
@@ -451,6 +473,60 @@ export default function App() {
     setSaving(false);
   }
 
+  // 認證載入中（Supabase 正在讀 session）
+  if (authLoading) return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#f7f8fc" }}>
+      <div style={{ width: 40, height: 40, border: "4px solid #e0e0e0", borderTopColor: "#6382ff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
+
+  // 未登入 → 顯示登入頁
+  if (!session) {
+    const tryLogin = async () => {
+      if (!loginEmail || !loginPw) { setLoginError("請輸入郵箱和密碼"); return; }
+      setLoginBusy(true);
+      setLoginError("");
+      const { error } = await supabase.auth.signInWithPassword({ email: loginEmail, password: loginPw });
+      if (error) setLoginError(error.message || "登入失敗");
+      setLoginBusy(false);
+    };
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "linear-gradient(135deg,#1a1f3a,#2d3561)" }}>
+        <div style={{ background: "#fff", borderRadius: 16, padding: 40, width: 380, boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
+          <div style={{ textAlign: "center", marginBottom: 28 }}>
+            <div style={{ width: 56, height: 56, margin: "0 auto 14px", borderRadius: "50%", background: "linear-gradient(135deg,#6382ff,#a78bfa)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: 800, color: "#fff" }}>H</div>
+            <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800 }}>Honnmono BizFlow</h2>
+            <p style={{ margin: "6px 0 0", fontSize: 13, color: "#888" }}>管理員登入</p>
+          </div>
+          <input
+            type="email"
+            autoFocus
+            value={loginEmail}
+            onChange={e => { setLoginEmail(e.target.value); setLoginError(""); }}
+            onKeyDown={e => { if (e.key === "Enter") tryLogin(); }}
+            placeholder="郵箱"
+            disabled={loginBusy}
+            style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 15, outline: "none", boxSizing: "border-box", marginBottom: 10 }}
+          />
+          <input
+            type="password"
+            value={loginPw}
+            onChange={e => { setLoginPw(e.target.value); setLoginError(""); }}
+            onKeyDown={e => { if (e.key === "Enter") tryLogin(); }}
+            placeholder="密碼"
+            disabled={loginBusy}
+            style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: loginError ? "1px solid #ef4444" : "1px solid #e0e0e0", fontSize: 15, outline: "none", boxSizing: "border-box", marginBottom: 8 }}
+          />
+          {loginError && <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 8 }}>{loginError}</div>}
+          <button onClick={tryLogin} disabled={loginBusy} style={{ width: "100%", padding: 12, background: loginBusy ? "#b0c0ff" : "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: loginBusy ? "wait" : "pointer", marginTop: 8 }}>
+            {loginBusy ? "登入中..." : "登入"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (loading) return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", flexDirection: "column", gap: 16, background: "#f7f8fc" }}>
       <div style={{ width: 48, height: 48, border: "4px solid #e0e0e0", borderTopColor: "#6382ff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
@@ -493,10 +569,15 @@ export default function App() {
         <div style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.07)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "rgba(99,130,255,0.1)", borderRadius: 10 }}>
             <div style={{ width: 30, height: 30, borderRadius: "50%", background: "linear-gradient(135deg,#7c9dff,#a78bfa)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#fff" }}>H</div>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>Honnmono</div>
+            <div style={{ flex: 1, overflow: "hidden" }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{session?.user?.email || "Honnmono"}</div>
               <div style={{ fontSize: 11, color: "#6b7bb8" }}>管理員</div>
             </div>
+            <button
+              onClick={async () => { await supabase.auth.signOut(); }}
+              title="登出"
+              style={{ background: "none", border: "none", color: "#6b7bb8", cursor: "pointer", padding: 4, fontSize: 16 }}
+            >⎋</button>
           </div>
         </div>
       </aside>
