@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -91,7 +91,12 @@ const Select = ({ label, value, onChange, options }) => (
 
 // ── INVOICE PDF PRINT ──────────────────────────────────────────────────────────
 function printInvoice(inv, customer, items) {
-  const rows = items.map((item, i) => `
+  let itemsArr = items;
+  if (typeof itemsArr === "string") {
+    try { itemsArr = JSON.parse(itemsArr); } catch { itemsArr = []; }
+  }
+  if (!Array.isArray(itemsArr)) itemsArr = [];
+  const rows = itemsArr.map((item, i) => `
     <tr>
       <td>${item.name || ""}</td>
       <td style="text-align:center">${item.qty || 1}</td>
@@ -128,7 +133,7 @@ function printInvoice(inv, customer, items) {
     <div style="text-align:right">
       <div class="tagline">SPECIALIST OF EV CHARGING</div>
       <h1>I N V O I C E</h1>
-      <div style="font-size:16px;font-weight:bold;letter-spacing:2px"># DC${inv.invoice_number || inv.id}</div>
+      <div style="font-size:16px;font-weight:bold;letter-spacing:2px"># ${String(inv.invoice_number || inv.id).toUpperCase().startsWith("DC") ? (inv.invoice_number || inv.id) : "DC" + (inv.invoice_number || inv.id)}</div>
     </div>
   </div>
   <div class="meta">
@@ -185,12 +190,20 @@ export default function App() {
   const [customers, setCustomers] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [search, setSearch] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [showAddCustomer, setShowAddCustomer] = useState(false);
   const [showNewInvoice, setShowNewInvoice] = useState(false);
   const [invoiceGenerated, setInvoiceGenerated] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [visibleCustomers, setVisibleCustomers] = useState(30);
+  const [visibleInvoices, setVisibleInvoices] = useState(30);
+  const [customerSort, setCustomerSort] = useState("created");
+  const [customerSortDir, setCustomerSortDir] = useState("desc");
+  const [customerTimeRange, setCustomerTimeRange] = useState("all");
+  const [editingProduct, setEditingProduct] = useState(null);
+  const [editStock, setEditStock] = useState(0);
 
   const [newCustomer, setNewCustomer] = useState({
     name: "", email: "", phone: "", phone_mainland: "",
@@ -202,38 +215,156 @@ export default function App() {
     customerId: "", items: [{ name: "", qty: 1, price: 0 }], notes: "", warranty: false
   });
 
+  // 客戶頁過濾/排序：按需計算最近購買日期 + 搜索 + 時間範圍 + 排序
+  const filteredCustomers = useMemo(() => {
+    const cutoff = customerTimeRange === "all" ? null : new Date(Date.now() - parseInt(customerTimeRange) * 86400000);
+    const lastPurchaseMap = {};
+    if (customerSort === "lastPurchase" || cutoff) {
+      for (const inv of invoices) {
+        if (!inv.customer_id || !inv.date) continue;
+        const prev = lastPurchaseMap[inv.customer_id];
+        if (!prev || new Date(inv.date) > new Date(prev)) {
+          lastPurchaseMap[inv.customer_id] = inv.date;
+        }
+      }
+    }
+    const q = search.toLowerCase();
+    return customers.filter(c => {
+      if (!(c.email && c.email.trim()) && !(c.phone && c.phone.trim())) return false;
+      const textMatch = !q || (c.name || "").toLowerCase().includes(q) || (c.email || "").toLowerCase().includes(q) || (c.phone || "").toLowerCase().includes(q) || (c.car_make || "").toLowerCase().includes(q) || (c.car_model || "").toLowerCase().includes(q);
+      if (!textMatch) return false;
+      if (!cutoff) return true;
+      const dateStr = lastPurchaseMap[c.id];
+      return dateStr && new Date(dateStr) >= cutoff;
+    }).sort((a, b) => {
+      const dir = customerSortDir === "desc" ? 1 : -1;
+      const va = customerSort === "lastPurchase" ? lastPurchaseMap[a.id] : a.created_at;
+      const vb = customerSort === "lastPurchase" ? lastPurchaseMap[b.id] : b.created_at;
+      if (!va && !vb) return 0;
+      if (!va) return 1;
+      if (!vb) return -1;
+      return vb.localeCompare(va) * dir;
+    });
+  }, [customers, invoices, search, customerSort, customerSortDir, customerTimeRange]);
+
+  // 發票頁過濾：按搜索關鍵字 (發票號 / 客戶名 / 備註)
+  const filteredInvoices = useMemo(() => {
+    const q = search.toLowerCase();
+    if (!q) return invoices;
+    return invoices.filter(inv => {
+      const c = customers.find(x => x.id === inv.customer_id);
+      return String(inv.invoice_number || "").toLowerCase().includes(q)
+        || (c?.name || "").toLowerCase().includes(q)
+        || (inv.notes || "").toLowerCase().includes(q);
+    });
+  }, [invoices, customers, search]);
+
   useEffect(() => {
+    async function fetchAll(table, orderCol, ascending = true) {
+      let all = [];
+      let from = 0;
+      const size = 1000;
+      while (true) {
+        let q = supabase.from(table).select("*").range(from, from + size - 1);
+        if (orderCol) q = q.order(orderCol, { ascending });
+        const { data, error } = await q;
+        if (error) throw new Error(`${table}: ${error.message || error}`);
+        if (!data || data.length === 0) break;
+        all = all.concat(data);
+        if (data.length < size) break;
+        from += size;
+      }
+      return all;
+    }
     async function load() {
       setLoading(true);
-      const [p, i, c, inv] = await Promise.all([
-        supabase.from("products").select("*").order("name"),
-        supabase.from("inventory").select("*"),
-        supabase.from("customers").select("*").order("name"),
-        supabase.from("invoices").select("*").order("date", { ascending: false }),
-      ]);
-      if (p.data) setProducts(p.data);
-      if (i.data) setInventory(i.data);
-      if (c.data) setCustomers(c.data);
-      if (inv.data) setInvoices(inv.data);
-      setLoading(false);
+      setLoadError(null);
+      try {
+        const [p, i, c, inv] = await Promise.all([
+          fetchAll("products", "name"),
+          fetchAll("inventory", null),
+          fetchAll("customers", "name"),
+          fetchAll("invoices", "date", false),
+        ]);
+        setProducts(p);
+        setInventory(i);
+        setCustomers(c);
+        setInvoices(inv);
+      } catch (e) {
+        setLoadError(e.message || String(e));
+      } finally {
+        setLoading(false);
+      }
     }
     load();
   }, []);
 
   const getProduct = (id) => products.find(p => p.id === id);
   const getCustomer = (id) => customers.find(c => c.id === id);
-  const warrantyAlerts = inventory.filter(i => i.status === "Warranty Expiring");
+  const fmtInvNum = (inv) => {
+    const num = String(inv.invoice_number || inv.id);
+    return num.toUpperCase().startsWith("DC") ? num : `DC${num}`;
+  };
+  // 月營收（當月）
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const monthlyRevenue = invoices.filter(i => (i.date || "").startsWith(currentMonth) && (i.status || "").trim().toLowerCase() === "paid").reduce((s, i) => s + (i.total || 0), 0);
   const totalRevenue = invoices.reduce((s, i) => s + (i.total || 0), 0);
   const inStock = inventory.filter(i => i.status === "In Stock").length;
+
+  // 保修提醒：從發票 + 產品 warranty_months 推算
+  const warrantyItems = (() => {
+    const today = new Date();
+    const in30 = new Date(today); in30.setDate(in30.getDate() + 30);
+    const results = [];
+    for (const inv of invoices) {
+      if (!Array.isArray(inv.items) || !inv.date) continue;
+      const cust = getCustomer(inv.customer_id);
+      for (const item of inv.items) {
+        const prod = products.find(p => p.name === item.name);
+        if (!prod || !prod.warranty_months) continue;
+        const wEnd = new Date(inv.date);
+        wEnd.setMonth(wEnd.getMonth() + prod.warranty_months);
+        if (wEnd >= today && wEnd <= in30) {
+          results.push({ customer: cust, customerName: cust?.name || "—", productName: item.name, invoiceNum: fmtInvNum(inv), invoiceDate: inv.date, warrantyEnd: wEnd.toISOString().slice(0, 10), daysLeft: Math.ceil((wEnd - today) / (1000 * 60 * 60 * 24)) });
+        }
+      }
+    }
+    return results.sort((a, b) => {
+      // 有客戶的優先（這樣 Dashboard 顯示的卡片可以點擊跳轉）
+      if (!!a.customer !== !!b.customer) return a.customer ? -1 : 1;
+      return a.daysLeft - b.daysLeft;
+    });
+  })();
+  const warrantyAlerts = warrantyItems;
+
+  // 從發票反推庫存：按產品聚合已售數量
+  const derivedInventory = (() => {
+    const map = {};
+    for (const inv of invoices) {
+      if (!Array.isArray(inv.items)) continue;
+      const cust = getCustomer(inv.customer_id);
+      for (const item of inv.items) {
+        const prod = products.find(p => p.name === item.name);
+        const key = item.name;
+        if (!map[key]) map[key] = { productName: key, productId: prod?.id, totalSold: 0, stock: prod?.stock ?? 0, warrantyMonths: prod?.warranty_months, records: [] };
+        map[key].totalSold += (item.qty || 1);
+        map[key].records.push({ customerName: cust?.name || "—", date: inv.date, qty: item.qty || 1, invoiceNum: fmtInvNum(inv) });
+      }
+    }
+    const values = Object.values(map);
+    for (const v of values) v.stock = Math.max((v.stock || 0) - v.totalSold, 0);
+    return values.sort((a, b) => b.totalSold - a.totalSold);
+  })();
 
   const invoiceTotal = newInvoice.items.reduce((sum, item) => sum + (item.price * item.qty || 0), 0);
 
   const navItems = [
-    { id: "dashboard", label: "Dashboard", icon: "dashboard" },
-    { id: "inventory", label: "Inventory", icon: "inventory" },
-    { id: "products", label: "Products", icon: "product" },
-    { id: "customers", label: "Customers", icon: "customer" },
-    { id: "invoices", label: "Invoices", icon: "invoice" },
+    { id: "dashboard", label: "總覽", icon: "dashboard" },
+    { id: "inventory", label: "庫存", icon: "inventory" },
+    { id: "products", label: "產品", icon: "product" },
+    { id: "customers", label: "客戶", icon: "customer" },
+    { id: "invoices", label: "發票", icon: "invoice" },
   ];
 
   async function handleSaveCustomer() {
@@ -255,6 +386,8 @@ export default function App() {
       setCustomers(prev => [...prev, ...data]);
       setShowAddCustomer(false);
       setNewCustomer({ name: "", email: "", phone: "", phone_mainland: "", car_make: "", car_model: "", address: "", interest_products: [], referral: "", type: "Lead", notes: "" });
+    } else if (error) {
+      alert(`新增客戶失敗：${error.message}`);
     }
     setSaving(false);
   }
@@ -276,11 +409,44 @@ export default function App() {
       setInvoiceGenerated(true);
       const customer = getCustomer(newInvoice.customerId);
       printInvoice(data[0], customer, newInvoice.items);
+
+      // Auto-create warranty: update inventory items with warranty_end dates
+      const invoiceDate = new Date();
+      for (const item of newInvoice.items) {
+        const matchedProduct = products.find(p => p.name === item.name);
+        if (matchedProduct && matchedProduct.warranty_months) {
+          const warrantyEnd = new Date(invoiceDate);
+          warrantyEnd.setMonth(warrantyEnd.getMonth() + matchedProduct.warranty_months);
+          const warrantyEndStr = warrantyEnd.toISOString().slice(0, 10);
+          const matchingInventory = inventory.filter(
+            inv => inv.product_id === matchedProduct.id && inv.status === "In Stock"
+          );
+          for (const invItem of matchingInventory.slice(0, item.qty)) {
+            const { error: invErr } = await supabase.from("inventory").update({
+              status: "Sold",
+              customer_id: newInvoice.customerId || null,
+              sold_date: invoiceDate.toISOString().slice(0, 10),
+              warranty_end: warrantyEndStr,
+            }).eq("id", invItem.id);
+            if (invErr) {
+              console.error(`庫存更新失敗 (item ${invItem.id}):`, invErr);
+              alert(`發票已生成 (#${data[0].invoice_number})，但部分庫存更新失敗：${invErr.message}\n請在庫存頁手動核對。`);
+              continue;
+            }
+            setInventory(prev => prev.map(i =>
+              i.id === invItem.id ? { ...i, status: "Sold", customer_id: newInvoice.customerId || null, sold_date: invoiceDate.toISOString().slice(0, 10), warranty_end: warrantyEndStr } : i
+            ));
+          }
+        }
+      }
+
       setTimeout(() => {
         setInvoiceGenerated(false);
         setShowNewInvoice(false);
         setNewInvoice({ customerId: "", items: [{ name: "", qty: 1, price: 0 }], notes: "", warranty: false });
       }, 2000);
+    } else if (error) {
+      alert(`發票生成失敗：${error.message}`);
     }
     setSaving(false);
   }
@@ -289,7 +455,16 @@ export default function App() {
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", flexDirection: "column", gap: 16, background: "#f7f8fc" }}>
       <div style={{ width: 48, height: 48, border: "4px solid #e0e0e0", borderTopColor: "#6382ff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-      <div style={{ color: "#888", fontSize: 15 }}>Loading BizFlow...</div>
+      <div style={{ color: "#888", fontSize: 15 }}>正在載入 BizFlow...</div>
+    </div>
+  );
+
+  if (loadError) return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", flexDirection: "column", gap: 16, background: "#f7f8fc", padding: 40 }}>
+      <div style={{ fontSize: 48 }}>⚠️</div>
+      <div style={{ color: "#d32f2f", fontSize: 18, fontWeight: 700 }}>資料載入失敗</div>
+      <div style={{ color: "#666", fontSize: 13, maxWidth: 500, textAlign: "center", wordBreak: "break-all" }}>{loadError}</div>
+      <button onClick={() => window.location.reload()} style={{ padding: "10px 24px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, fontSize: 14, cursor: "pointer" }}>重新載入</button>
     </div>
   );
 
@@ -300,17 +475,17 @@ export default function App() {
       <aside style={{ width: 220, background: "#1a1a2e", display: "flex", flexDirection: "column", flexShrink: 0 }}>
         <div style={{ padding: "20px 18px", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
           <img src={`data:image/png;base64,${LOGO_B64}`} style={{ width: "100%", maxHeight: 36, objectFit: "contain", filter: "invert(1)" }} />
-          <div style={{ fontSize: 10, color: "#6b7bb8", marginTop: 6, letterSpacing: "0.1em", textTransform: "uppercase" }}>Business Suite</div>
+          <div style={{ fontSize: 10, color: "#6b7bb8", marginTop: 6, letterSpacing: "0.1em", textTransform: "uppercase" }}>業務管理系統</div>
         </div>
         {warrantyAlerts.length > 0 && (
           <div style={{ margin: "10px 12px", background: "#ff9800", borderRadius: 10, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8 }}>
             <Icon name="warning" size={13} />
-            <div style={{ color: "#fff", fontSize: 12, fontWeight: 600 }}>{warrantyAlerts.length} warranty expiring</div>
+            <div style={{ color: "#fff", fontSize: 12, fontWeight: 600 }}>{warrantyAlerts.length} 件保修即將到期</div>
           </div>
         )}
         <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 2 }}>
           {navItems.map(n => (
-            <button key={n.id} onClick={() => { setTab(n.id); setSelectedCustomer(null); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "none", cursor: "pointer", background: tab === n.id ? "rgba(99,130,255,0.18)" : "transparent", color: tab === n.id ? "#7c9dff" : "#8899cc", fontSize: 14, fontWeight: tab === n.id ? 700 : 500, textAlign: "left" }}>
+            <button key={n.id} onClick={() => { setTab(n.id); setSelectedCustomer(null); setSearch(""); setVisibleCustomers(30); setVisibleInvoices(30); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "none", cursor: "pointer", background: tab === n.id ? "rgba(99,130,255,0.18)" : "transparent", color: tab === n.id ? "#7c9dff" : "#8899cc", fontSize: 14, fontWeight: tab === n.id ? 700 : 500, textAlign: "left" }}>
               <Icon name={n.icon} size={17} />{n.label}
             </button>
           ))}
@@ -320,7 +495,7 @@ export default function App() {
             <div style={{ width: 30, height: 30, borderRadius: "50%", background: "linear-gradient(135deg,#7c9dff,#a78bfa)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#fff" }}>H</div>
             <div>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>Honnmono</div>
-              <div style={{ fontSize: 11, color: "#6b7bb8" }}>Admin</div>
+              <div style={{ fontSize: 11, color: "#6b7bb8" }}>管理員</div>
             </div>
           </div>
         </div>
@@ -333,28 +508,37 @@ export default function App() {
         {tab === "dashboard" && (
           <div>
             <div style={{ marginBottom: 28 }}>
-              <h1 style={{ fontSize: 26, fontWeight: 800, margin: 0 }}>Good morning 👋</h1>
-              <p style={{ color: "#888", margin: "4px 0 0", fontSize: 15 }}>Here's what's happening with Honnmono today.</p>
+              <h1 style={{ fontSize: 26, fontWeight: 800, margin: 0 }}>早安 👋</h1>
+              <p style={{ color: "#888", margin: "4px 0 0", fontSize: 15 }}>以下是 Honnmono 今日的業務概況。</p>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 28 }}>
-              <StatCard label="Total Revenue" value={`HKD$${totalRevenue.toLocaleString()}`} sub="All invoices" accent="#6382ff" icon={<Icon name="trend_up" size={20} />} />
-              <StatCard label="Units In Stock" value={inStock} sub={`of ${inventory.length} total`} accent="#22c55e" icon={<Icon name="inventory" size={20} />} />
-              <StatCard label="Customers" value={customers.length} sub="All time" accent="#f59e0b" icon={<Icon name="customer" size={20} />} />
-              <StatCard label="Warranty Alerts" value={warrantyAlerts.length} sub="Need follow-up" accent="#ef4444" icon={<Icon name="warning" size={20} />} />
+              <StatCard label="本月營收" value={`HKD$${monthlyRevenue.toLocaleString()}`} sub={`${now.getFullYear()}年${now.getMonth() + 1}月`} accent="#6382ff" icon={<Icon name="trend_up" size={20} />} />
+              <StatCard label="庫存數量" value={inStock} sub={`共 ${inventory.length} 件`} accent="#22c55e" icon={<Icon name="inventory" size={20} />} />
+              <StatCard label="客戶數" value={customers.length} sub="累計" accent="#f59e0b" icon={<Icon name="customer" size={20} />} />
+              <StatCard label="保修提醒" value={warrantyAlerts.length} sub="需跟進" accent="#ef4444" icon={<Icon name="warning" size={20} />} />
+            </div>
+            <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 20, display: "flex", alignItems: "center", gap: 8 }}>
+              <Icon name="search" size={15} />
+              <input placeholder="搜尋發票、客戶、產品..." value={search} onChange={e => setSearch(e.target.value)} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
               <div style={{ background: "#fff", borderRadius: 16, padding: 24, border: "1px solid #f0f0f0", boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-                  <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Recent Invoices</h2>
-                  <button onClick={() => setTab("invoices")} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>View all →</button>
+                  <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>最近發票</h2>
+                  <button onClick={() => setTab("invoices")} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>查看全部 →</button>
                 </div>
-                {invoices.slice(0, 5).map(inv => {
+                {invoices.filter(inv => {
+                  const q = search.toLowerCase();
+                  if (!q) return true;
+                  const c = getCustomer(inv.customer_id);
+                  return String(inv.invoice_number || "").toLowerCase().includes(q) || (c?.name || "").toLowerCase().includes(q) || (inv.notes || "").toLowerCase().includes(q);
+                }).slice(0, 5).map(inv => {
                   const c = getCustomer(inv.customer_id);
                   return (
                     <div key={inv.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 0", borderBottom: "1px solid #f5f5f5" }}>
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: 14 }}>DC{inv.invoice_number || inv.id}</div>
-                        <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>{c?.name || "—"} · {inv.date}</div>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>{fmtInvNum(inv)}</div>
+                        <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>{c?.name || "—"} · {inv.date || "日期未知"}</div>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                         <span style={{ fontWeight: 700, fontSize: 15 }}>HKD${inv.total}</span>
@@ -366,22 +550,20 @@ export default function App() {
               </div>
               <div style={{ background: "#fff", borderRadius: 16, padding: 24, border: "1px solid #f0f0f0", boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-                  <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>🔔 Warranty Alerts</h2>
+                  <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>🔔 保修提醒</h2>
                   <Badge status="Warranty Expiring" />
                 </div>
-                {warrantyAlerts.length === 0 ? (
-                  <div style={{ color: "#aaa", fontSize: 14, textAlign: "center", paddingTop: 20 }}>No alerts right now ✓</div>
-                ) : warrantyAlerts.slice(0, 5).map(item => {
-                  const p = getProduct(item.product_id);
-                  const c = getCustomer(item.customer_id);
-                  return (
-                    <div key={item.id} style={{ background: "#fff8f0", border: "1px solid #ffe0b2", borderRadius: 12, padding: "12px 16px", marginBottom: 10 }}>
-                      <div style={{ fontWeight: 700, fontSize: 14 }}>{p?.name}</div>
-                      <div style={{ fontSize: 12, color: "#666", marginTop: 3 }}>SN: {item.serial_no} · {c?.name}</div>
-                      <div style={{ fontSize: 12, color: "#e65100", marginTop: 4, fontWeight: 600 }}>Warranty ends: {item.warranty_end}</div>
+                {warrantyItems.length === 0 ? (
+                  <div style={{ color: "#aaa", fontSize: 14, textAlign: "center", paddingTop: 20 }}>目前沒有提醒 ✓</div>
+                ) : warrantyItems.slice(0, 5).map((item, idx) => (
+                    <div key={idx} onClick={() => { if (item.customer) { setTab("customers"); setSelectedCustomer(item.customer); } }} style={{ background: "#fff8f0", border: "1px solid #ffe0b2", borderRadius: 12, padding: "12px 16px", marginBottom: 10, cursor: item.customer ? "pointer" : "default", transition: "all 0.15s" }}
+                      onMouseEnter={e => { if (item.customer) { e.currentTarget.style.borderColor = "#ff9800"; e.currentTarget.style.background = "#fff3e0"; } }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = "#ffe0b2"; e.currentTarget.style.background = "#fff8f0"; }}>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>{item.productName}</div>
+                      <div style={{ fontSize: 12, color: "#666", marginTop: 3 }}>{item.customerName} · {item.invoiceNum}</div>
+                      <div style={{ fontSize: 12, color: "#e65100", marginTop: 4, fontWeight: 600 }}>保修到期：{item.warrantyEnd}（剩餘 {item.daysLeft} 天）</div>
                     </div>
-                  );
-                })}
+                ))}
               </div>
             </div>
           </div>
@@ -392,49 +574,52 @@ export default function App() {
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
               <div>
-                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Inventory</h1>
-                <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>Track every unit — serial number, warranty, customer</p>
+                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>庫存</h1>
+                <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>從發票記錄自動推算的產品銷售及庫存概覽</p>
               </div>
             </div>
-            <div style={{ background: "#fff", borderRadius: 16, border: "1px solid #f0f0f0", boxShadow: "0 2px 12px rgba(0,0,0,0.04)", overflow: "hidden" }}>
-              <div style={{ padding: "16px 20px", borderBottom: "1px solid #f5f5f5" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#f7f8fc", borderRadius: 8, padding: "8px 14px" }}>
-                  <Icon name="search" size={15} />
-                  <input placeholder="Search serial number, product, customer..." value={search} onChange={e => setSearch(e.target.value)} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
-                </div>
-              </div>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-                <thead>
-                  <tr style={{ background: "#fafafa" }}>
-                    {["Serial No.", "Product", "Status", "Customer", "Sold Date", "Warranty End", "Extended"].map(h => (
-                      <th key={h} style={{ padding: "12px 16px", textAlign: "left", fontSize: 12, fontWeight: 700, color: "#888", letterSpacing: "0.05em", textTransform: "uppercase", borderBottom: "1px solid #f0f0f0" }}>{h}</th>
+            <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
+              <Icon name="search" size={15} />
+              <input placeholder="搜尋產品名稱..." value={search} onChange={e => setSearch(e.target.value)} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
+            </div>
+            {derivedInventory.length === 0 ? (
+              <div style={{ background: "#fff", borderRadius: 14, padding: 40, textAlign: "center", color: "#aaa", border: "1px solid #f0f0f0" }}>暫無庫存數據</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {derivedInventory.filter(d => {
+                  const q = search.toLowerCase();
+                  return !q || d.productName.toLowerCase().includes(q);
+                }).map((d, idx) => (
+                  <div key={idx} style={{ background: "#fff", borderRadius: 14, padding: "20px 24px", border: "1px solid #f0f0f0", boxShadow: "0 2px 8px rgba(0,0,0,0.03)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                      <div style={{ fontSize: 16, fontWeight: 800 }}>{d.productName}</div>
+                      <div style={{ display: "flex", gap: 12 }}>
+                        <div style={{ padding: "6px 14px", background: "#f0f4ff", borderRadius: 10, textAlign: "center" }}>
+                          <div style={{ fontSize: 16, fontWeight: 800, color: "#6382ff" }}>{d.totalSold}</div>
+                          <div style={{ fontSize: 11, color: "#888" }}>已售</div>
+                        </div>
+                        <div style={{ padding: "6px 14px", background: "#e8f5e9", borderRadius: 10, textAlign: "center" }}>
+                          <div style={{ fontSize: 16, fontWeight: 800, color: "#22c55e" }}>{d.stock > 0 ? d.stock : "—"}</div>
+                          <div style={{ fontSize: 11, color: "#888" }}>庫存</div>
+                        </div>
+                        {d.warrantyMonths && <div style={{ padding: "6px 14px", background: "#fff8f0", borderRadius: 10, textAlign: "center" }}>
+                          <div style={{ fontSize: 16, fontWeight: 800, color: "#f59e0b" }}>{d.warrantyMonths}月</div>
+                          <div style={{ fontSize: 11, color: "#888" }}>保修</div>
+                        </div>}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>最近 {Math.min(3, d.records.length)} 筆銷售記錄：</div>
+                    {d.records.slice(0, 3).map((r, i) => (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: i < 2 && i < d.records.length - 1 ? "1px solid #f5f5f5" : "none", fontSize: 13 }}>
+                        <span style={{ color: "#666" }}>{r.invoiceNum} · {r.customerName}</span>
+                        <span style={{ color: "#999" }}>{r.date || "日期未知"} · ×{r.qty}</span>
+                      </div>
                     ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {inventory.filter(i => {
-                    const p = getProduct(i.product_id);
-                    const c = getCustomer(i.customer_id);
-                    const q = search.toLowerCase();
-                    return !q || (i.serial_no || "").toLowerCase().includes(q) || (p?.name || "").toLowerCase().includes(q) || (c?.name || "").toLowerCase().includes(q);
-                  }).map((item, idx) => {
-                    const p = getProduct(item.product_id);
-                    const c = getCustomer(item.customer_id);
-                    return (
-                      <tr key={item.id} style={{ borderBottom: "1px solid #f5f5f5", background: idx % 2 === 0 ? "#fff" : "#fafbff" }}>
-                        <td style={{ padding: "12px 16px", fontFamily: "monospace", fontWeight: 700, fontSize: 13, color: "#6382ff" }}>{item.serial_no || "—"}</td>
-                        <td style={{ padding: "12px 16px", fontWeight: 600 }}>{p?.name || item.product_id}</td>
-                        <td style={{ padding: "12px 16px" }}><Badge status={item.status} /></td>
-                        <td style={{ padding: "12px 16px", color: c ? "#333" : "#ccc" }}>{c?.name || "—"}</td>
-                        <td style={{ padding: "12px 16px", color: "#666" }}>{item.sold_date || "—"}</td>
-                        <td style={{ padding: "12px 16px", color: item.status === "Warranty Expiring" ? "#e65100" : "#666" }}>{item.extended ? item.extended_end : (item.warranty_end || "—")}</td>
-                        <td style={{ padding: "12px 16px" }}>{item.extended ? <span style={{ color: "#22c55e", fontWeight: 700, fontSize: 12 }}>✓ Extended</span> : <span style={{ color: "#ccc" }}>—</span>}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                    {d.records.length > 3 && <div style={{ fontSize: 12, color: "#aaa", marginTop: 6 }}>還有 {d.records.length - 3} 筆記錄...</div>}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -442,14 +627,21 @@ export default function App() {
         {tab === "products" && (
           <div>
             <div style={{ marginBottom: 24 }}>
-              <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Products</h1>
-              <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>Synced from Shopify — your product catalogue</p>
+              <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>產品</h1>
+              <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>從 Shopify 同步 — 產品目錄</p>
+            </div>
+            <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
+              <Icon name="search" size={15} />
+              <input placeholder="搜尋產品..." value={search} onChange={e => setSearch(e.target.value)} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16 }}>
-              {products.map(p => {
-                const units = inventory.filter(i => i.product_id === p.id);
-                const sold = units.filter(i => i.status === "Sold").length;
-                const instock = units.filter(i => i.status === "In Stock").length;
+              {products.filter(p => {
+                const q = search.toLowerCase();
+                return !q || (p.name || "").toLowerCase().includes(q) || (p.code || "").toLowerCase().includes(q) || (p.category || "").toLowerCase().includes(q) || (p.specs || "").toLowerCase().includes(q);
+              }).map(p => {
+                const derived = derivedInventory.find(d => d.productName === p.name);
+                const sold = derived ? derived.totalSold : 0;
+                const instock = p.stock ?? 0;
                 return (
                   <div key={p.id} style={{ background: "#fff", borderRadius: 16, padding: 24, border: "1px solid #f0f0f0", boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
@@ -462,10 +654,15 @@ export default function App() {
                     </div>
                     {p.specs && <div style={{ background: "#f7f8fc", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#555" }}>📋 {p.specs}</div>}
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+                      <div onClick={(e) => { e.stopPropagation(); setEditingProduct(p); setEditStock(p.stock ?? 0); }} style={{ textAlign: "center", padding: "10px 8px", background: "#22c55e12", borderRadius: 8, cursor: "pointer", position: "relative" }}
+                        onMouseEnter={e => e.currentTarget.style.outline = "2px solid #22c55e"}
+                        onMouseLeave={e => e.currentTarget.style.outline = "none"}>
+                        <div style={{ fontSize: 20, fontWeight: 800, color: "#22c55e" }}>{p.stock ?? instock} <span style={{ fontSize: 11, color: "#aaa" }}>✏️</span></div>
+                        <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>庫存</div>
+                      </div>
                       {[
-                        { label: "In Stock", value: p.stock ?? instock, color: "#22c55e" },
-                        { label: "Sold", value: sold, color: "#6382ff" },
-                        { label: "Warranty", value: `${p.warranty_months || "—"}mo`, color: "#f59e0b" },
+                        { label: "已售", value: sold, color: "#6382ff" },
+                        { label: "保修", value: `${p.warranty_months || "—"}月`, color: "#f59e0b" },
                       ].map(stat => (
                         <div key={stat.label} style={{ textAlign: "center", padding: "10px 8px", background: stat.color + "12", borderRadius: 8 }}>
                           <div style={{ fontSize: 20, fontWeight: 800, color: stat.color }}>{stat.value}</div>
@@ -485,54 +682,73 @@ export default function App() {
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
               <div>
-                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Customers</h1>
-                <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>{customers.length} total customers</p>
+                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>客戶</h1>
+                <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>
+                  {customerTimeRange === "all"
+                    ? `共 ${filteredCustomers.length} 位客戶`
+                    : `共 ${filteredCustomers.length} 位客戶（${customerTimeRange}天內有購買）`}
+                </p>
               </div>
               <button onClick={() => setShowAddCustomer(true)} style={{ display: "flex", alignItems: "center", gap: 8, background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, padding: "10px 18px", cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
-                <Icon name="plus" size={16} /> Add Customer
+                <Icon name="plus" size={16} /> 新增客戶
               </button>
             </div>
 
-            <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
               <Icon name="search" size={15} />
-              <input placeholder="Search customers..." value={search} onChange={e => setSearch(e.target.value)} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
+              <input placeholder="搜尋客戶..." value={search} onChange={e => { setSearch(e.target.value); setVisibleCustomers(30); }} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontSize: 13, color: "#888", marginRight: 4 }}>排序：</span>
+              {[["created", "建立時間"], ["lastPurchase", "最近購買"]].map(([k, label]) => (
+                <button key={k} onClick={() => { setCustomerSort(k); setVisibleCustomers(30); }} style={{ padding: "6px 14px", borderRadius: 20, border: customerSort === k ? "1px solid #6382ff" : "1px solid #e0e0e0", background: customerSort === k ? "#f0f4ff" : "#fff", color: customerSort === k ? "#6382ff" : "#666", fontSize: 13, fontWeight: customerSort === k ? 700 : 400, cursor: "pointer" }}>{label}</button>
+              ))}
+              <button onClick={() => { setCustomerSortDir(d => d === "desc" ? "asc" : "desc"); setVisibleCustomers(30); }} title={customerSortDir === "desc" ? "目前降序（新→舊），點擊切換為升序" : "目前升序（舊→新），點擊切換為降序"} style={{ padding: "6px 14px", borderRadius: 20, border: "1px solid #6382ff", background: "#6382ff", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                {customerSortDir === "desc" ? "↓ 降序" : "↑ 升序"}
+              </button>
+              <span style={{ fontSize: 13, color: "#888", marginLeft: 12, marginRight: 4 }}>時間：</span>
+              {[["all", "全部"], ["7", "7天"], ["30", "30天"], ["90", "90天"]].map(([k, label]) => (
+                <button key={k} onClick={() => { setCustomerTimeRange(k); setVisibleCustomers(30); }} style={{ padding: "6px 14px", borderRadius: 20, border: customerTimeRange === k ? "1px solid #6382ff" : "1px solid #e0e0e0", background: customerTimeRange === k ? "#f0f4ff" : "#fff", color: customerTimeRange === k ? "#6382ff" : "#666", fontSize: 13, fontWeight: customerTimeRange === k ? 700 : 400, cursor: "pointer" }}>{label}</button>
+              ))}
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {customers.filter(c => {
-                const q = search.toLowerCase();
-                return !q || (c.name || "").toLowerCase().includes(q) || (c.email || "").toLowerCase().includes(q) || (c.phone || "").includes(q);
-              }).map(c => {
+              {filteredCustomers.slice(0, visibleCustomers).map(c => {
                 const custInvoices = invoices.filter(i => i.customer_id === c.id);
                 const total = custInvoices.reduce((s, i) => s + (i.total || 0), 0);
                 return (
-                  <div key={c.id} onClick={() => setSelectedCustomer(c)} style={{ background: "#fff", borderRadius: 14, padding: "18px 22px", border: "1px solid #f0f0f0", boxShadow: "0 2px 8px rgba(0,0,0,0.03)", display: "flex", alignItems: "center", gap: 18, cursor: "pointer" }}
-                    onMouseEnter={e => e.currentTarget.style.borderColor = "#6382ff"}
-                    onMouseLeave={e => e.currentTarget.style.borderColor = "#f0f0f0"}>
-                    <div style={{ width: 48, height: 48, borderRadius: "50%", background: "linear-gradient(135deg,#6382ff,#a78bfa)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 800, color: "#fff", flexShrink: 0 }}>
-                      {(c.name || "?")[0]}
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 3 }}>
-                        <span style={{ fontSize: 16, fontWeight: 800 }}>{c.name}</span>
-                        <Badge status={c.type || "Regular"} />
+                      <div key={c.id} onClick={() => setSelectedCustomer(c)} style={{ background: "#fff", borderRadius: 14, padding: "18px 22px", border: "1px solid #f0f0f0", boxShadow: "0 2px 8px rgba(0,0,0,0.03)", display: "flex", alignItems: "center", gap: 18, cursor: "pointer" }}
+                        onMouseEnter={e => e.currentTarget.style.borderColor = "#6382ff"}
+                        onMouseLeave={e => e.currentTarget.style.borderColor = "#f0f0f0"}>
+                        <div style={{ width: 48, height: 48, borderRadius: "50%", background: "linear-gradient(135deg,#6382ff,#a78bfa)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 800, color: "#fff", flexShrink: 0 }}>
+                          {(c.name || "?")[0]}
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 3 }}>
+                            <span style={{ fontSize: 16, fontWeight: 800 }}>{c.name}</span>
+                            <Badge status={c.type || "Regular"} />
+                          </div>
+                          <div style={{ fontSize: 13, color: "#666" }}>{c.email} · {c.phone}</div>
+                          {c.car_make && <div style={{ fontSize: 12, color: "#aaa", marginTop: 2 }}>🚗 {c.car_make} {c.car_model}</div>}
+                        </div>
+                        <div style={{ display: "flex", gap: 12, textAlign: "center" }}>
+                          <div style={{ padding: "8px 14px", background: "#f0f4ff", borderRadius: 10 }}>
+                            <div style={{ fontSize: 16, fontWeight: 800, color: "#6382ff" }}>HKD${total.toLocaleString()}</div>
+                            <div style={{ fontSize: 11, color: "#888" }}>累計</div>
+                          </div>
+                          <div style={{ padding: "8px 14px", background: "#fff8f0", borderRadius: 10 }}>
+                            <div style={{ fontSize: 16, fontWeight: 800, color: "#f59e0b" }}>{custInvoices.length}</div>
+                            <div style={{ fontSize: 11, color: "#888" }}>訂單</div>
+                          </div>
+                        </div>
                       </div>
-                      <div style={{ fontSize: 13, color: "#666" }}>{c.email} · {c.phone}</div>
-                      {c.car_make && <div style={{ fontSize: 12, color: "#aaa", marginTop: 2 }}>🚗 {c.car_make} {c.car_model}</div>}
-                    </div>
-                    <div style={{ display: "flex", gap: 12, textAlign: "center" }}>
-                      <div style={{ padding: "8px 14px", background: "#f0f4ff", borderRadius: 10 }}>
-                        <div style={{ fontSize: 16, fontWeight: 800, color: "#6382ff" }}>HKD${total.toLocaleString()}</div>
-                        <div style={{ fontSize: 11, color: "#888" }}>Lifetime</div>
-                      </div>
-                      <div style={{ padding: "8px 14px", background: "#fff8f0", borderRadius: 10 }}>
-                        <div style={{ fontSize: 16, fontWeight: 800, color: "#f59e0b" }}>{custInvoices.length}</div>
-                        <div style={{ fontSize: 11, color: "#888" }}>Orders</div>
-                      </div>
-                    </div>
-                  </div>
                 );
               })}
+              {visibleCustomers < filteredCustomers.length && (
+                <button onClick={() => setVisibleCustomers(v => v + 30)} style={{ display: "block", margin: "12px auto", padding: "10px 28px", background: "#f0f4ff", color: "#6382ff", border: "1px solid #e0e8ff", borderRadius: 10, cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
+                  載入更多（{filteredCustomers.length - visibleCustomers} 項待載入）
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -541,7 +757,7 @@ export default function App() {
         {tab === "customers" && selectedCustomer && (
           <div>
             <button onClick={() => setSelectedCustomer(null)} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", color: "#6382ff", fontWeight: 700, fontSize: 14, marginBottom: 20, padding: 0 }}>
-              <Icon name="back" size={16} /> Back to Customers
+              <Icon name="back" size={16} /> 返回客戶列表
             </button>
             <div style={{ background: "#fff", borderRadius: 16, padding: 28, border: "1px solid #f0f0f0", boxShadow: "0 2px 12px rgba(0,0,0,0.04)", marginBottom: 20 }}>
               <div style={{ display: "flex", alignItems: "flex-start", gap: 20, marginBottom: 24 }}>
@@ -555,15 +771,15 @@ export default function App() {
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontSize: 14 }}>
                     {selectedCustomer.email && <div>📧 {selectedCustomer.email}</div>}
-                    {selectedCustomer.phone && <div>📱 HK: {selectedCustomer.phone}</div>}
-                    {selectedCustomer.phone_mainland && <div>📱 Mainland: {selectedCustomer.phone_mainland}</div>}
+                    {selectedCustomer.phone && <div>📱 香港：{selectedCustomer.phone}</div>}
+                    {selectedCustomer.phone_mainland && <div>📱 內地：{selectedCustomer.phone_mainland}</div>}
                     {selectedCustomer.address && <div>📍 {selectedCustomer.address}</div>}
                     {selectedCustomer.car_make && <div>🚗 {selectedCustomer.car_make} {selectedCustomer.car_model}</div>}
-                    {selectedCustomer.referral && <div>🔗 Referral: {selectedCustomer.referral}</div>}
+                    {selectedCustomer.referral && <div>🔗 來源：{selectedCustomer.referral}</div>}
                   </div>
                   {selectedCustomer.interest_products?.length > 0 && (
                     <div style={{ marginTop: 10 }}>
-                      <span style={{ fontSize: 13, color: "#888" }}>Interested in: </span>
+                      <span style={{ fontSize: 13, color: "#888" }}>感興趣產品：</span>
                       {selectedCustomer.interest_products.map(p => (
                         <span key={p} style={{ background: "#f0f4ff", color: "#6382ff", borderRadius: 20, padding: "3px 10px", fontSize: 12, fontWeight: 600, marginRight: 6 }}>{p}</span>
                       ))}
@@ -574,15 +790,15 @@ export default function App() {
               </div>
             </div>
 
-            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>Purchase History</h3>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>購買記錄</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {invoices.filter(i => i.customer_id === selectedCustomer.id).length === 0 ? (
-                <div style={{ background: "#fff", borderRadius: 14, padding: 24, textAlign: "center", color: "#aaa", border: "1px solid #f0f0f0" }}>No purchases yet</div>
+                <div style={{ background: "#fff", borderRadius: 14, padding: 24, textAlign: "center", color: "#aaa", border: "1px solid #f0f0f0" }}>暫無購買記錄</div>
               ) : invoices.filter(i => i.customer_id === selectedCustomer.id).map(inv => (
                 <div key={inv.id} style={{ background: "#fff", borderRadius: 14, padding: "18px 22px", border: "1px solid #f0f0f0", boxShadow: "0 2px 8px rgba(0,0,0,0.03)", display: "flex", alignItems: "center", gap: 16 }}>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 800, fontSize: 15 }}>DC{inv.invoice_number || inv.id}</div>
-                    <div style={{ fontSize: 13, color: "#888", marginTop: 3 }}>{inv.date} · {inv.notes}</div>
+                    <div style={{ fontWeight: 800, fontSize: 15 }}>{fmtInvNum(inv)}</div>
+                    <div style={{ fontSize: 13, color: "#888", marginTop: 3 }}>{inv.date || "日期未知"} · {inv.notes}</div>
                     {Array.isArray(inv.items) && inv.items.map((item, i) => (
                       <div key={i} style={{ fontSize: 12, color: "#666", marginTop: 2 }}>{item.name} ×{item.qty} — HKD${item.price}</div>
                     ))}
@@ -605,31 +821,27 @@ export default function App() {
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
               <div>
-                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>Invoices</h1>
-                <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>{invoices.length} total invoices</p>
+                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>發票</h1>
+                <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>共 {invoices.length} 張發票</p>
               </div>
               <button onClick={() => setShowNewInvoice(true)} style={{ display: "flex", alignItems: "center", gap: 8, background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, padding: "10px 18px", cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
-                <Icon name="plus" size={16} /> New Invoice
+                <Icon name="plus" size={16} /> 新建發票
               </button>
             </div>
 
             <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
               <Icon name="search" size={15} />
-              <input placeholder="Search invoices..." value={search} onChange={e => setSearch(e.target.value)} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
+              <input placeholder="搜尋發票..." value={search} onChange={e => { setSearch(e.target.value); setVisibleInvoices(30); }} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {invoices.filter(inv => {
-                const c = getCustomer(inv.customer_id);
-                const q = search.toLowerCase();
-                return !q || (inv.invoice_number || "").includes(q) || (c?.name || "").toLowerCase().includes(q);
-              }).map(inv => {
+              {filteredInvoices.slice(0, visibleInvoices).map(inv => {
                 const c = getCustomer(inv.customer_id);
                 return (
                   <div key={inv.id} style={{ background: "#fff", borderRadius: 14, padding: "18px 22px", border: "1px solid #f0f0f0", boxShadow: "0 2px 8px rgba(0,0,0,0.03)", display: "flex", alignItems: "center", gap: 18 }}>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 800, fontSize: 15 }}>DC{inv.invoice_number || inv.id}</div>
-                      <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>{c?.name || "—"} · {inv.date} · {inv.notes}</div>
+                      <div style={{ fontWeight: 800, fontSize: 15 }}>{fmtInvNum(inv)}</div>
+                      <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>{c?.name || "—"} · {inv.date || "日期未知"} · {inv.notes}</div>
                       {Array.isArray(inv.items) && inv.items.slice(0, 2).map((item, i) => (
                         <div key={i} style={{ fontSize: 12, color: "#999" }}>{item.name} ×{item.qty}</div>
                       ))}
@@ -638,12 +850,17 @@ export default function App() {
                       <div style={{ fontSize: 18, fontWeight: 800 }}>HKD${inv.total}</div>
                       <Badge status={inv.status} />
                       <button onClick={() => printInvoice(inv, c, inv.items || [])} style={{ fontSize: 12, background: "#f0f4ff", color: "#6382ff", border: "none", borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
-                        <Icon name="print" size={13} /> Print
+                        <Icon name="print" size={13} /> 列印
                       </button>
                     </div>
                   </div>
                 );
               })}
+              {visibleInvoices < filteredInvoices.length && (
+                <button onClick={() => setVisibleInvoices(v => v + 30)} style={{ display: "block", margin: "12px auto", padding: "10px 28px", background: "#f0f4ff", color: "#6382ff", border: "1px solid #e0e8ff", borderRadius: 10, cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
+                  載入更多（{filteredInvoices.length - visibleInvoices} 項待載入）
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -654,7 +871,7 @@ export default function App() {
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
           <div style={{ background: "#fff", borderRadius: 20, padding: 32, width: 580, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>Add Customer</h2>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>新增客戶</h2>
               <button onClick={() => setShowAddCustomer(false)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
@@ -664,10 +881,10 @@ export default function App() {
               <Input label="內地電話" value={newCustomer.phone_mainland} onChange={v => setNewCustomer({...newCustomer, phone_mainland: v})} placeholder="+86" />
               <Select label="汽車品牌 Car Brand" value={newCustomer.car_make} onChange={v => setNewCustomer({...newCustomer, car_make: v})} options={CAR_BRANDS} />
               <Input label="型號 Car Model" value={newCustomer.car_model} onChange={v => setNewCustomer({...newCustomer, car_model: v})} placeholder="e.g. Model 3, Han EV" />
-              <Select label="Status" value={newCustomer.type} onChange={v => setNewCustomer({...newCustomer, type: v})} options={["Lead","Regular","VIP"]} />
-              <Select label="Referral Source" value={newCustomer.referral} onChange={v => setNewCustomer({...newCustomer, referral: v})} options={REFERRAL_SOURCES} />
+              <Select label="客戶狀態" value={newCustomer.type} onChange={v => setNewCustomer({...newCustomer, type: v})} options={["Lead","Regular","VIP"]} />
+              <Select label="客戶來源" value={newCustomer.referral} onChange={v => setNewCustomer({...newCustomer, referral: v})} options={REFERRAL_SOURCES} />
             </div>
-            <Input label="地址 Address" value={newCustomer.address} onChange={v => setNewCustomer({...newCustomer, address: v})} placeholder="Full address" />
+            <Input label="地址" value={newCustomer.address} onChange={v => setNewCustomer({...newCustomer, address: v})} placeholder="完整地址" />
             <div style={{ marginBottom: 14 }}>
               <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>有興趣產品 Interested Products</label>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -681,9 +898,9 @@ export default function App() {
                 ))}
               </div>
             </div>
-            <Input label="Notes" value={newCustomer.notes} onChange={v => setNewCustomer({...newCustomer, notes: v})} placeholder="Any additional notes..." />
+            <Input label="備註" value={newCustomer.notes} onChange={v => setNewCustomer({...newCustomer, notes: v})} placeholder="其他備註..." />
             <button onClick={handleSaveCustomer} disabled={!newCustomer.name || saving} style={{ width: "100%", padding: 14, background: newCustomer.name ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 12, fontSize: 16, fontWeight: 800, cursor: newCustomer.name ? "pointer" : "not-allowed" }}>
-              {saving ? "Saving..." : "Save Customer"}
+              {saving ? "儲存中..." : "儲存客戶"}
             </button>
           </div>
         </div>
@@ -696,51 +913,80 @@ export default function App() {
             {invoiceGenerated ? (
               <div style={{ textAlign: "center", padding: "40px 20px" }}>
                 <div style={{ width: 72, height: 72, borderRadius: "50%", background: "#e8f5e9", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", color: "#22c55e" }}><Icon name="check" size={36} /></div>
-                <div style={{ fontSize: 22, fontWeight: 800 }}>Invoice Generated!</div>
-                <div style={{ color: "#888", marginTop: 8, fontSize: 14 }}>PDF printed & saved to database</div>
+                <div style={{ fontSize: 22, fontWeight: 800 }}>發票已生成！</div>
+                <div style={{ color: "#888", marginTop: 8, fontSize: 14 }}>PDF 已列印並儲存到資料庫</div>
               </div>
             ) : (
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-                  <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>New Invoice</h2>
+                  <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>新建發票</h2>
                   <button onClick={() => setShowNewInvoice(false)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
                 </div>
                 <div style={{ marginBottom: 14 }}>
-                  <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 5 }}>Customer</label>
+                  <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 5 }}>客戶</label>
                   <select value={newInvoice.customerId} onChange={e => setNewInvoice({...newInvoice, customerId: e.target.value})} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", background: "#fff" }}>
-                    <option value="">Select customer...</option>
+                    <option value="">選擇客戶...</option>
                     {customers.map(c => <option key={c.id} value={c.id}>{c.name} {c.phone ? `· ${c.phone}` : ""}</option>)}
                   </select>
                 </div>
                 <div style={{ marginBottom: 14 }}>
-                  <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>Items</label>
+                  <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>商品項目</label>
                   {newInvoice.items.map((item, idx) => (
                     <div key={idx} style={{ display: "grid", gridTemplateColumns: "2fr 0.5fr 0.8fr auto", gap: 8, marginBottom: 8, alignItems: "center" }}>
-                      <input value={item.name} onChange={e => { const items = [...newInvoice.items]; items[idx].name = e.target.value; setNewInvoice({...newInvoice, items}); }} placeholder="Product / Service" style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
+                      <input value={item.name} onChange={e => { const items = [...newInvoice.items]; items[idx].name = e.target.value; setNewInvoice({...newInvoice, items}); }} placeholder="產品 / 服務" style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
                       <input type="number" min="1" value={item.qty} onChange={e => { const items = [...newInvoice.items]; items[idx].qty = parseInt(e.target.value) || 1; setNewInvoice({...newInvoice, items}); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "center" }} />
-                      <input type="number" value={item.price} onChange={e => { const items = [...newInvoice.items]; items[idx].price = parseFloat(e.target.value) || 0; setNewInvoice({...newInvoice, items}); }} placeholder="Price" style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
+                      <input type="number" value={item.price} onChange={e => { const items = [...newInvoice.items]; items[idx].price = parseFloat(e.target.value) || 0; setNewInvoice({...newInvoice, items}); }} placeholder="價格" style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
                       <button onClick={() => { const items = newInvoice.items.filter((_, i) => i !== idx); setNewInvoice({...newInvoice, items: items.length ? items : [{ name: "", qty: 1, price: 0 }]}); }} style={{ background: "#fce4ec", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
                     </div>
                   ))}
-                  <button onClick={() => setNewInvoice({...newInvoice, items: [...newInvoice.items, { name: "", qty: 1, price: 0 }]})} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", width: "100%" }}>+ Add item</button>
+                  <button onClick={() => setNewInvoice({...newInvoice, items: [...newInvoice.items, { name: "", qty: 1, price: 0 }]})} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", width: "100%" }}>+ 新增項目</button>
                 </div>
                 <div style={{ marginBottom: 14 }}>
-                  <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 5 }}>Notes</label>
-                  <input value={newInvoice.notes} onChange={e => setNewInvoice({...newInvoice, notes: e.target.value})} placeholder="e.g. Shopify Order #1055, WhatsApp order..." style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+                  <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 5 }}>備註</label>
+                  <input value={newInvoice.notes} onChange={e => setNewInvoice({...newInvoice, notes: e.target.value})} placeholder="例如 Shopify 訂單 #1055、WhatsApp 訂單..." style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", background: "#f0f4ff", borderRadius: 12, marginBottom: 20 }}>
                   <input type="checkbox" id="warranty" checked={newInvoice.warranty} onChange={e => setNewInvoice({...newInvoice, warranty: e.target.checked})} style={{ width: 16, height: 16, cursor: "pointer" }} />
-                  <label htmlFor="warranty" style={{ fontSize: 14, cursor: "pointer", fontWeight: 600 }}>Customer wants extended warranty (+1 year)</label>
+                  <label htmlFor="warranty" style={{ fontSize: 14, cursor: "pointer", fontWeight: 600 }}>客戶需要延長保修（+1 年）</label>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", background: "#1a1a2e", borderRadius: 12, marginBottom: 16 }}>
-                  <span style={{ color: "#aaa", fontSize: 14 }}>Total</span>
+                  <span style={{ color: "#aaa", fontSize: 14 }}>合計</span>
                   <span style={{ color: "#fff", fontSize: 24, fontWeight: 800 }}>HKD${invoiceTotal.toLocaleString()}</span>
                 </div>
                 <button onClick={handleGenerateInvoice} disabled={invoiceTotal === 0 || saving} style={{ width: "100%", padding: 14, background: invoiceTotal > 0 ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 12, fontSize: 16, fontWeight: 800, cursor: invoiceTotal > 0 ? "pointer" : "not-allowed" }}>
-                  {saving ? "Generating..." : "Generate Invoice & Print PDF"}
+                  {saving ? "生成中..." : "生成發票並列印 PDF"}
                 </button>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* EDIT PRODUCT STOCK MODAL */}
+      {editingProduct && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
+          <div style={{ background: "#fff", borderRadius: 20, padding: 32, width: 400, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>修改庫存</h2>
+              <button onClick={() => setEditingProduct(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>{editingProduct.name}</div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>庫存數量</label>
+              <input type="number" min="0" value={editStock} onChange={e => setEditStock(parseInt(e.target.value) || 0)} style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 18, fontWeight: 800, outline: "none", textAlign: "center", boxSizing: "border-box" }} />
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setEditingProduct(null)} style={{ flex: 1, padding: 12, background: "#f5f5f5", color: "#666", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>取消</button>
+              <button onClick={async () => {
+                const { error } = await supabase.from("products").update({ stock: editStock }).eq("id", editingProduct.id);
+                if (!error) {
+                  setProducts(prev => prev.map(p => p.id === editingProduct.id ? { ...p, stock: editStock } : p));
+                  setEditingProduct(null);
+                } else {
+                  alert(`庫存修改失敗：${error.message}`);
+                }
+              }} style={{ flex: 1, padding: 12, background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>儲存</button>
+            </div>
           </div>
         </div>
       )}
