@@ -229,6 +229,19 @@ export default function App() {
   const [newInvoice, setNewInvoice] = useState({
     customerId: "", items: [mkItem()], notes: "", warranty: false
   });
+  // 新建發票彈窗的搜索框 picker state
+  const [customerQuery, setCustomerQuery] = useState("");          // 客戶搜索輸入框文字
+  const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false);
+  const [productPickerOpenId, setProductPickerOpenId] = useState(null); // 哪條明細行的產品 picker 正開著 (item.id)
+
+  // 關閉新建發票彈窗 → 一次清掉所有殘留（避免下次打開時看到上次的選擇）
+  function closeNewInvoice() {
+    setShowNewInvoice(false);
+    setNewInvoice({ customerId: "", items: [mkItem()], notes: "", warranty: false });
+    setCustomerQuery("");
+    setCustomerDropdownOpen(false);
+    setProductPickerOpenId(null);
+  }
 
   // 客戶頁過濾/排序：按需計算最近購買日期 + 搜索 + 時間範圍 + 排序
   const filteredCustomers = useMemo(() => {
@@ -472,8 +485,7 @@ export default function App() {
 
       setTimeout(() => {
         setInvoiceGenerated(false);
-        setShowNewInvoice(false);
-        setNewInvoice({ customerId: "", items: [mkItem()], notes: "", warranty: false });
+        closeNewInvoice();
       }, 2000);
     } else if (error) {
       alert(`發票生成失敗：${error.message}`);
@@ -1009,20 +1021,129 @@ export default function App() {
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
                   <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>新建發票</h2>
-                  <button onClick={() => setShowNewInvoice(false)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
+                  <button onClick={closeNewInvoice} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
                 </div>
                 <div style={{ marginBottom: 14 }}>
                   <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 5 }}>客戶</label>
-                  <select value={newInvoice.customerId} onChange={e => setNewInvoice({...newInvoice, customerId: e.target.value})} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", background: "#fff" }}>
-                    <option value="">選擇客戶...</option>
-                    {customers.map(c => <option key={c.id} value={c.id}>{c.name} {c.phone ? `· ${c.phone}` : ""}</option>)}
-                  </select>
+                  <div style={{ position: "relative" }}>
+                    <input
+                      value={customerQuery}
+                      onChange={e => {
+                        setCustomerQuery(e.target.value);
+                        if (newInvoice.customerId) setNewInvoice({...newInvoice, customerId: ""});
+                        setCustomerDropdownOpen(true);
+                      }}
+                      onFocus={() => setCustomerDropdownOpen(true)}
+                      onBlur={() => setTimeout(() => setCustomerDropdownOpen(false), 150)}
+                      placeholder="輸入客戶姓名 / 電話 / 郵箱 / 車型搜索..."
+                      style={{ width: "100%", padding: "10px 14px", paddingRight: newInvoice.customerId ? 38 : 14, borderRadius: 10, border: newInvoice.customerId ? "1px solid #6382ff" : "1px solid #e0e0e0", fontSize: 14, outline: "none", background: "#fff", boxSizing: "border-box" }}
+                    />
+                    {newInvoice.customerId && (
+                      <button
+                        onClick={() => { setNewInvoice({...newInvoice, customerId: ""}); setCustomerQuery(""); }}
+                        style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "#f0f0f0", border: "none", borderRadius: "50%", width: 22, height: 22, cursor: "pointer", fontSize: 12, color: "#666", lineHeight: 1, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
+                      >×</button>
+                    )}
+                    {customerDropdownOpen && (() => {
+                      const q = customerQuery.toLowerCase().trim();
+                      const matched = customers.filter(c => {
+                        if (!c.name && !c.phone && !c.email) return false;
+                        if (!q) return true;
+                        return (c.name || "").toLowerCase().includes(q)
+                          || (c.phone || "").toLowerCase().includes(q)
+                          || (c.email || "").toLowerCase().includes(q)
+                          || (c.car_make || "").toLowerCase().includes(q)
+                          || (c.car_model || "").toLowerCase().includes(q);
+                      });
+                      const top = matched.slice(0, 20);
+                      return (
+                        <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, maxHeight: 260, overflowY: "auto", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 10, boxShadow: "0 4px 16px rgba(0,0,0,0.08)", zIndex: 100 }}>
+                          {top.length === 0 ? (
+                            <div style={{ padding: "12px 14px", fontSize: 13, color: "#999" }}>沒有符合的客戶，檢查拼寫或去「客戶」頁新增</div>
+                          ) : (
+                            <>
+                              {top.map(c => (
+                                <div
+                                  key={c.id}
+                                  onMouseDown={() => {
+                                    setNewInvoice({...newInvoice, customerId: c.id});
+                                    setCustomerQuery([c.name, c.phone].filter(Boolean).join(" · "));
+                                    setCustomerDropdownOpen(false);
+                                  }}
+                                  style={{ padding: "8px 14px", cursor: "pointer", borderBottom: "1px solid #f5f5f5" }}
+                                  onMouseEnter={e => e.currentTarget.style.background = "#f8f9ff"}
+                                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                                >
+                                  <div style={{ fontSize: 14, fontWeight: 600 }}>{c.name || "(未命名客戶)"}</div>
+                                  <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
+                                    {[c.phone, c.email, c.car_make, c.car_model].filter(Boolean).join(" · ") || "—"}
+                                  </div>
+                                </div>
+                              ))}
+                              {matched.length > 20 && (
+                                <div style={{ padding: "8px 14px", fontSize: 11, color: "#999", background: "#fafafa", textAlign: "center" }}>
+                                  還有 {matched.length - 20} 位客戶，繼續輸入縮小範圍
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
                 </div>
                 <div style={{ marginBottom: 14 }}>
                   <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>商品項目</label>
                   {newInvoice.items.map((item, idx) => (
-                    <div key={item.id} style={{ display: "grid", gridTemplateColumns: "2fr 0.5fr 0.8fr auto", gap: 8, marginBottom: 8, alignItems: "center" }}>
-                      <input value={item.name} onChange={e => { const items = [...newInvoice.items]; items[idx].name = e.target.value; setNewInvoice({...newInvoice, items}); }} placeholder="產品 / 服務" style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
+                    <div key={item.id} style={{ display: "grid", gridTemplateColumns: "1fr 60px 90px auto", gap: 8, marginBottom: 8, alignItems: "start" }}>
+                      <div style={{ position: "relative" }}>
+                        <input
+                          value={item.name}
+                          onChange={e => { const items = [...newInvoice.items]; items[idx] = {...item, name: e.target.value}; setNewInvoice({...newInvoice, items}); }}
+                          onFocus={() => setProductPickerOpenId(item.id)}
+                          onBlur={() => setTimeout(() => setProductPickerOpenId(cur => cur === item.id ? null : cur), 150)}
+                          placeholder="產品 / 服務（輸入關鍵字）"
+                          style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", width: "100%", boxSizing: "border-box" }}
+                        />
+                        {productPickerOpenId === item.id && (() => {
+                          const q = (item.name || "").toLowerCase().trim();
+                          const matched = products.filter(p => {
+                            if (!p.name) return false;
+                            if (!q) return true;
+                            return p.name.toLowerCase().includes(q) || (p.code || "").toLowerCase().includes(q) || (p.category || "").toLowerCase().includes(q);
+                          });
+                          const top = matched.slice(0, 10);
+                          if (top.length === 0) return null;
+                          return (
+                            <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, width: 360, maxWidth: "calc(100vw - 80px)", maxHeight: 240, overflowY: "auto", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 10, boxShadow: "0 4px 16px rgba(0,0,0,0.08)", zIndex: 100 }}>
+                              {top.map(p => (
+                                <div
+                                  key={p.id}
+                                  onMouseDown={() => {
+                                    const items = [...newInvoice.items];
+                                    items[idx] = {...item, name: p.name, price: Number(p.price) || item.price};
+                                    setNewInvoice({...newInvoice, items});
+                                    setProductPickerOpenId(null);
+                                  }}
+                                  style={{ padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid #f5f5f5" }}
+                                  onMouseEnter={e => e.currentTarget.style.background = "#f8f9ff"}
+                                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                                >
+                                  <div style={{ fontSize: 13, fontWeight: 600 }}>{p.name}</div>
+                                  <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
+                                    HK${p.price ?? "—"}{p.category ? ` · ${p.category}` : ""}{p.stock != null ? ` · 庫存 ${p.stock}` : ""}
+                                  </div>
+                                </div>
+                              ))}
+                              {matched.length > 10 && (
+                                <div style={{ padding: "6px 12px", fontSize: 10, color: "#999", background: "#fafafa", textAlign: "center" }}>
+                                  還有 {matched.length - 10} 個產品，繼續輸入縮小範圍
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </div>
                       <input type="number" min="1" value={item.qty} onChange={e => { const items = [...newInvoice.items]; items[idx].qty = parseInt(e.target.value) || 1; setNewInvoice({...newInvoice, items}); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "center" }} />
                       <input type="number" value={item.price} onChange={e => { const items = [...newInvoice.items]; items[idx].price = parseFloat(e.target.value) || 0; setNewInvoice({...newInvoice, items}); }} placeholder="價格" style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
                       <button onClick={() => { const items = newInvoice.items.filter(i => i.id !== item.id); setNewInvoice({...newInvoice, items: items.length ? items : [mkItem()]}); }} style={{ background: "#fce4ec", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
