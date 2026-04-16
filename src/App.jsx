@@ -125,6 +125,15 @@ function normalizeItem(item, products) {
   return { name, qty, price };
 }
 
+// 發票明細行的空白模板 —— id 用 randomUUID 確保 React key 穩定
+// （避免刪中間行時後面的 input value 錯位到前面的位置）
+function mkItem() {
+  const id = (typeof crypto !== "undefined" && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return { id, name: "", qty: 1, price: 0 };
+}
+
 function printInvoice(inv, customer, items, products = []) {
   let itemsArr = items;
   if (typeof itemsArr === "string") {
@@ -171,6 +180,10 @@ function printInvoice(inv, customer, items, products = []) {
   html = html.replace("{{invoice_rows}}", rowsHtml);
 
   const w = window.open("", "_blank");
+  if (!w) {
+    alert("瀏覽器阻擋了彈出窗口，請允許本網站彈窗後再試一次。\n發票已生成，可以從發票列表再次點選列印。");
+    return;
+  }
   w.document.write(html);
   w.document.close();
   setTimeout(() => w.print(), 500);
@@ -214,7 +227,7 @@ export default function App() {
   });
 
   const [newInvoice, setNewInvoice] = useState({
-    customerId: "", items: [{ name: "", qty: 1, price: 0 }], notes: "", warranty: false
+    customerId: "", items: [mkItem()], notes: "", warranty: false
   });
 
   // 客戶頁過濾/排序：按需計算最近購買日期 + 搜索 + 時間範圍 + 排序
@@ -460,7 +473,7 @@ export default function App() {
       setTimeout(() => {
         setInvoiceGenerated(false);
         setShowNewInvoice(false);
-        setNewInvoice({ customerId: "", items: [{ name: "", qty: 1, price: 0 }], notes: "", warranty: false });
+        setNewInvoice({ customerId: "", items: [mkItem()], notes: "", warranty: false });
       }, 2000);
     } else if (error) {
       alert(`發票生成失敗：${error.message}`);
@@ -1008,14 +1021,14 @@ export default function App() {
                 <div style={{ marginBottom: 14 }}>
                   <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>商品項目</label>
                   {newInvoice.items.map((item, idx) => (
-                    <div key={idx} style={{ display: "grid", gridTemplateColumns: "2fr 0.5fr 0.8fr auto", gap: 8, marginBottom: 8, alignItems: "center" }}>
+                    <div key={item.id} style={{ display: "grid", gridTemplateColumns: "2fr 0.5fr 0.8fr auto", gap: 8, marginBottom: 8, alignItems: "center" }}>
                       <input value={item.name} onChange={e => { const items = [...newInvoice.items]; items[idx].name = e.target.value; setNewInvoice({...newInvoice, items}); }} placeholder="產品 / 服務" style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
                       <input type="number" min="1" value={item.qty} onChange={e => { const items = [...newInvoice.items]; items[idx].qty = parseInt(e.target.value) || 1; setNewInvoice({...newInvoice, items}); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "center" }} />
                       <input type="number" value={item.price} onChange={e => { const items = [...newInvoice.items]; items[idx].price = parseFloat(e.target.value) || 0; setNewInvoice({...newInvoice, items}); }} placeholder="價格" style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
-                      <button onClick={() => { const items = newInvoice.items.filter((_, i) => i !== idx); setNewInvoice({...newInvoice, items: items.length ? items : [{ name: "", qty: 1, price: 0 }]}); }} style={{ background: "#fce4ec", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
+                      <button onClick={() => { const items = newInvoice.items.filter(i => i.id !== item.id); setNewInvoice({...newInvoice, items: items.length ? items : [mkItem()]}); }} style={{ background: "#fce4ec", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
                     </div>
                   ))}
-                  <button onClick={() => setNewInvoice({...newInvoice, items: [...newInvoice.items, { name: "", qty: 1, price: 0 }]})} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", width: "100%" }}>+ 新增項目</button>
+                  <button onClick={() => setNewInvoice({...newInvoice, items: [...newInvoice.items, mkItem()]})} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", width: "100%" }}>+ 新增項目</button>
                 </div>
                 <div style={{ marginBottom: 14 }}>
                   <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 5 }}>備註</label>
@@ -1029,8 +1042,8 @@ export default function App() {
                   <span style={{ color: "#aaa", fontSize: 14 }}>合計</span>
                   <span style={{ color: "#fff", fontSize: 24, fontWeight: 800 }}>HKD${invoiceTotal.toLocaleString()}</span>
                 </div>
-                <button onClick={handleGenerateInvoice} disabled={invoiceTotal === 0 || saving} style={{ width: "100%", padding: 14, background: invoiceTotal > 0 ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 12, fontSize: 16, fontWeight: 800, cursor: invoiceTotal > 0 ? "pointer" : "not-allowed" }}>
-                  {saving ? "生成中..." : "生成發票並列印 PDF"}
+                <button onClick={handleGenerateInvoice} disabled={invoiceTotal === 0 || !newInvoice.customerId || saving} style={{ width: "100%", padding: 14, background: (invoiceTotal > 0 && newInvoice.customerId) ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 12, fontSize: 16, fontWeight: 800, cursor: (invoiceTotal > 0 && newInvoice.customerId) ? "pointer" : "not-allowed" }}>
+                  {saving ? "生成中..." : !newInvoice.customerId ? "請先選擇客戶" : "生成發票並列印 PDF"}
                 </button>
               </>
             )}
