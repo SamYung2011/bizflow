@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { INVOICE_TEMPLATE } from "./invoiceTemplate.js";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -90,91 +91,84 @@ const Select = ({ label, value, onChange, options }) => (
 );
 
 // ── INVOICE PDF PRINT ──────────────────────────────────────────────────────────
-function printInvoice(inv, customer, items) {
+// 使用 Google Doc 導出的 HTML 模板（src/invoiceTemplate.js），逐個 placeholder 替換
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// 規範化一條 item（兼容手工格式 + Shopify 同步格式）
+// Shopify 同步：{ product: { legacyResourceId }, quantity, originalUnitPriceSet: { amount } }
+// 手工：{ name, qty, price }
+function normalizeItem(item, products) {
+  if (!item || typeof item !== "object") return { name: "", qty: "", price: "" };
+  const qty = item.qty ?? item.quantity ?? "";
+  const price = item.price
+    ?? (item.originalUnitPriceSet?.amount != null ? Number(item.originalUnitPriceSet.amount) : null)
+    ?? (item.discountedUnitPriceSet?.amount != null ? Number(item.discountedUnitPriceSet.amount) : null)
+    ?? "";
+  // 產品名查找優先級：
+  // 1. item.name / item.title（手工或 Shopify title 已帶入）
+  // 2. 按價格在 products 表找：唯一 → 用；多個 → 優先當前促銷版（含"推廣"/"限時"）；否則取第一個
+  // 3. 兜底通用名 "EV 充電配件"
+  let name = item.name || item.title || "";
+  if (!name && price !== "" && products?.length) {
+    const priceNum = Number(price);
+    const matches = products.filter(x => Number(x.price) === priceNum && x.name);
+    if (matches.length === 1) {
+      name = matches[0].name;
+    } else if (matches.length > 1) {
+      const promo = matches.find(x => /推廣|限時/.test(x.name));
+      name = (promo || matches[0]).name;
+    }
+  }
+  if (!name) name = "EV 充電配件";
+  return { name, qty, price };
+}
+
+function printInvoice(inv, customer, items, products = []) {
   let itemsArr = items;
   if (typeof itemsArr === "string") {
     try { itemsArr = JSON.parse(itemsArr); } catch { itemsArr = []; }
   }
+  // Shopify 同步的 items 常常是單個對象而非數組，包一下
+  if (itemsArr && !Array.isArray(itemsArr)) itemsArr = [itemsArr];
   if (!Array.isArray(itemsArr)) itemsArr = [];
-  const rows = itemsArr.map((item, i) => `
-    <tr>
-      <td>${item.name || ""}</td>
-      <td style="text-align:center">${item.qty || 1}</td>
-      <td style="text-align:right">$${item.price || 0}</td>
-      <td style="text-align:right">$${(item.qty || 1) * (item.price || 0)}</td>
-    </tr>`).join("");
+  itemsArr = itemsArr.map(it => normalizeItem(it, products));
 
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
-  <style>
-    body { font-family: Arial, sans-serif; color: #222; margin: 0; padding: 40px; }
-    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 30px; }
-    .logo { height: 50px; }
-    .tagline { font-size: 11px; color: #888; letter-spacing: 2px; text-align: right; margin-top: 6px; }
-    h1 { font-size: 28px; letter-spacing: 6px; margin: 0 0 4px; }
-    .meta { font-size: 13px; color: #555; margin-bottom: 30px; }
-    .bill-row { display: flex; gap: 60px; margin-bottom: 30px; }
-    .bill-col h3 { font-size: 12px; letter-spacing: 2px; color: #888; margin: 0 0 6px; }
-    .bill-col p { margin: 2px 0; font-size: 14px; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-    th { background: #1a1a2e; color: #fff; padding: 12px 16px; text-align: left; font-size: 12px; letter-spacing: 1px; }
-    td { padding: 12px 16px; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
-    .total-row { background: #1a1a2e; color: #fff; }
-    .total-row td { font-size: 18px; font-weight: bold; padding: 16px; }
-    .payment { margin-bottom: 30px; font-size: 13px; }
-    .payment h3 { font-size: 12px; letter-spacing: 2px; color: #888; margin-bottom: 8px; }
-    .footer { border-top: 1px solid #eee; padding-top: 20px; display: flex; justify-content: space-between; font-size: 12px; color: #666; }
-    .note { margin-top: 20px; font-size: 11px; color: #888; }
-    @media print { body { padding: 20px; } }
-  </style></head><body>
-  <div class="header">
-    <div>
-      <img src="data:image/png;base64,${LOGO_B64}" class="logo" />
-    </div>
-    <div style="text-align:right">
-      <div class="tagline">SPECIALIST OF EV CHARGING</div>
-      <h1>I N V O I C E</h1>
-      <div style="font-size:16px;font-weight:bold;letter-spacing:2px"># ${String(inv.invoice_number || inv.id).toUpperCase().startsWith("DC") ? (inv.invoice_number || inv.id) : "DC" + (inv.invoice_number || inv.id)}</div>
-    </div>
-  </div>
-  <div class="meta">
-    <strong>ISSUED:</strong> ${inv.date || new Date().toISOString().slice(0,10)}&nbsp;&nbsp;&nbsp;
-    <strong>DUE ON RECEIPT</strong>
-  </div>
-  <div class="bill-row">
-    <div class="bill-col">
-      <h3>BILL TO</h3>
-      <p><strong>${customer?.name || ""}</strong></p>
-      <p>${customer?.email || ""}</p>
-      <p>${customer?.phone || ""}</p>
-      <p>${customer?.address || ""}</p>
-    </div>
-    <div class="bill-col">
-      <h3>CAR DETAIL</h3>
-      <p>${customer?.car_make || ""} ${customer?.car_model || ""}</p>
-    </div>
-  </div>
-  <table>
-    <thead><tr><th>D E S C R I P T I O N</th><th style="text-align:center">Q U A N T I T Y</th><th style="text-align:right">P R I C E</th><th style="text-align:right">T O T A L</th></tr></thead>
-    <tbody>${rows}</tbody>
-    <tfoot><tr class="total-row"><td colspan="3">A M O U N T &nbsp; D U E : &nbsp; HKD$</td><td style="text-align:right">${inv.total || 0}</td></tr></tfoot>
-  </table>
-  <div class="payment">
-    <h3>PAYMENT INFO 支付方法</h3>
-    <p>FPS / Bank Transfer / PayMe</p>
-  </div>
-  <div class="footer">
-    <div>
-      <div><strong>Honnmono Intl Ltd</strong> &nbsp; +852 9575 7519</div>
-      <div>Room 1516, 15/F, New Commerce Ctr, Shek Mun, Sha Tin, HK</div>
-      <div>www.honnmono-store.com &nbsp; business@honn-mono-store.com</div>
-    </div>
-    <div style="text-align:right">
-      <div>Honnmono &nbsp; Honnmono_international</div>
-    </div>
-  </div>
-  <div class="note">GBT to CSS2 轉插提供為期2年的保修服務，並包含定期軟件升級服務。請密切留意Facebook和官方網站上相關消息的更新。</div>
-  <div style="text-align:center;margin-top:30px;font-size:14px;letter-spacing:3px;color:#888">THANK YOU FOR YOUR BUSINESS !</div>
-  </body></html>`;
+  // 發票號：優先 invoice_number，沒有就截 id 前 8 位（UUID 太長）
+  let invNumShort;
+  if (inv.invoice_number) {
+    invNumShort = String(inv.invoice_number).replace(/^DC/i, "");
+  } else {
+    const idStr = String(inv.id || "");
+    // UUID 格式取前 8 位；否則直接用
+    invNumShort = idStr.replace(/^DC/i, "").split("-")[0];
+  }
+
+  // 生成表格行（items 幾條就渲染幾行，超過 A4 時瀏覽器自動流式分頁）
+  const validItems = itemsArr.filter(x => x && (x.name || (x.qty !== "" && x.qty != null) || (x.price !== "" && x.price != null)));
+  const rowsHtml = validItems.map(item => {
+    const qty = item.qty !== "" && item.qty != null ? item.qty : "";
+    const price = item.price !== "" && item.price != null ? item.price : "";
+    return '<div class="table-row">' +
+      '<div>' + escapeHtml(item.name || "") + '</div>' +
+      '<div>' + escapeHtml(qty) + '</div>' +
+      '<div class="col-price">' + escapeHtml(price) + '</div>' +
+    '</div>';
+  }).join("");
+
+  // 渲染模板
+  let html = INVOICE_TEMPLATE;
+  html = html.replace("{{subject_line}}", escapeHtml(invNumShort));
+  html = html.replace("{{date}}", escapeHtml(inv.date || new Date().toISOString().slice(0, 10)));
+  html = html.replace("{{customer_name}}", escapeHtml(customer?.name || ""));
+  html = html.replace("{{customer_phone}}", escapeHtml(customer?.phone || ""));
+  html = html.replace("{{customer_email}}", escapeHtml(customer?.email || ""));
+  html = html.replace("{{customer_address}}", escapeHtml(customer?.address || ""));
+  html = html.replace("{{car_make}}", escapeHtml(customer?.car_make || ""));
+  html = html.replace("{{car_model}}", escapeHtml(customer?.car_model || ""));
+  html = html.replace("{{Total_Sum}}", escapeHtml(inv.total || 0));
+  html = html.replace("{{invoice_rows}}", rowsHtml);
 
   const w = window.open("", "_blank");
   w.document.write(html);
@@ -279,9 +273,10 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // 登入後才加載數據
+  // 登入後才加載數據 — 用 user.id 作為依賴，token 自動 refresh 不會重載
+  const userId = session?.user?.id;
   useEffect(() => {
-    if (!session) return;
+    if (!userId) return;
     async function fetchAll(table, orderCol, ascending = true) {
       let all = [];
       let from = 0;
@@ -319,7 +314,7 @@ export default function App() {
       }
     }
     load();
-  }, [session]);
+  }, [userId]);
 
   const getProduct = (id) => products.find(p => p.id === id);
   const getCustomer = (id) => customers.find(c => c.id === id);
@@ -430,7 +425,7 @@ export default function App() {
       setInvoices(prev => [data[0], ...prev]);
       setInvoiceGenerated(true);
       const customer = getCustomer(newInvoice.customerId);
-      printInvoice(data[0], customer, newInvoice.items);
+      printInvoice(data[0], customer, newInvoice.items, products);
 
       // Auto-create warranty: update inventory items with warranty_end dates
       const invoiceDate = new Date();
@@ -887,7 +882,7 @@ export default function App() {
                   <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                     <div style={{ fontSize: 18, fontWeight: 800 }}>HKD${inv.total}</div>
                     <Badge status={inv.status} />
-                    <button onClick={() => printInvoice(inv, selectedCustomer, inv.items || [])} style={{ fontSize: 12, background: "#f0f4ff", color: "#6382ff", border: "none", borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
+                    <button onClick={() => printInvoice(inv, selectedCustomer, inv.items || [], products)} style={{ fontSize: 12, background: "#f0f4ff", color: "#6382ff", border: "none", borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
                       <Icon name="print" size={13} /> Print
                     </button>
                   </div>
@@ -930,7 +925,7 @@ export default function App() {
                     <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                       <div style={{ fontSize: 18, fontWeight: 800 }}>HKD${inv.total}</div>
                       <Badge status={inv.status} />
-                      <button onClick={() => printInvoice(inv, c, inv.items || [])} style={{ fontSize: 12, background: "#f0f4ff", color: "#6382ff", border: "none", borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
+                      <button onClick={() => printInvoice(inv, c, inv.items || [], products)} style={{ fontSize: 12, background: "#f0f4ff", color: "#6382ff", border: "none", borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
                         <Icon name="print" size={13} /> 列印
                       </button>
                     </div>
