@@ -220,6 +220,7 @@ export default function App() {
   const [warrantySearch, setWarrantySearch] = useState("");
   const [warrantyBucket, setWarrantyBucket] = useState("all"); // all | expired | soon | near | far
   const [revenueRange, setRevenueRange] = useState("12m"); // thisMonth | lastMonth | 3m | 12m | year | all
+  const [dashSearch, setDashSearch] = useState("");
   const [customerSort, setCustomerSort] = useState("created");
   const [customerSortDir, setCustomerSortDir] = useState("desc");
   const [customerTimeRange, setCustomerTimeRange] = useState("all");
@@ -859,9 +860,80 @@ export default function App() {
               <StatCard label="客戶數" value={customers.length} sub="累計" accent="#f59e0b" icon={<Icon name="customer" size={20} />} onClick={() => { setTab("customers"); setSelectedCustomer(null); }} />
               <StatCard label="保修提醒" value={warrantyAlerts.length} sub="需跟進" accent="#ef4444" icon={<Icon name="warning" size={20} />} onClick={() => setTab("warranty")} />
             </div>
-            <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 20, display: "flex", alignItems: "center", gap: 8 }}>
-              <Icon name="search" size={15} />
-              <input placeholder="搜尋發票、客戶、產品..." value={search} onChange={e => setSearch(e.target.value)} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
+            <div style={{ position: "relative", marginBottom: 20 }}>
+              <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", display: "flex", alignItems: "center", gap: 8 }}>
+                <Icon name="search" size={15} />
+                <input placeholder="搜尋發票、客戶、產品..." value={dashSearch} onChange={e => setDashSearch(e.target.value)} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
+                {dashSearch && (
+                  <button onClick={() => setDashSearch("")} style={{ background: "#f5f5f5", border: "none", borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontSize: 12, color: "#666" }}>×</button>
+                )}
+              </div>
+              {dashSearch.trim() && (() => {
+                const q = dashSearch.trim().toLowerCase();
+                const custMatches = customerGroups.virtualCustomers.filter(c =>
+                  c.allNames.some(n => n.toLowerCase().includes(q))
+                  || c.allPhones.some(p => p.toLowerCase().includes(q))
+                  || c.allEmails.some(e => e.toLowerCase().includes(q))
+                  || (c.car_make || "").toLowerCase().includes(q)
+                  || (c.car_model || "").toLowerCase().includes(q)
+                ).slice(0, 5);
+                const prodMatches = products.filter(p => (p.name || "").toLowerCase().includes(q)).slice(0, 5);
+                const invMatches = invoices.filter(inv => {
+                  const c = getCustomer(inv.customer_id);
+                  return String(inv.invoice_number || "").toLowerCase().includes(q)
+                    || (c?.name || "").toLowerCase().includes(q)
+                    || (inv.notes || "").toLowerCase().includes(q);
+                }).slice(0, 5);
+                const total = custMatches.length + prodMatches.length + invMatches.length;
+                const panelStyle = { position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1px solid #e0e0e0", borderRadius: 12, marginTop: 4, boxShadow: "0 8px 28px rgba(0,0,0,0.1)", zIndex: 20, maxHeight: 500, overflowY: "auto" };
+                const hdrStyle = { padding: "10px 16px 4px", fontSize: 11, fontWeight: 700, color: "#888", letterSpacing: "0.08em", textTransform: "uppercase", background: "#fafbff" };
+                const rowStyle = { padding: "10px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12, borderBottom: "1px solid #f5f5f5" };
+                if (total === 0) return (<div style={{ ...panelStyle, padding: 20, textAlign: "center", color: "#999", fontSize: 13 }}>沒有符合的結果</div>);
+                return (
+                  <div style={panelStyle}>
+                    {custMatches.length > 0 && <>
+                      <div style={hdrStyle}>客戶（{custMatches.length}）</div>
+                      {custMatches.map(c => (
+                        <div key={"c" + c.id} onClick={() => { setTab("customers"); setSelectedCustomer(c); setDashSearch(""); }} style={rowStyle} onMouseEnter={e => e.currentTarget.style.background = "#f7f8fc"} onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
+                          <div style={{ width: 32, height: 32, borderRadius: "50%", background: "linear-gradient(135deg,#6382ff,#a78bfa)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#fff", flexShrink: 0 }}>{(c.name || "?")[0]}</div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 700, fontSize: 13 }}>{c.name}</div>
+                            <div style={{ fontSize: 11, color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{[c.phone, c.email].filter(Boolean).join(" · ")}{c.car_make ? ` · 🚗 ${c.car_make} ${c.car_model || ""}` : ""}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </>}
+                    {prodMatches.length > 0 && <>
+                      <div style={hdrStyle}>產品（{prodMatches.length}）</div>
+                      {prodMatches.map(p => (
+                        <div key={"p" + p.id} onClick={() => { setTab("products"); setDashSearch(""); }} style={rowStyle} onMouseEnter={e => e.currentTarget.style.background = "#f7f8fc"} onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
+                          <div style={{ fontSize: 20, width: 32, textAlign: "center" }}>📦</div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 700, fontSize: 13 }}>{p.name}</div>
+                            <div style={{ fontSize: 11, color: "#888" }}>HKD${p.price} · 保修 {p.warranty_months || "—"} 月</div>
+                          </div>
+                        </div>
+                      ))}
+                    </>}
+                    {invMatches.length > 0 && <>
+                      <div style={hdrStyle}>發票（{invMatches.length}）</div>
+                      {invMatches.map(inv => {
+                        const c = getCustomer(inv.customer_id);
+                        return (
+                          <div key={"i" + inv.id} onClick={() => { setTab("invoices"); setSearch(String(inv.invoice_number || inv.id).replace(/^DC/i, "")); setDashSearch(""); }} style={rowStyle} onMouseEnter={e => e.currentTarget.style.background = "#f7f8fc"} onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
+                            <div style={{ fontSize: 20, width: 32, textAlign: "center" }}>📄</div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontWeight: 700, fontSize: 13 }}>{fmtInvNum(inv)}</div>
+                              <div style={{ fontSize: 11, color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c?.name || "—"} · {inv.date || "?"} · HKD${inv.total}</div>
+                            </div>
+                            <Badge status={inv.status} />
+                          </div>
+                        );
+                      })}
+                    </>}
+                  </div>
+                );
+              })()}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
               <div style={{ background: "#fff", borderRadius: 16, padding: 24, border: "1px solid #f0f0f0", boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
@@ -869,12 +941,7 @@ export default function App() {
                   <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>最近發票</h2>
                   <button onClick={() => setTab("invoices")} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>查看全部 →</button>
                 </div>
-                {invoices.filter(inv => {
-                  const q = search.toLowerCase();
-                  if (!q) return true;
-                  const c = getCustomer(inv.customer_id);
-                  return String(inv.invoice_number || "").toLowerCase().includes(q) || (c?.name || "").toLowerCase().includes(q) || (inv.notes || "").toLowerCase().includes(q);
-                }).slice(0, 5).map(inv => {
+                {invoices.slice(0, 5).map(inv => {
                   const c = getCustomer(inv.customer_id);
                   return (
                     <div key={inv.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 0", borderBottom: "1px solid #f5f5f5" }}>
