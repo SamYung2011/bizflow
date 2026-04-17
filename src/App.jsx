@@ -244,6 +244,14 @@ export default function App() {
   const [warrantyBucket, setWarrantyBucket] = useState("all"); // all | expired | soon | near | far
   const [revenueRange, setRevenueRange] = useState("12m"); // thisMonth | lastMonth | 3m | 12m | year | all
   const [dashSearch, setDashSearch] = useState("");
+  const [editingInvoice, setEditingInvoice] = useState(null); // 正在編輯的發票對象
+  const [editInvItems, setEditInvItems] = useState([]);
+  const [editInvTotalOverride, setEditInvTotalOverride] = useState(""); // 空字串 = 跟隨明細合計；非空 = 手動覆蓋
+  const [editInvExtras, setEditInvExtras] = useState({
+    deposit: { enabled: false, amount: 0 },
+    discount: { enabled: false, amount: 0 },
+    surcharge: { enabled: false, amount: 0 },
+  });
   const [customerSort, setCustomerSort] = useState("created");
   const [customerSortDir, setCustomerSortDir] = useState("desc");
   const [customerTimeRange, setCustomerTimeRange] = useState("all");
@@ -511,18 +519,18 @@ export default function App() {
   // 月營收（當月）
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  const monthlyRevenue = invoices.filter(i => (i.date || "").startsWith(currentMonth) && (i.status || "").trim().toLowerCase() === "paid").reduce((s, i) => s + (i.total || 0), 0);
+  const monthlyRevenue = useMemo(() => invoices.filter(i => (i.date || "").startsWith(currentMonth) && (i.status || "").trim().toLowerCase() === "paid").reduce((s, i) => s + (i.total || 0), 0), [invoices, currentMonth]);
   const totalRevenue = invoices.reduce((s, i) => s + (i.total || 0), 0);
   const inStock = inventory.filter(i => i.status === "In Stock").length;
 
   // 保修提醒：從發票 + 產品 warranty_months 推算
-  const warrantyItems = (() => {
+  const warrantyItems = useMemo(() => {
     const today = new Date();
     const in30 = new Date(today); in30.setDate(in30.getDate() + 30);
     const results = [];
     for (const inv of invoices) {
       if (!Array.isArray(inv.items) || !inv.date) continue;
-      const cust = getCustomer(inv.customer_id);
+      const cust = customers.find(c => c.id === inv.customer_id);
       for (const item of inv.items) {
         const prod = products.find(p => p.name === item.name);
         if (!prod || !prod.warranty_months) continue;
@@ -534,24 +542,23 @@ export default function App() {
       }
     }
     return results.sort((a, b) => {
-      // 有客戶的優先（這樣 Dashboard 顯示的卡片可以點擊跳轉）
       if (!!a.customer !== !!b.customer) return a.customer ? -1 : 1;
       return a.daysLeft - b.daysLeft;
     });
-  })();
+  }, [invoices, products, customers]);
   const warrantyAlerts = warrantyItems;
 
   // 全量保修條目：涵蓋過期 30 天內 + 未來 365 天內，用於獨立「保修」tab
   // 僅顯示有客戶記錄的，無名客戶排除（無法聯繫不顯示）
-  const allWarrantyItems = (() => {
+  const allWarrantyItems = useMemo(() => {
     const today = new Date();
-    const expiredCutoff = new Date(today); expiredCutoff.setDate(expiredCutoff.getDate() - 30); // 過期 30 天內仍顯示
-    const upcomingCutoff = new Date(today); upcomingCutoff.setDate(upcomingCutoff.getDate() + 365); // 未來 365 天內
+    const expiredCutoff = new Date(today); expiredCutoff.setDate(expiredCutoff.getDate() - 30);
+    const upcomingCutoff = new Date(today); upcomingCutoff.setDate(upcomingCutoff.getDate() + 365);
     const results = [];
     for (const inv of invoices) {
       if (!Array.isArray(inv.items) || !inv.date) continue;
-      const cust = getCustomer(inv.customer_id);
-      if (!cust) continue; // 無客戶記錄直接跳過
+      const cust = customers.find(c => c.id === inv.customer_id);
+      if (!cust) continue;
       for (const item of inv.items) {
         const prod = products.find(p => p.name === item.name);
         if (!prod || !prod.warranty_months) continue;
@@ -581,14 +588,14 @@ export default function App() {
       }
     }
     return results.sort((a, b) => a.daysLeft - b.daysLeft);
-  })();
+  }, [invoices, products, customers]);
 
   // 從發票反推庫存：按產品聚合已售數量
-  const derivedInventory = (() => {
+  const derivedInventory = useMemo(() => {
     const map = {};
     for (const inv of invoices) {
       if (!Array.isArray(inv.items)) continue;
-      const cust = getCustomer(inv.customer_id);
+      const cust = customers.find(c => c.id === inv.customer_id);
       for (const item of inv.items) {
         const prod = products.find(p => p.name === item.name);
         const key = item.name;
@@ -600,7 +607,7 @@ export default function App() {
     const values = Object.values(map);
     for (const v of values) v.stock = Math.max((v.stock || 0) - v.totalSold, 0);
     return values.sort((a, b) => b.totalSold - a.totalSold);
-  })();
+  }, [invoices, products, customers]);
 
   const extrasTotal =
     (newInvoice.deposit?.enabled ? (Number(newInvoice.deposit.amount) || 0) : 0) +
@@ -710,6 +717,52 @@ export default function App() {
       alert(`發票生成失敗：${error.message}`);
     }
     setSaving(false);
+  }
+
+  function openEditInvoice(inv) {
+    const rawItems = Array.isArray(inv.items) ? inv.items : (() => { try { return JSON.parse(inv.items || "[]"); } catch { return []; } })();
+    // 拆分：押金/優惠/手續費 line item 提取出來作為 extras，其他進明細
+    const extras = { deposit: { enabled: false, amount: 0 }, discount: { enabled: false, amount: 0 }, surcharge: { enabled: false, amount: 0 } };
+    const normalItems = [];
+    for (const it of rawItems) {
+      const name = (it.name || "").trim();
+      const p = Number(it.price) || 0;
+      if (name === "押金") { extras.deposit = { enabled: true, amount: p }; continue; }
+      if (name === "優惠") { extras.discount = { enabled: true, amount: Math.abs(p) }; continue; }
+      if (name === "手續費") { extras.surcharge = { enabled: true, amount: p }; continue; }
+      normalItems.push({ id: it.id || mkItem().id, name, qty: Number(it.qty) || 1, price: p });
+    }
+    setEditingInvoice(inv);
+    setEditInvItems(normalItems.length > 0 ? normalItems : [mkItem()]);
+    setEditInvExtras(extras);
+    setEditInvTotalOverride("");
+  }
+  function closeEditInvoice() {
+    setEditingInvoice(null);
+    setEditInvItems([]);
+    setEditInvTotalOverride("");
+    setEditInvExtras({ deposit: { enabled: false, amount: 0 }, discount: { enabled: false, amount: 0 }, surcharge: { enabled: false, amount: 0 } });
+  }
+  async function handleSaveInvoice() {
+    if (!editingInvoice) return;
+    // 組裝最終 items：普通明細 + 勾選的 extras 作為 line item
+    const cleanItems = editInvItems.filter(it => it.name || it.qty || it.price);
+    const finalItems = [...cleanItems];
+    if (editInvExtras.deposit?.enabled && Number(editInvExtras.deposit.amount)) {
+      finalItems.push({ id: mkItem().id, name: "押金", qty: 1, price: Number(editInvExtras.deposit.amount) });
+    }
+    if (editInvExtras.surcharge?.enabled && Number(editInvExtras.surcharge.amount)) {
+      finalItems.push({ id: mkItem().id, name: "手續費", qty: 1, price: Number(editInvExtras.surcharge.amount) });
+    }
+    if (editInvExtras.discount?.enabled && Number(editInvExtras.discount.amount)) {
+      finalItems.push({ id: mkItem().id, name: "優惠", qty: 1, price: -Number(editInvExtras.discount.amount) });
+    }
+    const itemsSum = finalItems.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 0), 0);
+    const finalTotal = editInvTotalOverride === "" ? itemsSum : (Number(editInvTotalOverride) || 0);
+    const { error } = await supabase.from("invoices").update({ items: finalItems, total: finalTotal }).eq("id", editingInvoice.id);
+    if (error) { alert(`儲存失敗：${error.message}`); return; }
+    setInvoices(prev => prev.map(i => i.id === editingInvoice.id ? { ...i, items: finalItems, total: finalTotal } : i));
+    closeEditInvoice();
   }
 
   async function handleMarkPaid(inv) {
@@ -1271,6 +1324,9 @@ export default function App() {
                     )}
                     <div style={{ fontSize: 18, fontWeight: 800 }}>HKD${inv.total}</div>
                     <Badge status={inv.status} />
+                    <button onClick={() => openEditInvoice(inv)} title="編輯發票" style={{ fontSize: 12, background: "#fff8e1", color: "#f59e0b", border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700 }}>
+                      ✏️
+                    </button>
                     <button onClick={() => printInvoice(inv, selectedCustomer, inv.items || [], products)} style={{ fontSize: 12, background: "#f0f4ff", color: "#6382ff", border: "none", borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
                       <Icon name="print" size={13} /> Print
                     </button>
@@ -1320,6 +1376,9 @@ export default function App() {
                       )}
                       <div style={{ fontSize: 18, fontWeight: 800 }}>HKD${inv.total}</div>
                       <Badge status={inv.status} />
+                      <button onClick={() => openEditInvoice(inv)} title="編輯發票" style={{ fontSize: 12, background: "#fff8e1", color: "#f59e0b", border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700 }}>
+                        ✏️
+                      </button>
                       <button onClick={() => printInvoice(inv, c, inv.items || [], products)} style={{ fontSize: 12, background: "#f0f4ff", color: "#6382ff", border: "none", borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
                         <Icon name="print" size={13} /> 列印
                       </button>
@@ -1635,6 +1694,83 @@ export default function App() {
       </main>
 
       {/* ADD CUSTOMER MODAL */}
+      {editingInvoice && (() => {
+        const itemsSubtotal = editInvItems.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 0), 0);
+        const extrasTotal =
+          (editInvExtras.deposit?.enabled ? (Number(editInvExtras.deposit.amount) || 0) : 0) +
+          (editInvExtras.surcharge?.enabled ? (Number(editInvExtras.surcharge.amount) || 0) : 0) -
+          (editInvExtras.discount?.enabled ? (Number(editInvExtras.discount.amount) || 0) : 0);
+        const itemsSum = itemsSubtotal + extrasTotal;
+        const finalTotal = editInvTotalOverride === "" ? itemsSum : (Number(editInvTotalOverride) || 0);
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
+            <div style={{ background: "#fff", borderRadius: 20, padding: 32, width: 700, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>編輯發票</h2>
+                  <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>#{editingInvoice.invoice_number || editingInvoice.id}</div>
+                </div>
+                <button onClick={closeEditInvoice} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
+              </div>
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>明細</label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 60px 100px 36px", gap: 8, fontSize: 11, color: "#888", marginBottom: 6, paddingLeft: 4 }}>
+                  <div>產品名稱</div><div style={{ textAlign: "center" }}>數量</div><div>單價 HKD</div><div></div>
+                </div>
+                {editInvItems.map((item, idx) => (
+                  <div key={item.id} style={{ display: "grid", gridTemplateColumns: "1fr 60px 100px 36px", gap: 8, marginBottom: 8 }}>
+                    <input value={item.name} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, name: e.target.value }; setEditInvItems(arr); }} placeholder="產品名" style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
+                    <input type="number" value={item.qty} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, qty: parseInt(e.target.value) || 0 }; setEditInvItems(arr); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "center" }} />
+                    <input type="number" value={item.price} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, price: parseFloat(e.target.value) || 0 }; setEditInvItems(arr); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
+                    <button onClick={() => setEditInvItems(editInvItems.filter(i => i.id !== item.id))} style={{ background: "#fce4ec", border: "none", borderRadius: 8, cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
+                  </div>
+                ))}
+                <button onClick={() => setEditInvItems([...editInvItems, mkItem()])} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", width: "100%", marginTop: 4 }}>+ 新增項目</button>
+              </div>
+              <div style={{ marginBottom: 14, padding: "14px 16px", background: "#fafbff", borderRadius: 12, border: "1px solid #eef0fa" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#555", marginBottom: 10 }}>額外費用</div>
+                {[
+                  { key: "deposit", label: "押金", sign: "+", color: "#6382ff" },
+                  { key: "discount", label: "優惠", sign: "−", color: "#d14343" },
+                  { key: "surcharge", label: "手續費", sign: "+", color: "#f59e0b" },
+                ].map(({ key, label, sign, color }) => {
+                  const v = editInvExtras[key] || { enabled: false, amount: 0 };
+                  return (
+                    <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                      <input type="checkbox" id={`edit-extra-${key}`} checked={v.enabled} onChange={e => setEditInvExtras({ ...editInvExtras, [key]: { ...v, enabled: e.target.checked } })} style={{ width: 16, height: 16, cursor: "pointer" }} />
+                      <label htmlFor={`edit-extra-${key}`} style={{ fontSize: 14, cursor: "pointer", minWidth: 70, fontWeight: 600 }}>
+                        <span style={{ color, marginRight: 4 }}>{sign}</span>{label}
+                      </label>
+                      {v.enabled && (
+                        <input type="number" min="0" value={v.amount || ""} onChange={e => setEditInvExtras({ ...editInvExtras, [key]: { ...v, amount: parseFloat(e.target.value) || 0 } })} placeholder="金額 HKD" style={{ flex: 1, padding: "7px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ background: "#fafbff", borderRadius: 12, padding: "14px 18px", marginBottom: 16, border: "1px solid #eef0fa" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, marginBottom: 8 }}>
+                  <span style={{ color: "#666" }}>明細合計（含額外費用）</span>
+                  <span style={{ fontWeight: 700 }}>HKD${Math.round(itemsSum).toLocaleString()}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: 13, color: "#666" }}>發票總額（留空=跟明細）</span>
+                  <input type="number" value={editInvTotalOverride} onChange={e => setEditInvTotalOverride(e.target.value)} placeholder={String(Math.round(itemsSum))} style={{ width: 160, padding: "8px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "right" }} />
+                </div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 20px", background: "#1a1a2e", borderRadius: 12, marginBottom: 16 }}>
+                <span style={{ color: "#aaa", fontSize: 14 }}>最終總額</span>
+                <span style={{ color: "#fff", fontSize: 22, fontWeight: 800 }}>HKD${Math.round(finalTotal).toLocaleString()}</span>
+              </div>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={closeEditInvoice} style={{ flex: 1, padding: 12, background: "#f5f5f5", color: "#555", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>取消</button>
+                <button onClick={handleSaveInvoice} style={{ flex: 2, padding: 12, background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>儲存修改</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {showAddCustomer && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
           <div style={{ background: "#fff", borderRadius: 20, padding: 32, width: 580, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
