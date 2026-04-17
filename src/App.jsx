@@ -57,8 +57,10 @@ const Badge = ({ status }) => {
   );
 };
 
-const StatCard = ({ label, value, sub, accent, icon }) => (
-  <div style={{ background: "#fff", borderRadius: 16, padding: "24px 28px", border: "1px solid #f0f0f0", boxShadow: "0 2px 12px rgba(0,0,0,0.04)", display: "flex", flexDirection: "column", gap: 8, position: "relative", overflow: "hidden" }}>
+const StatCard = ({ label, value, sub, accent, icon, onClick }) => (
+  <div onClick={onClick} style={{ background: "#fff", borderRadius: 16, padding: "24px 28px", border: "1px solid #f0f0f0", boxShadow: "0 2px 12px rgba(0,0,0,0.04)", display: "flex", flexDirection: "column", gap: 8, position: "relative", overflow: "hidden", cursor: onClick ? "pointer" : "default", transition: "transform 0.15s" }}
+    onMouseEnter={e => { if (onClick) e.currentTarget.style.transform = "translateY(-2px)"; }}
+    onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; }}>
     <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: accent, borderRadius: "16px 16px 0 0" }} />
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
       <div>
@@ -214,6 +216,10 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [visibleCustomers, setVisibleCustomers] = useState(30);
   const [visibleInvoices, setVisibleInvoices] = useState(30);
+  const [visibleWarranty, setVisibleWarranty] = useState(50);
+  const [warrantySearch, setWarrantySearch] = useState("");
+  const [warrantyBucket, setWarrantyBucket] = useState("all"); // all | expired | soon | near | far
+  const [revenueRange, setRevenueRange] = useState("12m"); // thisMonth | lastMonth | 3m | 12m | year | all
   const [customerSort, setCustomerSort] = useState("created");
   const [customerSortDir, setCustomerSortDir] = useState("desc");
   const [customerTimeRange, setCustomerTimeRange] = useState("all");
@@ -227,7 +233,10 @@ export default function App() {
   });
 
   const [newInvoice, setNewInvoice] = useState({
-    customerId: "", items: [mkItem()], notes: "", warranty: false
+    customerId: "", items: [mkItem()], notes: "", warranty: false,
+    deposit: { enabled: false, amount: 0 },
+    discount: { enabled: false, amount: 0 },
+    surcharge: { enabled: false, amount: 0 },
   });
   // 新建發票彈窗的搜索框 picker state
   const [customerQuery, setCustomerQuery] = useState("");          // 客戶搜索輸入框文字
@@ -237,30 +246,137 @@ export default function App() {
   // 關閉新建發票彈窗 → 一次清掉所有殘留（避免下次打開時看到上次的選擇）
   function closeNewInvoice() {
     setShowNewInvoice(false);
-    setNewInvoice({ customerId: "", items: [mkItem()], notes: "", warranty: false });
+    setNewInvoice({
+      customerId: "", items: [mkItem()], notes: "", warranty: false,
+      deposit: { enabled: false, amount: 0 },
+      discount: { enabled: false, amount: 0 },
+      surcharge: { enabled: false, amount: 0 },
+    });
     setCustomerQuery("");
     setCustomerDropdownOpen(false);
     setProductPickerOpenId(null);
   }
 
   // 客戶頁過濾/排序：按需計算最近購買日期 + 搜索 + 時間範圍 + 排序
+  // 客戶去重：名/電話/郵箱/地址 4 字段命中 3 個以上視為同一客戶（union-find）
+  const customerGroups = useMemo(() => {
+    const norm = s => (s || "").trim().toLowerCase();
+    const fields = ["name", "phone", "email", "address"];
+    const idToCustomer = new Map();
+    customers.forEach(c => idToCustomer.set(c.id, c));
+    const indexes = fields.map(() => new Map());
+    customers.forEach(c => {
+      fields.forEach((f, i) => {
+        const v = norm(c[f]);
+        if (!v) return;
+        if (!indexes[i].has(v)) indexes[i].set(v, []);
+        indexes[i].get(v).push(c.id);
+      });
+    });
+    const parent = new Map();
+    customers.forEach(c => parent.set(c.id, c.id));
+    const find = x => {
+      let r = x;
+      while (parent.get(r) !== r) r = parent.get(r);
+      let cur = x;
+      while (parent.get(cur) !== r) { const nx = parent.get(cur); parent.set(cur, r); cur = nx; }
+      return r;
+    };
+    customers.forEach(c => {
+      const candidates = new Set();
+      fields.forEach((f, i) => {
+        const v = norm(c[f]);
+        if (!v) return;
+        indexes[i].get(v)?.forEach(id => { if (id !== c.id) candidates.add(id); });
+      });
+      candidates.forEach(id => {
+        const other = idToCustomer.get(id);
+        if (!other) return;
+        let matches = 0;
+        fields.forEach(f => {
+          const a = norm(c[f]), b = norm(other[f]);
+          if (a && a === b) matches++;
+        });
+        if (matches >= 3) {
+          const ra = find(c.id), rb = find(id);
+          if (ra !== rb) parent.set(ra, rb);
+        }
+      });
+    });
+    const groupInfo = new Map();
+    customers.forEach(c => {
+      const root = find(c.id);
+      if (!groupInfo.has(root)) groupInfo.set(root, { cids: [], names: new Set(), phones: new Set(), emails: new Set(), addresses: new Set() });
+      const g = groupInfo.get(root);
+      g.cids.push(c.id);
+      const n = (c.name || "").trim(); if (n) g.names.add(n);
+      const p = (c.phone || "").trim(); if (p) g.phones.add(p);
+      const e = (c.email || "").trim(); if (e) g.emails.add(e);
+      const a = (c.address || "").trim(); if (a) g.addresses.add(a);
+    });
+    const idToGroup = new Map();
+    customers.forEach(c => idToGroup.set(c.id, find(c.id)));
+    // 構造 virtualCustomers：每組合併成一條，主信息取組內第一個有 name 的
+    const virtualCustomers = [];
+    groupInfo.forEach((info, root) => {
+      const primaryCid = info.cids.find(cid => {
+        const x = idToCustomer.get(cid);
+        return x && (x.name || "").trim();
+      }) || info.cids[0];
+      const primary = idToCustomer.get(primaryCid) || {};
+      const earliestCreated = info.cids
+        .map(cid => idToCustomer.get(cid)?.created_at)
+        .filter(Boolean)
+        .sort()[0];
+      const allNames = Array.from(info.names);
+      const allPhones = Array.from(info.phones);
+      const allEmails = Array.from(info.emails);
+      const allAddresses = Array.from(info.addresses);
+      virtualCustomers.push({
+        ...primary,
+        id: root,
+        groupCids: info.cids,
+        allNames,
+        allPhones,
+        allEmails,
+        allAddresses,
+        name: (primary.name || "").trim() || allNames[0] || "",
+        phone: (primary.phone || "").trim() || allPhones[0] || "",
+        email: (primary.email || "").trim() || allEmails[0] || "",
+        address: (primary.address || "").trim() || allAddresses[0] || "",
+        created_at: earliestCreated,
+      });
+    });
+    return { idToGroup, groupInfo, virtualCustomers };
+  }, [customers]);
+
   const filteredCustomers = useMemo(() => {
     const cutoff = customerTimeRange === "all" ? null : new Date(Date.now() - parseInt(customerTimeRange) * 86400000);
+    // lastPurchaseMap 按 group id 聚合（group 內任一 cid 的最近購買）
     const lastPurchaseMap = {};
     if (customerSort === "lastPurchase" || cutoff) {
       for (const inv of invoices) {
         if (!inv.customer_id || !inv.date) continue;
-        const prev = lastPurchaseMap[inv.customer_id];
+        const gid = customerGroups.idToGroup.get(inv.customer_id);
+        if (!gid) continue;
+        const prev = lastPurchaseMap[gid];
         if (!prev || new Date(inv.date) > new Date(prev)) {
-          lastPurchaseMap[inv.customer_id] = inv.date;
+          lastPurchaseMap[gid] = inv.date;
         }
       }
     }
     const q = search.toLowerCase();
-    return customers.filter(c => {
-      if (!(c.email && c.email.trim()) && !(c.phone && c.phone.trim())) return false;
-      const textMatch = !q || (c.name || "").toLowerCase().includes(q) || (c.email || "").toLowerCase().includes(q) || (c.phone || "").toLowerCase().includes(q) || (c.car_make || "").toLowerCase().includes(q) || (c.car_model || "").toLowerCase().includes(q);
-      if (!textMatch) return false;
+    return customerGroups.virtualCustomers.filter(c => {
+      // 至少一個 email 或 phone 有值
+      if (c.allEmails.length === 0 && c.allPhones.length === 0) return false;
+      if (q) {
+        const hit = c.allNames.some(n => n.toLowerCase().includes(q))
+          || c.allEmails.some(e => e.toLowerCase().includes(q))
+          || c.allPhones.some(p => p.toLowerCase().includes(q))
+          || (c.car_make || "").toLowerCase().includes(q)
+          || (c.car_model || "").toLowerCase().includes(q);
+        if (!hit) return false;
+      }
       if (!cutoff) return true;
       const dateStr = lastPurchaseMap[c.id];
       return dateStr && new Date(dateStr) >= cutoff;
@@ -273,7 +389,7 @@ export default function App() {
       if (!vb) return -1;
       return vb.localeCompare(va) * dir;
     });
-  }, [customers, invoices, search, customerSort, customerSortDir, customerTimeRange]);
+  }, [customerGroups, invoices, search, customerSort, customerSortDir, customerTimeRange]);
 
   // 發票頁過濾：按搜索關鍵字 (發票號 / 客戶名 / 備註)
   const filteredInvoices = useMemo(() => {
@@ -381,6 +497,48 @@ export default function App() {
   })();
   const warrantyAlerts = warrantyItems;
 
+  // 全量保修條目：涵蓋過期 30 天內 + 未來 365 天內，用於獨立「保修」tab
+  // 僅顯示有客戶記錄的，無名客戶排除（無法聯繫不顯示）
+  const allWarrantyItems = (() => {
+    const today = new Date();
+    const expiredCutoff = new Date(today); expiredCutoff.setDate(expiredCutoff.getDate() - 30); // 過期 30 天內仍顯示
+    const upcomingCutoff = new Date(today); upcomingCutoff.setDate(upcomingCutoff.getDate() + 365); // 未來 365 天內
+    const results = [];
+    for (const inv of invoices) {
+      if (!Array.isArray(inv.items) || !inv.date) continue;
+      const cust = getCustomer(inv.customer_id);
+      if (!cust) continue; // 無客戶記錄直接跳過
+      for (const item of inv.items) {
+        const prod = products.find(p => p.name === item.name);
+        if (!prod || !prod.warranty_months) continue;
+        const wEnd = new Date(inv.date);
+        wEnd.setMonth(wEnd.getMonth() + prod.warranty_months);
+        if (wEnd >= expiredCutoff && wEnd <= upcomingCutoff) {
+          const daysLeft = Math.ceil((wEnd - today) / (1000 * 60 * 60 * 24));
+          let bucket;
+          if (daysLeft < 0) bucket = "expired";
+          else if (daysLeft <= 7) bucket = "week";
+          else if (daysLeft <= 30) bucket = "soon";
+          else if (daysLeft <= 90) bucket = "near";
+          else bucket = "far";
+          results.push({
+            customer: cust,
+            customerName: cust.name || "—",
+            customerPhone: cust.phone || "",
+            productName: item.name,
+            invoiceNum: fmtInvNum(inv),
+            invoiceId: inv.id,
+            invoiceDate: inv.date,
+            warrantyEnd: wEnd.toISOString().slice(0, 10),
+            daysLeft,
+            bucket,
+          });
+        }
+      }
+    }
+    return results.sort((a, b) => a.daysLeft - b.daysLeft);
+  })();
+
   // 從發票反推庫存：按產品聚合已售數量
   const derivedInventory = (() => {
     const map = {};
@@ -400,7 +558,11 @@ export default function App() {
     return values.sort((a, b) => b.totalSold - a.totalSold);
   })();
 
-  const invoiceTotal = newInvoice.items.reduce((sum, item) => sum + (item.price * item.qty || 0), 0);
+  const extrasTotal =
+    (newInvoice.deposit?.enabled ? (Number(newInvoice.deposit.amount) || 0) : 0) +
+    (newInvoice.surcharge?.enabled ? (Number(newInvoice.surcharge.amount) || 0) : 0) -
+    (newInvoice.discount?.enabled ? (Number(newInvoice.discount.amount) || 0) : 0);
+  const invoiceTotal = newInvoice.items.reduce((sum, item) => sum + (item.price * item.qty || 0), 0) + extrasTotal;
 
   const navItems = [
     { id: "dashboard", label: "總覽", icon: "dashboard" },
@@ -408,6 +570,8 @@ export default function App() {
     { id: "products", label: "產品", icon: "product" },
     { id: "customers", label: "客戶", icon: "customer" },
     { id: "invoices", label: "發票", icon: "invoice" },
+    { id: "warranty", label: "保修", icon: "warning" },
+    { id: "revenue", label: "營收", icon: "trend_up" },
   ];
 
   async function handleSaveCustomer() {
@@ -438,11 +602,21 @@ export default function App() {
   async function handleGenerateInvoice() {
     setSaving(true);
     const invNumber = `${Date.now()}`.slice(-6);
+    const finalItems = [...newInvoice.items];
+    if (newInvoice.deposit?.enabled && Number(newInvoice.deposit.amount)) {
+      finalItems.push({ id: mkItem().id, name: "押金", qty: 1, price: Number(newInvoice.deposit.amount) });
+    }
+    if (newInvoice.surcharge?.enabled && Number(newInvoice.surcharge.amount)) {
+      finalItems.push({ id: mkItem().id, name: "手續費", qty: 1, price: Number(newInvoice.surcharge.amount) });
+    }
+    if (newInvoice.discount?.enabled && Number(newInvoice.discount.amount)) {
+      finalItems.push({ id: mkItem().id, name: "優惠", qty: 1, price: -Number(newInvoice.discount.amount) });
+    }
     const { data, error } = await supabase.from("invoices").insert([{
       invoice_number: invNumber,
       customer_id: newInvoice.customerId || null,
       date: new Date().toISOString().slice(0, 10),
-      items: newInvoice.items,
+      items: finalItems,
       total: invoiceTotal,
       status: "Unpaid",
       notes: newInvoice.notes,
@@ -451,7 +625,7 @@ export default function App() {
       setInvoices(prev => [data[0], ...prev]);
       setInvoiceGenerated(true);
       const customer = getCustomer(newInvoice.customerId);
-      printInvoice(data[0], customer, newInvoice.items, products);
+      printInvoice(data[0], customer, finalItems, products);
 
       // Auto-create warranty: update inventory items with warranty_end dates
       const invoiceDate = new Date();
@@ -470,6 +644,7 @@ export default function App() {
               customer_id: newInvoice.customerId || null,
               sold_date: invoiceDate.toISOString().slice(0, 10),
               warranty_end: warrantyEndStr,
+              invoice_id: data[0].id,
             }).eq("id", invItem.id);
             if (invErr) {
               console.error(`庫存更新失敗 (item ${invItem.id}):`, invErr);
@@ -477,7 +652,7 @@ export default function App() {
               continue;
             }
             setInventory(prev => prev.map(i =>
-              i.id === invItem.id ? { ...i, status: "Sold", customer_id: newInvoice.customerId || null, sold_date: invoiceDate.toISOString().slice(0, 10), warranty_end: warrantyEndStr } : i
+              i.id === invItem.id ? { ...i, status: "Sold", customer_id: newInvoice.customerId || null, sold_date: invoiceDate.toISOString().slice(0, 10), warranty_end: warrantyEndStr, invoice_id: data[0].id } : i
             ));
           }
         }
@@ -491,6 +666,47 @@ export default function App() {
       alert(`發票生成失敗：${error.message}`);
     }
     setSaving(false);
+  }
+
+  async function handleDeleteCustomer(c) {
+    const cids = c.groupCids || [c.id];
+    const invCount = invoices.filter(i => cids.includes(i.customer_id)).length;
+    if (invCount > 0) {
+      alert(`此客戶有 ${invCount} 張發票，請先刪除該客戶的所有發票，再刪除客戶。`);
+      return;
+    }
+    const msg = cids.length > 1
+      ? `確定刪除客戶「${c.name || "(無名)"}」及其合併的 ${cids.length} 條重複記錄？\n\n此操作不可撤銷。`
+      : `確定刪除客戶「${c.name || "(無名)"}」？\n\n此操作不可撤銷。`;
+    const confirmed = window.confirm(msg);
+    if (!confirmed) return;
+    const { error } = await supabase.from("customers").delete().in("id", cids);
+    if (error) { alert(`刪除客戶失敗：${error.message}`); return; }
+    setCustomers(prev => prev.filter(x => !cids.includes(x.id)));
+    setSelectedCustomer(null);
+  }
+
+  async function handleDeleteInvoice(inv) {
+    const confirmed = window.confirm(`確定刪除發票 #${inv.invoice_number || inv.id}？\n\n此操作會同時還原對應的庫存狀態（Sold → In Stock），不可撤銷。`);
+    if (!confirmed) return;
+    const { data: relatedInv, error: fetchErr } = await supabase
+      .from("inventory").select("id").eq("invoice_id", inv.id);
+    if (fetchErr) { alert(`查詢關聯庫存失敗：${fetchErr.message}`); return; }
+    if (relatedInv && relatedInv.length > 0) {
+      const { error: restoreErr } = await supabase.from("inventory")
+        .update({ status: "In Stock", customer_id: null, sold_date: null, warranty_end: null, invoice_id: null })
+        .eq("invoice_id", inv.id);
+      if (restoreErr) { alert(`還原庫存失敗：${restoreErr.message}`); return; }
+    }
+    const { error: delErr } = await supabase.from("invoices").delete().eq("id", inv.id);
+    if (delErr) { alert(`刪除發票失敗：${delErr.message}`); return; }
+    setInvoices(prev => prev.filter(i => i.id !== inv.id));
+    if (relatedInv && relatedInv.length > 0) {
+      const ids = new Set(relatedInv.map(r => r.id));
+      setInventory(prev => prev.map(i => ids.has(i.id)
+        ? { ...i, status: "In Stock", customer_id: null, sold_date: null, warranty_end: null, invoice_id: null }
+        : i));
+    }
   }
 
   // 認證載入中（Supabase 正在讀 session）
@@ -574,7 +790,7 @@ export default function App() {
           <div style={{ fontSize: 10, color: "#6b7bb8", marginTop: 6, letterSpacing: "0.1em", textTransform: "uppercase" }}>業務管理系統</div>
         </div>
         {warrantyAlerts.length > 0 && (
-          <div style={{ margin: "10px 12px", background: "#ff9800", borderRadius: 10, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8 }}>
+          <div onClick={() => setTab("warranty")} style={{ margin: "10px 12px", background: "#ff9800", borderRadius: 10, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
             <Icon name="warning" size={13} />
             <div style={{ color: "#fff", fontSize: 12, fontWeight: 600 }}>{warrantyAlerts.length} 件保修即將到期</div>
           </div>
@@ -613,10 +829,10 @@ export default function App() {
               <p style={{ color: "#888", margin: "4px 0 0", fontSize: 15 }}>以下是 Honnmono 今日的業務概況。</p>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 28 }}>
-              <StatCard label="本月營收" value={`HKD$${monthlyRevenue.toLocaleString()}`} sub={`${now.getFullYear()}年${now.getMonth() + 1}月`} accent="#6382ff" icon={<Icon name="trend_up" size={20} />} />
-              <StatCard label="庫存數量" value={inStock} sub={`共 ${inventory.length} 件`} accent="#22c55e" icon={<Icon name="inventory" size={20} />} />
-              <StatCard label="客戶數" value={customers.length} sub="累計" accent="#f59e0b" icon={<Icon name="customer" size={20} />} />
-              <StatCard label="保修提醒" value={warrantyAlerts.length} sub="需跟進" accent="#ef4444" icon={<Icon name="warning" size={20} />} />
+              <StatCard label="本月營收" value={`HKD$${monthlyRevenue.toLocaleString()}`} sub={`${now.getFullYear()}年${now.getMonth() + 1}月`} accent="#6382ff" icon={<Icon name="trend_up" size={20} />} onClick={() => setTab("revenue")} />
+              <StatCard label="庫存數量" value={inStock} sub={`共 ${inventory.length} 件`} accent="#22c55e" icon={<Icon name="inventory" size={20} />} onClick={() => setTab("inventory")} />
+              <StatCard label="客戶數" value={customers.length} sub="累計" accent="#f59e0b" icon={<Icon name="customer" size={20} />} onClick={() => { setTab("customers"); setSelectedCustomer(null); }} />
+              <StatCard label="保修提醒" value={warrantyAlerts.length} sub="需跟進" accent="#ef4444" icon={<Icon name="warning" size={20} />} onClick={() => setTab("warranty")} />
             </div>
             <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 20, display: "flex", alignItems: "center", gap: 8 }}>
               <Icon name="search" size={15} />
@@ -656,7 +872,7 @@ export default function App() {
                 </div>
                 {warrantyItems.length === 0 ? (
                   <div style={{ color: "#aaa", fontSize: 14, textAlign: "center", paddingTop: 20 }}>目前沒有提醒 ✓</div>
-                ) : warrantyItems.slice(0, 5).map((item, idx) => (
+                ) : <>{warrantyItems.slice(0, 5).map((item, idx) => (
                     <div key={idx} onClick={() => { if (item.customer) { setTab("customers"); setSelectedCustomer(item.customer); } }} style={{ background: "#fff8f0", border: "1px solid #ffe0b2", borderRadius: 12, padding: "12px 16px", marginBottom: 10, cursor: item.customer ? "pointer" : "default", transition: "all 0.15s" }}
                       onMouseEnter={e => { if (item.customer) { e.currentTarget.style.borderColor = "#ff9800"; e.currentTarget.style.background = "#fff3e0"; } }}
                       onMouseLeave={e => { e.currentTarget.style.borderColor = "#ffe0b2"; e.currentTarget.style.background = "#fff8f0"; }}>
@@ -665,6 +881,11 @@ export default function App() {
                       <div style={{ fontSize: 12, color: "#e65100", marginTop: 4, fontWeight: 600 }}>保修到期：{item.warrantyEnd}（剩餘 {item.daysLeft} 天）</div>
                     </div>
                 ))}
+                {warrantyItems.length > 5 && (
+                  <button onClick={() => setTab("warranty")} style={{ display: "block", margin: "8px auto 0", padding: "8px 20px", background: "#fff3e0", color: "#ff9800", border: "1px solid #ffe0b2", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+                    查看全部保修記錄 →
+                  </button>
+                )}</>}
               </div>
             </div>
           </div>
@@ -815,7 +1036,8 @@ export default function App() {
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {filteredCustomers.slice(0, visibleCustomers).map(c => {
-                const custInvoices = invoices.filter(i => i.customer_id === c.id);
+                const cids = c.groupCids || [c.id];
+                const custInvoices = invoices.filter(i => cids.includes(i.customer_id));
                 const total = custInvoices.reduce((s, i) => s + (i.total || 0), 0);
                 return (
                       <div key={c.id} onClick={() => setSelectedCustomer(c)} style={{ background: "#fff", borderRadius: 14, padding: "18px 22px", border: "1px solid #f0f0f0", boxShadow: "0 2px 8px rgba(0,0,0,0.03)", display: "flex", alignItems: "center", gap: 18, cursor: "pointer" }}
@@ -857,24 +1079,40 @@ export default function App() {
         {/* CUSTOMER PROFILE */}
         {tab === "customers" && selectedCustomer && (
           <div>
-            <button onClick={() => setSelectedCustomer(null)} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", color: "#6382ff", fontWeight: 700, fontSize: 14, marginBottom: 20, padding: 0 }}>
-              <Icon name="back" size={16} /> 返回客戶列表
-            </button>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <button onClick={() => setSelectedCustomer(null)} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", color: "#6382ff", fontWeight: 700, fontSize: 14, padding: 0 }}>
+                <Icon name="back" size={16} /> 返回客戶列表
+              </button>
+              <button onClick={() => handleDeleteCustomer(selectedCustomer)} title="刪除客戶" style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff0f0", color: "#d14343", border: "1px solid #ffcccc", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+                🗑️ 刪除客戶
+              </button>
+            </div>
             <div style={{ background: "#fff", borderRadius: 16, padding: 28, border: "1px solid #f0f0f0", boxShadow: "0 2px 12px rgba(0,0,0,0.04)", marginBottom: 20 }}>
               <div style={{ display: "flex", alignItems: "flex-start", gap: 20, marginBottom: 24 }}>
                 <div style={{ width: 64, height: 64, borderRadius: "50%", background: "linear-gradient(135deg,#6382ff,#a78bfa)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: 800, color: "#fff", flexShrink: 0 }}>
                   {(selectedCustomer.name || "?")[0]}
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6, flexWrap: "wrap" }}>
                     <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800 }}>{selectedCustomer.name}</h2>
                     <Badge status={selectedCustomer.type || "Regular"} />
+                    {selectedCustomer.groupCids && selectedCustomer.groupCids.length > 1 && (
+                      <span style={{ fontSize: 11, color: "#6382ff", background: "#eef2ff", borderRadius: 20, padding: "2px 10px", fontWeight: 700 }}>
+                        已合併 {selectedCustomer.groupCids.length} 條重複記錄
+                      </span>
+                    )}
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontSize: 14 }}>
-                    {selectedCustomer.email && <div>📧 {selectedCustomer.email}</div>}
-                    {selectedCustomer.phone && <div>📱 香港：{selectedCustomer.phone}</div>}
+                    {(selectedCustomer.allEmails && selectedCustomer.allEmails.length > 0 ? selectedCustomer.allEmails : (selectedCustomer.email ? [selectedCustomer.email] : [])).map(e => (
+                      <div key={"e-" + e}>📧 {e}</div>
+                    ))}
+                    {(selectedCustomer.allPhones && selectedCustomer.allPhones.length > 0 ? selectedCustomer.allPhones : (selectedCustomer.phone ? [selectedCustomer.phone] : [])).map(p => (
+                      <div key={"p-" + p}>📱 {p}</div>
+                    ))}
                     {selectedCustomer.phone_mainland && <div>📱 內地：{selectedCustomer.phone_mainland}</div>}
-                    {selectedCustomer.address && <div>📍 {selectedCustomer.address}</div>}
+                    {(selectedCustomer.allAddresses && selectedCustomer.allAddresses.length > 0 ? selectedCustomer.allAddresses : (selectedCustomer.address ? [selectedCustomer.address] : [])).map(a => (
+                      <div key={"a-" + a}>📍 {a}</div>
+                    ))}
                     {selectedCustomer.car_make && <div>🚗 {selectedCustomer.car_make} {selectedCustomer.car_model}</div>}
                     {selectedCustomer.referral && <div>🔗 來源：{selectedCustomer.referral}</div>}
                   </div>
@@ -893,9 +1131,11 @@ export default function App() {
 
             <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>購買記錄</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {invoices.filter(i => i.customer_id === selectedCustomer.id).length === 0 ? (
-                <div style={{ background: "#fff", borderRadius: 14, padding: 24, textAlign: "center", color: "#aaa", border: "1px solid #f0f0f0" }}>暫無購買記錄</div>
-              ) : invoices.filter(i => i.customer_id === selectedCustomer.id).map(inv => (
+              {(() => {
+                const scCids = selectedCustomer.groupCids || [selectedCustomer.id];
+                const myInvoices = invoices.filter(i => scCids.includes(i.customer_id));
+                if (myInvoices.length === 0) return (<div style={{ background: "#fff", borderRadius: 14, padding: 24, textAlign: "center", color: "#aaa", border: "1px solid #f0f0f0" }}>暫無購買記錄</div>);
+                return myInvoices.map(inv => (
                 <div key={inv.id} style={{ background: "#fff", borderRadius: 14, padding: "18px 22px", border: "1px solid #f0f0f0", boxShadow: "0 2px 8px rgba(0,0,0,0.03)", display: "flex", alignItems: "center", gap: 16 }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 800, fontSize: 15 }}>{fmtInvNum(inv)}</div>
@@ -912,7 +1152,8 @@ export default function App() {
                     </button>
                   </div>
                 </div>
-              ))}
+              ));
+              })()}
             </div>
           </div>
         )}
@@ -953,6 +1194,9 @@ export default function App() {
                       <button onClick={() => printInvoice(inv, c, inv.items || [], products)} style={{ fontSize: 12, background: "#f0f4ff", color: "#6382ff", border: "none", borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
                         <Icon name="print" size={13} /> 列印
                       </button>
+                      <button onClick={() => handleDeleteInvoice(inv)} title="刪除發票" style={{ fontSize: 12, background: "#fff0f0", color: "#d14343", border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
+                        🗑️
+                      </button>
                     </div>
                   </div>
                 );
@@ -965,6 +1209,300 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* WARRANTY */}
+        {tab === "warranty" && (() => {
+          const counts = {
+            all: allWarrantyItems.length,
+            expired: allWarrantyItems.filter(w => w.bucket === "expired").length,
+            week: allWarrantyItems.filter(w => w.bucket === "week").length,
+            soon: allWarrantyItems.filter(w => w.bucket === "soon").length,
+            near: allWarrantyItems.filter(w => w.bucket === "near").length,
+            far: allWarrantyItems.filter(w => w.bucket === "far").length,
+          };
+          const q = warrantySearch.toLowerCase().trim();
+          const filtered = allWarrantyItems.filter(w => {
+            if (warrantyBucket !== "all" && w.bucket !== warrantyBucket) return false;
+            if (!q) return true;
+            return (w.customerName || "").toLowerCase().includes(q)
+              || (w.customerPhone || "").toLowerCase().includes(q)
+              || (w.productName || "").toLowerCase().includes(q)
+              || (w.invoiceNum || "").toLowerCase().includes(q);
+          });
+          const bucketColor = (b) => b === "expired" ? "#d14343" : b === "week" ? "#ea580c" : b === "soon" ? "#f59e0b" : b === "near" ? "#6382ff" : "#22c55e";
+          const bucketLabel = (b) => b === "expired" ? "已過期" : b === "week" ? "一週內" : b === "soon" ? "30 天內" : b === "near" ? "90 天內" : "一年內";
+          const filterBtns = [
+            { k: "all", label: `全部 (${counts.all})`, color: "#555" },
+            { k: "expired", label: `已過期 (${counts.expired})`, color: "#d14343" },
+            { k: "week", label: `一週內 (${counts.week})`, color: "#ea580c" },
+            { k: "soon", label: `30 天內 (${counts.soon})`, color: "#f59e0b" },
+            { k: "near", label: `90 天內 (${counts.near})`, color: "#6382ff" },
+            { k: "far", label: `一年內 (${counts.far})`, color: "#22c55e" },
+          ];
+          return (
+            <div>
+              <div style={{ marginBottom: 24 }}>
+                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>保修</h1>
+                <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>共 {counts.all} 件需跟進（過期 30 天內 + 未來 365 天內到期，僅顯示有聯繫方式的客戶）</p>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+                {filterBtns.map(b => (
+                  <button key={b.k} onClick={() => { setWarrantyBucket(b.k); setVisibleWarranty(50); }} style={{ padding: "8px 16px", borderRadius: 20, border: warrantyBucket === b.k ? `2px solid ${b.color}` : "1px solid #e0e0e0", background: warrantyBucket === b.k ? b.color + "18" : "#fff", color: warrantyBucket === b.k ? b.color : "#555", fontSize: 13, fontWeight: warrantyBucket === b.k ? 700 : 500, cursor: "pointer" }}>{b.label}</button>
+                ))}
+              </div>
+              <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
+                <Icon name="search" size={15} />
+                <input placeholder="搜尋客戶名 / 電話 / 產品 / 發票號..." value={warrantySearch} onChange={e => { setWarrantySearch(e.target.value); setVisibleWarranty(50); }} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {filtered.length === 0 ? (
+                  <div style={{ padding: 40, textAlign: "center", color: "#999" }}>沒有符合條件的保修記錄</div>
+                ) : filtered.slice(0, visibleWarranty).map((w, idx) => (
+                  <div key={w.invoiceId + "-" + idx} onClick={() => { if (w.customer) { setTab("customers"); setSelectedCustomer(w.customer); } }} style={{ background: "#fff", borderRadius: 12, padding: "14px 18px", border: "1px solid #f0f0f0", boxShadow: "0 2px 6px rgba(0,0,0,0.02)", display: "flex", alignItems: "center", gap: 14, cursor: w.customer ? "pointer" : "default", transition: "border-color 0.15s" }}
+                    onMouseEnter={e => { if (w.customer) e.currentTarget.style.borderColor = "#6382ff"; }}
+                    onMouseLeave={e => e.currentTarget.style.borderColor = "#f0f0f0"}>
+                    <div style={{ width: 6, alignSelf: "stretch", background: bucketColor(w.bucket), borderRadius: 3 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                        <span style={{ fontWeight: 800, fontSize: 15 }}>{w.customerName}</span>
+                        {w.customerPhone && <span style={{ fontSize: 12, color: "#888" }}>· {w.customerPhone}</span>}
+                        <span style={{ fontSize: 11, color: bucketColor(w.bucket), fontWeight: 700, padding: "2px 8px", background: bucketColor(w.bucket) + "18", borderRadius: 8 }}>{bucketLabel(w.bucket)}</span>
+                      </div>
+                      <div style={{ fontSize: 13, color: "#666", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.productName} · {w.invoiceNum} · 購買 {w.invoiceDate}</div>
+                    </div>
+                    <div style={{ textAlign: "right", flexShrink: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: bucketColor(w.bucket) }}>{w.warrantyEnd}</div>
+                      <div style={{ fontSize: 12, color: "#888" }}>{w.daysLeft < 0 ? `已過 ${-w.daysLeft} 天` : `剩餘 ${w.daysLeft} 天`}</div>
+                    </div>
+                  </div>
+                ))}
+                {visibleWarranty < filtered.length && (
+                  <button onClick={() => setVisibleWarranty(v => v + 50)} style={{ display: "block", margin: "12px auto", padding: "10px 28px", background: "#f0f4ff", color: "#6382ff", border: "1px solid #e0e8ff", borderRadius: 10, cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
+                    載入更多（{filtered.length - visibleWarranty} 項待載入）
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* REVENUE */}
+        {tab === "revenue" && (() => {
+          const paidInvoices = invoices.filter(i => (i.status || "").trim().toLowerCase() === "paid");
+          // 時間範圍過濾
+          const today = new Date();
+          const rangeStart = (() => {
+            const d = new Date(today);
+            if (revenueRange === "thisMonth") return new Date(today.getFullYear(), today.getMonth(), 1);
+            if (revenueRange === "lastMonth") return new Date(today.getFullYear(), today.getMonth() - 1, 1);
+            if (revenueRange === "3m") { d.setMonth(d.getMonth() - 3); return d; }
+            if (revenueRange === "12m") { d.setMonth(d.getMonth() - 12); return d; }
+            if (revenueRange === "year") return new Date(today.getFullYear(), 0, 1);
+            return new Date(2000, 0, 1);
+          })();
+          const rangeEnd = (() => {
+            if (revenueRange === "lastMonth") return new Date(today.getFullYear(), today.getMonth(), 1);
+            return today;
+          })();
+          const inRange = paidInvoices.filter(i => {
+            if (!i.date) return false;
+            const d = new Date(i.date);
+            return d >= rangeStart && d < rangeEnd;
+          });
+          const totalRevenue = inRange.reduce((s, i) => s + (i.total || 0), 0);
+          const invCount = inRange.length;
+          const avgValue = invCount > 0 ? Math.round(totalRevenue / invCount) : 0;
+          // 所有發票（含未付款）在範圍內用於狀態統計
+          const allInRange = invoices.filter(i => {
+            if (!i.date) return false;
+            const d = new Date(i.date);
+            return d >= rangeStart && d < rangeEnd;
+          });
+          const unpaidCount = allInRange.filter(i => (i.status || "").trim().toLowerCase() !== "paid").length;
+          const unpaidAmount = allInRange.filter(i => (i.status || "").trim().toLowerCase() !== "paid").reduce((s, i) => s + (i.total || 0), 0);
+          // 按月聚合（最多 24 月）
+          const monthMap = {};
+          inRange.forEach(i => {
+            const m = (i.date || "").slice(0, 7);
+            if (!m) return;
+            monthMap[m] = (monthMap[m] || 0) + (i.total || 0);
+          });
+          const monthKeys = Object.keys(monthMap).sort();
+          const maxMonth = Math.max(1, ...Object.values(monthMap));
+          // 產品 Top 10（按銷售金額）
+          const prodMap = {};
+          inRange.forEach(i => {
+            if (!Array.isArray(i.items)) return;
+            i.items.forEach(it => {
+              const name = it.name || "未命名";
+              const amt = (Number(it.price) || 0) * (Number(it.qty) || 0);
+              prodMap[name] = (prodMap[name] || 0) + amt;
+            });
+          });
+          const prodTop = Object.entries(prodMap).sort((a, b) => b[1] - a[1]).slice(0, 10);
+          const maxProd = Math.max(1, ...prodTop.map(p => p[1]));
+          // 客戶 Top 10：依 customerGroups（4 欄位命中 3+ 視為同一人）合併。無名堆一條
+          const custMap = {};
+          inRange.forEach(i => {
+            if (!i.customer_id) return;
+            const groupId = customerGroups.idToGroup.get(i.customer_id);
+            const info = groupId ? customerGroups.groupInfo.get(groupId) : null;
+            const names = info ? Array.from(info.names) : [];
+            const phones = info ? Array.from(info.phones) : [];
+            const emails = info ? Array.from(info.emails) : [];
+            let key;
+            if (names.length > 0) {
+              key = "G:" + groupId;
+            } else {
+              key = "UNNAMED";
+            }
+            if (!custMap[key]) {
+              custMap[key] = {
+                name: names.length > 0 ? names.join(" / ") : "(無名客戶)",
+                phone: phones.join(", "),
+                email: emails.join(", "),
+                amt: 0,
+              };
+            }
+            custMap[key].amt += i.total || 0;
+          });
+          const custTop = Object.values(custMap).sort((a, b) => b.amt - a.amt).slice(0, 10);
+          const maxCust = Math.max(1, ...custTop.map(c => c.amt));
+          const ranges = [
+            { k: "thisMonth", label: "本月" },
+            { k: "lastMonth", label: "上月" },
+            { k: "3m", label: "近 3 月" },
+            { k: "12m", label: "近 12 月" },
+            { k: "year", label: "本年度" },
+            { k: "all", label: "全部" },
+          ];
+          return (
+            <div>
+              <div style={{ marginBottom: 20 }}>
+                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>營收</h1>
+                <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>僅統計已付款（Paid）發票</p>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20 }}>
+                {ranges.map(r => (
+                  <button key={r.k} onClick={() => setRevenueRange(r.k)} style={{ padding: "8px 16px", borderRadius: 20, border: revenueRange === r.k ? "2px solid #6382ff" : "1px solid #e0e0e0", background: revenueRange === r.k ? "#eef2ff" : "#fff", color: revenueRange === r.k ? "#6382ff" : "#555", fontSize: 13, fontWeight: revenueRange === r.k ? 700 : 500, cursor: "pointer" }}>{r.label}</button>
+                ))}
+              </div>
+              {/* KPI cards */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 20 }}>
+                <div style={{ background: "#fff", borderRadius: 14, padding: "20px 24px", border: "1px solid #f0f0f0" }}>
+                  <div style={{ fontSize: 12, color: "#888", fontWeight: 600, letterSpacing: "0.04em" }}>總營收</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: "#6382ff", marginTop: 4 }}>HKD${Math.round(totalRevenue).toLocaleString()}</div>
+                </div>
+                <div style={{ background: "#fff", borderRadius: 14, padding: "20px 24px", border: "1px solid #f0f0f0" }}>
+                  <div style={{ fontSize: 12, color: "#888", fontWeight: 600, letterSpacing: "0.04em" }}>已付發票數</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: "#22c55e", marginTop: 4 }}>{invCount}</div>
+                </div>
+                <div style={{ background: "#fff", borderRadius: 14, padding: "20px 24px", border: "1px solid #f0f0f0" }}>
+                  <div style={{ fontSize: 12, color: "#888", fontWeight: 600, letterSpacing: "0.04em" }}>平均單據</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: "#f59e0b", marginTop: 4 }}>HKD${avgValue.toLocaleString()}</div>
+                </div>
+                <div style={{ background: "#fff", borderRadius: 14, padding: "20px 24px", border: "1px solid #f0f0f0" }}>
+                  <div style={{ fontSize: 12, color: "#888", fontWeight: 600, letterSpacing: "0.04em" }}>未付款</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: "#d14343", marginTop: 4 }}>{unpaidCount}</div>
+                  <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>HKD${unpaidAmount.toLocaleString()}</div>
+                </div>
+              </div>
+              {/* 月度柱状图（多月份）/ 產品佔比餅圖（單月） */}
+              {monthKeys.length > 1 ? (
+                <div style={{ background: "#fff", borderRadius: 14, padding: 24, border: "1px solid #f0f0f0", marginBottom: 20 }}>
+                  <h3 style={{ margin: "0 0 16px", fontSize: 15, fontWeight: 700 }}>月度營收趨勢</h3>
+                  <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 220, overflowX: "auto", paddingBottom: 6 }}>
+                    {monthKeys.map(m => {
+                      const v = monthMap[m];
+                      const h = Math.max(4, (v / maxMonth) * 180);
+                      return (
+                        <div key={m} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 50, flex: "1 0 50px" }}>
+                          <div style={{ fontSize: 10, color: "#888", fontWeight: 600 }}>{v >= 10000 ? `${Math.round(v/1000)}k` : v}</div>
+                          <div style={{ width: "100%", height: h, background: "linear-gradient(180deg,#6382ff,#a78bfa)", borderRadius: "6px 6px 0 0" }} title={`${m}: HKD$${v.toLocaleString()}`} />
+                          <div style={{ fontSize: 10, color: "#888" }}>{m.slice(2)}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (() => {
+                const sortedProds = Object.entries(prodMap).sort((a, b) => b[1] - a[1]);
+                const top6 = sortedProds.slice(0, 6);
+                const restSum = sortedProds.slice(6).reduce((s, [, v]) => s + v, 0);
+                const pieData = [
+                  ...top6.map(([n, v]) => ({ name: n, value: v })),
+                  ...(restSum > 0 ? [{ name: "其他", value: restSum }] : []),
+                ];
+                const pieTotal = pieData.reduce((s, d) => s + d.value, 0);
+                const colors = ["#6382ff", "#a78bfa", "#f59e0b", "#22c55e", "#ef4444", "#ea580c", "#14b8a6"];
+                if (pieTotal === 0) return null;
+                let offset = -Math.PI / 2;
+                return (
+                  <div style={{ background: "#fff", borderRadius: 14, padding: 24, border: "1px solid #f0f0f0", marginBottom: 20 }}>
+                    <h3 style={{ margin: "0 0 16px", fontSize: 15, fontWeight: 700 }}>產品銷售佔比</h3>
+                    <div style={{ display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
+                      <svg viewBox="0 0 100 100" style={{ width: 240, height: 240, flexShrink: 0 }}>
+                        {pieData.length === 1 ? (
+                          <circle cx="50" cy="50" r="40" fill={colors[0]} />
+                        ) : pieData.map((d, i) => {
+                          const angle = (d.value / pieTotal) * 2 * Math.PI;
+                          const x1 = 50 + 40 * Math.cos(offset);
+                          const y1 = 50 + 40 * Math.sin(offset);
+                          offset += angle;
+                          const x2 = 50 + 40 * Math.cos(offset);
+                          const y2 = 50 + 40 * Math.sin(offset);
+                          const large = angle > Math.PI ? 1 : 0;
+                          return <path key={i} d={`M 50 50 L ${x1} ${y1} A 40 40 0 ${large} 1 ${x2} ${y2} Z`} fill={colors[i % colors.length]} stroke="#fff" strokeWidth="0.5" />;
+                        })}
+                      </svg>
+                      <div style={{ flexShrink: 0, maxWidth: 480 }}>
+                        {pieData.map((d, i) => (
+                          <div key={i} style={{ display: "grid", gridTemplateColumns: "14px 1fr auto auto", alignItems: "center", gap: 10, marginBottom: 8, fontSize: 13 }}>
+                            <div style={{ width: 14, height: 14, background: colors[i % colors.length], borderRadius: 3 }} />
+                            <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#333", minWidth: 150, maxWidth: 260 }}>{d.name}</div>
+                            <div style={{ fontWeight: 700, color: "#666", minWidth: 40, textAlign: "right" }}>{Math.round(d.value / pieTotal * 100)}%</div>
+                            <div style={{ fontSize: 11, color: "#888", minWidth: 90, textAlign: "right" }}>HKD${Math.round(d.value).toLocaleString()}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+              {/* 产品 Top 10 + 客户 Top 10 */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <div style={{ background: "#fff", borderRadius: 14, padding: 24, border: "1px solid #f0f0f0" }}>
+                  <h3 style={{ margin: "0 0 16px", fontSize: 15, fontWeight: 700 }}>熱銷產品 Top 10</h3>
+                  {prodTop.length === 0 ? <div style={{ color: "#aaa", fontSize: 13 }}>沒有數據</div> : prodTop.map(([name, amt]) => (
+                    <div key={name} style={{ marginBottom: 10 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+                        <span style={{ fontWeight: 600, color: "#333", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "70%" }}>{name}</span>
+                        <span style={{ fontWeight: 700, color: "#6382ff" }}>HKD${amt.toLocaleString()}</span>
+                      </div>
+                      <div style={{ height: 6, background: "#f0f4ff", borderRadius: 3 }}>
+                        <div style={{ height: "100%", width: `${(amt/maxProd)*100}%`, background: "linear-gradient(90deg,#6382ff,#a78bfa)", borderRadius: 3 }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ background: "#fff", borderRadius: 14, padding: 24, border: "1px solid #f0f0f0" }}>
+                  <h3 style={{ margin: "0 0 16px", fontSize: 15, fontWeight: 700 }}>大客戶 Top 10</h3>
+                  {custTop.length === 0 ? <div style={{ color: "#aaa", fontSize: 13 }}>沒有數據</div> : custTop.map((c, idx) => (
+                    <div key={idx} style={{ marginBottom: 10 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+                        <span style={{ fontWeight: 600, color: "#333" }}>{c.name}{c.phone ? ` · ${c.phone}` : ""}</span>
+                        <span style={{ fontWeight: 700, color: "#22c55e" }}>HKD${c.amt.toLocaleString()}</span>
+                      </div>
+                      <div style={{ height: 6, background: "#f0fdf4", borderRadius: 3 }}>
+                        <div style={{ height: "100%", width: `${(c.amt/maxCust)*100}%`, background: "linear-gradient(90deg,#22c55e,#84cc16)", borderRadius: 3 }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </main>
 
       {/* ADD CUSTOMER MODAL */}
@@ -1150,6 +1688,27 @@ export default function App() {
                     </div>
                   ))}
                   <button onClick={() => setNewInvoice({...newInvoice, items: [...newInvoice.items, mkItem()]})} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", width: "100%" }}>+ 新增項目</button>
+                </div>
+                <div style={{ marginBottom: 14, padding: "14px 16px", background: "#fafbff", borderRadius: 12, border: "1px solid #eef0fa" }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#555", marginBottom: 10 }}>額外費用（可選）</div>
+                  {[
+                    { key: "deposit", label: "押金", sign: "+", color: "#6382ff" },
+                    { key: "discount", label: "優惠", sign: "−", color: "#d14343" },
+                    { key: "surcharge", label: "手續費", sign: "+", color: "#f59e0b" },
+                  ].map(({ key, label, sign, color }) => {
+                    const v = newInvoice[key] || { enabled: false, amount: 0 };
+                    return (
+                      <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                        <input type="checkbox" id={`extra-${key}`} checked={v.enabled} onChange={e => setNewInvoice({ ...newInvoice, [key]: { ...v, enabled: e.target.checked } })} style={{ width: 16, height: 16, cursor: "pointer" }} />
+                        <label htmlFor={`extra-${key}`} style={{ fontSize: 14, cursor: "pointer", minWidth: 70, fontWeight: 600 }}>
+                          <span style={{ color, marginRight: 4 }}>{sign}</span>{label}
+                        </label>
+                        {v.enabled && (
+                          <input type="number" min="0" value={v.amount || ""} onChange={e => setNewInvoice({ ...newInvoice, [key]: { ...v, amount: parseFloat(e.target.value) || 0 } })} placeholder="金額 HKD" style={{ flex: 1, padding: "7px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
                 <div style={{ marginBottom: 14 }}>
                   <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 5 }}>備註</label>

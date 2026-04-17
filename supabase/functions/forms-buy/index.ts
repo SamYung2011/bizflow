@@ -37,10 +37,12 @@ Deno.serve(async (req) => {
     return json({ error: "invalid JSON" }, 400);
   }
 
-  // Framer webhook 的字段名（按你 Zapier 截圖裡看到的，全部兼容多種寫法）
+  // Framer webhook 的字段名（大小寫不敏感 + 兼容多種寫法）
+  const lowerPayload: Record<string, unknown> = {};
+  for (const k in payload) lowerPayload[k.toLowerCase().trim()] = payload[k];
   const get = (...keys: string[]): string => {
     for (const k of keys) {
-      const v = payload[k];
+      const v = lowerPayload[k.toLowerCase().trim()];
       if (v != null && String(v).trim() !== "") return String(v).trim();
     }
     return "";
@@ -54,6 +56,7 @@ Deno.serve(async (req) => {
   const carModel  = get("Model", "Car Model", "型號", "car_model");
   const address   = get("Address", "地址", "address");
   const referral  = get("Referral", "推薦人", "referral");
+  const promoCode = get("Promo Code", "PromoCode", "promo_code", "promo");
 
   // 產品最多 3 個槽位
   const productNames = [
@@ -124,16 +127,21 @@ Deno.serve(async (req) => {
     }
   }
 
-  // —— 2. 按產品名查 products 表回填價格 ————————————————————————
+  // —— 2. 按產品名查 products 表回填價格（小寫 + 去空格/橫線模糊匹配） ——
   type Item = { name: string; qty: number; price: number };
   let items: Item[] = [];
   if (productNames.length > 0) {
-    const { data: products } = await sb
-      .from("products")
-      .select("name, price")
-      .in("name", productNames);
+    // 拉全 products 表（30-50 條，量很小）
+    const { data: products } = await sb.from("products").select("name, price");
+    const normalize = (s: string) => (s || "").toLowerCase().replace(/[\s\-]+/g, "");
     items = productNames.map((pname) => {
-      const p = products?.find((x: { name: string }) => x.name === pname);
+      const target = normalize(pname);
+      const matches = (products || []).filter((x: { name: string }) => x.name && normalize(x.name) === target);
+      let p = matches[0];
+      if (matches.length > 1) {
+        // 同名多条时优先 "推廣"/"限時" 促銷版
+        p = matches.find((x: { name: string }) => /推廣|限時|優惠/.test(x.name)) || matches[0];
+      }
       return {
         name: pname,
         qty: 1,
@@ -162,7 +170,7 @@ Deno.serve(async (req) => {
       total,
       status: "Unpaid",
       invoice_number: nextInvNum,
-      notes: "__FORMS_BUY__ Framer 表單意向 " + new Date().toISOString(),
+      notes: "__FORMS_BUY__ Framer 表單意向 " + new Date().toISOString() + (promoCode ? " | Promo Code: " + promoCode : ""),
       extended_warranty: false,
     })
     .select("id")
