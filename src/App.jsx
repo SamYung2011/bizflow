@@ -458,6 +458,31 @@ export default function App() {
     load();
   }, [userId]);
 
+  // Realtime 訂閱 customers 表：INSERT/UPDATE/DELETE 時靜默刷新本地 state
+  // 用途：Framer 意向表單寫入 Supabase 後前端自動同步，不用 F5
+  useEffect(() => {
+    if (!userId) return;
+    const channel = supabase
+      .channel("customers-realtime")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "customers" }, (payload) => {
+        const row = payload.new;
+        if (!row) return;
+        setCustomers(prev => prev.some(c => c.id === row.id) ? prev : [row, ...prev]);
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "customers" }, (payload) => {
+        const row = payload.new;
+        if (!row) return;
+        setCustomers(prev => prev.map(c => c.id === row.id ? row : c));
+      })
+      .on("postgres_changes", { event: "DELETE", schema: "public", table: "customers" }, (payload) => {
+        const id = payload.old?.id;
+        if (!id) return;
+        setCustomers(prev => prev.filter(c => c.id !== id));
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [userId]);
+
   const getProduct = (id) => products.find(p => p.id === id);
   const getCustomer = (id) => customers.find(c => c.id === id);
   const fmtInvNum = (inv) => {
