@@ -421,42 +421,39 @@ export default function App() {
   useEffect(() => {
     if (!userId) return;
     async function fetchAll(table, orderCol, ascending = true) {
-      let all = [];
-      let from = 0;
       const size = 1000;
-      while (true) {
+      // 先用 head 查 count（不拉資料，只拿總數），再並行分頁
+      const { count, error: cErr } = await supabase.from(table).select("*", { count: "exact", head: true });
+      if (cErr) throw new Error(`${table} count: ${cErr.message || cErr}`);
+      const totalPages = Math.max(1, Math.ceil((count || 0) / size));
+      const pagePromises = [];
+      for (let i = 0; i < totalPages; i++) {
+        const from = i * size;
         let q = supabase.from(table).select("*").range(from, from + size - 1);
         if (orderCol) q = q.order(orderCol, { ascending });
-        const { data, error } = await q;
-        if (error) throw new Error(`${table}: ${error.message || error}`);
-        if (!data || data.length === 0) break;
-        all = all.concat(data);
-        if (data.length < size) break;
-        from += size;
+        pagePromises.push(q);
+      }
+      const results = await Promise.all(pagePromises);
+      const all = [];
+      for (const r of results) {
+        if (r.error) throw new Error(`${table}: ${r.error.message || r.error}`);
+        if (r.data) all.push(...r.data);
       }
       return all;
     }
-    async function load() {
-      setLoading(true);
-      setLoadError(null);
-      try {
-        const [p, i, c, inv] = await Promise.all([
-          fetchAll("products", "name"),
-          fetchAll("inventory", null),
-          fetchAll("customers", "name"),
-          fetchAll("invoices", "date", false),
-        ]);
-        setProducts(p);
-        setInventory(i);
-        setCustomers(c);
-        setInvoices(inv);
-      } catch (e) {
-        setLoadError(e.message || String(e));
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
+    // 各表獨立拉取，不等齊 — 誰先到誰先顯示
+    setLoadError(null);
+    const onErr = (name) => (e) => setLoadError(prev => prev || `${name}: ${e.message || e}`);
+    const pProds = fetchAll("products", "name");
+    const pInv = fetchAll("inventory", null);
+    const pCust = fetchAll("customers", "name");
+    const pInvoices = fetchAll("invoices", "date", false);
+    pProds.then(setProducts).catch(onErr("products"));
+    pInv.then(setInventory).catch(onErr("inventory"));
+    pCust.then(setCustomers).catch(onErr("customers"));
+    pInvoices.then(setInvoices).catch(onErr("invoices"));
+    // 最快一張到位就解開 loading spinner，其他 state 後續漸進填入
+    Promise.any([pProds, pInv, pCust, pInvoices]).finally(() => setLoading(false));
   }, [userId]);
 
   // Realtime 訂閱 customers 表：INSERT/UPDATE/DELETE 時靜默刷新本地 state
@@ -1569,7 +1566,7 @@ export default function App() {
                     <div key={name} style={{ marginBottom: 10 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
                         <span style={{ fontWeight: 600, color: "#333", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "70%" }}>{name}</span>
-                        <span style={{ fontWeight: 700, color: "#6382ff" }}>HKD${amt.toLocaleString()}</span>
+                        <span style={{ fontWeight: 700, color: "#6382ff" }}>HKD${Math.round(amt).toLocaleString()}</span>
                       </div>
                       <div style={{ height: 6, background: "#f0f4ff", borderRadius: 3 }}>
                         <div style={{ height: "100%", width: `${(amt/maxProd)*100}%`, background: "linear-gradient(90deg,#6382ff,#a78bfa)", borderRadius: 3 }} />
@@ -1583,7 +1580,7 @@ export default function App() {
                     <div key={idx} style={{ marginBottom: 10 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
                         <span style={{ fontWeight: 600, color: "#333" }}>{c.name}{c.phone ? ` · ${c.phone}` : ""}</span>
-                        <span style={{ fontWeight: 700, color: "#22c55e" }}>HKD${c.amt.toLocaleString()}</span>
+                        <span style={{ fontWeight: 700, color: "#22c55e" }}>HKD${Math.round(c.amt).toLocaleString()}</span>
                       </div>
                       <div style={{ height: 6, background: "#f0fdf4", borderRadius: 3 }}>
                         <div style={{ height: "100%", width: `${(c.amt/maxCust)*100}%`, background: "linear-gradient(90deg,#22c55e,#84cc16)", borderRadius: 3 }} />
