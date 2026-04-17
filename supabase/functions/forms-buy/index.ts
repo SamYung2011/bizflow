@@ -170,7 +170,12 @@ Deno.serve(async (req) => {
       total,
       status: "Unpaid",
       invoice_number: nextInvNum,
-      notes: "__FORMS_BUY__ Framer 表單意向 " + new Date().toISOString() + (promoCode ? " | Promo Code: " + promoCode : ""),
+      notes: (() => {
+        const hk = new Date(Date.now() + 8 * 60 * 60 * 1000);
+        const pad = (n: number) => String(n).padStart(2, "0");
+        const hkStr = `${hk.getUTCFullYear()}-${pad(hk.getUTCMonth() + 1)}-${pad(hk.getUTCDate())} ${pad(hk.getUTCHours())}:${pad(hk.getUTCMinutes())}`;
+        return "__FORMS_BUY__ Framer 表單意向 " + hkStr + (promoCode ? " | Promo Code: " + promoCode : "");
+      })(),
       extended_warranty: false,
     })
     .select("id")
