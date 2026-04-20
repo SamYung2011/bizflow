@@ -275,6 +275,67 @@ export default function App() {
   const [warrantyBucket, setWarrantyBucket] = useState("all"); // all | expired | soon | near | far
   const [revenueRange, setRevenueRange] = useState("12m"); // thisMonth | lastMonth | 3m | 12m | year | all
   const [dashSearch, setDashSearch] = useState("");
+  const [editingCustomer, setEditingCustomer] = useState(null); // 当前被编辑的真实 customer 对象（单条记录，不是 virtualCustomer）
+  const [editCustCid, setEditCustCid] = useState(""); // 合并组内选中要编辑的 cid
+  const [editCustForm, setEditCustForm] = useState({ name: "", phone: "", phone_mainland: "", email: "", address: "", car_make: "", car_model: "", type: "Regular", referral: "" });
+  const [editCustSaving, setEditCustSaving] = useState(false);
+  const openEditCustomer = (virtualC) => {
+    const cids = virtualC.groupCids || [virtualC.id];
+    // 默认编辑 primary（= virtualC.id = root cid 真实记录）
+    const primaryCid = cids.find(id => customers.find(c => c.id === id && (c.name || "").trim())) || cids[0];
+    const real = customers.find(c => c.id === primaryCid);
+    if (!real) return;
+    setEditingCustomer(real);
+    setEditCustCid(primaryCid);
+    setEditCustForm({
+      name: real.name || "",
+      phone: real.phone || "",
+      phone_mainland: real.phone_mainland || "",
+      email: real.email || "",
+      address: real.address || "",
+      car_make: real.car_make || "",
+      car_model: real.car_model || "",
+      type: real.type || "Regular",
+      referral: real.referral || "",
+    });
+  };
+  const switchEditCustCid = (cid) => {
+    const real = customers.find(c => c.id === cid);
+    if (!real) return;
+    setEditingCustomer(real);
+    setEditCustCid(cid);
+    setEditCustForm({
+      name: real.name || "",
+      phone: real.phone || "",
+      phone_mainland: real.phone_mainland || "",
+      email: real.email || "",
+      address: real.address || "",
+      car_make: real.car_make || "",
+      car_model: real.car_model || "",
+      type: real.type || "Regular",
+      referral: real.referral || "",
+    });
+  };
+  async function handleSaveCustomerEdit() {
+    if (!editingCustomer || !editCustCid) return;
+    setEditCustSaving(true);
+    const patch = {
+      name: editCustForm.name.trim() || null,
+      phone: editCustForm.phone.trim() || null,
+      phone_mainland: editCustForm.phone_mainland.trim() || null,
+      email: editCustForm.email.trim() || null,
+      address: editCustForm.address.trim() || null,
+      car_make: editCustForm.car_make.trim() || null,
+      car_model: editCustForm.car_model.trim() || null,
+      type: editCustForm.type || "Regular",
+      referral: editCustForm.referral.trim() || null,
+    };
+    const { error } = await supabase.from("customers").update(patch).eq("id", editCustCid);
+    setEditCustSaving(false);
+    if (error) { alert("保存失敗：" + error.message); return; }
+    setCustomers(prev => prev.map(c => c.id === editCustCid ? { ...c, ...patch } : c));
+    setEditingCustomer(null);
+  }
   const [printChooser, setPrintChooser] = useState(null); // { inv, customer, items, products } | null
   const [printWantInvoice, setPrintWantInvoice] = useState(true);
   const [printWantReceipt, setPrintWantReceipt] = useState(true);
@@ -1298,9 +1359,14 @@ export default function App() {
               <button onClick={() => setSelectedCustomer(null)} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", color: "#6382ff", fontWeight: 700, fontSize: 14, padding: 0 }}>
                 <Icon name="back" size={16} /> 返回客戶列表
               </button>
-              <button onClick={() => handleDeleteCustomer(selectedCustomer)} title="刪除客戶" style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff0f0", color: "#d14343", border: "1px solid #ffcccc", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
-                🗑️ 刪除客戶
-              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => openEditCustomer(selectedCustomer)} title="編輯客戶" style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff9ec", color: "#d08700", border: "1px solid #f4dca4", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+                  ✏️ 編輯客戶
+                </button>
+                <button onClick={() => handleDeleteCustomer(selectedCustomer)} title="刪除客戶" style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff0f0", color: "#d14343", border: "1px solid #ffcccc", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+                  🗑️ 刪除客戶
+                </button>
+              </div>
             </div>
             <div style={{ background: "#fff", borderRadius: 16, padding: 28, border: "1px solid #f0f0f0", boxShadow: "0 2px 12px rgba(0,0,0,0.04)", marginBottom: 20 }}>
               <div style={{ display: "flex", alignItems: "flex-start", gap: 20, marginBottom: 24 }}>
@@ -1739,6 +1805,75 @@ export default function App() {
           );
         })()}
       </main>
+
+      {/* EDIT CUSTOMER MODAL */}
+      {editingCustomer && (() => {
+        const groupCids = (selectedCustomer?.groupCids && selectedCustomer.groupCids.length > 1) ? selectedCustomer.groupCids : null;
+        const inp = (label, key, type = "text") => (
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#666", fontWeight: 600 }}>
+            {label}
+            <input
+              type={type}
+              value={editCustForm[key]}
+              onChange={e => setEditCustForm(f => ({ ...f, [key]: e.target.value }))}
+              style={{ padding: "8px 10px", border: "1px solid #e0e0e0", borderRadius: 8, fontSize: 14, color: "#111" }}
+            />
+          </label>
+        );
+        return (
+          <div onClick={() => !editCustSaving && setEditingCustomer(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, width: 560, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>編輯客戶資料</div>
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>id: {editCustCid}</div>
+              {groupCids && (
+                <div style={{ background: "#fff9ec", border: "1px solid #f4dca4", borderRadius: 10, padding: "10px 12px", marginBottom: 16 }}>
+                  <div style={{ fontSize: 12, color: "#8a6900", marginBottom: 6, fontWeight: 600 }}>
+                    此客戶由 {groupCids.length} 條重複記錄合併，選擇要編輯的原始記錄：
+                  </div>
+                  <select value={editCustCid} onChange={e => switchEditCustCid(e.target.value)} style={{ width: "100%", padding: "8px 10px", border: "1px solid #e0cfa0", borderRadius: 8, fontSize: 13, background: "#fff" }}>
+                    {groupCids.map(cid => {
+                      const r = customers.find(c => c.id === cid);
+                      const preview = r ? [r.name || "(無名)", r.phone || "-", r.email || "-"].join(" · ") : cid;
+                      return <option key={cid} value={cid}>{preview}</option>;
+                    })}
+                  </select>
+                </div>
+              )}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 18 }}>
+                {inp("姓名 Name", "name")}
+                <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#666", fontWeight: 600 }}>
+                  類型 Type
+                  <select value={editCustForm.type} onChange={e => setEditCustForm(f => ({ ...f, type: e.target.value }))} style={{ padding: "8px 10px", border: "1px solid #e0e0e0", borderRadius: 8, fontSize: 14, color: "#111", background: "#fff" }}>
+                    <option value="Regular">Regular</option>
+                    <option value="Lead">Lead</option>
+                  </select>
+                </label>
+                {inp("香港電話 Phone", "phone")}
+                {inp("內地電話 Phone (CN)", "phone_mainland")}
+                {inp("郵箱 Email", "email")}
+                {inp("推薦人 Referral", "referral")}
+                {inp("車品牌 Car Make", "car_make")}
+                {inp("車型 Car Model", "car_model")}
+              </div>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#666", fontWeight: 600, marginBottom: 18 }}>
+                地址 Address
+                <textarea
+                  value={editCustForm.address}
+                  onChange={e => setEditCustForm(f => ({ ...f, address: e.target.value }))}
+                  rows={2}
+                  style={{ padding: "8px 10px", border: "1px solid #e0e0e0", borderRadius: 8, fontSize: 14, color: "#111", resize: "vertical", fontFamily: "inherit" }}
+                />
+              </label>
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                <button disabled={editCustSaving} onClick={() => setEditingCustomer(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: editCustSaving ? "not-allowed" : "pointer" }}>取消</button>
+                <button disabled={editCustSaving} onClick={handleSaveCustomerEdit} style={{ background: editCustSaving ? "#ccc" : "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 700, cursor: editCustSaving ? "not-allowed" : "pointer" }}>
+                  {editCustSaving ? "保存中…" : "保存"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* PRINT CHOOSER MODAL */}
       {printChooser && (
