@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@supabase/supabase-js";
-import { INVOICE_TEMPLATE } from "./invoiceTemplate.js";
+import { INVOICE_SHELL_HEAD, INVOICE_PAGE, INVOICE_SHELL_TAIL } from "./invoiceTemplate.js";
+import { RECEIPT_FRAGMENT } from "./receiptTemplate.js";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -159,27 +160,25 @@ function mkItem() {
   return { id, name: "", qty: 1, price: 0 };
 }
 
-function printInvoice(inv, customer, items, products = []) {
+// mode = { invoice: boolean, receipt: boolean }；都 false 直接返回
+function printInvoice(inv, customer, items, products = [], mode = { invoice: true, receipt: true }) {
+  if (!mode.invoice && !mode.receipt) return;
   let itemsArr = items;
   if (typeof itemsArr === "string") {
     try { itemsArr = JSON.parse(itemsArr); } catch { itemsArr = []; }
   }
-  // Shopify 同步的 items 常常是單個對象而非數組，包一下
   if (itemsArr && !Array.isArray(itemsArr)) itemsArr = [itemsArr];
   if (!Array.isArray(itemsArr)) itemsArr = [];
   itemsArr = itemsArr.map(it => normalizeItem(it, products));
 
-  // 發票號：優先 invoice_number，沒有就截 id 前 8 位（UUID 太長）
   let invNumShort;
   if (inv.invoice_number) {
     invNumShort = String(inv.invoice_number).replace(/^DC/i, "");
   } else {
     const idStr = String(inv.id || "");
-    // UUID 格式取前 8 位；否則直接用
     invNumShort = idStr.replace(/^DC/i, "").split("-")[0];
   }
 
-  // 生成表格行（items 幾條就渲染幾行，超過 A4 時瀏覽器自動流式分頁）
   const validItems = itemsArr.filter(x => x && (x.name || (x.qty !== "" && x.qty != null) || (x.price !== "" && x.price != null)));
   const rowsHtml = validItems.map(item => {
     const qty = item.qty !== "" && item.qty != null ? item.qty : "";
@@ -191,18 +190,50 @@ function printInvoice(inv, customer, items, products = []) {
     '</div>';
   }).join("");
 
-  // 渲染模板
-  let html = INVOICE_TEMPLATE;
-  html = html.replace("{{subject_line}}", escapeHtml(invNumShort));
-  html = html.replace("{{date}}", escapeHtml(inv.date || new Date().toISOString().slice(0, 10)));
-  html = html.replace("{{customer_name}}", escapeHtml(customer?.name || ""));
-  html = html.replace("{{customer_phone}}", escapeHtml(customer?.phone || ""));
-  html = html.replace("{{customer_email}}", escapeHtml(customer?.email || ""));
-  html = html.replace("{{customer_address}}", escapeHtml(customer?.address || ""));
-  html = html.replace("{{car_make}}", escapeHtml(customer?.car_make || ""));
-  html = html.replace("{{car_model}}", escapeHtml(customer?.car_model || ""));
-  html = html.replace("{{Total_Sum}}", escapeHtml(inv.total || 0));
-  html = html.replace("{{invoice_rows}}", rowsHtml);
+  const dateStr = escapeHtml(inv.date || new Date().toISOString().slice(0, 10));
+  const subj = escapeHtml(invNumShort);
+  const cname = escapeHtml(customer?.name || "");
+  const cphone = escapeHtml(customer?.phone || "");
+  const cemail = escapeHtml(customer?.email || "");
+  const caddr = escapeHtml(customer?.address || "");
+  const cmake = escapeHtml(customer?.car_make || "");
+  const cmodel = escapeHtml(customer?.car_model || "");
+  const total = escapeHtml(inv.total || 0);
+
+  let invoicePage = "";
+  if (mode.invoice) {
+    invoicePage = INVOICE_PAGE
+      .replace("{{subject_line}}", subj)
+      .replace("{{date}}", dateStr)
+      .replace("{{customer_name}}", cname)
+      .replace("{{customer_phone}}", cphone)
+      .replace("{{customer_email}}", cemail)
+      .replace("{{customer_address}}", caddr)
+      .replace("{{car_make}}", cmake)
+      .replace("{{car_model}}", cmodel)
+      .replace("{{Total_Sum}}", total)
+      .replace("{{invoice_rows}}", rowsHtml);
+  }
+
+  let receiptPage = "";
+  if (mode.receipt) {
+    // 单独出收据时去掉 receipt-page 的 page-break-before，避免第一页前强制空白页
+    const cls = mode.invoice ? "page receipt-page" : "page";
+    receiptPage = RECEIPT_FRAGMENT
+      .replace('class="page receipt-page"', 'class="' + cls + '"')
+      .replace("{{r_subject_line}}", subj)
+      .replace("{{r_date}}", dateStr)
+      .replace("{{r_customer_name}}", cname)
+      .replace("{{r_customer_phone}}", cphone)
+      .replace("{{r_customer_email}}", cemail)
+      .replace("{{r_customer_address}}", caddr)
+      .replace("{{r_car_make}}", cmake)
+      .replace("{{r_car_model}}", cmodel)
+      .replace("{{r_Total_Sum}}", total)
+      .replace("{{r_rows}}", rowsHtml);
+  }
+
+  const html = INVOICE_SHELL_HEAD + invoicePage + receiptPage + INVOICE_SHELL_TAIL;
 
   const w = window.open("", "_blank");
   if (!w) {
@@ -244,6 +275,14 @@ export default function App() {
   const [warrantyBucket, setWarrantyBucket] = useState("all"); // all | expired | soon | near | far
   const [revenueRange, setRevenueRange] = useState("12m"); // thisMonth | lastMonth | 3m | 12m | year | all
   const [dashSearch, setDashSearch] = useState("");
+  const [printChooser, setPrintChooser] = useState(null); // { inv, customer, items, products } | null
+  const [printWantInvoice, setPrintWantInvoice] = useState(true);
+  const [printWantReceipt, setPrintWantReceipt] = useState(true);
+  const openPrintChooser = (inv, customer, items, products) => {
+    setPrintWantInvoice(true);
+    setPrintWantReceipt(true);
+    setPrintChooser({ inv, customer, items, products });
+  };
   const [editingInvoice, setEditingInvoice] = useState(null); // 正在編輯的發票對象
   const [editInvItems, setEditInvItems] = useState([]);
   const [editInvTotalOverride, setEditInvTotalOverride] = useState(""); // 空字串 = 跟隨明細合計；非空 = 手動覆蓋
@@ -426,12 +465,16 @@ export default function App() {
   // 發票頁過濾：按搜索關鍵字 (發票號 / 客戶名 / 備註)
   const filteredInvoices = useMemo(() => {
     const q = search.toLowerCase();
-    if (!q) return invoices;
-    return invoices.filter(inv => {
+    const base = !q ? invoices : invoices.filter(inv => {
       const c = customers.find(x => x.id === inv.customer_id);
       return String(inv.invoice_number || "").toLowerCase().includes(q)
         || (c?.name || "").toLowerCase().includes(q)
         || (inv.notes || "").toLowerCase().includes(q);
+    });
+    return [...base].sort((a, b) => {
+      const da = a.date || "", db = b.date || "";
+      if (da !== db) return db.localeCompare(da);
+      return String(b.created_at || "").localeCompare(String(a.created_at || ""));
     });
   }, [invoices, customers, search]);
 
@@ -676,7 +719,7 @@ export default function App() {
       setInvoices(prev => [data[0], ...prev]);
       setInvoiceGenerated(true);
       const customer = getCustomer(newInvoice.customerId);
-      printInvoice(data[0], customer, finalItems, products);
+      openPrintChooser(data[0], customer, finalItems, products);
 
       // Auto-create warranty: update inventory items with warranty_end dates
       const invoiceDate = new Date();
@@ -1305,7 +1348,11 @@ export default function App() {
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {(() => {
                 const scCids = selectedCustomer.groupCids || [selectedCustomer.id];
-                const myInvoices = invoices.filter(i => scCids.includes(i.customer_id));
+                const myInvoices = invoices.filter(i => scCids.includes(i.customer_id)).slice().sort((a, b) => {
+                  const da = a.date || "", db = b.date || "";
+                  if (da !== db) return db.localeCompare(da);
+                  return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+                });
                 if (myInvoices.length === 0) return (<div style={{ background: "#fff", borderRadius: 14, padding: 24, textAlign: "center", color: "#aaa", border: "1px solid #f0f0f0" }}>暫無購買記錄</div>);
                 return myInvoices.map(inv => (
                 <div key={inv.id} style={{ background: "#fff", borderRadius: 14, padding: "18px 22px", border: "1px solid #f0f0f0", boxShadow: "0 2px 8px rgba(0,0,0,0.03)", display: "flex", alignItems: "center", gap: 16 }}>
@@ -1327,7 +1374,7 @@ export default function App() {
                     <button onClick={() => openEditInvoice(inv)} title="編輯發票" style={{ fontSize: 12, background: "#fff8e1", color: "#f59e0b", border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700 }}>
                       ✏️
                     </button>
-                    <button onClick={() => printInvoice(inv, selectedCustomer, inv.items || [], products)} style={{ fontSize: 12, background: "#f0f4ff", color: "#6382ff", border: "none", borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
+                    <button onClick={() => openPrintChooser(inv, selectedCustomer, inv.items || [], products)} style={{ fontSize: 12, background: "#f0f4ff", color: "#6382ff", border: "none", borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
                       <Icon name="print" size={13} /> Print
                     </button>
                   </div>
@@ -1379,7 +1426,7 @@ export default function App() {
                       <button onClick={() => openEditInvoice(inv)} title="編輯發票" style={{ fontSize: 12, background: "#fff8e1", color: "#f59e0b", border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700 }}>
                         ✏️
                       </button>
-                      <button onClick={() => printInvoice(inv, c, inv.items || [], products)} style={{ fontSize: 12, background: "#f0f4ff", color: "#6382ff", border: "none", borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
+                      <button onClick={() => openPrintChooser(inv, c, inv.items || [], products)} style={{ fontSize: 12, background: "#f0f4ff", color: "#6382ff", border: "none", borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
                         <Icon name="print" size={13} /> 列印
                       </button>
                       <button onClick={() => handleDeleteInvoice(inv)} title="刪除發票" style={{ fontSize: 12, background: "#fff0f0", color: "#d14343", border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
@@ -1692,6 +1739,38 @@ export default function App() {
           );
         })()}
       </main>
+
+      {/* PRINT CHOOSER MODAL */}
+      {printChooser && (
+        <div onClick={() => setPrintChooser(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, width: 360, maxWidth: "90vw", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>選擇列印內容</div>
+            <div style={{ fontSize: 13, color: "#888", marginBottom: 18 }}>
+              DC{String(printChooser.inv.invoice_number || "").replace(/^DC/i, "") || (printChooser.inv.id || "").slice(0, 8)}
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", border: "1px solid #eee", borderRadius: 10, marginBottom: 10, cursor: "pointer" }}>
+              <input type="checkbox" checked={printWantInvoice} onChange={e => setPrintWantInvoice(e.target.checked)} style={{ width: 16, height: 16 }} />
+              <span style={{ fontWeight: 600 }}>發票 Invoice</span>
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", border: "1px solid #eee", borderRadius: 10, marginBottom: 18, cursor: "pointer" }}>
+              <input type="checkbox" checked={printWantReceipt} onChange={e => setPrintWantReceipt(e.target.checked)} style={{ width: 16, height: 16 }} />
+              <span style={{ fontWeight: 600 }}>收據 Receipt</span>
+            </label>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button onClick={() => setPrintChooser(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: "pointer" }}>取消</button>
+              <button
+                disabled={!printWantInvoice && !printWantReceipt}
+                onClick={() => {
+                  const { inv, customer, items, products } = printChooser;
+                  setPrintChooser(null);
+                  printInvoice(inv, customer, items, products, { invoice: printWantInvoice, receipt: printWantReceipt });
+                }}
+                style={{ background: (!printWantInvoice && !printWantReceipt) ? "#ccc" : "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 700, cursor: (!printWantInvoice && !printWantReceipt) ? "not-allowed" : "pointer" }}
+              >確定列印</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ADD CUSTOMER MODAL */}
       {editingInvoice && (() => {

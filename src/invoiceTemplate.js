@@ -14,7 +14,7 @@
 //   {{invoice_rows}}   ← 动态生成 N 行 <div class="table-row">
 import { logoDataUrl, sloganDataUrl, fbDataUrl, igDataUrl } from "./invoiceAssets";
 
-export const INVOICE_TEMPLATE =
+export const INVOICE_SHELL_HEAD =
 '<!DOCTYPE html>\n' +
 '<html lang="zh-HK">\n' +
 '<head>\n' +
@@ -223,9 +223,15 @@ export const INVOICE_TEMPLATE =
 '    break-before: avoid;\n' +
 '    page-break-before: avoid;\n' +
 '  }\n' +
+'  .receipt-page {\n' +
+'    break-before: always;\n' +
+'    page-break-before: always;\n' +
+'  }\n' +
 '</style>\n' +
 '</head>\n' +
-'<body>\n' +
+'<body>\n';
+
+export const INVOICE_PAGE =
 '<div class="page">\n' +
 '  <div class="logo-block">\n' +
 '    <img class="logo" src="' + logoDataUrl + '" alt="HONNMONO">\n' +
@@ -303,6 +309,8 @@ export const INVOICE_TEMPLATE =
 '    </div>\n' +
 '  </div>\n' +
 '  <div class="thanks">THANK YOU FOR YOUR BUSINESS !</div>\n' +
-'</div>\n' +
+'</div>';
+
+export const INVOICE_SHELL_TAIL =
 '</body>\n' +
 '</html>';
