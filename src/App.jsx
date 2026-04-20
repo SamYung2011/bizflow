@@ -339,11 +339,62 @@ export default function App() {
   const [printChooser, setPrintChooser] = useState(null); // { inv, customer, items, products } | null
   const [printWantInvoice, setPrintWantInvoice] = useState(true);
   const [printWantReceipt, setPrintWantReceipt] = useState(true);
+  const [pendingMerge, setPendingMerge] = useState(null); // { inv, newCustomer, oldCustomer, items, products }
+  const [mergeBusy, setMergeBusy] = useState(false);
   const openPrintChooser = (inv, customer, items, products) => {
+    // 检查 __PENDING_MERGE__:<oldCid> 标记
+    const m = (inv?.notes || "").match(/__PENDING_MERGE__:([\w-]+)/);
+    if (m) {
+      const oldCid = m[1];
+      const oldCust = customers.find(c => c.id === oldCid);
+      if (oldCust) {
+        setPendingMerge({ inv, newCustomer: customer, oldCustomer: oldCust, items, products });
+        return;
+      }
+      // 如果老客户已被删/找不到，直接清标记继续
+    }
     setPrintWantInvoice(true);
     setPrintWantReceipt(true);
     setPrintChooser({ inv, customer, items, products });
   };
+  async function handleConfirmMerge() {
+    if (!pendingMerge) return;
+    setMergeBusy(true);
+    const { inv, newCustomer, oldCustomer, items, products } = pendingMerge;
+    const isEmpty = v => v == null || String(v).trim() === "";
+    const patch = {};
+    for (const key of ["name", "phone", "phone_mainland", "email", "address", "car_make", "car_model", "referral"]) {
+      if (isEmpty(oldCustomer[key]) && !isEmpty(newCustomer[key])) patch[key] = newCustomer[key];
+    }
+    if (Object.keys(patch).length > 0) {
+      const { error } = await supabase.from("customers").update(patch).eq("id", oldCustomer.id);
+      if (error) { alert("合併失敗（更新老客戶）：" + error.message); setMergeBusy(false); return; }
+    }
+    const newNotes = (inv.notes || "").replace(/\s*__PENDING_MERGE__:[\w-]+/g, "").trim();
+    const { error: invErr } = await supabase.from("invoices").update({ customer_id: oldCustomer.id, notes: newNotes }).eq("id", inv.id);
+    if (invErr) { alert("合併失敗（更新發票）：" + invErr.message); setMergeBusy(false); return; }
+    // 如果临时新客户没挂其他发票，删掉
+    const { data: otherInvs } = await supabase.from("invoices").select("id").eq("customer_id", newCustomer.id).neq("id", inv.id).limit(1);
+    let deletedNewCust = false;
+    if (!otherInvs || otherInvs.length === 0) {
+      await supabase.from("customers").delete().eq("id", newCustomer.id);
+      deletedNewCust = true;
+    }
+    const mergedOld = { ...oldCustomer, ...patch };
+    setCustomers(prev => {
+      let next = prev.map(c => c.id === oldCustomer.id ? mergedOld : c);
+      if (deletedNewCust) next = next.filter(c => c.id !== newCustomer.id);
+      return next;
+    });
+    const mergedInv = { ...inv, customer_id: oldCustomer.id, notes: newNotes };
+    setInvoices(prev => prev.map(i => i.id === inv.id ? mergedInv : i));
+    setMergeBusy(false);
+    setPendingMerge(null);
+    // 合并完自动进入列印 chooser
+    setPrintWantInvoice(true);
+    setPrintWantReceipt(true);
+    setPrintChooser({ inv: mergedInv, customer: mergedOld, items, products });
+  }
   const [editingInvoice, setEditingInvoice] = useState(null); // 正在編輯的發票對象
   const [editInvItems, setEditInvItems] = useState([]);
   const [editInvTotalOverride, setEditInvTotalOverride] = useState(""); // 空字串 = 跟隨明細合計；非空 = 手動覆蓋
@@ -1805,6 +1856,63 @@ export default function App() {
           );
         })()}
       </main>
+
+      {/* PENDING MERGE PROMPT MODAL */}
+      {pendingMerge && (() => {
+        const { newCustomer: nc, oldCustomer: oc } = pendingMerge;
+        const isEmpty = v => v == null || String(v).trim() === "";
+        const rows = [
+          ["姓名", "name"],
+          ["香港電話", "phone"],
+          ["內地電話", "phone_mainland"],
+          ["郵箱", "email"],
+          ["地址", "address"],
+          ["車品牌", "car_make"],
+          ["車型", "car_model"],
+          ["推薦人", "referral"],
+        ];
+        return (
+          <div onClick={() => !mergeBusy && setPendingMerge(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, width: 720, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>🔔 疑似重複客戶，是否合併？</div>
+              <div style={{ fontSize: 13, color: "#666", marginBottom: 18, lineHeight: 1.6 }}>
+                此表單提交的新客戶匹配到原有客戶（姓名/電話/郵箱/地址命中 3 分以上）。<br/>
+                合併邏輯：<b>原有資料不變</b>，只將老客戶空的欄位填入新表單值。帶 🆕 的是新客戶獨有的資訊。
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "120px 1fr 1fr", gap: 0, border: "1px solid #eee", borderRadius: 10, overflow: "hidden", marginBottom: 18 }}>
+                <div style={{ background: "#fafafa", padding: "10px 12px", fontSize: 12, fontWeight: 700, color: "#888" }}>欄位</div>
+                <div style={{ background: "#fafafa", padding: "10px 12px", fontSize: 12, fontWeight: 700, color: "#888", borderLeft: "1px solid #eee" }}>原有客戶（保留）</div>
+                <div style={{ background: "#fff9ec", padding: "10px 12px", fontSize: 12, fontWeight: 700, color: "#8a6900", borderLeft: "1px solid #eee" }}>新表單客戶</div>
+                {rows.map(([label, key]) => {
+                  const oldVal = oc[key];
+                  const newVal = nc[key];
+                  const isNew = isEmpty(oldVal) && !isEmpty(newVal);
+                  const isDiff = !isEmpty(oldVal) && !isEmpty(newVal) && String(oldVal).trim().toLowerCase() !== String(newVal).trim().toLowerCase();
+                  return (
+                    <>
+                      <div key={key+"-l"} style={{ padding: "10px 12px", fontSize: 13, fontWeight: 600, color: "#555", borderTop: "1px solid #eee" }}>{label}</div>
+                      <div key={key+"-o"} style={{ padding: "10px 12px", fontSize: 13, color: isEmpty(oldVal) ? "#bbb" : "#111", borderLeft: "1px solid #eee", borderTop: "1px solid #eee" }}>
+                        {isEmpty(oldVal) ? "—" : oldVal}
+                      </div>
+                      <div key={key+"-n"} style={{ padding: "10px 12px", fontSize: 13, color: isEmpty(newVal) ? "#bbb" : "#111", borderLeft: "1px solid #eee", borderTop: "1px solid #eee", display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ flex: 1 }}>{isEmpty(newVal) ? "—" : newVal}</span>
+                        {isNew && <span style={{ background: "#d4edda", color: "#155724", fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4 }}>🆕 NEW</span>}
+                        {isDiff && <span style={{ background: "#f8d7da", color: "#721c24", fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4 }}>差異</span>}
+                      </div>
+                    </>
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                <button disabled={mergeBusy} onClick={() => setPendingMerge(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: mergeBusy ? "not-allowed" : "pointer" }}>關閉（下次再決定）</button>
+                <button disabled={mergeBusy} onClick={handleConfirmMerge} style={{ background: mergeBusy ? "#ccc" : "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 700, cursor: mergeBusy ? "not-allowed" : "pointer" }}>
+                  {mergeBusy ? "合併中…" : "合併到原客戶"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* EDIT CUSTOMER MODAL */}
       {editingCustomer && (() => {

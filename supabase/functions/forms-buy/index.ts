@@ -71,24 +71,89 @@ Deno.serve(async (req) => {
 
   const sb = createClient(SUPA_URL, SERVICE_KEY);
 
-  // —— 1. 客戶去重：先按 email，再按 hkPhone，找到就 reuse ——————————
-  let customerId: string | null = null;
-  if (email) {
-    const { data } = await sb.from("customers").select("id").eq("email", email).limit(1);
-    if (data?.[0]) customerId = data[0].id;
+  // —— v10：打分制 reuse + 严格一致沉默合并 + 差异走 PENDING_MERGE ——
+  // 垃圾 email 黑名单（测试/占位值）
+  const isSuspiciousEmail = (e: string): boolean => {
+    if (!e) return true;
+    const lower = e.toLowerCase().trim();
+    const blk = ["123@gmail.com","test@test.com","1@1.com","a@a.com","123@qq.com","321@abc.com","123@abc.com"];
+    if (blk.includes(lower)) return true;
+    const local = lower.split("@")[0] || "";
+    if (local.length <= 2) return true;
+    if (/^\d+$/.test(local) && local.length <= 4) return true;
+    return false;
+  };
+  const emailValid = email && !isSuspiciousEmail(email);
+
+  const nameMatches = (a: string, b: string): boolean => {
+    const na = (a || "").toLowerCase().replace(/\s+/g, "");
+    const nb = (b || "").toLowerCase().replace(/\s+/g, "");
+    if (!na || !nb) return false;
+    return na === nb || na.includes(nb) || nb.includes(na);
+  };
+
+  // 拉候选客户（按 email 或 phone 精确撞）
+  const candidates: Record<string, unknown>[] = [];
+  if (emailValid) {
+    const { data } = await sb.from("customers").select("*").eq("email", email);
+    if (data) candidates.push(...data);
   }
-  if (!customerId && hkPhone) {
-    const { data } = await sb.from("customers").select("id").eq("phone", hkPhone).limit(1);
-    if (data?.[0]) customerId = data[0].id;
+  if (hkPhone) {
+    const { data } = await sb.from("customers").select("*").eq("phone", hkPhone);
+    if (data) candidates.push(...data);
+  }
+  const seen = new Set<string>();
+  const unique = candidates.filter((c) => {
+    const id = String(c.id);
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+
+  // 打分：name+2 / email+2 / phone+1 / address+1，score ≥ 3 算匹配
+  let best: (Record<string, unknown> & { _score: number }) | null = null;
+  for (const c of unique) {
+    let s = 0;
+    if (name && nameMatches(name, String(c.name || ""))) s += 2;
+    if (emailValid && c.email && email.toLowerCase() === String(c.email).toLowerCase()) s += 2;
+    if (hkPhone && c.phone && hkPhone === String(c.phone)) s += 1;
+    if (address && c.address && address === String(c.address)) s += 1;
+    if (s >= 3 && (!best || s > best._score)) best = { ...c, _score: s };
   }
 
-  // 找不到就新增
-  if (!customerId) {
+  // 严格一致：表单填了值的字段都跟老客户对应字段精确相等（老客户空算不一致）
+  const strictSame = best && ((): boolean => {
+    const pairs: [string, string][] = [
+      ["name", name],
+      ["phone", hkPhone],
+      ["phone_mainland", cnPhone],
+      ["email", emailValid ? email : ""],
+      ["address", address],
+      ["car_make", carMake],
+      ["car_model", carModel],
+      ["referral", referral],
+    ];
+    for (const [key, formVal] of pairs) {
+      if (!formVal) continue;
+      const oldVal = String(best![key] || "").trim();
+      if (oldVal.toLowerCase() !== formVal.toLowerCase()) return false;
+    }
+    return true;
+  })();
+
+  let customerId: string;
+  let pendingMergeCid = "";
+
+  if (best && strictSame) {
+    // 完全一致 → 沉默 reuse
+    customerId = String(best.id);
+  } else {
+    // 新建独立 customer，不动老客户主档
     const { data: newCust, error: ce } = await sb
       .from("customers")
       .insert({
         name: name || "(表單未填名)",
-        email: email || null,
+        email: emailValid ? email : null,
         phone: hkPhone || null,
         phone_mainland: cnPhone || null,
         car_make: carMake || null,
@@ -99,32 +164,10 @@ Deno.serve(async (req) => {
       })
       .select("id")
       .single();
-    if (ce) {
-      return json({ error: "customer insert failed", detail: ce.message }, 500);
-    }
+    if (ce) return json({ error: "customer insert failed", detail: ce.message }, 500);
     customerId = newCust.id;
-  } else {
-    // —— 找到了現有客戶：用表單新填的數據補全空字段（不覆蓋已有值）——
-    const { data: existing } = await sb
-      .from("customers")
-      .select("name, email, phone, phone_mainland, car_make, car_model, address, referral")
-      .eq("id", customerId)
-      .single();
-    if (existing) {
-      const patch: Record<string, string> = {};
-      const isEmpty = (v: unknown) => v == null || String(v).trim() === "";
-      if (isEmpty(existing.name) && name) patch.name = name;
-      if (isEmpty(existing.email) && email) patch.email = email;
-      if (isEmpty(existing.phone) && hkPhone) patch.phone = hkPhone;
-      if (isEmpty(existing.phone_mainland) && cnPhone) patch.phone_mainland = cnPhone;
-      if (isEmpty(existing.car_make) && carMake) patch.car_make = carMake;
-      if (isEmpty(existing.car_model) && carModel) patch.car_model = carModel;
-      if (isEmpty(existing.address) && address) patch.address = address;
-      if (isEmpty(existing.referral) && referral) patch.referral = referral;
-      if (Object.keys(patch).length > 0) {
-        await sb.from("customers").update(patch).eq("id", customerId);
-      }
-    }
+    // score ≥ 3 但有差异 → 标记待合并，让运营手动处理
+    if (best) pendingMergeCid = String(best.id);
   }
 
   // —— 2. 按產品名查 products 表回填價格（小寫 + 去空格/橫線模糊匹配） ——
@@ -174,7 +217,8 @@ Deno.serve(async (req) => {
         const hk = new Date(Date.now() + 8 * 60 * 60 * 1000);
         const pad = (n: number) => String(n).padStart(2, "0");
         const hkStr = `${hk.getUTCFullYear()}-${pad(hk.getUTCMonth() + 1)}-${pad(hk.getUTCDate())} ${pad(hk.getUTCHours())}:${pad(hk.getUTCMinutes())}`;
-        return "__FORMS_BUY__ Framer 表單意向 " + hkStr + (promoCode ? " | Promo Code: " + promoCode : "");
+        const base = "__FORMS_BUY__ Framer 表單意向 " + hkStr + (promoCode ? " | Promo Code: " + promoCode : "");
+        return pendingMergeCid ? base + " __PENDING_MERGE__:" + pendingMergeCid : base;
       })(),
       extended_warranty: false,
     })
