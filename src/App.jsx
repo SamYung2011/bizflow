@@ -341,6 +341,7 @@ export default function App() {
   const [printWantReceipt, setPrintWantReceipt] = useState(true);
   const [pendingMerge, setPendingMerge] = useState(null); // { inv, newCustomer, oldCustomer, items, products }
   const [mergeBusy, setMergeBusy] = useState(false);
+  const [mergeChoices, setMergeChoices] = useState({}); // { [field]: 'keep' | 'overwrite' | 'append' }，仅用于差異字段
   const openPrintChooser = (inv, customer, items, products) => {
     // 检查 __PENDING_MERGE__:<oldCid> 标记
     const m = (inv?.notes || "").match(/__PENDING_MERGE__:([\w-]+)/);
@@ -348,6 +349,7 @@ export default function App() {
       const oldCid = m[1];
       const oldCust = customers.find(c => c.id === oldCid);
       if (oldCust) {
+        setMergeChoices({});
         setPendingMerge({ inv, newCustomer: customer, oldCustomer: oldCust, items, products });
         return;
       }
@@ -362,9 +364,21 @@ export default function App() {
     setMergeBusy(true);
     const { inv, newCustomer, oldCustomer, items, products } = pendingMerge;
     const isEmpty = v => v == null || String(v).trim() === "";
+    const eqVal = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
     const patch = {};
     for (const key of ["name", "phone", "phone_mainland", "email", "address", "car_make", "car_model", "referral"]) {
-      if (isEmpty(oldCustomer[key]) && !isEmpty(newCustomer[key])) patch[key] = newCustomer[key];
+      const oldV = oldCustomer[key];
+      const newV = newCustomer[key];
+      if (isEmpty(oldV) && !isEmpty(newV)) {
+        // 老空新有 → 自动补（🆕 NEW）
+        patch[key] = newV;
+      } else if (!isEmpty(oldV) && !isEmpty(newV) && !eqVal(oldV, newV)) {
+        // 差異 → 按运营选择
+        const choice = mergeChoices[key] || "keep";
+        if (choice === "overwrite") patch[key] = newV;
+        else if (choice === "append") patch[key] = String(oldV).trim() + ", " + String(newV).trim();
+        // keep 不动
+      }
     }
     if (Object.keys(patch).length > 0) {
       const { error } = await supabase.from("customers").update(patch).eq("id", oldCustomer.id);
@@ -1879,15 +1893,34 @@ export default function App() {
                 此表單提交的新客戶匹配到原有客戶（姓名/電話/郵箱/地址命中 3 分以上）。<br/>
                 合併邏輯：<b>原有資料不變</b>，只將老客戶空的欄位填入新表單值。帶 🆕 的是新客戶獨有的資訊。
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "120px 1fr 1fr", gap: 0, border: "1px solid #eee", borderRadius: 10, overflow: "hidden", marginBottom: 18 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "100px 1fr 1fr 180px", gap: 0, border: "1px solid #eee", borderRadius: 10, overflow: "hidden", marginBottom: 18 }}>
                 <div style={{ background: "#fafafa", padding: "10px 12px", fontSize: 12, fontWeight: 700, color: "#888" }}>欄位</div>
-                <div style={{ background: "#fafafa", padding: "10px 12px", fontSize: 12, fontWeight: 700, color: "#888", borderLeft: "1px solid #eee" }}>原有客戶（保留）</div>
+                <div style={{ background: "#fafafa", padding: "10px 12px", fontSize: 12, fontWeight: 700, color: "#888", borderLeft: "1px solid #eee" }}>原有客戶</div>
                 <div style={{ background: "#fff9ec", padding: "10px 12px", fontSize: 12, fontWeight: 700, color: "#8a6900", borderLeft: "1px solid #eee" }}>新表單客戶</div>
+                <div style={{ background: "#fafafa", padding: "10px 12px", fontSize: 12, fontWeight: 700, color: "#888", borderLeft: "1px solid #eee", textAlign: "center" }}>差異處理</div>
                 {rows.map(([label, key]) => {
                   const oldVal = oc[key];
                   const newVal = nc[key];
                   const isNew = isEmpty(oldVal) && !isEmpty(newVal);
                   const isDiff = !isEmpty(oldVal) && !isEmpty(newVal) && String(oldVal).trim().toLowerCase() !== String(newVal).trim().toLowerCase();
+                  const choice = mergeChoices[key] || "keep";
+                  const btn = (val, label2) => (
+                    <button
+                      type="button"
+                      onClick={() => setMergeChoices(p => ({ ...p, [key]: val }))}
+                      style={{
+                        flex: 1,
+                        border: "1px solid " + (choice === val ? "#6382ff" : "#ddd"),
+                        background: choice === val ? "#6382ff" : "#fff",
+                        color: choice === val ? "#fff" : "#555",
+                        fontSize: 10,
+                        fontWeight: 700,
+                        padding: "4px 0",
+                        borderRadius: 5,
+                        cursor: "pointer"
+                      }}
+                    >{label2}</button>
+                  );
                   return (
                     <>
                       <div key={key+"-l"} style={{ padding: "10px 12px", fontSize: 13, fontWeight: 600, color: "#555", borderTop: "1px solid #eee" }}>{label}</div>
@@ -1898,6 +1931,9 @@ export default function App() {
                         <span style={{ flex: 1 }}>{isEmpty(newVal) ? "—" : newVal}</span>
                         {isNew && <span style={{ background: "#d4edda", color: "#155724", fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4 }}>🆕 NEW</span>}
                         {isDiff && <span style={{ background: "#f8d7da", color: "#721c24", fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4 }}>差異</span>}
+                      </div>
+                      <div key={key+"-c"} style={{ padding: "6px 8px", borderLeft: "1px solid #eee", borderTop: "1px solid #eee", display: "flex", alignItems: "center", gap: 4 }}>
+                        {isDiff ? (<>{btn("keep", "保留")}{btn("overwrite", "覆蓋")}{btn("append", "追加")}</>) : (<span style={{ flex: 1, textAlign: "center", color: "#bbb", fontSize: 11 }}>{isNew ? "自動補" : "—"}</span>)}
                       </div>
                     </>
                   );
