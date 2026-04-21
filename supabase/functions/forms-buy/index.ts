@@ -71,15 +71,17 @@ Deno.serve(async (req) => {
 
   const sb = createClient(SUPA_URL, SERVICE_KEY);
 
-  // —— v10：打分制 reuse + 严格一致沉默合并 + 差异走 PENDING_MERGE ——
-  // 垃圾 email 黑名单（测试/占位值）
+  // —— v11：打分制 reuse + 严格一致沉默合并 + 差异走 PENDING_MERGE ——
+  // 垃圾 email 过滤
   const isSuspiciousEmail = (e: string): boolean => {
     if (!e) return true;
     const lower = e.toLowerCase().trim();
+    if (!lower.includes("@")) return true;                // v11: 没 @ 直接拦
     const blk = ["123@gmail.com","test@test.com","1@1.com","a@a.com","123@qq.com","321@abc.com","123@abc.com"];
     if (blk.includes(lower)) return true;
-    const local = lower.split("@")[0] || "";
-    if (local.length <= 2) return true;
+    const [local, domain] = lower.split("@");
+    if (!domain || !domain.includes(".")) return true;    // v11: domain 缺 TLD
+    if ((local || "").length <= 2) return true;
     if (/^\d+$/.test(local) && local.length <= 4) return true;
     return false;
   };

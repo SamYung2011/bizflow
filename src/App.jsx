@@ -277,7 +277,23 @@ export default function App() {
   const [dashSearch, setDashSearch] = useState("");
   const [editingCustomer, setEditingCustomer] = useState(null); // 当前被编辑的真实 customer 对象（单条记录，不是 virtualCustomer）
   const [editCustCid, setEditCustCid] = useState(""); // 合并组内选中要编辑的 cid
-  const [editCustForm, setEditCustForm] = useState({ name: "", phone: "", phone_mainland: "", email: "", address: "", car_make: "", car_model: "", type: "Regular", referral: "" });
+  // 多值字段（phone/phone_mainland/address/car_make/car_model）在表单里用 string[] 管理，每项对应一个 input
+  const loadMultiField = raw => {
+    const arr = String(raw || "").split(/\n+/).map(s => s.trim()).filter(Boolean);
+    return arr.length > 0 ? arr : [""];
+  };
+  const buildEditForm = real => ({
+    name: real.name || "",
+    phones: loadMultiField(real.phone),
+    phoneMainlands: loadMultiField(real.phone_mainland),
+    email: real.email || "",
+    addresses: loadMultiField(real.address),
+    carMakes: loadMultiField(real.car_make),
+    carModels: loadMultiField(real.car_model),
+    type: real.type || "Regular",
+    referral: real.referral || "",
+  });
+  const [editCustForm, setEditCustForm] = useState(buildEditForm({}));
   const [editCustSaving, setEditCustSaving] = useState(false);
   const openEditCustomer = (virtualC) => {
     const cids = virtualC.groupCids || [virtualC.id];
@@ -287,46 +303,27 @@ export default function App() {
     if (!real) return;
     setEditingCustomer(real);
     setEditCustCid(primaryCid);
-    setEditCustForm({
-      name: real.name || "",
-      phone: real.phone || "",
-      phone_mainland: real.phone_mainland || "",
-      email: real.email || "",
-      address: real.address || "",
-      car_make: real.car_make || "",
-      car_model: real.car_model || "",
-      type: real.type || "Regular",
-      referral: real.referral || "",
-    });
+    setEditCustForm(buildEditForm(real));
   };
   const switchEditCustCid = (cid) => {
     const real = customers.find(c => c.id === cid);
     if (!real) return;
     setEditingCustomer(real);
     setEditCustCid(cid);
-    setEditCustForm({
-      name: real.name || "",
-      phone: real.phone || "",
-      phone_mainland: real.phone_mainland || "",
-      email: real.email || "",
-      address: real.address || "",
-      car_make: real.car_make || "",
-      car_model: real.car_model || "",
-      type: real.type || "Regular",
-      referral: real.referral || "",
-    });
+    setEditCustForm(buildEditForm(real));
   };
   async function handleSaveCustomerEdit() {
     if (!editingCustomer || !editCustCid) return;
     setEditCustSaving(true);
+    const joinArr = arr => (arr || []).map(s => String(s).trim()).filter(Boolean).join("\n") || null;
     const patch = {
       name: editCustForm.name.trim() || null,
-      phone: editCustForm.phone.trim() || null,
-      phone_mainland: editCustForm.phone_mainland.trim() || null,
+      phone: joinArr(editCustForm.phones),
+      phone_mainland: joinArr(editCustForm.phoneMainlands),
       email: editCustForm.email.trim() || null,
-      address: editCustForm.address.trim() || null,
-      car_make: editCustForm.car_make.trim() || null,
-      car_model: editCustForm.car_model.trim() || null,
+      address: joinArr(editCustForm.addresses),
+      car_make: joinArr(editCustForm.carMakes),
+      car_model: joinArr(editCustForm.carModels),
       type: editCustForm.type || "Regular",
       referral: editCustForm.referral.trim() || null,
     };
@@ -342,6 +339,39 @@ export default function App() {
   const [pendingMerge, setPendingMerge] = useState(null); // { inv, newCustomer, oldCustomer, items, products }
   const [mergeBusy, setMergeBusy] = useState(false);
   const [mergeChoices, setMergeChoices] = useState({}); // { [field]: 'keep' | 'overwrite' | 'append' }，仅用于差異字段
+  // 多值字段打印前的选择弹窗（车型/地址客户存了多行，要先挑一组）
+  const [printFieldChooser, setPrintFieldChooser] = useState(null); // { inv, customer, items, products, multi: { field: [values...] } }
+  const [printFieldChoices, setPrintFieldChoices] = useState({}); // { [field]: selected_value }
+  const splitMulti = v => String(v || "").split(/\n+/).map(s => s.trim()).filter(Boolean);
+  const PRINT_FIELD_DEFS = [
+    { key: "name", label: "姓名", arr: "allNames" },
+    { key: "phone", label: "香港電話", arr: "allPhones" },
+    { key: "phone_mainland", label: "內地電話", arr: "allPhoneMainlands" },
+    { key: "email", label: "郵箱", arr: "allEmails" },
+    { key: "address", label: "地址", arr: "allAddresses" },
+    { key: "car_make", label: "車品牌", arr: "allCarMakes" },
+    { key: "car_model", label: "車型", arr: "allCarModels" },
+  ];
+  const enterPrintFlow = (inv, customer, items, products) => {
+    const multi = {};
+    for (const def of PRINT_FIELD_DEFS) {
+      const arrVals = def.arr && Array.isArray(customer?.[def.arr]) ? customer[def.arr] : [];
+      const singleVal = customer?.[def.key];
+      const sources = arrVals.length > 0 ? arrVals : (singleVal ? [singleVal] : []);
+      const vals = [...new Set(sources.flatMap(v => splitMulti(v)))];
+      if (vals.length > 1) multi[def.key] = vals;
+    }
+    if (Object.keys(multi).length > 0) {
+      const defaults = {};
+      Object.keys(multi).forEach(f => { defaults[f] = multi[f][0]; });
+      setPrintFieldChoices(defaults);
+      setPrintFieldChooser({ inv, customer, items, products, multi });
+      return;
+    }
+    setPrintWantInvoice(true);
+    setPrintWantReceipt(true);
+    setPrintChooser({ inv, customer, items, products });
+  };
   const openPrintChooser = (inv, customer, items, products) => {
     // 检查 __PENDING_MERGE__:<oldCid> 标记
     const m = (inv?.notes || "").match(/__PENDING_MERGE__:([\w-]+)/);
@@ -355,9 +385,10 @@ export default function App() {
       }
       // 如果老客户已被删/找不到，直接清标记继续
     }
-    setPrintWantInvoice(true);
-    setPrintWantReceipt(true);
-    setPrintChooser({ inv, customer, items, products });
+    // 总是用合并组聚合版（virtualCustomer），拿到 allXxx 多值字段
+    const gid = customerGroups.idToGroup.get(customer?.id);
+    const virtual = gid ? customerGroups.virtualCustomers.find(v => v.id === gid) : null;
+    enterPrintFlow(inv, virtual || customer, items, products);
   };
   async function handleConfirmMerge() {
     if (!pendingMerge) return;
@@ -376,7 +407,7 @@ export default function App() {
         // 差異 → 按运营选择
         const choice = mergeChoices[key] || "keep";
         if (choice === "overwrite") patch[key] = newV;
-        else if (choice === "append") patch[key] = String(oldV).trim() + ", " + String(newV).trim();
+        else if (choice === "append") patch[key] = String(oldV).trim() + "\n" + String(newV).trim();
         // keep 不动
       }
     }
@@ -404,10 +435,8 @@ export default function App() {
     setInvoices(prev => prev.map(i => i.id === inv.id ? mergedInv : i));
     setMergeBusy(false);
     setPendingMerge(null);
-    // 合并完自动进入列印 chooser
-    setPrintWantInvoice(true);
-    setPrintWantReceipt(true);
-    setPrintChooser({ inv: mergedInv, customer: mergedOld, items, products });
+    // 合并完自动进入列印 flow（若老客户多值会先弹字段选择）
+    enterPrintFlow(mergedInv, mergedOld, items, products);
   }
   const [editingInvoice, setEditingInvoice] = useState(null); // 正在編輯的發票對象
   const [editInvItems, setEditInvItems] = useState([]);
@@ -434,6 +463,7 @@ export default function App() {
     deposit: { enabled: false, amount: 0 },
     discount: { enabled: false, amount: 0 },
     surcharge: { enabled: false, amount: 0 },
+    fieldOverrides: {},
   });
   // 新建發票彈窗的搜索框 picker state
   const [customerQuery, setCustomerQuery] = useState("");          // 客戶搜索輸入框文字
@@ -448,6 +478,7 @@ export default function App() {
       deposit: { enabled: false, amount: 0 },
       discount: { enabled: false, amount: 0 },
       surcharge: { enabled: false, amount: 0 },
+      fieldOverrides: {},
     });
     setCustomerQuery("");
     setCustomerDropdownOpen(false);
@@ -501,15 +532,23 @@ export default function App() {
       });
     });
     const groupInfo = new Map();
+    const splitLines = v => String(v || "").split(/\n+/).map(s => s.trim()).filter(Boolean);
     customers.forEach(c => {
       const root = find(c.id);
-      if (!groupInfo.has(root)) groupInfo.set(root, { cids: [], names: new Set(), phones: new Set(), emails: new Set(), addresses: new Set() });
+      if (!groupInfo.has(root)) groupInfo.set(root, {
+        cids: [], names: new Set(), phones: new Set(), emails: new Set(), addresses: new Set(),
+        phoneMainlands: new Set(), carMakes: new Set(), carModels: new Set(),
+      });
       const g = groupInfo.get(root);
       g.cids.push(c.id);
       const n = (c.name || "").trim(); if (n) g.names.add(n);
-      const p = (c.phone || "").trim(); if (p) g.phones.add(p);
-      const e = (c.email || "").trim(); if (e) g.emails.add(e);
-      const a = (c.address || "").trim(); if (a) g.addresses.add(a);
+      // 多值字段支持 \n 拆分后分别入 Set（防止老记录存 "A\nB" 被当单条）
+      splitLines(c.phone).forEach(v => g.phones.add(v));
+      splitLines(c.email).forEach(v => g.emails.add(v));
+      splitLines(c.address).forEach(v => g.addresses.add(v));
+      splitLines(c.phone_mainland).forEach(v => g.phoneMainlands.add(v));
+      splitLines(c.car_make).forEach(v => g.carMakes.add(v));
+      splitLines(c.car_model).forEach(v => g.carModels.add(v));
     });
     const idToGroup = new Map();
     customers.forEach(c => idToGroup.set(c.id, find(c.id)));
@@ -529,6 +568,9 @@ export default function App() {
       const allPhones = Array.from(info.phones);
       const allEmails = Array.from(info.emails);
       const allAddresses = Array.from(info.addresses);
+      const allPhoneMainlands = Array.from(info.phoneMainlands);
+      const allCarMakes = Array.from(info.carMakes);
+      const allCarModels = Array.from(info.carModels);
       virtualCustomers.push({
         ...primary,
         id: root,
@@ -537,10 +579,16 @@ export default function App() {
         allPhones,
         allEmails,
         allAddresses,
+        allPhoneMainlands,
+        allCarMakes,
+        allCarModels,
         name: (primary.name || "").trim() || allNames[0] || "",
         phone: (primary.phone || "").trim() || allPhones[0] || "",
         email: (primary.email || "").trim() || allEmails[0] || "",
         address: (primary.address || "").trim() || allAddresses[0] || "",
+        phone_mainland: allPhoneMainlands.join("\n") || primary.phone_mainland || "",
+        car_make: allCarMakes.join("\n") || primary.car_make || "",
+        car_model: allCarModels.join("\n") || primary.car_model || "",
         created_at: earliestCreated,
       });
     });
@@ -845,7 +893,11 @@ export default function App() {
       setInvoices(prev => [data[0], ...prev]);
       setInvoiceGenerated(true);
       const customer = getCustomer(newInvoice.customerId);
-      openPrintChooser(data[0], customer, finalItems, products);
+      // 把弹窗里勾选的多值字段 override 进 customer，跳过再弹信息选择 modal
+      const gid = customerGroups.idToGroup.get(newInvoice.customerId);
+      const virtual = gid ? customerGroups.virtualCustomers.find(v => v.id === gid) : null;
+      const effective = { ...(virtual || customer), ...(newInvoice.fieldOverrides || {}) };
+      enterPrintFlow(data[0], effective, finalItems, products);
 
       // Auto-create warranty: update inventory items with warranty_end dates
       const invoiceDate = new Date();
@@ -962,7 +1014,24 @@ export default function App() {
   }
 
   async function handleDeleteInvoice(inv) {
-    const confirmed = window.confirm(`確定刪除發票 #${inv.invoice_number || inv.id}？\n\n此操作會同時還原對應的庫存狀態（Sold → In Stock），不可撤銷。`);
+    const cust = customers.find(c => c.id === inv.customer_id);
+    const custLine = cust ? (cust.name || "(無名)") + (cust.phone ? ` · ${cust.phone}` : "") : "(無客戶)";
+    let itemsArr = inv.items;
+    if (typeof itemsArr === "string") { try { itemsArr = JSON.parse(itemsArr); } catch { itemsArr = []; } }
+    if (!Array.isArray(itemsArr)) itemsArr = [];
+    const itemsLine = itemsArr.length > 0
+      ? itemsArr.map(it => `  • ${it.name || "(未命名)"} × ${it.qty || 1}`).join("\n")
+      : "  (無明細)";
+    const msg =
+      `⚠️ 確認刪除以下發票？\n\n` +
+      `發票號：DC${String(inv.invoice_number || inv.id).replace(/^DC/i, "")}\n` +
+      `客戶：${custLine}\n` +
+      `日期：${inv.date || "-"}\n` +
+      `金額：HKD$${inv.total || 0}\n` +
+      `狀態：${inv.status || "-"}\n` +
+      `明細：\n${itemsLine}\n\n` +
+      `此操作會同時還原對應的庫存狀態（Sold → In Stock），不可撤銷。`;
+    const confirmed = window.confirm(msg);
     if (!confirmed) return;
     const { data: relatedInv, error: fetchErr } = await supabase
       .from("inventory").select("id").eq("invoice_id", inv.id);
@@ -1448,20 +1517,44 @@ export default function App() {
                       </span>
                     )}
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontSize: 14 }}>
-                    {(selectedCustomer.allEmails && selectedCustomer.allEmails.length > 0 ? selectedCustomer.allEmails : (selectedCustomer.email ? [selectedCustomer.email] : [])).map(e => (
-                      <div key={"e-" + e}>📧 {e}</div>
-                    ))}
-                    {(selectedCustomer.allPhones && selectedCustomer.allPhones.length > 0 ? selectedCustomer.allPhones : (selectedCustomer.phone ? [selectedCustomer.phone] : [])).map(p => (
-                      <div key={"p-" + p}>📱 {p}</div>
-                    ))}
-                    {selectedCustomer.phone_mainland && <div>📱 內地：{selectedCustomer.phone_mainland}</div>}
-                    {(selectedCustomer.allAddresses && selectedCustomer.allAddresses.length > 0 ? selectedCustomer.allAddresses : (selectedCustomer.address ? [selectedCustomer.address] : [])).map(a => (
-                      <div key={"a-" + a}>📍 {a}</div>
-                    ))}
-                    {selectedCustomer.car_make && <div>🚗 {selectedCustomer.car_make} {selectedCustomer.car_model}</div>}
-                    {selectedCustomer.referral && <div>🔗 來源：{selectedCustomer.referral}</div>}
-                  </div>
+                  {(() => {
+                    const emails = (selectedCustomer.allEmails && selectedCustomer.allEmails.length > 0) ? selectedCustomer.allEmails : (selectedCustomer.email ? [selectedCustomer.email] : []);
+                    const phones = (selectedCustomer.allPhones && selectedCustomer.allPhones.length > 0) ? selectedCustomer.allPhones : (selectedCustomer.phone ? [selectedCustomer.phone] : []);
+                    const pmSrc = (selectedCustomer.allPhoneMainlands && selectedCustomer.allPhoneMainlands.length > 0) ? selectedCustomer.allPhoneMainlands : (selectedCustomer.phone_mainland ? [selectedCustomer.phone_mainland] : []);
+                    const phoneMainlands = [...new Set(pmSrc.flatMap(v => splitMulti(v)))];
+                    const addrSrc = (selectedCustomer.allAddresses && selectedCustomer.allAddresses.length > 0) ? selectedCustomer.allAddresses : (selectedCustomer.address ? [selectedCustomer.address] : []);
+                    const addresses = [...new Set(addrSrc.flatMap(a => splitMulti(a)))];
+                    const makes = splitMulti(selectedCustomer.car_make);
+                    const models = splitMulti(selectedCustomer.car_model);
+                    const carN = Math.max(makes.length, models.length);
+                    const cars = [];
+                    for (let i = 0; i < carN; i++) {
+                      const mk = makes[i] || "";
+                      const md = models[i] || "";
+                      if (mk || md) cars.push(`${mk} ${md}`.trim());
+                    }
+                    const blk = (arr, render) => arr.length === 0 ? null : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        {arr.map((v, i) => <div key={i}>{render(v)}</div>)}
+                      </div>
+                    );
+                    return (
+                      <>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 14 }}>
+                          {blk(emails, v => <>📧 {v}</>)}
+                          {blk(phones, v => <>📱 香港：{v}</>)}
+                          {blk(phoneMainlands, v => <>📱 內地：{v}</>)}
+                          {blk(cars, v => <>🚗 {v}</>)}
+                          {selectedCustomer.referral && <div>🔗 來源：{selectedCustomer.referral}</div>}
+                        </div>
+                        {addresses.length > 0 && (
+                          <div style={{ marginTop: 10, fontSize: 14, display: "flex", flexDirection: "column", gap: 4 }}>
+                            {addresses.map((a, i) => <div key={i}>📍 {addresses.length > 1 ? `地址 ${i + 1}：` : ""}{a}</div>)}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                   {selectedCustomer.interest_products?.length > 0 && (
                     <div style={{ marginTop: 10 }}>
                       <span style={{ fontSize: 13, color: "#888" }}>感興趣產品：</span>
@@ -1953,20 +2046,54 @@ export default function App() {
       {/* EDIT CUSTOMER MODAL */}
       {editingCustomer && (() => {
         const groupCids = (selectedCustomer?.groupCids && selectedCustomer.groupCids.length > 1) ? selectedCustomer.groupCids : null;
-        const inp = (label, key, type = "text") => (
+        const inp = (label, key) => (
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#666", fontWeight: 600 }}>
             {label}
             <input
-              type={type}
+              type="text"
               value={editCustForm[key]}
               onChange={e => setEditCustForm(f => ({ ...f, [key]: e.target.value }))}
               style={{ padding: "8px 10px", border: "1px solid #e0e0e0", borderRadius: 8, fontSize: 14, color: "#111" }}
             />
           </label>
         );
+        // 多值字段渲染：每项独立 input + × 删除 + "+ 新增" 按钮
+        const multiFld = (label, key, placeholder, addText) => {
+          const arr = editCustForm[key] || [""];
+          const updateAt = (idx, val) => setEditCustForm(f => {
+            const next = [...(f[key] || [""])];
+            next[idx] = val;
+            return { ...f, [key]: next };
+          });
+          const removeAt = idx => setEditCustForm(f => {
+            const next = (f[key] || []).filter((_, i) => i !== idx);
+            return { ...f, [key]: next.length > 0 ? next : [""] };
+          });
+          const addNew = () => setEditCustForm(f => ({ ...f, [key]: [...(f[key] || []), ""] }));
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: "#666", fontWeight: 600 }}>
+              <div>{label}</div>
+              {arr.map((v, idx) => (
+                <div key={idx} style={{ display: "flex", gap: 6 }}>
+                  <input
+                    type="text"
+                    value={v}
+                    placeholder={placeholder}
+                    onChange={e => updateAt(idx, e.target.value)}
+                    style={{ flex: 1, padding: "8px 10px", border: "1px solid #e0e0e0", borderRadius: 8, fontSize: 14, color: "#111" }}
+                  />
+                  {arr.length > 1 && (
+                    <button type="button" onClick={() => removeAt(idx)} title="刪除" style={{ width: 34, background: "#fff0f0", color: "#d14343", border: "1px solid #ffcccc", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>×</button>
+                  )}
+                </div>
+              ))}
+              <button type="button" onClick={addNew} style={{ alignSelf: "flex-start", background: "none", color: "#6382ff", border: "1px dashed #6382ff", borderRadius: 8, padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>+ {addText}</button>
+            </div>
+          );
+        };
         return (
           <div onClick={() => !editCustSaving && setEditingCustomer(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-            <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, width: 560, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, width: 620, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
               <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>編輯客戶資料</div>
               <div style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>id: {editCustCid}</div>
               {groupCids && (
@@ -1983,7 +2110,7 @@ export default function App() {
                   </select>
                 </div>
               )}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 18 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
                 {inp("姓名 Name", "name")}
                 <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#666", fontWeight: 600 }}>
                   類型 Type
@@ -1992,27 +2119,66 @@ export default function App() {
                     <option value="Lead">Lead</option>
                   </select>
                 </label>
-                {inp("香港電話 Phone", "phone")}
-                {inp("內地電話 Phone (CN)", "phone_mainland")}
                 {inp("郵箱 Email", "email")}
                 {inp("推薦人 Referral", "referral")}
-                {inp("車品牌 Car Make", "car_make")}
-                {inp("車型 Car Model", "car_model")}
               </div>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#666", fontWeight: 600, marginBottom: 18 }}>
-                地址 Address
-                <textarea
-                  value={editCustForm.address}
-                  onChange={e => setEditCustForm(f => ({ ...f, address: e.target.value }))}
-                  rows={2}
-                  style={{ padding: "8px 10px", border: "1px solid #e0e0e0", borderRadius: 8, fontSize: 14, color: "#111", resize: "vertical", fontFamily: "inherit" }}
-                />
-              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+                {multiFld("香港電話 Phone", "phones", "例：9123 4567", "新增香港電話")}
+                {multiFld("內地電話 Phone (CN)", "phoneMainlands", "例：138 0013 8000", "新增內地電話")}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+                {multiFld("車品牌 Car Make", "carMakes", "例：Tesla", "新增車品牌")}
+                {multiFld("車型 Car Model", "carModels", "例：Model 3", "新增車型")}
+              </div>
+              <div style={{ marginBottom: 18 }}>
+                {multiFld("地址 Address", "addresses", "請輸入完整地址", "新增地址")}
+              </div>
               <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
                 <button disabled={editCustSaving} onClick={() => setEditingCustomer(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: editCustSaving ? "not-allowed" : "pointer" }}>取消</button>
                 <button disabled={editCustSaving} onClick={handleSaveCustomerEdit} style={{ background: editCustSaving ? "#ccc" : "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 700, cursor: editCustSaving ? "not-allowed" : "pointer" }}>
                   {editCustSaving ? "保存中…" : "保存"}
                 </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* PRINT FIELD CHOOSER — 客户任一字段多值时先挑一组 */}
+      {printFieldChooser && (() => {
+        const labels = Object.fromEntries(PRINT_FIELD_DEFS.map(d => [d.key, d.label]));
+        const { multi } = printFieldChooser;
+        return (
+          <div onClick={() => setPrintFieldChooser(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 2050, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, width: 520, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>選擇本次列印使用的資訊</div>
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 18 }}>此客戶在以下欄位存了多個值，請勾選本張發票/收據使用哪個。</div>
+              {Object.keys(multi).map(field => (
+                <div key={field} style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#555", marginBottom: 8 }}>{labels[field] || field}</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {multi[field].map((v, idx) => (
+                      <label key={idx} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 12px", border: "1px solid " + (printFieldChoices[field] === v ? "#6382ff" : "#eee"), background: printFieldChoices[field] === v ? "#f0f4ff" : "#fff", borderRadius: 10, cursor: "pointer" }}>
+                        <input type="radio" name={"pfc-"+field} checked={printFieldChoices[field] === v} onChange={() => setPrintFieldChoices(p => ({ ...p, [field]: v }))} style={{ marginTop: 3 }} />
+                        <span style={{ fontSize: 14, color: "#111", whiteSpace: "pre-wrap", lineHeight: 1.4 }}>{v}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 20 }}>
+                <button onClick={() => setPrintFieldChooser(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: "pointer" }}>取消</button>
+                <button
+                  onClick={() => {
+                    const { inv, customer, items, products } = printFieldChooser;
+                    const override = { ...customer, ...printFieldChoices };
+                    setPrintFieldChooser(null);
+                    setPrintWantInvoice(true);
+                    setPrintWantReceipt(true);
+                    setPrintChooser({ inv, customer: override, items, products });
+                  }}
+                  style={{ background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 700, cursor: "pointer" }}
+                >下一步</button>
               </div>
             </div>
           </div>
@@ -2191,7 +2357,7 @@ export default function App() {
                       value={customerQuery}
                       onChange={e => {
                         setCustomerQuery(e.target.value);
-                        if (newInvoice.customerId) setNewInvoice({...newInvoice, customerId: ""});
+                        if (newInvoice.customerId) setNewInvoice({...newInvoice, customerId: "", fieldOverrides: {}});
                         setCustomerDropdownOpen(true);
                       }}
                       onFocus={() => setCustomerDropdownOpen(true)}
@@ -2201,20 +2367,20 @@ export default function App() {
                     />
                     {newInvoice.customerId && (
                       <button
-                        onClick={() => { setNewInvoice({...newInvoice, customerId: ""}); setCustomerQuery(""); }}
+                        onClick={() => { setNewInvoice({...newInvoice, customerId: "", fieldOverrides: {}}); setCustomerQuery(""); }}
                         style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "#f0f0f0", border: "none", borderRadius: "50%", width: 22, height: 22, cursor: "pointer", fontSize: 12, color: "#666", lineHeight: 1, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
                       >×</button>
                     )}
                     {customerDropdownOpen && (() => {
                       const q = customerQuery.toLowerCase().trim();
-                      const matched = customers.filter(c => {
-                        if (!c.name && !c.phone && !c.email) return false;
+                      // 改用 virtualCustomers 去重，合并组只展示一次
+                      const matched = customerGroups.virtualCustomers.filter(v => {
+                        if ((!v.allNames || v.allNames.length === 0) && (!v.allPhones || v.allPhones.length === 0) && (!v.allEmails || v.allEmails.length === 0)) return false;
                         if (!q) return true;
-                        return (c.name || "").toLowerCase().includes(q)
-                          || (c.phone || "").toLowerCase().includes(q)
-                          || (c.email || "").toLowerCase().includes(q)
-                          || (c.car_make || "").toLowerCase().includes(q)
-                          || (c.car_model || "").toLowerCase().includes(q);
+                        const hit = (arr) => (arr || []).some(x => String(x).toLowerCase().includes(q));
+                        return hit(v.allNames) || hit(v.allPhones) || hit(v.allEmails)
+                          || splitMulti(v.car_make).some(x => x.toLowerCase().includes(q))
+                          || splitMulti(v.car_model).some(x => x.toLowerCase().includes(q));
                       });
                       const top = matched.slice(0, 20);
                       return (
@@ -2223,24 +2389,38 @@ export default function App() {
                             <div style={{ padding: "12px 14px", fontSize: 13, color: "#999" }}>沒有符合的客戶，檢查拼寫或去「客戶」頁新增</div>
                           ) : (
                             <>
-                              {top.map(c => (
-                                <div
-                                  key={c.id}
-                                  onMouseDown={() => {
-                                    setNewInvoice({...newInvoice, customerId: c.id});
-                                    setCustomerQuery([c.name, c.phone].filter(Boolean).join(" · "));
-                                    setCustomerDropdownOpen(false);
-                                  }}
-                                  style={{ padding: "8px 14px", cursor: "pointer", borderBottom: "1px solid #f5f5f5" }}
-                                  onMouseEnter={e => e.currentTarget.style.background = "#f8f9ff"}
-                                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                                >
-                                  <div style={{ fontSize: 14, fontWeight: 600 }}>{c.name || "(未命名客戶)"}</div>
-                                  <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
-                                    {[c.phone, c.email, c.car_make, c.car_model].filter(Boolean).join(" · ") || "—"}
+                              {top.map(v => {
+                                const merged = v.groupCids && v.groupCids.length > 1;
+                                const preview = [v.phone, v.email, splitMulti(v.car_make)[0], splitMulti(v.car_model)[0]].filter(Boolean).join(" · ");
+                                return (
+                                  <div
+                                    key={v.id}
+                                    onMouseDown={() => {
+                                      // 选中合并组：customerId 存 root（= v.id），fieldOverrides 默认选第一值
+                                      const overrides = {};
+                                      for (const def of PRINT_FIELD_DEFS) {
+                                        const arrVals = def.arr && v[def.arr] ? v[def.arr] : [];
+                                        const singleVal = v[def.key];
+                                        const sources = arrVals.length > 0 ? arrVals : (singleVal ? [singleVal] : []);
+                                        const vals = [...new Set(sources.flatMap(s => splitMulti(s)))];
+                                        if (vals.length > 0) overrides[def.key] = vals[0];
+                                      }
+                                      setNewInvoice({ ...newInvoice, customerId: v.id, fieldOverrides: overrides });
+                                      setCustomerQuery([v.name, v.phone].filter(Boolean).join(" · "));
+                                      setCustomerDropdownOpen(false);
+                                    }}
+                                    style={{ padding: "8px 14px", cursor: "pointer", borderBottom: "1px solid #f5f5f5" }}
+                                    onMouseEnter={e => e.currentTarget.style.background = "#f8f9ff"}
+                                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                                  >
+                                    <div style={{ fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                                      {v.name || "(未命名客戶)"}
+                                      {merged && <span style={{ fontSize: 10, color: "#6382ff", background: "#eef2ff", borderRadius: 20, padding: "1px 8px", fontWeight: 700 }}>已合併 {v.groupCids.length}</span>}
+                                    </div>
+                                    <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{preview || "—"}</div>
                                   </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                               {matched.length > 20 && (
                                 <div style={{ padding: "8px 14px", fontSize: 11, color: "#999", background: "#fafafa", textAlign: "center" }}>
                                   還有 {matched.length - 20} 位客戶，繼續輸入縮小範圍
@@ -2253,6 +2433,42 @@ export default function App() {
                     })()}
                   </div>
                 </div>
+                {newInvoice.customerId && (() => {
+                  const gid = customerGroups.idToGroup.get(newInvoice.customerId);
+                  const virtual = gid ? customerGroups.virtualCustomers.find(v => v.id === gid) : null;
+                  if (!virtual) return null;
+                  const multi = {};
+                  for (const def of PRINT_FIELD_DEFS) {
+                    const arrVals = def.arr && virtual[def.arr] ? virtual[def.arr] : [];
+                    const singleVal = virtual[def.key];
+                    const sources = arrVals.length > 0 ? arrVals : (singleVal ? [singleVal] : []);
+                    const vals = [...new Set(sources.flatMap(s => splitMulti(s)))];
+                    if (vals.length > 1) multi[def.key] = vals;
+                  }
+                  if (Object.keys(multi).length === 0) return null;
+                  const labels = Object.fromEntries(PRINT_FIELD_DEFS.map(d => [d.key, d.label]));
+                  return (
+                    <div style={{ marginBottom: 14, padding: "14px 16px", background: "#fff9ec", borderRadius: 12, border: "1px solid #f4dca4" }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#8a6900", marginBottom: 10 }}>此客戶有多個資料，請選擇本次發票使用的</div>
+                      {Object.keys(multi).map(field => (
+                        <div key={field} style={{ marginBottom: 10 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#666", marginBottom: 6 }}>{labels[field] || field}</div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                            {multi[field].map((v, idx) => {
+                              const checked = (newInvoice.fieldOverrides || {})[field] === v;
+                              return (
+                                <label key={idx} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "7px 10px", border: "1px solid " + (checked ? "#6382ff" : "#e8dfb6"), background: checked ? "#f0f4ff" : "#fff", borderRadius: 8, cursor: "pointer" }}>
+                                  <input type="radio" name={"inv-fc-"+field} checked={checked} onChange={() => setNewInvoice(prev => ({ ...prev, fieldOverrides: { ...(prev.fieldOverrides || {}), [field]: v } }))} style={{ marginTop: 2 }} />
+                                  <span style={{ fontSize: 13, color: "#111", whiteSpace: "pre-wrap", lineHeight: 1.4 }}>{v}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
                 <div style={{ marginBottom: 14 }}>
                   <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>商品項目</label>
                   {newInvoice.items.map((item, idx) => (
