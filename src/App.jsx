@@ -257,12 +257,18 @@ export default function App() {
 
   const [tab, setTab] = useState("dashboard");
   const [products, setProducts] = useState([]);
+  const [warehouses, setWarehouses] = useState([]);
+  const [stocks, setStocks] = useState([]);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [productOrgDraft, setProductOrgDraft] = useState(null);
+  const [expandedSkuGroups, setExpandedSkuGroups] = useState(new Set());
   const [inventory, setInventory] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [search, setSearch] = useState("");
+  const [productCategoryFilter, setProductCategoryFilter] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [showAddCustomer, setShowAddCustomer] = useState(false);
   const [showNewInvoice, setShowNewInvoice] = useState(false);
@@ -663,6 +669,7 @@ export default function App() {
   const [customerTimeRange, setCustomerTimeRange] = useState("all");
   const [editingProduct, setEditingProduct] = useState(null);
   const [editStock, setEditStock] = useState(0);
+  const [editStocks, setEditStocks] = useState({});
 
   const [newCustomer, setNewCustomer] = useState({
     name: "", email: "", phone: "", phone_mainland: "",
@@ -973,12 +980,27 @@ export default function App() {
   const qInventory = useQuery({ queryKey: ["bf", "inventory"], queryFn: () => fetchAllTable("inventory", null), enabled: !!userId });
   const qCustomers = useQuery({ queryKey: ["bf", "customers"], queryFn: () => fetchAllTable("customers", "name"), enabled: !!userId });
   const qInvoices = useQuery({ queryKey: ["bf", "invoices"], queryFn: () => fetchAllTable("invoices", "date", false), enabled: !!userId });
+  const qWarehouses = useQuery({ queryKey: ["bf", "warehouses"], queryFn: () => fetchAllTable("warehouses", "sort_order"), enabled: !!userId });
+  const qStocks = useQuery({ queryKey: ["bf", "inventory_stock"], queryFn: () => fetchAllTable("inventory_stock", null), enabled: !!userId });
 
   // query data 同步到現有 useState，現存的 mutation 代碼（setCustomers 等）照舊工作
   useEffect(() => { if (qProducts.data) setProducts(qProducts.data); }, [qProducts.data]);
   useEffect(() => { if (qInventory.data) setInventory(qInventory.data); }, [qInventory.data]);
   useEffect(() => { if (qCustomers.data) setCustomers(qCustomers.data); }, [qCustomers.data]);
   useEffect(() => { if (qInvoices.data) setInvoices(qInvoices.data); }, [qInvoices.data]);
+  useEffect(() => { if (qWarehouses.data) setWarehouses(qWarehouses.data); }, [qWarehouses.data]);
+  useEffect(() => { if (qStocks.data) setStocks(qStocks.data); }, [qStocks.data]);
+
+  // 打開編輯庫存弹窗時從 stocks 載入各倉庫當前 qty
+  useEffect(() => {
+    if (!editingProduct) { setEditStocks({}); return; }
+    const init = {};
+    for (const w of warehouses) {
+      const row = stocks.find(s => s.product_id === editingProduct.id && s.warehouse_id === w.id);
+      init[w.id] = row ? row.qty : 0;
+    }
+    setEditStocks(init);
+  }, [editingProduct, warehouses, stocks]);
 
   // 最快一張到位就解 spinner
   useEffect(() => {
@@ -1143,7 +1165,6 @@ export default function App() {
 
   const navItems = [
     { id: "dashboard", label: "總覽", icon: "dashboard" },
-    { id: "inventory", label: "庫存", icon: "inventory" },
     { id: "products", label: "產品", icon: "product" },
     { id: "customers", label: "客戶", icon: "customer" },
     { id: "invoices", label: "發票", icon: "invoice" },
@@ -1483,7 +1504,7 @@ export default function App() {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 28 }}>
               <StatCard label="本月營收" value={`HKD$${monthlyRevenue.toLocaleString()}`} sub={`${now.getFullYear()}年${now.getMonth() + 1}月`} accent="#6382ff" icon={<Icon name="trend_up" size={20} />} onClick={() => setTab("revenue")} />
-              <StatCard label="庫存數量" value={inStock} sub={`共 ${inventory.length} 件`} accent="#22c55e" icon={<Icon name="inventory" size={20} />} onClick={() => setTab("inventory")} />
+              <StatCard label="庫存數量" value={inStock} sub={`共 ${inventory.length} 件`} accent="#22c55e" icon={<Icon name="inventory" size={20} />} onClick={() => setTab("products")} />
               <StatCard label="客戶數" value={customers.length} sub="累計" accent="#f59e0b" icon={<Icon name="customer" size={20} />} onClick={() => { setTab("customers"); setSelectedCustomer(null); }} />
               <StatCard label="保修提醒" value={warrantyAlerts.length} sub="需跟進" accent="#ef4444" icon={<Icon name="warning" size={20} />} onClick={() => setTab("warranty")} />
             </div>
@@ -1611,112 +1632,410 @@ export default function App() {
         )}
 
         {/* INVENTORY */}
-        {tab === "inventory" && (
+        {/* PRODUCTS (合并庫存) */}
+        {tab === "products" && !selectedProduct && (
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
               <div>
-                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>庫存</h1>
-                <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>從發票記錄自動推算的產品銷售及庫存概覽</p>
+                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>產品</h1>
+                <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>產品目錄 + 庫存管理</p>
               </div>
             </div>
-            <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
               <Icon name="search" size={15} />
-              <input placeholder="搜尋產品名稱..." value={search} onChange={e => setSearch(e.target.value)} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
+              <input placeholder="搜尋和篩選..." value={search} onChange={e => setSearch(e.target.value)} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
             </div>
-            {derivedInventory.length === 0 ? (
-              <div style={{ background: "#fff", borderRadius: 14, padding: 40, textAlign: "center", color: "#aaa", border: "1px solid #f0f0f0" }}>暫無庫存數據</div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {derivedInventory.filter(d => {
-                  const q = search.toLowerCase();
-                  return !q || d.productName.toLowerCase().includes(q);
-                }).map((d, idx) => (
-                  <div key={idx} style={{ background: "#fff", borderRadius: 14, padding: "20px 24px", border: "1px solid #f0f0f0", boxShadow: "0 2px 8px rgba(0,0,0,0.03)" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                      <div style={{ fontSize: 16, fontWeight: 800 }}>{d.productName}</div>
-                      <div style={{ display: "flex", gap: 12 }}>
-                        <div style={{ padding: "6px 14px", background: "#f0f4ff", borderRadius: 10, textAlign: "center" }}>
-                          <div style={{ fontSize: 16, fontWeight: 800, color: "#6382ff" }}>{d.totalSold}</div>
-                          <div style={{ fontSize: 11, color: "#888" }}>已售</div>
-                        </div>
-                        <div style={{ padding: "6px 14px", background: "#e8f5e9", borderRadius: 10, textAlign: "center" }}>
-                          <div style={{ fontSize: 16, fontWeight: 800, color: "#22c55e" }}>{d.stock > 0 ? d.stock : "—"}</div>
-                          <div style={{ fontSize: 11, color: "#888" }}>庫存</div>
-                        </div>
-                        {d.warrantyMonths && <div style={{ padding: "6px 14px", background: "#fff8f0", borderRadius: 10, textAlign: "center" }}>
-                          <div style={{ fontSize: 16, fontWeight: 800, color: "#f59e0b" }}>{d.warrantyMonths}月</div>
-                          <div style={{ fontSize: 11, color: "#888" }}>保修</div>
-                        </div>}
-                      </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+              {(() => {
+                const cats = [...new Set(products.filter(p => !p.parent_product_id && p.category !== '_archived').map(p => p.category).filter(Boolean))];
+                const all = [["", "全部"], ...cats.map(c => [c, c])];
+                return all.map(([key, label]) => {
+                  const active = productCategoryFilter === key;
+                  return (
+                    <div key={key || 'all'} onClick={() => setProductCategoryFilter(key)}
+                      style={{ padding: "6px 14px", background: active ? "#1a73e8" : "#f0f2f5", color: active ? "#fff" : "#555", borderRadius: 16, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                      {label}
                     </div>
-                    <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>最近 {Math.min(3, d.records.length)} 筆銷售記錄：</div>
-                    {d.records.slice(0, 3).map((r, i) => (
-                      <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: i < 2 && i < d.records.length - 1 ? "1px solid #f5f5f5" : "none", fontSize: 13 }}>
-                        <span style={{ color: "#666" }}>{r.invoiceNum} · {r.customerName}</span>
-                        <span style={{ color: "#999" }}>{r.date || "日期未知"} · ×{r.qty}</span>
-                      </div>
-                    ))}
-                    {d.records.length > 3 && <div style={{ fontSize: 12, color: "#aaa", marginTop: 6 }}>還有 {d.records.length - 3} 筆記錄...</div>}
-                  </div>
-                ))}
+                  );
+                });
+              })()}
+            </div>
+            <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", overflow: "hidden" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "36px 60px 2.5fr 0.8fr 1fr 1fr 0.8fr", gap: 12, padding: "12px 16px", background: "#fafbfc", borderBottom: "1px solid #f0f0f0", fontSize: 12, color: "#666", fontWeight: 600 }}>
+                <div><input type="checkbox" /></div>
+                <div>圖片</div>
+                <div>商品</div>
+                <div>狀態</div>
+                <div>庫存</div>
+                <div>類別</div>
+                <div style={{ textAlign: "right" }}>價格</div>
               </div>
-            )}
-          </div>
-        )}
-
-        {/* PRODUCTS */}
-        {tab === "products" && (
-          <div>
-            <div style={{ marginBottom: 24 }}>
-              <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>產品</h1>
-              <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>從 Shopify 同步 — 產品目錄</p>
-            </div>
-            <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
-              <Icon name="search" size={15} />
-              <input placeholder="搜尋產品..." value={search} onChange={e => setSearch(e.target.value)} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16 }}>
               {products.filter(p => {
+                // 只显示顶层产品（非子 SKU）+ 隐藏 _archived 老数据
+                if (p.parent_product_id) return false;
+                if (p.category === '_archived') return false;
+                if (productCategoryFilter && p.category !== productCategoryFilter) return false;
                 const q = search.toLowerCase();
-                return !q || (p.name || "").toLowerCase().includes(q) || (p.code || "").toLowerCase().includes(q) || (p.category || "").toLowerCase().includes(q) || (p.specs || "").toLowerCase().includes(q);
+                return !q || (p.name || "").toLowerCase().includes(q) || (p.internal_code || "").toLowerCase().includes(q) || (p.category || "").toLowerCase().includes(q) || (p.specs || "").toLowerCase().includes(q);
               }).map(p => {
-                const derived = derivedInventory.find(d => d.productName === p.name);
-                const sold = derived ? derived.totalSold : 0;
-                const instock = p.stock ?? 0;
+                const children = products.filter(c => c.parent_product_id === p.id);
+                const hasChildren = children.length > 0;
+                const status = p.status || "active";
+                // 分仓聚合：某产品（+所有子 SKU）在每个仓库的总数
+                const stockByWarehouse = warehouses.map(w => {
+                  const pids = hasChildren ? children.map(c => c.id) : [p.id];
+                  const qty = stocks.filter(s => s.warehouse_id === w.id && pids.includes(s.product_id)).reduce((sum, s) => sum + (s.qty || 0), 0);
+                  return { warehouse: w, qty };
+                });
+                const totalStock = stockByWarehouse.reduce((s, x) => s + x.qty, 0);
+                const prices = hasChildren ? children.map(c => c.price ?? 0).filter(v => v > 0) : [];
+                const priceDisplay = hasChildren
+                  ? (prices.length ? `HK$ ${Math.min(...prices)} - ${Math.max(...prices)}` : "—")
+                  : `HK$ ${p.price}`;
                 return (
-                  <div key={p.id} style={{ background: "#fff", borderRadius: 16, padding: 24, border: "1px solid #f0f0f0", boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
-                      <div>
-                        <div style={{ fontFamily: "monospace", fontSize: 11, color: "#aaa", marginBottom: 4 }}>{p.code || p.id}</div>
-                        <div style={{ fontSize: 18, fontWeight: 800 }}>{p.name}</div>
-                        <div style={{ fontSize: 13, color: "#888", marginTop: 3 }}>{p.category}</div>
-                      </div>
-                      <div style={{ fontSize: 22, fontWeight: 800, color: "#6382ff" }}>HKD${p.price}</div>
+                  <div key={p.id} onClick={() => setSelectedProduct(p)} style={{ display: "grid", gridTemplateColumns: "36px 60px 2.5fr 0.8fr 1.2fr 1fr 1.1fr", gap: 12, padding: "12px 16px", borderBottom: "1px solid #f5f5f5", alignItems: "center", fontSize: 13, cursor: "pointer" }}
+                    onMouseEnter={e => e.currentTarget.style.background = "#fafbfc"}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <div onClick={e => e.stopPropagation()}><input type="checkbox" /></div>
+                    {p.image_url ? (
+                      <img src={p.image_url} style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 8, border: "1px solid #f0f0f0" }} />
+                    ) : (
+                      <div style={{ width: 48, height: 48, background: "#f0f2f5", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", color: "#bbb", fontSize: 10 }}>圖</div>
+                    )}
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: "#1a1a1a" }}>{p.name}</div>
+                      <div style={{ fontFamily: "monospace", fontSize: 10, color: "#aaa", marginTop: 2 }}>{p.internal_code || p.code || p.id.slice(0, 8)}</div>
                     </div>
-                    {p.specs && <div style={{ background: "#f7f8fc", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#555" }}>📋 {p.specs}</div>}
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-                      <div onClick={(e) => { e.stopPropagation(); setEditingProduct(p); setEditStock(p.stock ?? 0); }} style={{ textAlign: "center", padding: "10px 8px", background: "#22c55e12", borderRadius: 8, cursor: "pointer", position: "relative" }}
-                        onMouseEnter={e => e.currentTarget.style.outline = "2px solid #22c55e"}
-                        onMouseLeave={e => e.currentTarget.style.outline = "none"}>
-                        <div style={{ fontSize: 20, fontWeight: 800, color: "#22c55e" }}>{p.stock ?? instock} <span style={{ fontSize: 11, color: "#aaa" }}>✏️</span></div>
-                        <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>庫存</div>
-                      </div>
-                      {[
-                        { label: "已售", value: sold, color: "#6382ff" },
-                        { label: "保修", value: `${p.warranty_months || "—"}月`, color: "#f59e0b" },
-                      ].map(stat => (
-                        <div key={stat.label} style={{ textAlign: "center", padding: "10px 8px", background: stat.color + "12", borderRadius: 8 }}>
-                          <div style={{ fontSize: 20, fontWeight: 800, color: stat.color }}>{stat.value}</div>
-                          <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{stat.label}</div>
-                        </div>
-                      ))}
+                    <div>
+                      <span style={{ padding: "3px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600, background: status === "draft" ? "#e5e7eb" : status === "discontinued" ? "#fee2e2" : "#d1fae5", color: status === "draft" ? "#6b7280" : status === "discontinued" ? "#991b1b" : "#047857" }}>
+                        {status === "draft" ? "草稿" : status === "discontinued" ? "停售" : "啟用"}
+                      </span>
                     </div>
+                    <div onClick={hasChildren ? undefined : (e) => { e.stopPropagation(); setEditingProduct(p); }} style={{ cursor: hasChildren ? "default" : "pointer" }}>
+                      {hasChildren && <div style={{ fontSize: 11, color: "#888", marginBottom: 2 }}>共 {children.length} 個子類 · 共 {totalStock} 件</div>}
+                      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                        {stockByWarehouse.map(({ warehouse, qty }) => (
+                          <span key={warehouse.id} style={{ fontSize: 12 }}>
+                            <span style={{ color: "#888" }}>{warehouse.name.replace("分部", "")}</span>
+                            <span style={{ color: qty > 0 ? "#22c55e" : "#ef4444", fontWeight: 700, marginLeft: 4 }}>{qty}</span>
+                          </span>
+                        ))}
+                        {!hasChildren && <span style={{ fontSize: 11, color: "#bbb" }}>✏️</span>}
+                      </div>
+                    </div>
+                    <div style={{ color: "#555" }}>{p.category || "未分類"}</div>
+                    <div style={{ textAlign: "right", fontWeight: 700, color: "#1a1a1a" }}>{priceDisplay}</div>
                   </div>
                 );
               })}
+              {products.length === 0 && (
+                <div style={{ padding: 40, textAlign: "center", color: "#aaa" }}>暫無產品</div>
+              )}
             </div>
           </div>
         )}
+
+        {/* PRODUCT DETAIL */}
+        {tab === "products" && selectedProduct && (() => {
+          const p = selectedProduct;
+          const children = products.filter(c => c.parent_product_id === p.id);
+          const hasChildren = children.length > 0;
+          const pids = hasChildren ? children.map(c => c.id) : [p.id];
+          const allPids = [p.id, ...children.map(c => c.id)];
+          // 90 天销售额
+          const since = new Date(); since.setDate(since.getDate() - 90);
+          let soldQty = 0, soldTotal = 0;
+          const buyers = new Set();
+          for (const inv of invoices) {
+            if (!Array.isArray(inv.items) || !inv.date) continue;
+            if (new Date(inv.date) < since) continue;
+            const paid = (inv.status || "").toLowerCase() === "paid";
+            if (!paid) continue;
+            for (const it of inv.items) {
+              if (!it || !it.name) continue;
+              const matched = allPids.some(id => {
+                const prod = products.find(pp => pp.id === id);
+                return prod && prod.name === it.name;
+              });
+              if (matched) {
+                soldQty += (it.qty || 1);
+                soldTotal += (it.price || 0) * (it.qty || 1);
+                if (inv.customer_id) buyers.add(inv.customer_id);
+              }
+            }
+          }
+          // 組織分類编辑
+          const draft = productOrgDraft || { product_type: p.product_type || "", collections: p.collections || [], tags: p.tags || [] };
+          const saveDraft = async () => {
+            const { error } = await supabase.from("products").update({ product_type: draft.product_type || null, collections: draft.collections, tags: draft.tags }).eq("id", p.id);
+            if (error) { alert("儲存失敗：" + error.message); return; }
+            setProducts(prev => prev.map(x => x.id === p.id ? { ...x, ...draft } : x));
+            setSelectedProduct(prev => ({ ...prev, ...draft }));
+            setProductOrgDraft(null);
+          };
+          const collectionOpts = [...new Set(products.flatMap(x => x.collections || []))].filter(Boolean);
+          const tagOpts = [...new Set(products.flatMap(x => x.tags || []))].filter(Boolean);
+          return (
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
+                <button onClick={() => { setSelectedProduct(null); setProductOrgDraft(null); }} style={{ background: "#f5f5f5", border: "none", borderRadius: 10, padding: "10px 14px", cursor: "pointer", fontSize: 14 }}>← 返回</button>
+                <div>
+                  <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{p.name}</h1>
+                  <div style={{ fontFamily: "monospace", fontSize: 12, color: "#aaa", marginTop: 4 }}>{p.internal_code}</div>
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  {/* 產品圖片 */}
+                  <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: 20 }}>
+                    <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 14 }}>產品圖片</div>
+                    {p.image_url ? (
+                      <img src={p.image_url} style={{ width: "100%", maxHeight: 320, objectFit: "contain", borderRadius: 10, background: "#fafbfc", border: "1px solid #f0f0f0" }} />
+                    ) : (
+                      <div style={{ width: "100%", height: 200, background: "#f7f9fc", borderRadius: 10, border: "1px dashed #e0e0e0", display: "flex", alignItems: "center", justifyContent: "center", color: "#bbb", fontSize: 14 }}>尚無圖片</div>
+                    )}
+                    <label style={{ display: "inline-block", marginTop: 12, padding: "8px 16px", background: "#6382ff", color: "#fff", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 700 }}>
+                      {p.image_url ? "替換圖片" : "上傳圖片"}
+                      <input type="file" accept="image/*" style={{ display: "none" }} onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+                        const path = `${p.internal_code || p.id}/${Date.now()}.${ext}`;
+                        const { error: upErr } = await supabase.storage.from('product-images').upload(path, file, { upsert: false });
+                        if (upErr) { alert('上傳失敗：' + upErr.message); return; }
+                        const { data: pub } = supabase.storage.from('product-images').getPublicUrl(path);
+                        const url = pub.publicUrl;
+                        const { error: dbErr } = await supabase.from('products').update({ image_url: url }).eq('id', p.id);
+                        if (dbErr) { alert('保存失敗：' + dbErr.message); return; }
+                        setProducts(prev => prev.map(x => x.id === p.id ? { ...x, image_url: url } : x));
+                        setSelectedProduct(prev => ({ ...prev, image_url: url }));
+                      }} />
+                    </label>
+                    {p.image_url && (
+                      <button onClick={async () => {
+                        if (!confirm('確定移除這張圖片？')) return;
+                        const { error } = await supabase.from('products').update({ image_url: null }).eq('id', p.id);
+                        if (error) { alert('移除失敗：' + error.message); return; }
+                        setProducts(prev => prev.map(x => x.id === p.id ? { ...x, image_url: null } : x));
+                        setSelectedProduct(prev => ({ ...prev, image_url: null }));
+                      }} style={{ marginLeft: 8, padding: "8px 16px", background: "#f5f5f5", color: "#666", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>移除</button>
+                    )}
+                  </div>
+                  {/* 子類（SKU 變體） */}
+                  {hasChildren && (() => {
+                    // 充電樁：按 kW + 相 分组渲染矩阵
+                    const isPile = p.category === '充電樁';
+                    if (isPile) {
+                      const groups = {};
+                      const lengthOrder = ['5M', '7M', '10M'];
+                      const connOrder = ['RFID', 'Wifi'];
+                      for (const c of children) {
+                        const kw = c.name.match(/(\d+)kW/)?.[1];
+                        const phase = c.name.match(/(單相|三相)/)?.[1];
+                        const len = c.name.match(/(\d+M)(?=\s|$)/)?.[1];
+                        const conn = /Wifi/i.test(c.name) ? 'Wifi' : (/RFID/i.test(c.name) ? 'RFID' : null);
+                        if (!kw || !phase || !len || !conn) continue;
+                        const key = `${kw}kW ${phase}`;
+                        if (!groups[key]) groups[key] = { kw, phase, rows: {} };
+                        if (!groups[key].rows[len]) groups[key].rows[len] = {};
+                        groups[key].rows[len][conn] = c;
+                      }
+                      const groupKeys = Object.keys(groups).sort((a, b) => parseInt(a) - parseInt(b));
+                      return (
+                        <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: 20 }}>
+                          <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 14 }}>子類 · 共 {children.length} 個（按規格分組）</div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                            {groupKeys.map(key => {
+                              const g = groups[key];
+                              const expanded = expandedSkuGroups.has(key);
+                              const allInGroup = Object.values(g.rows).flatMap(row => Object.values(row));
+                              const groupStock = allInGroup.reduce((sum, c) => sum + stocks.filter(s => s.product_id === c.id).reduce((s2, s) => s2 + (s.qty || 0), 0), 0);
+                              return (
+                                <div key={key} style={{ border: "1px solid #f0f0f0", borderRadius: 8, overflow: "hidden" }}>
+                                  <div onClick={() => setExpandedSkuGroups(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; })}
+                                    style={{ padding: "12px 14px", background: expanded ? "#f7f9fc" : "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                      <span style={{ fontSize: 14, color: "#888" }}>{expanded ? "▼" : "▶"}</span>
+                                      <div>
+                                        <div style={{ fontSize: 14, fontWeight: 700 }}>Type2 充電樁 {key}</div>
+                                        <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{allInGroup.length} 個 SKU · 共 {groupStock} 件</div>
+                                      </div>
+                                    </div>
+                                    <div style={{ fontSize: 12, color: "#666" }}>
+                                      HK$ {Math.min(...allInGroup.map(c => c.price))} - {Math.max(...allInGroup.map(c => c.price))}
+                                    </div>
+                                  </div>
+                                  {expanded && (
+                                    <div style={{ padding: 12, background: "#fafbfc" }}>
+                                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                                        <thead>
+                                          <tr>
+                                            <th style={{ textAlign: "left", padding: "6px 10px", color: "#888", fontWeight: 600, borderBottom: "1px solid #e8eaed" }}>線長</th>
+                                            {connOrder.map(cn => (
+                                              <th key={cn} style={{ textAlign: "left", padding: "6px 10px", color: "#888", fontWeight: 600, borderBottom: "1px solid #e8eaed" }}>{cn}</th>
+                                            ))}
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {lengthOrder.map(len => (
+                                            <tr key={len}>
+                                              <td style={{ padding: "10px", fontWeight: 700, color: "#555" }}>{len}</td>
+                                              {connOrder.map(cn => {
+                                                const c = g.rows[len]?.[cn];
+                                                if (!c) return <td key={cn} style={{ padding: 10, color: "#ccc" }}>—</td>;
+                                                const qtys = warehouses.map(w => ({ w, qty: stocks.filter(s => s.product_id === c.id && s.warehouse_id === w.id).reduce((sum, s) => sum + (s.qty || 0), 0) }));
+                                                return (
+                                                  <td key={cn} onClick={() => setEditingProduct(c)} style={{ padding: "10px", cursor: "pointer", borderRadius: 6 }}
+                                                    onMouseEnter={e => e.currentTarget.style.background = "#eef2ff"}
+                                                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                                                    <div style={{ fontWeight: 700, color: "#1a1a1a" }}>HK$ {c.price}</div>
+                                                    <div style={{ fontSize: 11, color: "#666", marginTop: 3 }}>
+                                                      {qtys.map(({ w, qty }) => (
+                                                        <span key={w.id} style={{ marginRight: 8 }}>
+                                                          <span style={{ color: "#888" }}>{w.name.replace("分部", "")}</span>
+                                                          <span style={{ color: qty > 0 ? "#22c55e" : "#ef4444", fontWeight: 700, marginLeft: 3 }}>{qty}</span>
+                                                        </span>
+                                                      ))}
+                                                    </div>
+                                                    <div style={{ fontFamily: "monospace", fontSize: 9, color: "#bbb", marginTop: 3 }}>{c.internal_code}</div>
+                                                  </td>
+                                                );
+                                              })}
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    }
+                    // 其他父产品（充電綫 4 SKU）：平铺
+                    return (
+                      <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: 20 }}>
+                        <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 14 }}>子類 · 共 {children.length} 個</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          {children.map(c => {
+                            const cStockByW = warehouses.map(w => ({ w, qty: stocks.filter(s => s.product_id === c.id && s.warehouse_id === w.id).reduce((sum, s) => sum + (s.qty || 0), 0) }));
+                            return (
+                              <div key={c.id} style={{ display: "grid", gridTemplateColumns: "48px 2fr 1.2fr 1fr 40px", gap: 12, alignItems: "center", padding: "10px 12px", borderRadius: 8, border: "1px solid #f0f0f0" }}>
+                                {c.image_url ? (
+                                  <img src={c.image_url} style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6, border: "1px solid #f0f0f0" }} />
+                                ) : (
+                                  <div style={{ width: 40, height: 40, background: "#f0f2f5", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", color: "#bbb", fontSize: 9 }}>圖</div>
+                                )}
+                                <div>
+                                  <div style={{ fontSize: 13, fontWeight: 600 }}>{c.name}</div>
+                                  <div style={{ fontFamily: "monospace", fontSize: 10, color: "#aaa" }}>{c.internal_code}</div>
+                                </div>
+                                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12 }}>
+                                  {cStockByW.map(({ w, qty }) => (
+                                    <span key={w.id}>
+                                      <span style={{ color: "#888" }}>{w.name.replace("分部", "")}</span>
+                                      <span style={{ color: qty > 0 ? "#22c55e" : "#ef4444", fontWeight: 700, marginLeft: 4 }}>{qty}</span>
+                                    </span>
+                                  ))}
+                                </div>
+                                <div style={{ textAlign: "right", fontSize: 13, fontWeight: 700 }}>HK$ {c.price}</div>
+                                <button onClick={() => setEditingProduct(c)} style={{ background: "#f5f5f5", border: "none", borderRadius: 6, padding: "6px 10px", cursor: "pointer", fontSize: 12 }}>✏️</button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {/* 主产品无子类时直接显示它自己的库存 */}
+                  {!hasChildren && (
+                    <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: 20 }}>
+                      <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 14 }}>分倉庫存</div>
+                      {warehouses.map(w => {
+                        const qty = stocks.filter(s => s.product_id === p.id && s.warehouse_id === w.id).reduce((sum, s) => sum + (s.qty || 0), 0);
+                        return (
+                          <div key={w.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f5f5f5" }}>
+                            <span>{w.name}</span>
+                            <span style={{ color: qty > 0 ? "#22c55e" : "#ef4444", fontWeight: 700 }}>{qty} 件</span>
+                          </div>
+                        );
+                      })}
+                      <button onClick={() => setEditingProduct(p)} style={{ marginTop: 12, background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>修改庫存</button>
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  {/* 90 天销售额 */}
+                  <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: 20 }}>
+                    <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 12 }}>過去 90 天的銷售額</div>
+                    <div style={{ fontSize: 13, color: "#555", lineHeight: 1.8 }}>
+                      <div>• 售出 <b>{soldQty}</b> 件</div>
+                      <div>• <b>{buyers.size}</b> 位買家</div>
+                      <div>• 銷貨淨額 <b>HK$ {soldTotal.toLocaleString()}</b></div>
+                    </div>
+                  </div>
+                  {/* 商品組織分類 */}
+                  <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: 20 }}>
+                    <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 14 }}>商品組織分類</div>
+                    <div style={{ marginBottom: 12 }}>
+                      <label style={{ fontSize: 12, color: "#888", display: "block", marginBottom: 4 }}>類型</label>
+                      <input value={draft.product_type} onChange={e => setProductOrgDraft({ ...draft, product_type: e.target.value })} placeholder="如 EV / 配件"
+                        style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, boxSizing: "border-box" }} />
+                    </div>
+                    <div style={{ marginBottom: 12 }}>
+                      <label style={{ fontSize: 12, color: "#888", display: "block", marginBottom: 4 }}>商品系列</label>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+                        {draft.collections.map((c, i) => (
+                          <span key={i} style={{ background: "#f0f4ff", color: "#6382ff", padding: "4px 8px", borderRadius: 6, fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
+                            {c}
+                            <button onClick={() => setProductOrgDraft({ ...draft, collections: draft.collections.filter((_, j) => j !== i) })} style={{ background: "none", border: "none", cursor: "pointer", color: "#6382ff", padding: 0 }}>×</button>
+                          </span>
+                        ))}
+                      </div>
+                      <input placeholder="輸入後回車新增" list="collection-opts" onKeyDown={e => {
+                        if (e.key === "Enter" && e.target.value.trim()) {
+                          const v = e.target.value.trim();
+                          if (!draft.collections.includes(v)) setProductOrgDraft({ ...draft, collections: [...draft.collections, v] });
+                          e.target.value = "";
+                        }
+                      }} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, boxSizing: "border-box" }} />
+                      <datalist id="collection-opts">{collectionOpts.map(o => <option key={o} value={o} />)}</datalist>
+                    </div>
+                    <div style={{ marginBottom: 12 }}>
+                      <label style={{ fontSize: 12, color: "#888", display: "block", marginBottom: 4 }}>標籤</label>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+                        {draft.tags.map((t, i) => (
+                          <span key={i} style={{ background: "#fff6e5", color: "#b87500", padding: "4px 8px", borderRadius: 6, fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
+                            {t}
+                            <button onClick={() => setProductOrgDraft({ ...draft, tags: draft.tags.filter((_, j) => j !== i) })} style={{ background: "none", border: "none", cursor: "pointer", color: "#b87500", padding: 0 }}>×</button>
+                          </span>
+                        ))}
+                      </div>
+                      <input placeholder="輸入後回車新增" list="tag-opts" onKeyDown={e => {
+                        if (e.key === "Enter" && e.target.value.trim()) {
+                          const v = e.target.value.trim();
+                          if (!draft.tags.includes(v)) setProductOrgDraft({ ...draft, tags: [...draft.tags, v] });
+                          e.target.value = "";
+                        }
+                      }} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, boxSizing: "border-box" }} />
+                      <datalist id="tag-opts">{tagOpts.map(o => <option key={o} value={o} />)}</datalist>
+                    </div>
+                    {productOrgDraft && (
+                      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                        <button onClick={() => setProductOrgDraft(null)} style={{ flex: 1, padding: "8px 10px", background: "#f5f5f5", border: "none", borderRadius: 8, fontSize: 13, cursor: "pointer" }}>取消</button>
+                        <button onClick={saveDraft} style={{ flex: 1, padding: "8px 10px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>儲存</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* CUSTOMERS */}
         {tab === "customers" && !selectedCustomer && (
@@ -3204,29 +3523,54 @@ export default function App() {
         </div>
       )}
 
-      {/* EDIT PRODUCT STOCK MODAL */}
+      {/* EDIT PRODUCT STOCK MODAL (分倉) */}
       {editingProduct && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
-          <div style={{ background: "#fff", borderRadius: 20, padding: 32, width: 400, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+          <div style={{ background: "#fff", borderRadius: 20, padding: 32, width: 440, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
               <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>修改庫存</h2>
               <button onClick={() => setEditingProduct(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
             </div>
-            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>{editingProduct.name}</div>
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>庫存數量</label>
-              <input type="number" min="0" value={editStock} onChange={e => setEditStock(parseInt(e.target.value) || 0)} style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 18, fontWeight: 800, outline: "none", textAlign: "center", boxSizing: "border-box" }} />
-            </div>
-            <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{editingProduct.name}</div>
+            <div style={{ fontFamily: "monospace", fontSize: 11, color: "#aaa", marginBottom: 20 }}>{editingProduct.internal_code}</div>
+            {warehouses.map(w => (
+              <div key={w.id} style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 12 }}>
+                <label style={{ fontSize: 13, fontWeight: 700, color: "#555", minWidth: 80 }}>{w.name}</label>
+                <input type="number" min="0" value={editStocks[w.id] ?? 0}
+                  onChange={e => setEditStocks(s => ({ ...s, [w.id]: parseInt(e.target.value) || 0 }))}
+                  style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 16, fontWeight: 700, outline: "none", textAlign: "center" }} />
+              </div>
+            ))}
+            <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
               <button onClick={() => setEditingProduct(null)} style={{ flex: 1, padding: 12, background: "#f5f5f5", color: "#666", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>取消</button>
               <button onClick={async () => {
-                const { error } = await supabase.from("products").update({ stock: editStock }).eq("id", editingProduct.id);
-                if (!error) {
-                  setProducts(prev => prev.map(p => p.id === editingProduct.id ? { ...p, stock: editStock } : p));
-                  setEditingProduct(null);
-                } else {
-                  alert(`庫存修改失敗：${error.message}`);
+                const upserts = [];
+                const movements = [];
+                for (const w of warehouses) {
+                  const newQty = editStocks[w.id] ?? 0;
+                  const existing = stocks.find(s => s.product_id === editingProduct.id && s.warehouse_id === w.id);
+                  const oldQty = existing ? existing.qty : 0;
+                  if (newQty === oldQty) continue;
+                  upserts.push({ product_id: editingProduct.id, warehouse_id: w.id, qty: newQty, updated_at: new Date().toISOString() });
+                  movements.push({ product_id: editingProduct.id, warehouse_id: w.id, delta: newQty - oldQty, type: "adjust", reason: "手動調整" });
                 }
+                if (upserts.length === 0) { setEditingProduct(null); return; }
+                const { error: upErr } = await supabase.from("inventory_stock").upsert(upserts, { onConflict: "product_id,warehouse_id" });
+                if (upErr) { alert(`庫存儲存失敗：${upErr.message}`); return; }
+                if (movements.length > 0) {
+                  await supabase.from("inventory_movements").insert(movements);
+                }
+                // 本地同步 stocks
+                setStocks(prev => {
+                  const map = new Map(prev.map(s => [`${s.product_id}_${s.warehouse_id}`, s]));
+                  for (const u of upserts) {
+                    const k = `${u.product_id}_${u.warehouse_id}`;
+                    const old = map.get(k);
+                    map.set(k, { ...(old || { id: crypto.randomUUID() }), ...u });
+                  }
+                  return [...map.values()];
+                });
+                setEditingProduct(null);
               }} style={{ flex: 1, padding: 12, background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>儲存</button>
             </div>
           </div>
