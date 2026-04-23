@@ -282,19 +282,129 @@ export default function App() {
     const arr = String(raw || "").split(/\n+/).map(s => s.trim()).filter(Boolean);
     return arr.length > 0 ? arr : [""];
   };
-  const buildEditForm = real => ({
-    name: real.name || "",
-    phones: loadMultiField(real.phone),
-    phoneMainlands: loadMultiField(real.phone_mainland),
-    email: real.email || "",
-    addresses: loadMultiField(real.address),
-    carMakes: loadMultiField(real.car_make),
-    carModels: loadMultiField(real.car_model),
-    type: real.type || "Regular",
-    referral: real.referral || "",
-  });
+  const buildEditForm = (src, allCustomers = customers) => {
+    // src 可以是 virtualCustomer（有 allXxx 数组）或 raw customer
+    const pickMulti = (arrKey, singleKey) => {
+      const arr = src[arrKey];
+      if (Array.isArray(arr) && arr.length > 0) return arr.slice();
+      return loadMultiField(src[singleKey]);
+    };
+    // 物理合并的别名：parent_id = src.id 的子记录 name。同名合并成一行避免用户看到重复
+    const physicalChildren = (allCustomers || []).filter(c => c.parent_id === src.id);
+    const aliasNameToCids = new Map(); // 保留顺序：Map 默认按 insert 顺序
+    for (const child of physicalChildren) {
+      const n = (child.name || "").trim();
+      if (!n) continue;
+      if (!aliasNameToCids.has(n)) aliasNameToCids.set(n, []);
+      aliasNameToCids.get(n).push(child.id);
+    }
+    const physicalAliases = Array.from(aliasNameToCids.keys());
+    return {
+      name: src.name || "",
+      aliases: physicalAliases.length > 0 ? physicalAliases : [""],
+      _originalAliases: physicalAliases.slice(),
+      _originalAliasNameToCids: aliasNameToCids,
+      phones: pickMulti('allPhones', 'phone'),
+      phoneMainlands: pickMulti('allPhoneMainlands', 'phone_mainland'),
+      emails: pickMulti('allEmails', 'email'),
+      addresses: pickMulti('allAddresses', 'address'),
+      carMakes: pickMulti('allCarMakes', 'car_make'),
+      carModels: pickMulti('allCarModels', 'car_model'),
+      type: src.type || "Regular",
+      referral: src.referral || "",
+    };
+  };
   const [editCustForm, setEditCustForm] = useState(buildEditForm({}));
   const [editCustSaving, setEditCustSaving] = useState(false);
+  const [mergeHistoryOpen, setMergeHistoryOpen] = useState(null); // virtualCustomer 或 null
+  const [mergeCandidatesOpen, setMergeCandidatesOpen] = useState(false); // 一键合并弹窗
+  // 回退合併 modal：{ vc, clickedCid } — 從合併記錄 modal 點某條非主記錄的「回退」打開
+  const [rollbackOpen, setRollbackOpen] = useState(null);
+  const [rollbackAffected, setRollbackAffected] = useState(new Set());
+  const [rollbackTarget, setRollbackTarget] = useState("independent"); // 'independent' | 'mergeTo'
+  const [rollbackMergeTo, setRollbackMergeTo] = useState("");
+  const [rollbackMergeToQuery, setRollbackMergeToQuery] = useState("");
+  const [rollbackMergeToOpen, setRollbackMergeToOpen] = useState(false);
+  const [rollbackFields, setRollbackFields] = useState({});
+  const [rollbackBusy, setRollbackBusy] = useState(false);
+  const openRollback = (vc, clickedCid) => {
+    setRollbackOpen({ vc, clickedCid });
+    setRollbackAffected(new Set([clickedCid]));
+    setRollbackTarget("independent");
+    setRollbackMergeTo("");
+    setRollbackMergeToQuery("");
+    setRollbackMergeToOpen(false);
+    setRollbackFields({});
+  };
+  async function handleRollback() {
+    if (!rollbackOpen) return;
+    const { vc, clickedCid } = rollbackOpen;
+    const primaryCid = vc.id;
+    const affected = Array.from(rollbackAffected);
+    if (affected.length === 0) { alert("請至少勾選一條要回退的記錄"); return; }
+    if (rollbackTarget === "mergeTo" && !rollbackMergeTo) { alert("請選擇要合併到的客戶"); return; }
+    if (rollbackTarget === "mergeTo" && affected.includes(rollbackMergeTo)) { alert("不能合併到自己"); return; }
+    setRollbackBusy(true);
+    const MULTI_DB = ["phone", "phone_mainland", "email", "address", "car_make", "car_model"];
+    const patches = new Map(); // cid -> patch
+    for (const cid of affected) {
+      const rec = customers.find(c => c.id === cid);
+      if (!rec) continue;
+      const patch = {};
+      if (rollbackTarget === "independent") {
+        if (rec.parent_id) {
+          patch.parent_id = null;
+        } else {
+          const existing = Array.isArray(rec.merge_exclude) ? rec.merge_exclude : [];
+          patch.merge_exclude = [...new Set([...existing, primaryCid])];
+        }
+      } else if (rollbackTarget === "mergeTo") {
+        patch.parent_id = rollbackMergeTo;
+        patch.merge_exclude = [];
+      }
+      if (cid === clickedCid) {
+        for (const dbKey of MULTI_DB) {
+          if (rollbackFields[dbKey] === undefined) continue;
+          if (rollbackFields[dbKey] === "__clear__") patch[dbKey] = null;
+          else if (rollbackFields[dbKey] !== "") patch[dbKey] = rollbackFields[dbKey];
+        }
+      }
+      if (Object.keys(patch).length > 0) patches.set(cid, patch);
+    }
+    for (const [cid, patch] of patches) {
+      const { error } = await supabase.from("customers").update(patch).eq("id", cid);
+      if (error) { setRollbackBusy(false); alert("回退失敗：" + error.message); return; }
+    }
+    if (patches.size > 0) {
+      setCustomers(prev => prev.map(c => patches.has(c.id) ? { ...c, ...patches.get(c.id) } : c));
+    }
+    setRollbackBusy(false);
+    setRollbackOpen(null);
+    setMergeHistoryOpen(null);
+  }
+  async function handleUnmerge(childCid) {
+    const ok = window.confirm(`確定撤銷此合併？該記錄會變回獨立客戶，發票關聯不變。`);
+    if (!ok) return;
+    const { error } = await supabase.from("customers").update({ parent_id: null }).eq("id", childCid);
+    if (error) { alert("撤銷失敗：" + error.message); return; }
+    setCustomers(prev => prev.map(c => c.id === childCid ? { ...c, parent_id: null } : c));
+  }
+  async function handleUpgradePhysical(vc) {
+    const primaryCid = vc?.id;
+    if (!primaryCid) return;
+    const siblings = (vc.groupCids || []).filter(id => id !== primaryCid);
+    if (siblings.length === 0) return;
+    const ok = window.confirm(
+      `確定把 ${siblings.length} 條疑似重複的記錄物理合併到「${vc.name || '(無名)'}」?\n\n` +
+      `合併後這些記錄會掛在主記錄下，字段（電話/郵箱/地址等）歸主記錄管理；\n` +
+      `下次編輯時刪除字段才會真生效。可在合併記錄裡隨時點「撤銷合併」還原。`
+    );
+    if (!ok) return;
+    const { error } = await supabase.from("customers").update({ parent_id: primaryCid }).in("id", siblings);
+    if (error) { alert("升級物理合併失敗：" + error.message); return; }
+    setCustomers(prev => prev.map(c => siblings.includes(c.id) ? { ...c, parent_id: primaryCid } : c));
+    setMergeHistoryOpen(null);
+  }
   const openEditCustomer = (virtualC) => {
     const cids = virtualC.groupCids || [virtualC.id];
     // 默认编辑 primary（= virtualC.id = root cid 真实记录）
@@ -303,7 +413,8 @@ export default function App() {
     if (!real) return;
     setEditingCustomer(real);
     setEditCustCid(primaryCid);
-    setEditCustForm(buildEditForm(real));
+    // 用 virtualC（合并组聚合版）load 多值字段，这样编辑弹窗能看到所有地址/电话/别名
+    setEditCustForm(buildEditForm(virtualC));
   };
   const switchEditCustCid = (cid) => {
     const real = customers.find(c => c.id === cid);
@@ -313,24 +424,125 @@ export default function App() {
     setEditCustForm(buildEditForm(real));
   };
   async function handleSaveCustomerEdit() {
-    if (!editingCustomer || !editCustCid) return;
+    console.log("[SAVE] start", { editCustCid, editingCustomerId: editingCustomer?.id, form: editCustForm });
+    if (!editingCustomer || !editCustCid) { console.log("[SAVE] early return"); return; }
     setEditCustSaving(true);
     const joinArr = arr => (arr || []).map(s => String(s).trim()).filter(Boolean).join("\n") || null;
     const patch = {
       name: editCustForm.name.trim() || null,
       phone: joinArr(editCustForm.phones),
       phone_mainland: joinArr(editCustForm.phoneMainlands),
-      email: editCustForm.email.trim() || null,
+      email: joinArr(editCustForm.emails),
       address: joinArr(editCustForm.addresses),
       car_make: joinArr(editCustForm.carMakes),
       car_model: joinArr(editCustForm.carModels),
       type: editCustForm.type || "Regular",
       referral: editCustForm.referral.trim() || null,
     };
-    const { error } = await supabase.from("customers").update(patch).eq("id", editCustCid);
+    console.log("[SAVE] patch", patch);
+    const { data: updData, error, status: updStatus } = await supabase.from("customers").update(patch).eq("id", editCustCid).select();
+    console.log("[SAVE] update result", { updData, error, updStatus });
+    if (error) { setEditCustSaving(false); alert("保存失敗：" + error.message); return; }
+    // 多值字段「反向清理」：form 裡被刪除的值，合并组内其他成員（rule 1 獨立 + 物理子）
+    // 對應字段也要移除，否則 customerGroups 聚合會把被刪的值從其他成員裡拉回來。
+    const splitMulti = v => String(v || "").split(/\n+/).map(s => s.trim()).filter(Boolean);
+    const MULTI_FIELDS = [
+      { formKey: "phones", dbKey: "phone" },
+      { formKey: "phoneMainlands", dbKey: "phone_mainland" },
+      { formKey: "emails", dbKey: "email" },
+      { formKey: "addresses", dbKey: "address" },
+      { formKey: "carMakes", dbKey: "car_make" },
+      { formKey: "carModels", dbKey: "car_model" },
+    ];
+    const _gid = customerGroups.idToGroup.get(editCustCid);
+    const _vc = _gid ? customerGroups.virtualCustomers.find(v => v.id === _gid) : null;
+    const relatedCids = [
+      ...((_vc?.groupCids || []).filter(id => id !== editCustCid)),
+      ...((_vc?.mergedChildCids) || []),
+    ];
+    const siblingPatchMap = new Map(); // cid -> patch
+    for (const sibCid of relatedCids) {
+      const sib = customers.find(c => c.id === sibCid);
+      if (!sib) continue;
+      const sibPatch = {};
+      for (const { formKey, dbKey } of MULTI_FIELDS) {
+        const newValues = (editCustForm[formKey] || []).map(s => String(s).trim()).filter(Boolean);
+        const newSet = new Set(newValues);
+        const sibCurrent = splitMulti(sib[dbKey]);
+        const filtered = sibCurrent.filter(v => newSet.has(v));
+        if (filtered.length !== sibCurrent.length) {
+          sibPatch[dbKey] = filtered.length > 0 ? filtered.join("\n") : null;
+        }
+      }
+      if (Object.keys(sibPatch).length > 0) siblingPatchMap.set(sibCid, sibPatch);
+    }
+    for (const [sibCid, sibPatch] of siblingPatchMap) {
+      const { error: e } = await supabase.from("customers").update(sibPatch).eq("id", sibCid);
+      if (e) { setEditCustSaving(false); alert("關聯記錄更新失敗：" + e.message); return; }
+    }
+    if (siblingPatchMap.size > 0) {
+      setCustomers(prev => prev.map(c => siblingPatchMap.has(c.id) ? { ...c, ...siblingPatchMap.get(c.id) } : c));
+    }
+    // 別名處理（name-based diff，不用 index 對齊）：
+    // - 新增的 name：優先 adopt rule 1 同名獨立 customer（UPDATE parent_id），否則 INSERT
+    // - 移除的 name：對應所有物理子 UPDATE parent_id = null（降級成獨立 customer，保留字段和發票關聯，不刪除）
+    // 物理子字段不主動清空，避免用户操作丟失原始數據
+    const normName = s => String(s || "").trim().toLowerCase();
+    const newNames = (editCustForm.aliases || []).map(s => String(s).trim()).filter(Boolean);
+    const oldNames = editCustForm._originalAliases || [];
+    const oldNameToCids = editCustForm._originalAliasNameToCids || new Map();
+    const newNameSet = new Set(newNames.map(normName));
+    const oldNameSet = new Set(oldNames.map(normName));
+    const namesToAdd = newNames.filter(n => !oldNameSet.has(normName(n)));
+    const namesToRemove = oldNames.filter(n => !newNameSet.has(normName(n)));
+    const cidsToDowngrade = [];
+    for (const n of namesToRemove) {
+      const cids = oldNameToCids.get(n) || [];
+      cidsToDowngrade.push(...cids);
+    }
+    if (cidsToDowngrade.length > 0) {
+      const { error: e } = await supabase.from("customers").update({ parent_id: null }).in("id", cidsToDowngrade);
+      if (e) { setEditCustSaving(false); alert("別名降級失敗：" + e.message); return; }
+    }
+    // Add: 先查當前合并组里 rule 1 的独立成员，同名直接 UPDATE parent_id；否則 INSERT 新子記錄
+    const gid = customerGroups.idToGroup.get(editCustCid);
+    const curVc = gid ? customerGroups.virtualCustomers.find(v => v.id === gid) : null;
+    const groupCids = curVc?.groupCids || [editCustCid];
+    const ruleOneSiblings = customers.filter(c =>
+      groupCids.includes(c.id) && c.id !== editCustCid && !c.parent_id
+    );
+    const usedSiblingIds = new Set();
+    const insertedRows = [];
+    const adoptedRows = [];
+    for (const aliasName of namesToAdd) {
+      const match = ruleOneSiblings.find(s => !usedSiblingIds.has(s.id) && normName(s.name) === normName(aliasName));
+      if (match) {
+        const { data, error: e } = await supabase.from("customers").update({ parent_id: editCustCid }).eq("id", match.id).select().single();
+        if (e) { setEditCustSaving(false); alert("別名合併失敗：" + e.message); return; }
+        usedSiblingIds.add(match.id);
+        if (data) adoptedRows.push(data);
+      } else {
+        const { data, error: e } = await supabase.from("customers").insert({
+          name: aliasName, parent_id: editCustCid, type: editCustForm.type || "Regular"
+        }).select().single();
+        if (e) { setEditCustSaving(false); alert("別名新增失敗：" + e.message); return; }
+        if (data) insertedRows.push(data);
+      }
+    }
     setEditCustSaving(false);
-    if (error) { alert("保存失敗：" + error.message); return; }
-    setCustomers(prev => prev.map(c => c.id === editCustCid ? { ...c, ...patch } : c));
+    setCustomers(prev => {
+      let next = prev.map(c => c.id === editCustCid ? { ...c, ...patch } : c);
+      if (cidsToDowngrade.length > 0) {
+        const dset = new Set(cidsToDowngrade);
+        next = next.map(c => dset.has(c.id) ? { ...c, parent_id: null } : c);
+      }
+      if (adoptedRows.length > 0) {
+        const adoptedMap = new Map(adoptedRows.map(r => [r.id, r]));
+        next = next.map(c => adoptedMap.has(c.id) ? { ...c, ...adoptedMap.get(c.id) } : c);
+      }
+      if (insertedRows.length > 0) next = [...next, ...insertedRows];
+      return next;
+    });
     setEditingCustomer(null);
   }
   const [printChooser, setPrintChooser] = useState(null); // { inv, customer, items, products } | null
@@ -486,14 +698,51 @@ export default function App() {
   }
 
   // 客戶頁過濾/排序：按需計算最近購買日期 + 搜索 + 時間範圍 + 排序
-  // 客戶去重：名/電話/郵箱/地址 4 字段命中 3 個以上視為同一客戶（union-find）
+  // 客戶去重：
+  //   規則 1（虛擬合併，union-find）：name/phone/email/address 4 字段命中 3+ 視為疑似同人
+  //   規則 2（物理合併，DB parent_id）：除 name 外所有字段完全相等 + name 都非空 → UPDATE parent_id = keeper.id
+  //     parent_id 非空的子記錄不作為獨立客戶顯示，名字作別名加入 keeper 的 allNames
   const customerGroups = useMemo(() => {
     const norm = s => (s || "").trim().toLowerCase();
     const fields = ["name", "phone", "email", "address"];
+    // 地址模糊匹配：edit distance ≤ 1 視為相同（容忍 1 個字的錯漏）
+    const editDist1 = (a, b) => {
+      if (a === b) return true;
+      const la = a.length, lb = b.length;
+      if (Math.abs(la - lb) > 1) return false;
+      // 最多 1 次編輯：替換/插入/刪除
+      let i = 0, j = 0, edits = 0;
+      while (i < la && j < lb) {
+        if (a[i] === b[j]) { i++; j++; continue; }
+        if (++edits > 1) return false;
+        if (la === lb) { i++; j++; }         // 替換
+        else if (la > lb) i++;               // a 多一字，刪 a
+        else j++;                            // b 多一字，刪 b
+      }
+      if (i < la || j < lb) edits++;
+      return edits <= 1;
+    };
+    const splitAddr = s => String(s || "").split(/\n+/).map(x => x.trim().toLowerCase()).filter(Boolean);
+    const addrMatch = (a, b) => {
+      const A = splitAddr(a), B = splitAddr(b);
+      if (A.length === 0 || B.length === 0) return false;
+      for (const x of A) for (const y of B) if (editDist1(x, y)) return true;
+      return false;
+    };
     const idToCustomer = new Map();
     customers.forEach(c => idToCustomer.set(c.id, c));
-    const indexes = fields.map(() => new Map());
+    // 規則 2 子記錄：parent_id 非空的 customer，按 parent_id 分組
+    const childrenByParent = new Map(); // parentId -> [child customers]
     customers.forEach(c => {
+      if (c.parent_id) {
+        if (!childrenByParent.has(c.parent_id)) childrenByParent.set(c.parent_id, []);
+        childrenByParent.get(c.parent_id).push(c);
+      }
+    });
+    // 只用 parent_id IS NULL 的 customer 做 union-find（子記錄不獨立成組）
+    const independents = customers.filter(c => !c.parent_id);
+    const indexes = fields.map(() => new Map());
+    independents.forEach(c => {
       fields.forEach((f, i) => {
         const v = norm(c[f]);
         if (!v) return;
@@ -502,7 +751,7 @@ export default function App() {
       });
     });
     const parent = new Map();
-    customers.forEach(c => parent.set(c.id, c.id));
+    independents.forEach(c => parent.set(c.id, c.id));
     const find = x => {
       let r = x;
       while (parent.get(r) !== r) r = parent.get(r);
@@ -510,7 +759,7 @@ export default function App() {
       while (parent.get(cur) !== r) { const nx = parent.get(cur); parent.set(cur, r); cur = nx; }
       return r;
     };
-    customers.forEach(c => {
+    independents.forEach(c => {
       const candidates = new Set();
       fields.forEach((f, i) => {
         const v = norm(c[f]);
@@ -520,10 +769,18 @@ export default function App() {
       candidates.forEach(id => {
         const other = idToCustomer.get(id);
         if (!other) return;
+        // 回退合併：若任一方把對方加入 merge_exclude，跳過自動合併
+        const ex1 = Array.isArray(c.merge_exclude) ? c.merge_exclude : [];
+        const ex2 = Array.isArray(other.merge_exclude) ? other.merge_exclude : [];
+        if (ex1.includes(other.id) || ex2.includes(c.id)) return;
         let matches = 0;
         fields.forEach(f => {
-          const a = norm(c[f]), b = norm(other[f]);
-          if (a && a === b) matches++;
+          if (f === "address") {
+            if (addrMatch(c.address, other.address)) matches++;
+          } else {
+            const a = norm(c[f]), b = norm(other[f]);
+            if (a && a === b) matches++;
+          }
         });
         if (matches >= 3) {
           const ra = find(c.id), rb = find(id);
@@ -533,32 +790,56 @@ export default function App() {
     });
     const groupInfo = new Map();
     const splitLines = v => String(v || "").split(/\n+/).map(s => s.trim()).filter(Boolean);
-    customers.forEach(c => {
-      const root = find(c.id);
-      if (!groupInfo.has(root)) groupInfo.set(root, {
-        cids: [], names: new Set(), phones: new Set(), emails: new Set(), addresses: new Set(),
-        phoneMainlands: new Set(), carMakes: new Set(), carModels: new Set(),
-      });
-      const g = groupInfo.get(root);
-      g.cids.push(c.id);
+    // 把 keeper 自身 + 物理子記錄的字段一起算進 group
+    const absorb = (g, c) => {
       const n = (c.name || "").trim(); if (n) g.names.add(n);
-      // 多值字段支持 \n 拆分后分别入 Set（防止老记录存 "A\nB" 被当单条）
       splitLines(c.phone).forEach(v => g.phones.add(v));
       splitLines(c.email).forEach(v => g.emails.add(v));
       splitLines(c.address).forEach(v => g.addresses.add(v));
       splitLines(c.phone_mainland).forEach(v => g.phoneMainlands.add(v));
       splitLines(c.car_make).forEach(v => g.carMakes.add(v));
       splitLines(c.car_model).forEach(v => g.carModels.add(v));
+    };
+    independents.forEach(c => {
+      const root = find(c.id);
+      if (!groupInfo.has(root)) groupInfo.set(root, {
+        cids: [], childCids: [], names: new Set(), phones: new Set(), emails: new Set(), addresses: new Set(),
+        phoneMainlands: new Set(), carMakes: new Set(), carModels: new Set(),
+      });
+      const g = groupInfo.get(root);
+      g.cids.push(c.id);
+      absorb(g, c);
+      // 把規則 2 合併的子記錄吸進來
+      (childrenByParent.get(c.id) || []).forEach(child => {
+        g.childCids.push(child.id);
+        absorb(g, child);
+      });
     });
-    const idToGroup = new Map();
-    customers.forEach(c => idToGroup.set(c.id, find(c.id)));
-    // 構造 virtualCustomers：每組合併成一條，主信息取組內第一個有 name 的
-    const virtualCustomers = [];
+    // 預先算每個 group 的 primaryCid，讓 virtualC.id 直接用 primaryCid（避免 root 跟 primary 不一致導致 parent_id 引用錯亂）
+    const rootToPrimary = new Map();
     groupInfo.forEach((info, root) => {
       const primaryCid = info.cids.find(cid => {
         const x = idToCustomer.get(cid);
         return x && (x.name || "").trim();
       }) || info.cids[0];
+      rootToPrimary.set(root, primaryCid);
+    });
+    const idToGroup = new Map();
+    independents.forEach(c => {
+      const root = find(c.id);
+      idToGroup.set(c.id, rootToPrimary.get(root) || root);
+    });
+    // 子記錄 → 指向其 parent 所在的 group primary
+    customers.forEach(c => {
+      if (c.parent_id && !idToGroup.has(c.id)) {
+        const mapped = idToGroup.get(c.parent_id);
+        if (mapped) idToGroup.set(c.id, mapped);
+      }
+    });
+    // 構造 virtualCustomers：每組合併成一條，主信息取組內第一個有 name 的
+    const virtualCustomers = [];
+    groupInfo.forEach((info, root) => {
+      const primaryCid = rootToPrimary.get(root);
       const primary = idToCustomer.get(primaryCid) || {};
       const earliestCreated = info.cids
         .map(cid => idToCustomer.get(cid)?.created_at)
@@ -573,8 +854,10 @@ export default function App() {
       const allCarModels = Array.from(info.carModels);
       virtualCustomers.push({
         ...primary,
-        id: root,
-        groupCids: info.cids,
+        id: primaryCid,                // 用 primaryCid 而非 union-find root，让 parent_id 引用稳定
+        groupCids: info.cids,          // rule 1 虛擬合併（獨立 customer id 列表）
+        mergedChildCids: info.childCids, // rule 2 物理合併的子記錄 id
+        allCids: [...info.cids, ...info.childCids], // 查發票用：包含所有相關 customer_id
         allNames,
         allPhones,
         allEmails,
@@ -594,6 +877,23 @@ export default function App() {
     });
     return { idToGroup, groupInfo, virtualCustomers };
   }, [customers]);
+
+  // selectedCustomer 是 virtualCustomer 的快照，customers 變化後需要重新同步，
+  // 否則保存後用戶看到的還是舊聚合字段（allAddresses/allPhones/... 不刷新）
+  useEffect(() => {
+    if (!selectedCustomer) return;
+    const gid = customerGroups.idToGroup.get(selectedCustomer.id);
+    const fresh = gid ? customerGroups.virtualCustomers.find(v => v.id === gid) : null;
+    if (!fresh || fresh.id !== selectedCustomer.id) return;
+    const snapshot = v => JSON.stringify([
+      v.allCids, v.allAddresses, v.allPhones, v.allEmails, v.allNames,
+      v.allPhoneMainlands, v.allCarMakes, v.allCarModels,
+      v.name, v.phone, v.email, v.address, v.car_make, v.car_model
+    ]);
+    if (snapshot(fresh) !== snapshot(selectedCustomer)) {
+      setSelectedCustomer(fresh);
+    }
+  }, [customerGroups]);
 
   const filteredCustomers = useMemo(() => {
     const cutoff = customerTimeRange === "all" ? null : new Date(Date.now() - parseInt(customerTimeRange) * 86400000);
@@ -740,6 +1040,13 @@ export default function App() {
   const totalRevenue = invoices.reduce((s, i) => s + (i.total || 0), 0);
   const inStock = inventory.filter(i => i.status === "In Stock").length;
 
+  // 非保修項黑名單：運費 / 配件 / 費用類 不進保修提醒
+  const isNonWarrantyItem = (name) => {
+    if (!name) return true;
+    const n = String(name).toLowerCase();
+    return /運費|郵費|shipping|freight|防水盒|防水袋|押金|手續費/i.test(n);
+  };
+
   // 保修提醒：從發票 + 產品 warranty_months 推算
   const warrantyItems = useMemo(() => {
     const today = new Date();
@@ -749,6 +1056,7 @@ export default function App() {
       if (!Array.isArray(inv.items) || !inv.date) continue;
       const cust = customers.find(c => c.id === inv.customer_id);
       for (const item of inv.items) {
+        if (isNonWarrantyItem(item.name)) continue;
         const prod = products.find(p => p.name === item.name);
         if (!prod || !prod.warranty_months) continue;
         const wEnd = new Date(inv.date);
@@ -777,6 +1085,7 @@ export default function App() {
       const cust = customers.find(c => c.id === inv.customer_id);
       if (!cust) continue;
       for (const item of inv.items) {
+        if (isNonWarrantyItem(item.name)) continue;
         const prod = products.find(p => p.name === item.name);
         if (!prod || !prod.warranty_months) continue;
         const wEnd = new Date(inv.date);
@@ -996,7 +1305,7 @@ export default function App() {
   }
 
   async function handleDeleteCustomer(c) {
-    const cids = c.groupCids || [c.id];
+    const cids = c.allCids || c.groupCids || [c.id];
     const invCount = invoices.filter(i => cids.includes(i.customer_id)).length;
     if (invCount > 0) {
       alert(`此客戶有 ${invCount} 張發票，請先刪除該客戶的所有發票，再刪除客戶。`);
@@ -1421,9 +1730,22 @@ export default function App() {
                     : `共 ${filteredCustomers.length} 位客戶（${customerTimeRange}天內有購買）`}
                 </p>
               </div>
-              <button onClick={() => setShowAddCustomer(true)} style={{ display: "flex", alignItems: "center", gap: 8, background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, padding: "10px 18px", cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
-                <Icon name="plus" size={16} /> 新增客戶
-              </button>
+              <div style={{ display: "flex", gap: 10 }}>
+                {(() => {
+                  const candidates = customerGroups.virtualCustomers.filter(v => (v.groupCids || []).length > 1);
+                  if (candidates.length === 0) return null;
+                  return (
+                    <button
+                      onClick={() => setMergeCandidatesOpen(true)}
+                      title="列出所有虛擬合併的客戶組，一鍵升級為物理合併"
+                      style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff6e5", color: "#b87500", border: "1px solid #ffd88a", borderRadius: 10, padding: "10px 16px", cursor: "pointer", fontWeight: 700, fontSize: 14 }}
+                    >🔍 疑似重複 {candidates.length} 組</button>
+                  );
+                })()}
+                <button onClick={() => setShowAddCustomer(true)} style={{ display: "flex", alignItems: "center", gap: 8, background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, padding: "10px 18px", cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
+                  <Icon name="plus" size={16} /> 新增客戶
+                </button>
+              </div>
             </div>
 
             <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
@@ -1446,7 +1768,7 @@ export default function App() {
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {filteredCustomers.slice(0, visibleCustomers).map(c => {
-                const cids = c.groupCids || [c.id];
+                const cids = c.allCids || c.groupCids || [c.id];
                 const custInvoices = invoices.filter(i => cids.includes(i.customer_id));
                 const total = custInvoices.reduce((s, i) => s + (i.total || 0), 0);
                 return (
@@ -1508,15 +1830,34 @@ export default function App() {
                   {(selectedCustomer.name || "?")[0]}
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 2, flexWrap: "wrap" }}>
                     <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800 }}>{selectedCustomer.name}</h2>
                     <Badge status={selectedCustomer.type || "Regular"} />
-                    {selectedCustomer.groupCids && selectedCustomer.groupCids.length > 1 && (
-                      <span style={{ fontSize: 11, color: "#6382ff", background: "#eef2ff", borderRadius: 20, padding: "2px 10px", fontWeight: 700 }}>
-                        已合併 {selectedCustomer.groupCids.length} 條重複記錄
-                      </span>
-                    )}
+                    {(() => {
+                      const totalCount = (selectedCustomer.allCids || selectedCustomer.groupCids || []).length;
+                      if (totalCount <= 1) return null;
+                      return (
+                        <button
+                          onClick={() => setMergeHistoryOpen(selectedCustomer)}
+                          style={{ fontSize: 11, color: "#6382ff", background: "#eef2ff", borderRadius: 20, padding: "2px 10px", fontWeight: 700, border: "none", cursor: "pointer" }}
+                          title="查看合併記錄"
+                        >
+                          已合併 {totalCount} 條重複記錄 →
+                        </button>
+                      );
+                    })()}
                   </div>
+                  {(() => {
+                    const aliases = [...new Set((selectedCustomer.allNames || []).filter(n => n && n !== selectedCustomer.name))];
+                    if (aliases.length === 0) return null;
+                    return (
+                      <div style={{ marginBottom: 8 }}>
+                        {aliases.map(a => (
+                          <div key={a} style={{ fontSize: 22, fontWeight: 800, color: "#111" }}>{a}</div>
+                        ))}
+                      </div>
+                    );
+                  })()}
                   {(() => {
                     const emails = (selectedCustomer.allEmails && selectedCustomer.allEmails.length > 0) ? selectedCustomer.allEmails : (selectedCustomer.email ? [selectedCustomer.email] : []);
                     const phones = (selectedCustomer.allPhones && selectedCustomer.allPhones.length > 0) ? selectedCustomer.allPhones : (selectedCustomer.phone ? [selectedCustomer.phone] : []);
@@ -1571,7 +1912,7 @@ export default function App() {
             <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>購買記錄</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {(() => {
-                const scCids = selectedCustomer.groupCids || [selectedCustomer.id];
+                const scCids = selectedCustomer.allCids || selectedCustomer.groupCids || [selectedCustomer.id];
                 const myInvoices = invoices.filter(i => scCids.includes(i.customer_id)).slice().sort((a, b) => {
                   const da = a.date || "", db = b.date || "";
                   if (da !== db) return db.localeCompare(da);
@@ -2043,6 +2384,286 @@ export default function App() {
         );
       })()}
 
+      {/* MERGE HISTORY MODAL — 点"已合并 N 条"徽标弹出 */}
+      {mergeHistoryOpen && (() => {
+        const vc = mergeHistoryOpen;
+        const allCids = vc.allCids || vc.groupCids || [vc.id];
+        const physMerged = new Set(vc.mergedChildCids || []);
+        const rows = allCids.map(cid => {
+          const real = customers.find(c => c.id === cid);
+          if (!real) return null;
+          return { real, isPhysicalChild: physMerged.has(cid) };
+        }).filter(Boolean);
+        return (
+          <div onClick={() => setMergeHistoryOpen(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, width: 720, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>合併記錄</div>
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>
+                此客戶由 {rows.length} 條原始記錄組成（虛擬：字段命中 3+ 自動合併；物理：除名字外完全相等已合併到主記錄）
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {rows.map(({ real, isPhysicalChild }) => {
+                  const isPrimary = real.id === vc.id;
+                  return (
+                  <div key={real.id} style={{ border: "1px solid #eee", borderRadius: 10, padding: "12px 14px", background: isPhysicalChild ? "#fff9ec" : "#fafbff" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        {!isPrimary && (
+                          <button
+                            onClick={() => openRollback(vc, real.id)}
+                            title="回退：從合併組分離、改合併到其他客戶、或恢復字段值"
+                            style={{ fontSize: 12, background: "#fff0f0", color: "#d14343", border: "1px solid #ffcccc", borderRadius: 6, padding: "5px 10px", cursor: "pointer", fontWeight: 600 }}
+                          >回退</button>
+                        )}
+                        <span style={{ fontWeight: 700, fontSize: 14 }}>{real.name || "(無名)"}</span>
+                        {isPrimary && <span style={{ fontSize: 10, color: "#2b4eb5", background: "#e0e8ff", borderRadius: 4, padding: "2px 6px", fontWeight: 700 }}>主記錄</span>}
+                        {isPhysicalChild && <span style={{ fontSize: 10, color: "#8a6900", background: "#fde8b0", borderRadius: 4, padding: "2px 6px", fontWeight: 700 }}>物理合併</span>}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 12, color: "#666", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
+                      <div>📱 香港：{real.phone || "—"}</div>
+                      <div>📧 {real.email || "—"}</div>
+                      {real.phone_mainland && <div>📱 內地：{real.phone_mainland}</div>}
+                      {real.address && <div>📍 {real.address}</div>}
+                      {real.car_make && <div>🚗 {real.car_make} {real.car_model || ""}</div>}
+                      <div style={{ color: "#aaa", fontSize: 11 }}>id: {real.id.slice(0, 8)}…</div>
+                    </div>
+                  </div>
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 18, gap: 10 }}>
+                {(() => {
+                  const upgradeable = rows.filter(r => !r.isPhysicalChild && r.real.id !== vc.id).length;
+                  if (upgradeable === 0) return <span />;
+                  return (
+                    <button
+                      onClick={() => handleUpgradePhysical(vc)}
+                      title="把 rule 1 虛擬合併的成員真正綁定到主記錄，之後刪除字段才真生效"
+                      style={{ background: "#fff6e5", color: "#b87500", border: "1px solid #ffd88a", borderRadius: 8, padding: "10px 16px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}
+                    >升級為物理合併 ({upgradeable})</button>
+                  );
+                })()}
+                <button onClick={() => setMergeHistoryOpen(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: "pointer" }}>關閉</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ROLLBACK MODAL — 從合併記錄 modal 點「回退」打開 */}
+      {rollbackOpen && (() => {
+        const { vc, clickedCid } = rollbackOpen;
+        const primaryCid = vc.id;
+        const allRelated = [
+          ...((vc.groupCids || []).filter(id => id !== primaryCid)),
+          ...((vc.mergedChildCids) || []),
+        ];
+        const records = allRelated.map(cid => customers.find(c => c.id === cid)).filter(Boolean);
+        const clickedRec = customers.find(c => c.id === clickedCid);
+        const primaryRec = customers.find(c => c.id === primaryCid);
+        const splitMulti2 = v => String(v || "").split(/\n+/).map(s => s.trim()).filter(Boolean);
+        // 收集合并组所有字段值供字段恢复 picker 用
+        const allIds = [...(vc.groupCids || []), ...(vc.mergedChildCids || [])];
+        const gather = (dbKey) => {
+          const s = new Set();
+          for (const id of allIds) {
+            const r = customers.find(c => c.id === id);
+            if (!r) continue;
+            splitMulti2(r[dbKey]).forEach(v => s.add(v));
+          }
+          return Array.from(s);
+        };
+        const FIELD_DEFS = [
+          { dbKey: "phone", label: "香港電話" },
+          { dbKey: "phone_mainland", label: "內地電話" },
+          { dbKey: "email", label: "郵箱" },
+          { dbKey: "address", label: "地址" },
+          { dbKey: "car_make", label: "車品牌" },
+          { dbKey: "car_model", label: "車型" },
+        ];
+        // 搜合併目標：排除自己合併組成員（已在組內，合併無意義）
+        const excludeForTarget = new Set(allIds);
+        const q = rollbackMergeToQuery.toLowerCase().trim();
+        const mergeToCandidates = customerGroups.virtualCustomers.filter(v => {
+          if (excludeForTarget.has(v.id)) return false;
+          if (!q) return true;
+          const hit = (arr) => (arr || []).some(x => String(x).toLowerCase().includes(q));
+          return hit(v.allNames) || hit(v.allPhones) || hit(v.allEmails);
+        }).slice(0, 15);
+        const toggleAffected = (cid) => setRollbackAffected(prev => {
+          const next = new Set(prev);
+          if (next.has(cid)) next.delete(cid); else next.add(cid);
+          return next;
+        });
+        return (
+          <div onClick={() => !rollbackBusy && setRollbackOpen(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, width: 720, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>回退合併</div>
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 18 }}>
+                主記錄：<b>{primaryRec?.name || "(無名)"}</b>（id: {primaryCid.slice(0,8)}…）<br/>
+                點擊的記錄：<b>{clickedRec?.name || "(無名)"}</b>（id: {clickedCid.slice(0,8)}…）
+              </div>
+
+              {/* 影響範圍 */}
+              <div style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#333", marginBottom: 8 }}>1. 影響範圍（勾選要一併回退的記錄）</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 180, overflowY: "auto", border: "1px solid #eee", borderRadius: 8, padding: 10 }}>
+                  {records.map(r => {
+                    const checked = rollbackAffected.has(r.id);
+                    const isPhys = Boolean(r.parent_id);
+                    return (
+                      <label key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", border: "1px solid " + (checked ? "#6382ff" : "#eee"), background: checked ? "#f0f4ff" : "#fff", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+                        <input type="checkbox" checked={checked} onChange={() => toggleAffected(r.id)} />
+                        <span style={{ fontWeight: 600 }}>{r.name || "(無名)"}</span>
+                        <span style={{ fontSize: 10, color: isPhys ? "#8a6900" : "#2b4eb5", background: isPhys ? "#fde8b0" : "#e0e8ff", borderRadius: 4, padding: "1px 6px", fontWeight: 700 }}>{isPhys ? "物理子" : "rule 1 獨立"}</span>
+                        <span style={{ color: "#888" }}>{r.phone || "—"} · {r.email || "—"}</span>
+                        <span style={{ color: "#aaa", marginLeft: "auto" }}>id: {r.id.slice(0,8)}…</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 目標 */}
+              <div style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#333", marginBottom: 8 }}>2. 回退後的目標</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", border: "1px solid " + (rollbackTarget === "independent" ? "#6382ff" : "#e0e0e0"), background: rollbackTarget === "independent" ? "#f0f4ff" : "#fff", borderRadius: 8, cursor: "pointer" }}>
+                    <input type="radio" checked={rollbackTarget === "independent"} onChange={() => setRollbackTarget("independent")} />
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>變為獨立客戶</div>
+                      <div style={{ fontSize: 11, color: "#888" }}>物理子記錄會清 parent_id；rule 1 獨立會加入 merge_exclude 不再自動合併回主記錄</div>
+                    </div>
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", border: "1px solid " + (rollbackTarget === "mergeTo" ? "#6382ff" : "#e0e0e0"), background: rollbackTarget === "mergeTo" ? "#f0f4ff" : "#fff", borderRadius: 8, cursor: "pointer" }}>
+                    <input type="radio" checked={rollbackTarget === "mergeTo"} onChange={() => setRollbackTarget("mergeTo")} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>合併到其他客戶</div>
+                      <div style={{ fontSize: 11, color: "#888", marginBottom: rollbackTarget === "mergeTo" ? 6 : 0 }}>所選記錄 UPDATE parent_id = 目標客戶</div>
+                      {rollbackTarget === "mergeTo" && (
+                        <div style={{ position: "relative" }}>
+                          <input
+                            value={rollbackMergeToQuery}
+                            onChange={e => { setRollbackMergeToQuery(e.target.value); setRollbackMergeToOpen(true); if (rollbackMergeTo) setRollbackMergeTo(""); }}
+                            onFocus={() => setRollbackMergeToOpen(true)}
+                            onBlur={() => setTimeout(() => setRollbackMergeToOpen(false), 150)}
+                            placeholder="輸入客戶姓名 / 電話 / 郵箱..."
+                            style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid " + (rollbackMergeTo ? "#6382ff" : "#e0e0e0"), fontSize: 13, outline: "none", boxSizing: "border-box" }}
+                          />
+                          {rollbackMergeToOpen && rollbackMergeToQuery && (
+                            <div style={{ position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, maxHeight: 200, overflowY: "auto", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.08)", zIndex: 10 }}>
+                              {mergeToCandidates.length === 0 ? (
+                                <div style={{ padding: "8px 12px", fontSize: 12, color: "#999" }}>沒找到</div>
+                              ) : mergeToCandidates.map(v => (
+                                <div key={v.id} onMouseDown={() => { setRollbackMergeTo(v.id); setRollbackMergeToQuery(`${v.name || "(無名)"} · ${v.phone || "—"}`); setRollbackMergeToOpen(false); }}
+                                  style={{ padding: "7px 12px", fontSize: 12, cursor: "pointer", borderBottom: "1px solid #f5f5f5" }}
+                                  onMouseEnter={e => e.currentTarget.style.background = "#f8f9ff"}
+                                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                                  <div style={{ fontWeight: 600 }}>{v.name || "(無名)"}</div>
+                                  <div style={{ color: "#888", fontSize: 11 }}>{v.phone || "—"} · {v.email || "—"}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* 字段恢復 */}
+              {rollbackAffected.has(clickedCid) && clickedRec && (
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#333", marginBottom: 4 }}>3. 字段恢復（僅對點擊的記錄 {clickedRec.name || "(無名)"}）</div>
+                  <div style={{ fontSize: 11, color: "#888", marginBottom: 10 }}>可選：從合併組其他成員的字段池裡挑值覆蓋。選「不修改」保留當前值。</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {FIELD_DEFS.map(({ dbKey, label }) => {
+                      const vals = gather(dbKey);
+                      const cur = clickedRec[dbKey];
+                      return (
+                        <div key={dbKey} style={{ display: "grid", gridTemplateColumns: "100px 1fr", alignItems: "center", gap: 8 }}>
+                          <div style={{ fontSize: 12, color: "#666", fontWeight: 600 }}>{label}</div>
+                          <select
+                            value={rollbackFields[dbKey] ?? ""}
+                            onChange={e => setRollbackFields(prev => ({ ...prev, [dbKey]: e.target.value }))}
+                            style={{ padding: "6px 8px", border: "1px solid #e0e0e0", borderRadius: 6, fontSize: 12, background: "#fff" }}
+                          >
+                            <option value="">-- 不修改（當前：{cur ? String(cur).slice(0, 30) + (String(cur).length > 30 ? "…" : "") : "空"}）--</option>
+                            {vals.map(v => <option key={v} value={v}>{v.slice(0, 60)}{v.length > 60 ? "…" : ""}</option>)}
+                            <option value="__clear__">-- 清空 --</option>
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* 按鈕 */}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <button onClick={() => !rollbackBusy && setRollbackOpen(null)} disabled={rollbackBusy} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: rollbackBusy ? "not-allowed" : "pointer" }}>取消</button>
+                <button onClick={handleRollback} disabled={rollbackBusy} style={{ background: rollbackBusy ? "#ccc" : "#d14343", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 700, cursor: rollbackBusy ? "not-allowed" : "pointer" }}>{rollbackBusy ? "執行中..." : "確認回退"}</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* MERGE CANDIDATES MODAL — 客户页一键入口 */}
+      {mergeCandidatesOpen && (() => {
+        const candidates = customerGroups.virtualCustomers
+          .filter(v => (v.groupCids || []).length > 1)
+          .sort((a, b) => (b.groupCids?.length || 0) - (a.groupCids?.length || 0));
+        return (
+          <div onClick={() => setMergeCandidatesOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, width: 760, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>疑似重複客戶檢測</div>
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>
+                共 {candidates.length} 組虛擬合併（資料命中 3+ 字段自動合併）。點「物理合併」把成員綁定到主記錄，之後刪字段才真生效。
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {candidates.length === 0 && (
+                  <div style={{ textAlign: "center", color: "#aaa", padding: 30, fontSize: 13 }}>沒有疑似重複的客戶</div>
+                )}
+                {candidates.map(vc => {
+                  const siblingCount = (vc.groupCids || []).filter(id => id !== vc.id).length;
+                  const preview = [vc.phone, vc.email, splitMulti(vc.car_make)[0]].filter(Boolean).join(" · ");
+                  return (
+                    <div key={vc.id} style={{ border: "1px solid #eee", borderRadius: 10, padding: "12px 14px", background: "#fafbff", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2, display: "flex", alignItems: "center", gap: 6 }}>
+                          {vc.name || "(無名)"}
+                          <span style={{ fontSize: 10, color: "#6382ff", background: "#eef2ff", borderRadius: 20, padding: "1px 8px", fontWeight: 700 }}>合併組 {vc.groupCids.length} 條</span>
+                        </div>
+                        <div style={{ fontSize: 12, color: "#666", marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{preview || "—"}</div>
+                        {vc.allNames && vc.allNames.length > 1 && (
+                          <div style={{ fontSize: 11, color: "#888" }}>別名：{vc.allNames.filter(n => n !== vc.name).join(" / ")}</div>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                        <button
+                          onClick={() => { setMergeCandidatesOpen(false); setSelectedCustomer(vc); }}
+                          style={{ fontSize: 12, background: "#f5f5f5", color: "#666", border: "none", borderRadius: 6, padding: "7px 12px", cursor: "pointer", fontWeight: 600 }}
+                        >查看</button>
+                        <button
+                          onClick={() => handleUpgradePhysical(vc)}
+                          style={{ fontSize: 12, background: "#6382ff", color: "#fff", border: "none", borderRadius: 6, padding: "7px 12px", cursor: "pointer", fontWeight: 700, whiteSpace: "nowrap" }}
+                        >物理合併 {siblingCount}</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
+                <button onClick={() => setMergeCandidatesOpen(false)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: "pointer" }}>關閉</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* EDIT CUSTOMER MODAL */}
       {editingCustomer && (() => {
         const groupCids = (selectedCustomer?.groupCids && selectedCustomer.groupCids.length > 1) ? selectedCustomer.groupCids : null;
@@ -2096,20 +2717,6 @@ export default function App() {
             <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, width: 620, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
               <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>編輯客戶資料</div>
               <div style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>id: {editCustCid}</div>
-              {groupCids && (
-                <div style={{ background: "#fff9ec", border: "1px solid #f4dca4", borderRadius: 10, padding: "10px 12px", marginBottom: 16 }}>
-                  <div style={{ fontSize: 12, color: "#8a6900", marginBottom: 6, fontWeight: 600 }}>
-                    此客戶由 {groupCids.length} 條重複記錄合併，選擇要編輯的原始記錄：
-                  </div>
-                  <select value={editCustCid} onChange={e => switchEditCustCid(e.target.value)} style={{ width: "100%", padding: "8px 10px", border: "1px solid #e0cfa0", borderRadius: 8, fontSize: 13, background: "#fff" }}>
-                    {groupCids.map(cid => {
-                      const r = customers.find(c => c.id === cid);
-                      const preview = r ? [r.name || "(無名)", r.phone || "-", r.email || "-"].join(" · ") : cid;
-                      return <option key={cid} value={cid}>{preview}</option>;
-                    })}
-                  </select>
-                </div>
-              )}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
                 {inp("姓名 Name", "name")}
                 <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#666", fontWeight: 600 }}>
@@ -2119,7 +2726,11 @@ export default function App() {
                     <option value="Lead">Lead</option>
                   </select>
                 </label>
-                {inp("郵箱 Email", "email")}
+              </div>
+              <div style={{ marginBottom: 14 }}>
+                {multiFld("別名 Aliases", "aliases", "例：公司別名或其他稱呼", "新增別名")}
+              </div>
+              <div style={{ marginBottom: 14 }}>
                 {inp("推薦人 Referral", "referral")}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
@@ -2127,8 +2738,12 @@ export default function App() {
                 {multiFld("內地電話 Phone (CN)", "phoneMainlands", "例：138 0013 8000", "新增內地電話")}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+                {multiFld("郵箱 Email", "emails", "例：user@example.com", "新增郵箱")}
                 {multiFld("車品牌 Car Make", "carMakes", "例：Tesla", "新增車品牌")}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
                 {multiFld("車型 Car Model", "carModels", "例：Model 3", "新增車型")}
+                <div />
               </div>
               <div style={{ marginBottom: 18 }}>
                 {multiFld("地址 Address", "addresses", "請輸入完整地址", "新增地址")}
@@ -2433,6 +3048,25 @@ export default function App() {
                     })()}
                   </div>
                 </div>
+                {newInvoice.customerId && (() => {
+                  const gid = customerGroups.idToGroup.get(newInvoice.customerId);
+                  const virtual = gid ? customerGroups.virtualCustomers.find(v => v.id === gid) : null;
+                  if (!virtual) return null;
+                  const upgradeable = (virtual.groupCids || []).filter(id => id !== virtual.id).length;
+                  if (upgradeable === 0) return null;
+                  return (
+                    <div style={{ marginBottom: 14, padding: "12px 14px", background: "#eef4ff", borderRadius: 10, border: "1px solid #c7d7ff", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                      <div style={{ fontSize: 13, color: "#2b4eb5", lineHeight: 1.4 }}>
+                        <div style={{ fontWeight: 700, marginBottom: 2 }}>偵測到 {upgradeable} 條疑似重複客戶</div>
+                        <div style={{ fontSize: 11, color: "#5b75b8" }}>虛擬合併中（資料命中 3+ 字段），可一鍵物理合併到主記錄</div>
+                      </div>
+                      <button
+                        onClick={() => handleUpgradePhysical(virtual)}
+                        style={{ background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", fontWeight: 700, cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}
+                      >合併並繼續</button>
+                    </div>
+                  );
+                })()}
                 {newInvoice.customerId && (() => {
                   const gid = customerGroups.idToGroup.get(newInvoice.customerId);
                   const virtual = gid ? customerGroups.virtualCustomers.find(v => v.id === gid) : null;
