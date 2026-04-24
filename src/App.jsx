@@ -1674,7 +1674,7 @@ export default function App() {
                     <div key={inv.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 0", borderBottom: "1px solid #f5f5f5" }}>
                       <div>
                         <div style={{ fontWeight: 600, fontSize: 14 }}>{fmtInvNum(inv)}</div>
-                        <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>{c?.name || "—"} · {inv.date || "日期未知"}</div>
+                        <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>{(c?.phone || c?.phone_mainland) ? `${c.phone || c.phone_mainland} · ` : ""}{c?.name || "—"} · {inv.date || "日期未知"}</div>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                         <span style={{ fontWeight: 700, fontSize: 15 }}>HKD${inv.total}</span>
@@ -2373,7 +2373,7 @@ export default function App() {
                   <div key={inv.id} style={{ background: "#fff", borderRadius: 14, padding: "18px 22px", border: "1px solid #f0f0f0", boxShadow: "0 2px 8px rgba(0,0,0,0.03)", display: "flex", alignItems: "center", gap: 18 }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 800, fontSize: 15 }}>{fmtInvNum(inv)}</div>
-                      <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>{c?.name || "—"} · {inv.date || "日期未知"} · {formatNotes(inv.notes)}</div>
+                      <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>{(c?.phone || c?.phone_mainland) ? `${c.phone || c.phone_mainland} · ` : ""}{c?.name || "—"} · {inv.date || "日期未知"} · {formatNotes(inv.notes)}</div>
                       {Array.isArray(inv.items) && inv.items.slice(0, 2).map((item, i) => (
                         <div key={i} style={{ fontSize: 12, color: "#999" }}>{item.name} ×{item.qty}</div>
                       ))}
