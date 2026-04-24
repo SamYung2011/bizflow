@@ -153,11 +153,11 @@ function normalizeItem(item, products) {
 
 // 發票明細行的空白模板 —— id 用 randomUUID 確保 React key 穩定
 // （避免刪中間行時後面的 input value 錯位到前面的位置）
-function mkItem() {
+function mkItem(warehouseId = null) {
   const id = (typeof crypto !== "undefined" && crypto.randomUUID)
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  return { id, name: "", qty: 1, price: 0 };
+  return { id, name: "", qty: 1, price: 0, warehouse_id: warehouseId };
 }
 
 // mode = { invoice: boolean, receipt: boolean }；都 false 直接返回
@@ -657,6 +657,8 @@ export default function App() {
     enterPrintFlow(mergedInv, mergedOld, items, products);
   }
   const [editingInvoice, setEditingInvoice] = useState(null); // 正在編輯的發票對象
+  const [markPaidCtx, setMarkPaidCtx] = useState(null); // { inv, defaultWh } —— 標記已付款彈窗
+  const [stockToast, setStockToast] = useState(null); // { items: [name] } —— 右下角庫存不足 toast
   const [editInvItems, setEditInvItems] = useState([]);
   const [editInvTotalOverride, setEditInvTotalOverride] = useState(""); // 空字串 = 跟隨明細合計；非空 = 手動覆蓋
   const [editInvExtras, setEditInvExtras] = useState({
@@ -1038,6 +1040,13 @@ export default function App() {
     return () => { supabase.removeChannel(channel); };
   }, [userId]);
 
+  // 切到產品頁或點擊 Dashboard 庫存卡時，若有 SKU 庫存 <=0 自動彈右下角 toast
+  useEffect(() => {
+    if (tab !== "products") return;
+    if (outOfStockSkus.length === 0) { setStockToast(null); return; }
+    setStockToast({ items: outOfStockSkus.map(p => p.name) });
+  }, [tab]); // 故意只監聽 tab —— outOfStockSkus 變動不重彈，避免騷擾
+
   // notes 里的 ISO 时间戳 (UTC) 自动转成 HK 时间显示
   const formatNotes = (notes) => {
     if (!notes) return "";
@@ -1094,6 +1103,21 @@ export default function App() {
     });
   }, [invoices, products, customers]);
   const warrantyAlerts = warrantyItems;
+
+  // 庫存不足 SKU（活 SKU + 非父 + 所有倉庫合計 <= 0）
+  const outOfStockSkus = useMemo(() => {
+    if (!products.length) return [];
+    const parentIds = new Set(products.filter(x => x.parent_product_id).map(x => x.parent_product_id));
+    const byProd = new Map();
+    for (const s of stocks) {
+      byProd.set(s.product_id, (byProd.get(s.product_id) || 0) + (s.qty || 0));
+    }
+    return products.filter(p => {
+      if (p.category === '_archived') return false;
+      if (parentIds.has(p.id)) return false;
+      return (byProd.get(p.id) || 0) <= 0;
+    });
+  }, [products, stocks]);
 
   // 全量保修條目：涵蓋過期 30 天內 + 未來 365 天內，用於獨立「保修」tab
   // 僅顯示有客戶記錄的，無名客戶排除（無法聯繫不顯示）
@@ -1316,13 +1340,68 @@ export default function App() {
     closeEditInvoice();
   }
 
-  async function handleMarkPaid(inv) {
+  function handleMarkPaid(inv) {
     if ((inv.status || "").trim().toLowerCase() === "paid") return;
-    const confirmed = window.confirm(`確定標記發票 #${inv.invoice_number || inv.id} 為已付款？`);
-    if (!confirmed) return;
+    setMarkPaidCtx({ inv, defaultWh: warehouses[0]?.id || null });
+  }
+
+  // 解析發票 items 成扣減計劃（item + product + warehouse_id + 當前庫存 + 扣後庫存）
+  function buildDeductionPlan(inv, defaultWh) {
+    let itemsArr = inv.items;
+    if (typeof itemsArr === "string") { try { itemsArr = JSON.parse(itemsArr); } catch { itemsArr = []; } }
+    if (!Array.isArray(itemsArr)) itemsArr = [];
+    const parentIds = new Set(products.filter(x => x.parent_product_id).map(x => x.parent_product_id));
+    const plan = [];
+    for (const it of itemsArr) {
+      const prod = products.find(p => p.name === it.name);
+      if (!prod) { plan.push({ name: it.name, qty: Number(it.qty) || 0, skip: true, reason: "產品未匹配" }); continue; }
+      if (prod.category === '_archived') { plan.push({ name: it.name, qty: Number(it.qty) || 0, skip: true, reason: "已歸檔老產品" }); continue; }
+      if (parentIds.has(prod.id)) { plan.push({ name: it.name, qty: Number(it.qty) || 0, skip: true, reason: "父 SKU 不扣" }); continue; }
+      const wid = it.warehouse_id || defaultWh;
+      if (!wid) { plan.push({ name: it.name, qty: Number(it.qty) || 0, skip: true, reason: "無倉庫" }); continue; }
+      const stock = stocks.find(s => s.product_id === prod.id && s.warehouse_id === wid);
+      const current = stock?.qty || 0;
+      const deduct = Number(it.qty) || 0;
+      plan.push({ product_id: prod.id, warehouse_id: wid, name: it.name, qty: deduct, current, after: current - deduct });
+    }
+    return plan;
+  }
+
+  async function executeMarkPaid() {
+    if (!markPaidCtx) return;
+    const { inv, defaultWh } = markPaidCtx;
+    const plan = buildDeductionPlan(inv, defaultWh);
+    const deductions = plan.filter(p => !p.skip && p.qty > 0);
+    // 扣減 + 流水
+    for (const d of deductions) {
+      await supabase.from("inventory_stock").upsert({
+        product_id: d.product_id,
+        warehouse_id: d.warehouse_id,
+        qty: d.after,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'product_id,warehouse_id' });
+      await supabase.from("inventory_movements").insert({
+        product_id: d.product_id,
+        warehouse_id: d.warehouse_id,
+        delta: -d.qty,
+        type: 'sale',
+        reason: `發票 #${inv.invoice_number || inv.id} 標記已付款`,
+        invoice_id: inv.id,
+      });
+    }
     const { error } = await supabase.from("invoices").update({ status: "Paid" }).eq("id", inv.id);
     if (error) { alert(`標記失敗：${error.message}`); return; }
     setInvoices(prev => prev.map(i => i.id === inv.id ? { ...i, status: "Paid" } : i));
+    setStocks(prev => {
+      const map = new Map(prev.map(s => [`${s.product_id}|${s.warehouse_id}`, s]));
+      for (const d of deductions) {
+        const k = `${d.product_id}|${d.warehouse_id}`;
+        const existing = map.get(k);
+        map.set(k, existing ? { ...existing, qty: d.after } : { product_id: d.product_id, warehouse_id: d.warehouse_id, qty: d.after });
+      }
+      return [...map.values()];
+    });
+    setMarkPaidCtx(null);
   }
 
   async function handleDeleteCustomer(c) {
@@ -3172,18 +3251,22 @@ export default function App() {
               </div>
               <div style={{ marginBottom: 14 }}>
                 <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>明細</label>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 60px 100px 36px", gap: 8, fontSize: 11, color: "#888", marginBottom: 6, paddingLeft: 4 }}>
-                  <div>產品名稱</div><div style={{ textAlign: "center" }}>數量</div><div>單價 HKD</div><div></div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 56px 90px 72px 36px", gap: 6, fontSize: 11, color: "#888", marginBottom: 6, paddingLeft: 4 }}>
+                  <div>產品名稱</div><div style={{ textAlign: "center" }}>數量</div><div>單價 HKD</div><div>倉庫</div><div></div>
                 </div>
                 {editInvItems.map((item, idx) => (
-                  <div key={item.id} style={{ display: "grid", gridTemplateColumns: "1fr 60px 100px 36px", gap: 8, marginBottom: 8 }}>
+                  <div key={item.id} style={{ display: "grid", gridTemplateColumns: "1fr 56px 90px 72px 36px", gap: 6, marginBottom: 8 }}>
                     <input value={item.name} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, name: e.target.value }; setEditInvItems(arr); }} placeholder="產品名" style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
                     <input type="number" value={item.qty} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, qty: parseInt(e.target.value) || 0 }; setEditInvItems(arr); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "center" }} />
                     <input type="number" value={item.price} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, price: parseFloat(e.target.value) || 0 }; setEditInvItems(arr); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
+                    <select value={item.warehouse_id || ''} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, warehouse_id: e.target.value || null }; setEditInvItems(arr); }} title="扣庫存的倉庫（不顯示在發票/收據上）" style={{ padding: "9px 6px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", background: "#fff" }}>
+                      <option value="">—</option>
+                      {warehouses.map(w => <option key={w.id} value={w.id}>{w.name.replace("分部", "")}</option>)}
+                    </select>
                     <button onClick={() => setEditInvItems(editInvItems.filter(i => i.id !== item.id))} style={{ background: "#fce4ec", border: "none", borderRadius: 8, cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
                   </div>
                 ))}
-                <button onClick={() => setEditInvItems([...editInvItems, mkItem()])} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", width: "100%", marginTop: 4 }}>+ 新增項目</button>
+                <button onClick={() => setEditInvItems([...editInvItems, mkItem(warehouses[0]?.id)])} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", width: "100%", marginTop: 4 }}>+ 新增項目</button>
               </div>
               <div style={{ marginBottom: 14, padding: "14px 16px", background: "#fafbff", borderRadius: 12, border: "1px solid #eef0fa" }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: "#555", marginBottom: 10 }}>額外費用</div>
@@ -3228,6 +3311,84 @@ export default function App() {
           </div>
         );
       })()}
+
+      {/* MARK PAID CONFIRM MODAL */}
+      {markPaidCtx && (() => {
+        const { inv, defaultWh } = markPaidCtx;
+        const plan = buildDeductionPlan(inv, defaultWh);
+        let itemsArr = inv.items;
+        if (typeof itemsArr === "string") { try { itemsArr = JSON.parse(itemsArr); } catch { itemsArr = []; } }
+        if (!Array.isArray(itemsArr)) itemsArr = [];
+        const anyMissing = itemsArr.some(it => !it.warehouse_id);
+        const insufficient = plan.filter(p => !p.skip && p.after < 0);
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }}>
+            <div style={{ background: "#fff", borderRadius: 16, padding: 24, width: 520, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+              <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 4 }}>標記已付款</div>
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>#{inv.invoice_number || inv.id} · 將從庫存扣除對應數量</div>
+              {anyMissing && (
+                <div style={{ marginBottom: 14, padding: "12px 14px", background: "#fff8e1", borderRadius: 10, border: "1px solid #f4dca4" }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#8a6900", marginBottom: 8 }}>此發票有商品未指定倉庫，統一扣：</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {warehouses.map(w => (
+                      <button key={w.id} onClick={() => setMarkPaidCtx({ ...markPaidCtx, defaultWh: w.id })}
+                        style={{ flex: 1, padding: "9px 12px", borderRadius: 8, border: defaultWh === w.id ? "2px solid #6382ff" : "1px solid #e0e0e0", background: defaultWh === w.id ? "#eef2ff" : "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer", color: defaultWh === w.id ? "#3b58d4" : "#555" }}>
+                        {w.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div style={{ border: "1px solid #eef0fa", borderRadius: 10, overflow: "hidden", marginBottom: 14 }}>
+                <div style={{ background: "#fafbff", padding: "8px 12px", fontSize: 11, color: "#888", display: "grid", gridTemplateColumns: "1fr 48px 60px 72px", gap: 6 }}>
+                  <div>產品</div><div style={{ textAlign: "center" }}>數量</div><div>倉庫</div><div style={{ textAlign: "right" }}>扣後</div>
+                </div>
+                {plan.map((p, i) => {
+                  const wh = warehouses.find(w => w.id === p.warehouse_id);
+                  return (
+                    <div key={i} style={{ padding: "9px 12px", fontSize: 12, borderTop: "1px solid #f5f5f5", display: "grid", gridTemplateColumns: "1fr 48px 60px 72px", gap: 6, alignItems: "center", background: p.skip ? "#fafafa" : (p.after < 0 ? "#fff5f5" : "#fff") }}>
+                      <div style={{ color: p.skip ? "#999" : "#222", fontStyle: p.skip ? "italic" : "normal" }}>{p.name || "(空)"}</div>
+                      <div style={{ textAlign: "center", color: "#555" }}>{p.qty}</div>
+                      <div style={{ color: "#666", fontSize: 11 }}>{p.skip ? "—" : (wh ? wh.name.replace("分部", "") : "？")}</div>
+                      <div style={{ textAlign: "right", fontWeight: 700, color: p.skip ? "#999" : (p.after < 0 ? "#e53935" : "#22c55e") }}>
+                        {p.skip ? p.reason : `${p.current} → ${p.after}`}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {insufficient.length > 0 && (
+                <div style={{ marginBottom: 14, padding: "10px 14px", background: "#fff5f5", borderRadius: 10, border: "1px solid #f4c4c4", fontSize: 12, color: "#c53030" }}>
+                  ⚠ 以下商品庫存不足，確認後將扣成負數：
+                  <div style={{ marginTop: 4, fontSize: 11 }}>
+                    {insufficient.map((p, i) => <div key={i}>• {p.name}：剩 {p.current}，需扣 {p.qty}</div>)}
+                  </div>
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={() => setMarkPaidCtx(null)} style={{ flex: 1, padding: 10, background: "#f5f5f5", color: "#555", border: "none", borderRadius: 10, fontWeight: 700, cursor: "pointer" }}>取消</button>
+                <button onClick={executeMarkPaid} disabled={anyMissing && !defaultWh} style={{ flex: 2, padding: 10, background: (anyMissing && !defaultWh) ? "#e0e0e0" : "#22c55e", color: "#fff", border: "none", borderRadius: 10, fontWeight: 800, cursor: (anyMissing && !defaultWh) ? "not-allowed" : "pointer" }}>確認付款並扣庫存</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* STOCK OUT TOAST (bottom-right) */}
+      {stockToast && (
+        <div style={{ position: "fixed", right: 28, bottom: 28, width: 440, background: "#fff", borderRadius: 14, boxShadow: "0 10px 32px rgba(0,0,0,0.18)", border: "1px solid #f4c4c4", padding: "18px 18px 18px 20px", zIndex: 300, display: "flex", gap: 14, alignItems: "flex-start" }}>
+          <div style={{ fontSize: 26, color: "#ef4444", lineHeight: 1, marginTop: 2 }}>⚠</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>庫存不足提醒</div>
+            <div style={{ fontSize: 13, color: "#888", marginBottom: 10 }}>以下 {stockToast.items.length} 個 SKU 庫存為 0 或負數</div>
+            <div style={{ fontSize: 13, color: "#333", maxHeight: 200, overflowY: "auto", lineHeight: 1.7 }}>
+              {stockToast.items.slice(0, 10).map((n, i) => <div key={i} style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>• {n}</div>)}
+              {stockToast.items.length > 10 && <div style={{ color: "#999", marginTop: 4 }}>... 還有 {stockToast.items.length - 10} 個</div>}
+            </div>
+          </div>
+          <button onClick={() => setStockToast(null)} title="關閉" style={{ background: "none", border: "none", color: "#aaa", cursor: "pointer", fontSize: 24, padding: 0, lineHeight: 1, marginTop: -4 }}>×</button>
+        </div>
+      )}
 
       {showAddCustomer && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
@@ -3425,7 +3586,7 @@ export default function App() {
                 <div style={{ marginBottom: 14 }}>
                   <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>商品項目</label>
                   {newInvoice.items.map((item, idx) => (
-                    <div key={item.id} style={{ display: "grid", gridTemplateColumns: "1fr 60px 90px auto", gap: 8, marginBottom: 8, alignItems: "start" }}>
+                    <div key={item.id} style={{ display: "grid", gridTemplateColumns: "1fr 56px 82px 72px auto", gap: 6, marginBottom: 8, alignItems: "start" }}>
                       <div style={{ position: "relative" }}>
                         <input
                           value={item.name}
@@ -3479,10 +3640,13 @@ export default function App() {
                       </div>
                       <input type="number" min="1" value={item.qty} onChange={e => { const items = [...newInvoice.items]; items[idx].qty = parseInt(e.target.value) || 1; setNewInvoice({...newInvoice, items}); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "center" }} />
                       <input type="number" value={item.price} onChange={e => { const items = [...newInvoice.items]; items[idx].price = parseFloat(e.target.value) || 0; setNewInvoice({...newInvoice, items}); }} placeholder="價格" style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
-                      <button onClick={() => { const items = newInvoice.items.filter(i => i.id !== item.id); setNewInvoice({...newInvoice, items: items.length ? items : [mkItem()]}); }} style={{ background: "#fce4ec", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
+                      <select value={item.warehouse_id || ''} onChange={e => { const items = [...newInvoice.items]; items[idx] = {...item, warehouse_id: e.target.value || null}; setNewInvoice({...newInvoice, items}); }} title="扣庫存的倉庫（不顯示在發票/收據上）" style={{ padding: "9px 6px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", background: "#fff" }}>
+                        {warehouses.map(w => <option key={w.id} value={w.id}>{w.name.replace("分部", "")}</option>)}
+                      </select>
+                      <button onClick={() => { const items = newInvoice.items.filter(i => i.id !== item.id); setNewInvoice({...newInvoice, items: items.length ? items : [mkItem(warehouses[0]?.id)]}); }} style={{ background: "#fce4ec", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
                     </div>
                   ))}
-                  <button onClick={() => setNewInvoice({...newInvoice, items: [...newInvoice.items, mkItem()]})} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", width: "100%" }}>+ 新增項目</button>
+                  <button onClick={() => setNewInvoice({...newInvoice, items: [...newInvoice.items, mkItem(warehouses[0]?.id)]})} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", width: "100%" }}>+ 新增項目</button>
                 </div>
                 <div style={{ marginBottom: 14, padding: "14px 16px", background: "#fafbff", borderRadius: 12, border: "1px solid #eef0fa" }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: "#555", marginBottom: 10 }}>額外費用（可選）</div>
