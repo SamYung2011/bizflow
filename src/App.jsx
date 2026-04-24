@@ -3437,8 +3437,11 @@ export default function App() {
                         />
                         {productPickerOpenId === item.id && (() => {
                           const q = (item.name || "").toLowerCase().trim();
+                          const parentIds = new Set(products.filter(x => x.parent_product_id).map(x => x.parent_product_id));
                           const matched = products.filter(p => {
                             if (!p.name) return false;
+                            if (p.category === '_archived') return false;
+                            if (parentIds.has(p.id)) return false;
                             if (!q) return true;
                             return p.name.toLowerCase().includes(q) || (p.code || "").toLowerCase().includes(q) || (p.category || "").toLowerCase().includes(q);
                           });
