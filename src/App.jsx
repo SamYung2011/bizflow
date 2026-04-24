@@ -259,6 +259,12 @@ export default function App() {
   const [products, setProducts] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
   const [stocks, setStocks] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [showAddEmployee, setShowAddEmployee] = useState(false);
+  const [newEmployee, setNewEmployee] = useState({ name: "", role: "", phone: "", email: "", note: "" });
+  const [editingTask, setEditingTask] = useState(null); // 任務詳情 modal 當前任務
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [productOrgDraft, setProductOrgDraft] = useState(null);
   const [expandedSkuGroups, setExpandedSkuGroups] = useState(new Set());
@@ -984,6 +990,8 @@ export default function App() {
   const qInvoices = useQuery({ queryKey: ["bf", "invoices"], queryFn: () => fetchAllTable("invoices", "date", false), enabled: !!userId });
   const qWarehouses = useQuery({ queryKey: ["bf", "warehouses"], queryFn: () => fetchAllTable("warehouses", "sort_order"), enabled: !!userId });
   const qStocks = useQuery({ queryKey: ["bf", "inventory_stock"], queryFn: () => fetchAllTable("inventory_stock", null), enabled: !!userId });
+  const qEmployees = useQuery({ queryKey: ["bf", "employees"], queryFn: () => fetchAllTable("employees", "created_at"), enabled: !!userId });
+  const qTasks = useQuery({ queryKey: ["bf", "employee_tasks"], queryFn: () => fetchAllTable("employee_tasks", "created_at"), enabled: !!userId });
 
   // query data 同步到現有 useState，現存的 mutation 代碼（setCustomers 等）照舊工作
   useEffect(() => { if (qProducts.data) setProducts(qProducts.data); }, [qProducts.data]);
@@ -992,6 +1000,8 @@ export default function App() {
   useEffect(() => { if (qInvoices.data) setInvoices(qInvoices.data); }, [qInvoices.data]);
   useEffect(() => { if (qWarehouses.data) setWarehouses(qWarehouses.data); }, [qWarehouses.data]);
   useEffect(() => { if (qStocks.data) setStocks(qStocks.data); }, [qStocks.data]);
+  useEffect(() => { if (qEmployees.data) setEmployees(qEmployees.data); }, [qEmployees.data]);
+  useEffect(() => { if (qTasks.data) setTasks(qTasks.data); }, [qTasks.data]);
 
   // 打開編輯庫存弹窗時從 stocks 載入各倉庫當前 qty
   useEffect(() => {
@@ -1194,6 +1204,7 @@ export default function App() {
     { id: "invoices", label: "發票", icon: "invoice" },
     { id: "warranty", label: "保修", icon: "warning" },
     { id: "revenue", label: "營收", icon: "trend_up" },
+    { id: "employees", label: "員工管理", icon: "customer" },
   ];
 
   async function handleSaveCustomer() {
@@ -1460,6 +1471,68 @@ export default function App() {
         ? { ...i, status: "In Stock", customer_id: null, sold_date: null, warranty_end: null, invoice_id: null }
         : i));
     }
+  }
+
+  // ── 員工管理 ──────────────────────────────────────────────
+  async function handleSaveEmployee() {
+    if (!newEmployee.name.trim()) { alert("請輸入員工姓名"); return; }
+    const { data, error } = await supabase.from("employees").insert({
+      name: newEmployee.name.trim(),
+      role: newEmployee.role.trim() || null,
+      phone: newEmployee.phone.trim() || null,
+      email: newEmployee.email.trim() || null,
+      note: newEmployee.note.trim() || null,
+    }).select().single();
+    if (error) { alert(`新增失敗：${error.message}`); return; }
+    setEmployees(prev => [...prev, data]);
+    setShowAddEmployee(false);
+    setNewEmployee({ name: "", role: "", phone: "", email: "", note: "" });
+  }
+
+  async function handleDeleteEmployee(emp) {
+    const taskCount = tasks.filter(t => t.employee_id === emp.id).length;
+    const msg = taskCount > 0
+      ? `確定刪除員工「${emp.name}」？\n將同時刪除其 ${taskCount} 條任務記錄。此操作不可撤銷。`
+      : `確定刪除員工「${emp.name}」？此操作不可撤銷。`;
+    if (!window.confirm(msg)) return;
+    const { error } = await supabase.from("employees").delete().eq("id", emp.id);
+    if (error) { alert(`刪除失敗：${error.message}`); return; }
+    setEmployees(prev => prev.filter(e => e.id !== emp.id));
+    setTasks(prev => prev.filter(t => t.employee_id !== emp.id));
+    setSelectedEmployee(null);
+  }
+
+  async function handleAddTask(employeeId, title, priority = "none", parentTaskId = null) {
+    if (!title || !title.trim()) return;
+    const { data, error } = await supabase.from("employee_tasks").insert({
+      employee_id: employeeId,
+      title: title.trim(),
+      priority,
+      parent_task_id: parentTaskId,
+    }).select().single();
+    if (error) { alert(`新增任務失敗：${error.message}`); return; }
+    setTasks(prev => [...prev, data]);
+    return data;
+  }
+
+  async function handleUpdateTask(taskId, patch) {
+    const { error } = await supabase.from("employee_tasks").update(patch).eq("id", taskId);
+    if (error) { alert(`更新失敗：${error.message}`); return; }
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...patch } : t));
+    if (editingTask?.id === taskId) setEditingTask(prev => ({ ...prev, ...patch }));
+  }
+
+  async function handleToggleTaskDone(task) {
+    const next = task.status === "done" ? "open" : "done";
+    await handleUpdateTask(task.id, { status: next, completed_at: next === "done" ? new Date().toISOString() : null });
+  }
+
+  async function handleDeleteTask(taskId) {
+    if (!window.confirm("確定刪除此任務及所有子任務？")) return;
+    const { error } = await supabase.from("employee_tasks").delete().eq("id", taskId);
+    if (error) { alert(`刪除失敗：${error.message}`); return; }
+    setTasks(prev => prev.filter(t => t.id !== taskId && t.parent_task_id !== taskId));
+    if (editingTask?.id === taskId) setEditingTask(null);
   }
 
   // 認證載入中（Supabase 正在讀 session）
@@ -2701,6 +2774,155 @@ export default function App() {
             </div>
           );
         })()}
+
+        {/* EMPLOYEES — 員工管理 */}
+        {tab === "employees" && !selectedEmployee && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 28 }}>
+              <div>
+                <div style={{ fontSize: 28, fontWeight: 800 }}>員工管理</div>
+                <div style={{ fontSize: 13, color: "#888", marginTop: 4 }}>共 {employees.length} 位員工</div>
+              </div>
+              <button onClick={() => setShowAddEmployee(true)} style={{ display: "flex", alignItems: "center", gap: 6, background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, padding: "10px 18px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+                <Icon name="plus" size={16} /> 新增員工
+              </button>
+            </div>
+            {employees.length === 0 ? (
+              <div style={{ background: "#fff", borderRadius: 14, padding: 48, textAlign: "center", color: "#999", border: "1px dashed #e0e0e0" }}>
+                尚無員工，點右上「新增員工」開始。
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
+                {employees.map(emp => {
+                  const empTasks = tasks.filter(t => t.employee_id === emp.id && !t.parent_task_id);
+                  const openCount = empTasks.filter(t => t.status === "open").length;
+                  const doneCount = empTasks.filter(t => t.status === "done").length;
+                  return (
+                    <div key={emp.id} onClick={() => setSelectedEmployee(emp)} style={{ background: "#fff", borderRadius: 14, padding: "20px 22px", border: "1px solid #f0f0f0", cursor: "pointer", transition: "transform 0.15s, box-shadow 0.15s", boxShadow: "0 2px 8px rgba(0,0,0,0.03)" }}
+                      onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 6px 16px rgba(0,0,0,0.08)"; }}
+                      onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.03)"; }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+                        <div style={{ width: 44, height: 44, borderRadius: "50%", background: "linear-gradient(135deg,#7c9dff,#a78bfa)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 700 }}>{(emp.name || "?").slice(0, 1)}</div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 16, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{emp.name}</div>
+                          {emp.role && <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>{emp.role}</div>}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 14, fontSize: 12, color: "#666" }}>
+                        <div><span style={{ fontWeight: 700, color: "#6382ff" }}>{openCount}</span> 進行中</div>
+                        <div><span style={{ fontWeight: 700, color: "#22c55e" }}>{doneCount}</span> 已完成</div>
+                      </div>
+                      {(emp.phone || emp.email) && (
+                        <div style={{ fontSize: 11, color: "#aaa", marginTop: 10, paddingTop: 10, borderTop: "1px solid #f5f5f5" }}>
+                          {emp.phone && <div>{emp.phone}</div>}
+                          {emp.email && <div>{emp.email}</div>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* EMPLOYEE DETAIL BOARD — 員工任務看板 */}
+        {tab === "employees" && selectedEmployee && (() => {
+          const emp = selectedEmployee;
+          const topTasks = tasks.filter(t => t.employee_id === emp.id && !t.parent_task_id);
+          const cols = {
+            high: topTasks.filter(t => t.priority === "high" && t.status === "open"),
+            none: topTasks.filter(t => t.priority === "none" && t.status === "open"),
+            abandoned: topTasks.filter(t => t.status === "abandoned"),
+            done: topTasks.filter(t => t.status === "done"),
+          };
+          const renderTaskCard = (t, idx) => {
+            const subtasks = tasks.filter(s => s.parent_task_id === t.id);
+            const subDone = subtasks.filter(s => s.status === "done").length;
+            const isDone = t.status === "done";
+            const isAbandoned = t.status === "abandoned";
+            return (
+              <div key={t.id} style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 10, padding: "12px 14px", marginBottom: 8, opacity: (isDone || isAbandoned) ? 0.6 : 1, cursor: "pointer" }}
+                onClick={(e) => { if (e.target.tagName !== "INPUT") setEditingTask(t); }}>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                  <input type="checkbox" checked={isDone} onChange={() => handleToggleTaskDone(t)} onClick={e => e.stopPropagation()} style={{ width: 16, height: 16, marginTop: 2, cursor: "pointer" }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, textDecoration: isDone ? "line-through" : "none", color: (isDone || isAbandoned) ? "#999" : "#222" }}>
+                      {idx != null && <span style={{ color: "#aaa", marginRight: 6 }}>{idx + 1}.</span>}{t.title}
+                    </div>
+                    {(subtasks.length > 0 || t.feedback) && (
+                      <div style={{ fontSize: 11, color: "#888", marginTop: 4, display: "flex", gap: 10 }}>
+                        {subtasks.length > 0 && <span>☑ {subDone}/{subtasks.length} 子任務</span>}
+                        {t.feedback && <span style={{ color: "#f59e0b" }}>💬 反饋</span>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          };
+          const AddTaskInput = ({ priority }) => {
+            const [val, setVal] = useState("");
+            return (
+              <form onSubmit={e => { e.preventDefault(); if (val.trim()) { handleAddTask(emp.id, val, priority); setVal(""); } }} style={{ marginBottom: 10 }}>
+                <input value={val} onChange={e => setVal(e.target.value)} placeholder="+ 添加任務" style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px dashed #d0d0d0", fontSize: 13, outline: "none", background: "#fafbff", boxSizing: "border-box" }} />
+              </form>
+            );
+          };
+          return (
+            <div>
+              <button onClick={() => setSelectedEmployee(null)} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", color: "#888", fontSize: 13, cursor: "pointer", marginBottom: 16, padding: 0 }}>
+                <Icon name="back" size={14} /> 返回員工列表
+              </button>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                  <div style={{ width: 56, height: 56, borderRadius: "50%", background: "linear-gradient(135deg,#7c9dff,#a78bfa)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 700 }}>{(emp.name || "?").slice(0, 1)}</div>
+                  <div>
+                    <div style={{ fontSize: 24, fontWeight: 800 }}>{emp.name}</div>
+                    <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>
+                      {[emp.role, emp.phone, emp.email].filter(Boolean).join(" · ") || "—"}
+                    </div>
+                  </div>
+                </div>
+                <button onClick={() => handleDeleteEmployee(emp)} style={{ background: "#fce4ec", border: "none", color: "#e53935", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>刪除員工</button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginBottom: 24 }}>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ color: "#ef4444" }}>高優先級</span>
+                    <span style={{ fontSize: 12, color: "#aaa" }}>{cols.high.length}</span>
+                  </div>
+                  <AddTaskInput priority="high" />
+                  {cols.high.map((t, i) => renderTaskCard(t, i))}
+                </div>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span>無優先級</span>
+                    <span style={{ fontSize: 12, color: "#aaa" }}>{cols.none.length}</span>
+                  </div>
+                  <AddTaskInput priority="none" />
+                  {cols.none.map((t, i) => renderTaskCard(t, i))}
+                </div>
+              </div>
+              {cols.abandoned.length > 0 && (
+                <details style={{ marginBottom: 16 }}>
+                  <summary style={{ fontSize: 14, fontWeight: 600, color: "#888", cursor: "pointer", padding: "8px 0" }}>
+                    已放棄 <span style={{ color: "#aaa", marginLeft: 6 }}>{cols.abandoned.length}</span>
+                  </summary>
+                  <div style={{ marginTop: 8 }}>{cols.abandoned.map((t, i) => renderTaskCard(t, i))}</div>
+                </details>
+              )}
+              {cols.done.length > 0 && (
+                <details style={{ marginBottom: 16 }}>
+                  <summary style={{ fontSize: 14, fontWeight: 600, color: "#22c55e", cursor: "pointer", padding: "8px 0" }}>
+                    已完成 <span style={{ color: "#aaa", marginLeft: 6 }}>{cols.done.length}</span>
+                  </summary>
+                  <div style={{ marginTop: 8 }}>{cols.done.map((t, i) => renderTaskCard(t, i))}</div>
+                </details>
+              )}
+            </div>
+          );
+        })()}
       </main>
 
       {/* PENDING MERGE PROMPT MODAL */}
@@ -3389,6 +3611,66 @@ export default function App() {
           <button onClick={() => setStockToast(null)} title="關閉" style={{ background: "none", border: "none", color: "#aaa", cursor: "pointer", fontSize: 24, padding: 0, lineHeight: 1, marginTop: -4 }}>×</button>
         </div>
       )}
+
+      {/* ADD EMPLOYEE MODAL */}
+      {showAddEmployee && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: 28, width: 460, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>新增員工</h2>
+              <button onClick={() => { setShowAddEmployee(false); setNewEmployee({ name: "", role: "", phone: "", email: "", note: "" }); }} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
+            </div>
+            <Input label="姓名 *" value={newEmployee.name} onChange={v => setNewEmployee({ ...newEmployee, name: v })} placeholder="員工姓名" />
+            <Input label="職位" value={newEmployee.role} onChange={v => setNewEmployee({ ...newEmployee, role: v })} placeholder="例如 客服 / 技術 / 銷售" />
+            <Input label="電話" value={newEmployee.phone} onChange={v => setNewEmployee({ ...newEmployee, phone: v })} placeholder="+852" />
+            <Input label="Email" value={newEmployee.email} onChange={v => setNewEmployee({ ...newEmployee, email: v })} placeholder="email@example.com" />
+            <Input label="備註" value={newEmployee.note} onChange={v => setNewEmployee({ ...newEmployee, note: v })} placeholder="其他備註..." />
+            <button onClick={handleSaveEmployee} disabled={!newEmployee.name.trim()} style={{ width: "100%", padding: 12, background: newEmployee.name.trim() ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 800, cursor: newEmployee.name.trim() ? "pointer" : "not-allowed", marginTop: 8 }}>儲存員工</button>
+          </div>
+        </div>
+      )}
+
+      {/* TASK DETAIL MODAL */}
+      {editingTask && (() => {
+        const t = editingTask;
+        const subtasks = tasks.filter(s => s.parent_task_id === t.id);
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 110 }}>
+            <div style={{ background: "#fff", borderRadius: 16, padding: 28, width: 540, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => handleUpdateTask(t.id, { priority: t.priority === "high" ? "none" : "high" })} style={{ fontSize: 12, fontWeight: 700, padding: "5px 12px", borderRadius: 20, border: "1px solid " + (t.priority === "high" ? "#ef4444" : "#e0e0e0"), background: t.priority === "high" ? "#fff5f5" : "#fff", color: t.priority === "high" ? "#ef4444" : "#888", cursor: "pointer" }}>
+                    {t.priority === "high" ? "● 高優先級" : "○ 無優先級"}
+                  </button>
+                  {t.status !== "abandoned" && <button onClick={() => handleUpdateTask(t.id, { status: "abandoned" })} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 20, border: "1px solid #e0e0e0", background: "#fff", color: "#888", cursor: "pointer" }}>標記放棄</button>}
+                  {t.status === "abandoned" && <button onClick={() => handleUpdateTask(t.id, { status: "open" })} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 20, border: "1px solid #6382ff", background: "#eef2ff", color: "#6382ff", cursor: "pointer" }}>恢復進行</button>}
+                </div>
+                <button onClick={() => setEditingTask(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
+              </div>
+              <input value={t.title} onChange={e => setEditingTask({ ...t, title: e.target.value })} onBlur={() => handleUpdateTask(t.id, { title: t.title })} style={{ width: "100%", padding: "10px 0", fontSize: 22, fontWeight: 800, border: "none", outline: "none", marginBottom: 4, boxSizing: "border-box" }} />
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 4, marginTop: 8 }}>描述 / 備註 / Deadline</div>
+              <textarea value={t.note || ""} onChange={e => setEditingTask({ ...t, note: e.target.value })} onBlur={() => handleUpdateTask(t.id, { note: t.note || null })} placeholder="輸入描述..." style={{ width: "100%", minHeight: 60, padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit" }} />
+              <div style={{ fontSize: 12, color: "#888", marginTop: 16, marginBottom: 6 }}>子任務</div>
+              {subtasks.map((st, i) => (
+                <div key={st.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid #f5f5f5" }}>
+                  <input type="checkbox" checked={st.status === "done"} onChange={() => handleToggleTaskDone(st)} style={{ width: 15, height: 15, cursor: "pointer" }} />
+                  <span style={{ flex: 1, fontSize: 13, textDecoration: st.status === "done" ? "line-through" : "none", color: st.status === "done" ? "#999" : "#333" }}>{st.title}</span>
+                  <button onClick={() => handleDeleteTask(st.id)} title="刪除" style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 14 }}>×</button>
+                </div>
+              ))}
+              <form onSubmit={e => { e.preventDefault(); const v = e.target.elements.sub.value.trim(); if (v) { handleAddTask(t.employee_id, v, "none", t.id); e.target.reset(); } }} style={{ marginTop: 8 }}>
+                <input name="sub" placeholder="+ 添加子任務" style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px dashed #d0d0d0", fontSize: 13, outline: "none", background: "#fafbff", boxSizing: "border-box" }} />
+              </form>
+              <div style={{ fontSize: 12, color: "#f59e0b", fontWeight: 700, marginTop: 16, marginBottom: 6 }}>💬 員工反饋</div>
+              <textarea value={t.feedback || ""} onChange={e => setEditingTask({ ...t, feedback: e.target.value })} onBlur={() => handleUpdateTask(t.id, { feedback: t.feedback || null })} placeholder="例如：太忙，本週無法完成 / 需要 XXX 支援" style={{ width: "100%", minHeight: 50, padding: "8px 10px", borderRadius: 8, border: "1px solid #f4dca4", fontSize: 13, outline: "none", resize: "vertical", boxSizing: "border-box", background: "#fff9ec", fontFamily: "inherit" }} />
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 20, paddingTop: 16, borderTop: "1px solid #f0f0f0" }}>
+                <button onClick={() => handleDeleteTask(t.id)} style={{ background: "none", border: "none", color: "#e53935", fontSize: 13, cursor: "pointer" }}>🗑 刪除任務</button>
+                <button onClick={() => setEditingTask(null)} style={{ background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, padding: "9px 20px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>完成</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {showAddCustomer && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
