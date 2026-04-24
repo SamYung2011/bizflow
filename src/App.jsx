@@ -265,6 +265,7 @@ export default function App() {
   const [showAddEmployee, setShowAddEmployee] = useState(false);
   const [newEmployee, setNewEmployee] = useState({ name: "", role: "", phone: "", email: "", note: "" });
   const [editingTask, setEditingTask] = useState(null); // 任務詳情 modal 當前任務
+  const [newTaskDraft, setNewTaskDraft] = useState({ title: "", priority: "low", note: "" });
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [productOrgDraft, setProductOrgDraft] = useState(null);
   const [expandedSkuGroups, setExpandedSkuGroups] = useState(new Set());
@@ -1050,6 +1051,25 @@ export default function App() {
     return () => { supabase.removeChannel(channel); };
   }, [userId]);
 
+  // 每次 app 載入清理超過 7 天的已完成 / 已放棄 任務
+  useEffect(() => {
+    if (!userId) return;
+    (async () => {
+      const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const { data, error } = await supabase
+        .from("employee_tasks")
+        .delete()
+        .in("status", ["done", "abandoned"])
+        .lt("completed_at", cutoff)
+        .select("id");
+      if (error) { console.error("任務 7 天清理失敗", error); return; }
+      if (data && data.length > 0) {
+        const ids = new Set(data.map(r => r.id));
+        setTasks(prev => prev.filter(t => !ids.has(t.id)));
+      }
+    })();
+  }, [userId]);
+
   // 切到產品頁或點擊 Dashboard 庫存卡時，若有 SKU 庫存 <=0 自動彈右下角 toast
   useEffect(() => {
     if (tab !== "products") return;
@@ -1502,13 +1522,14 @@ export default function App() {
     setSelectedEmployee(null);
   }
 
-  async function handleAddTask(employeeId, title, priority = "none", parentTaskId = null) {
+  async function handleAddTask(employeeId, title, priority = "low", parentTaskId = null, note = null) {
     if (!title || !title.trim()) return;
     const { data, error } = await supabase.from("employee_tasks").insert({
       employee_id: employeeId,
       title: title.trim(),
       priority,
       parent_task_id: parentTaskId,
+      note: note || null,
     }).select().single();
     if (error) { alert(`新增任務失敗：${error.message}`); return; }
     setTasks(prev => [...prev, data]);
@@ -2775,66 +2796,29 @@ export default function App() {
           );
         })()}
 
-        {/* EMPLOYEES — 員工管理 */}
-        {tab === "employees" && !selectedEmployee && (
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 28 }}>
-              <div>
-                <div style={{ fontSize: 28, fontWeight: 800 }}>員工管理</div>
-                <div style={{ fontSize: 13, color: "#888", marginTop: 4 }}>共 {employees.length} 位員工</div>
-              </div>
-              <button onClick={() => setShowAddEmployee(true)} style={{ display: "flex", alignItems: "center", gap: 6, background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, padding: "10px 18px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
-                <Icon name="plus" size={16} /> 新增員工
-              </button>
-            </div>
-            {employees.length === 0 ? (
-              <div style={{ background: "#fff", borderRadius: 14, padding: 48, textAlign: "center", color: "#999", border: "1px dashed #e0e0e0" }}>
-                尚無員工，點右上「新增員工」開始。
-              </div>
-            ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
-                {employees.map(emp => {
-                  const empTasks = tasks.filter(t => t.employee_id === emp.id && !t.parent_task_id);
-                  const openCount = empTasks.filter(t => t.status === "open").length;
-                  const doneCount = empTasks.filter(t => t.status === "done").length;
-                  return (
-                    <div key={emp.id} onClick={() => setSelectedEmployee(emp)} style={{ background: "#fff", borderRadius: 14, padding: "20px 22px", border: "1px solid #f0f0f0", cursor: "pointer", transition: "transform 0.15s, box-shadow 0.15s", boxShadow: "0 2px 8px rgba(0,0,0,0.03)" }}
-                      onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 6px 16px rgba(0,0,0,0.08)"; }}
-                      onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.03)"; }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-                        <div style={{ width: 44, height: 44, borderRadius: "50%", background: "linear-gradient(135deg,#7c9dff,#a78bfa)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 700 }}>{(emp.name || "?").slice(0, 1)}</div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 16, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{emp.name}</div>
-                          {emp.role && <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>{emp.role}</div>}
-                        </div>
-                      </div>
-                      <div style={{ display: "flex", gap: 14, fontSize: 12, color: "#666" }}>
-                        <div><span style={{ fontWeight: 700, color: "#6382ff" }}>{openCount}</span> 進行中</div>
-                        <div><span style={{ fontWeight: 700, color: "#22c55e" }}>{doneCount}</span> 已完成</div>
-                      </div>
-                      {(emp.phone || emp.email) && (
-                        <div style={{ fontSize: 11, color: "#aaa", marginTop: 10, paddingTop: 10, borderTop: "1px solid #f5f5f5" }}>
-                          {emp.phone && <div>{emp.phone}</div>}
-                          {emp.email && <div>{emp.email}</div>}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* EMPLOYEE DETAIL BOARD — 員工任務看板 */}
-        {tab === "employees" && selectedEmployee && (() => {
+        {/* EMPLOYEES — 員工管理（左列表 + 右三欄看板） */}
+        {tab === "employees" && (() => {
           const emp = selectedEmployee;
-          const topTasks = tasks.filter(t => t.employee_id === emp.id && !t.parent_task_id);
-          const cols = {
+          const topTasks = emp ? tasks.filter(t => t.employee_id === emp.id && !t.parent_task_id) : [];
+          const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+          const within7Days = (t) => {
+            const ts = t.completed_at ? new Date(t.completed_at).getTime() : new Date(t.created_at).getTime();
+            return ts >= sevenDaysAgo;
+          };
+          const cols = emp ? {
             high: topTasks.filter(t => t.priority === "high" && t.status === "open"),
-            none: topTasks.filter(t => t.priority === "none" && t.status === "open"),
-            abandoned: topTasks.filter(t => t.status === "abandoned"),
-            done: topTasks.filter(t => t.status === "done"),
+            mid:  topTasks.filter(t => t.priority === "mid"  && t.status === "open"),
+            low:  topTasks.filter(t => (t.priority === "low" || t.priority === "none" || !t.priority) && t.status === "open"),
+            abandoned: topTasks.filter(t => t.status === "abandoned" && within7Days(t)),
+            done: topTasks.filter(t => t.status === "done" && within7Days(t)),
+          } : null;
+          const empFeedbacks = emp ? tasks.filter(t => t.employee_id === emp.id && t.feedback && t.feedback.trim()) : [];
+          const fmtShortDate = (iso) => {
+            if (!iso) return "";
+            const d = new Date(iso);
+            const m = String(d.getMonth() + 1).padStart(2, "0");
+            const day = String(d.getDate()).padStart(2, "0");
+            return `${m}-${day}`;
           };
           const renderTaskCard = (t, idx) => {
             const subtasks = tasks.filter(s => s.parent_task_id === t.id);
@@ -2842,84 +2826,147 @@ export default function App() {
             const isDone = t.status === "done";
             const isAbandoned = t.status === "abandoned";
             return (
-              <div key={t.id} style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 10, padding: "12px 14px", marginBottom: 8, opacity: (isDone || isAbandoned) ? 0.6 : 1, cursor: "pointer" }}
+              <div key={t.id} style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 10, padding: "10px 12px", marginBottom: 8, opacity: (isDone || isAbandoned) ? 0.6 : 1, cursor: "pointer" }}
                 onClick={(e) => { if (e.target.tagName !== "INPUT") setEditingTask(t); }}>
-                <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-                  <input type="checkbox" checked={isDone} onChange={() => handleToggleTaskDone(t)} onClick={e => e.stopPropagation()} style={{ width: 16, height: 16, marginTop: 2, cursor: "pointer" }} />
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                  <input type="checkbox" checked={isDone} onChange={() => handleToggleTaskDone(t)} onClick={e => e.stopPropagation()} style={{ width: 15, height: 15, marginTop: 2, cursor: "pointer" }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, textDecoration: isDone ? "line-through" : "none", color: (isDone || isAbandoned) ? "#999" : "#222" }}>
-                      {idx != null && <span style={{ color: "#aaa", marginRight: 6 }}>{idx + 1}.</span>}{t.title}
+                    <div style={{ fontSize: 13, fontWeight: 600, textDecoration: isDone ? "line-through" : "none", color: (isDone || isAbandoned) ? "#999" : "#222", lineHeight: 1.4 }}>
+                      {idx != null && <span style={{ color: "#aaa", marginRight: 5 }}>{idx + 1}.</span>}{t.title}
                     </div>
-                    {(subtasks.length > 0 || t.feedback) && (
-                      <div style={{ fontSize: 11, color: "#888", marginTop: 4, display: "flex", gap: 10 }}>
-                        {subtasks.length > 0 && <span>☑ {subDone}/{subtasks.length} 子任務</span>}
-                        {t.feedback && <span style={{ color: "#f59e0b" }}>💬 反饋</span>}
+                    <div style={{ fontSize: 10, color: "#aaa", marginTop: 4, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      <span>📅 {fmtShortDate(t.created_at)}</span>
+                      {isDone && t.completed_at && <span style={{ color: "#22c55e" }}>✓ {fmtShortDate(t.completed_at)}</span>}
+                      {isAbandoned && t.completed_at && <span>✗ {fmtShortDate(t.completed_at)}</span>}
+                      {subtasks.length > 0 && <span style={{ color: "#888" }}>☑ {subDone}/{subtasks.length}</span>}
+                      {t.feedback && <span style={{ color: "#f59e0b" }}>💬</span>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          };
+          const colBox = (title, color, count, tasksArr) => (
+            <div style={{ background: "#fafbfc", border: "1px solid #eef0fa", borderRadius: 12, padding: 14, minHeight: 240, display: "flex", flexDirection: "column" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color }}>{title}</span>
+                <span style={{ fontSize: 12, color: "#aaa" }}>{count}</span>
+              </div>
+              <div style={{ flex: 1, overflowY: "auto" }}>{tasksArr.map((t, i) => renderTaskCard(t, i))}</div>
+            </div>
+          );
+          return (
+            <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 20, minHeight: "calc(100vh - 80px)" }}>
+              {/* 左欄：員工列表 */}
+              <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 14, padding: 20, display: "flex", flexDirection: "column" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                  <div>
+                    <div style={{ fontSize: 18, fontWeight: 800 }}>員工管理</div>
+                    <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>共 {employees.length} 位員工</div>
+                  </div>
+                  <button onClick={() => setShowAddEmployee(true)} title="新增員工" style={{ display: "flex", alignItems: "center", gap: 4, background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "7px 11px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                    <Icon name="plus" size={13} /> 新增
+                  </button>
+                </div>
+                <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
+                  {employees.length === 0 ? (
+                    <div style={{ textAlign: "center", padding: 24, color: "#aaa", fontSize: 12, border: "1px dashed #e0e0e0", borderRadius: 10 }}>尚無員工</div>
+                  ) : employees.map(e => {
+                    const openCount = tasks.filter(t => t.employee_id === e.id && !t.parent_task_id && t.status === "open").length;
+                    const doneCount = tasks.filter(t => t.employee_id === e.id && !t.parent_task_id && t.status === "done").length;
+                    const active = emp && emp.id === e.id;
+                    return (
+                      <div key={e.id} onClick={() => setSelectedEmployee(e)} style={{ background: active ? "#eef2ff" : "#fafbfc", border: "1px solid " + (active ? "#6382ff" : "#f0f0f0"), borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#7c9dff,#a78bfa)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, flexShrink: 0 }}>{(e.name || "?").slice(0, 1)}</div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: active ? "#3b58d4" : "#222" }}>{e.name}</div>
+                            {e.role && <div style={{ fontSize: 11, color: "#888", marginTop: 1 }}>{e.role}</div>}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", gap: 10, fontSize: 11, color: "#666", marginTop: 8 }}>
+                          <span><span style={{ fontWeight: 700, color: "#6382ff" }}>{openCount}</span> 進行</span>
+                          <span><span style={{ fontWeight: 700, color: "#22c55e" }}>{doneCount}</span> 完成</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              {/* 右欄：任務看板（未選員工顯示占位） */}
+              <div>
+                {!emp ? (
+                  <div style={{ background: "#fff", borderRadius: 14, padding: 80, textAlign: "center", color: "#aaa", border: "1px dashed #e0e0e0", minHeight: 400, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    ← 從左側選擇員工查看任務看板
+                  </div>
+                ) : (
+                  <div>
+                    {/* 員工頭部 */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <div style={{ width: 44, height: 44, borderRadius: "50%", background: "linear-gradient(135deg,#7c9dff,#a78bfa)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 700 }}>{(emp.name || "?").slice(0, 1)}</div>
+                        <div>
+                          <div style={{ fontSize: 20, fontWeight: 800 }}>{emp.name}</div>
+                          <div style={{ fontSize: 12, color: "#888", marginTop: 1 }}>{[emp.role, emp.phone, emp.email].filter(Boolean).join(" · ") || "—"}</div>
+                        </div>
+                      </div>
+                      <button onClick={() => handleDeleteEmployee(emp)} style={{ background: "#fce4ec", border: "none", color: "#e53935", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>刪除員工</button>
+                    </div>
+                    {/* 3 列 × 2 行網格：高 中 | 添加（跨2行）| 反饋 低 */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gridTemplateRows: "auto auto", gap: 14, marginBottom: 20 }}>
+                      <div style={{ gridColumn: 1, gridRow: 1 }}>{colBox("高優先級", "#ef4444", cols.high.length, cols.high)}</div>
+                      <div style={{ gridColumn: 2, gridRow: 1 }}>{colBox("中優先級", "#f59e0b", cols.mid.length, cols.mid)}</div>
+                      <div style={{ gridColumn: 3, gridRow: "1 / 3", background: "#fff", border: "1px solid #eef0fa", borderRadius: 12, padding: 16, display: "flex", flexDirection: "column" }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: "#3b58d4" }}>＋ 添加任務</div>
+                        <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>優先級</div>
+                        <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+                          {[{ v: "high", l: "高", c: "#ef4444" }, { v: "mid", l: "中", c: "#f59e0b" }, { v: "low", l: "低", c: "#22c55e" }].map(opt => {
+                            const on = newTaskDraft.priority === opt.v;
+                            return (
+                              <button key={opt.v} onClick={() => setNewTaskDraft({ ...newTaskDraft, priority: opt.v })} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1px solid " + (on ? opt.c : "#e0e0e0"), background: on ? opt.c + "18" : "#fff", color: on ? opt.c : "#888", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{opt.l}</button>
+                            );
+                          })}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>標題</div>
+                        <input value={newTaskDraft.title} onChange={e => setNewTaskDraft({ ...newTaskDraft, title: e.target.value })} placeholder="任務標題..." style={{ width: "100%", padding: "9px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", marginBottom: 10, boxSizing: "border-box" }} />
+                        <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>描述 / 備註（可選）</div>
+                        <textarea value={newTaskDraft.note} onChange={e => setNewTaskDraft({ ...newTaskDraft, note: e.target.value })} placeholder="Deadline / 細節..." style={{ width: "100%", minHeight: 80, padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 12, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit", marginBottom: 12 }} />
+                        <button onClick={async () => { if (!newTaskDraft.title.trim()) return; await handleAddTask(emp.id, newTaskDraft.title, newTaskDraft.priority, null, newTaskDraft.note); setNewTaskDraft({ title: "", priority: "low", note: "" }); }} disabled={!newTaskDraft.title.trim()} style={{ width: "100%", padding: 10, background: newTaskDraft.title.trim() ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: newTaskDraft.title.trim() ? "pointer" : "not-allowed" }}>新增任務</button>
+                      </div>
+                      <div style={{ gridColumn: 1, gridRow: 2 }}>
+                        <div style={{ background: "#fff9ec", border: "1px solid #f4dca4", borderRadius: 12, padding: 14, minHeight: 240 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#8a6900", marginBottom: 10 }}>💬 任務反饋記錄 <span style={{ fontSize: 12, color: "#b88a00", marginLeft: 6 }}>{empFeedbacks.length}</span></div>
+                          {empFeedbacks.length === 0 ? (
+                            <div style={{ fontSize: 12, color: "#b8a76a", fontStyle: "italic" }}>暫無反饋</div>
+                          ) : empFeedbacks.map(t => (
+                            <div key={t.id} onClick={() => setEditingTask(t)} style={{ background: "#fff", border: "1px solid #f4dca4", borderRadius: 8, padding: "9px 11px", marginBottom: 8, cursor: "pointer" }}>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: "#333", marginBottom: 4 }}>{t.title}</div>
+                              <div style={{ fontSize: 11, color: "#8a6900", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{t.feedback}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div style={{ gridColumn: 2, gridRow: 2 }}>{colBox("低優先級", "#22c55e", cols.low.length, cols.low)}</div>
+                    </div>
+                    {(cols.abandoned.length > 0 || cols.done.length > 0) && (
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                        {cols.abandoned.length > 0 && (
+                          <details>
+                            <summary style={{ fontSize: 13, fontWeight: 600, color: "#888", cursor: "pointer", padding: "8px 0" }}>已放棄 <span style={{ color: "#aaa", marginLeft: 6 }}>{cols.abandoned.length}</span></summary>
+                            <div style={{ marginTop: 8 }}>{cols.abandoned.map((t, i) => renderTaskCard(t, i))}</div>
+                          </details>
+                        )}
+                        {cols.done.length > 0 && (
+                          <details>
+                            <summary style={{ fontSize: 13, fontWeight: 600, color: "#22c55e", cursor: "pointer", padding: "8px 0" }}>已完成 <span style={{ color: "#aaa", marginLeft: 6 }}>{cols.done.length}</span></summary>
+                            <div style={{ marginTop: 8 }}>{cols.done.map((t, i) => renderTaskCard(t, i))}</div>
+                          </details>
+                        )}
                       </div>
                     )}
                   </div>
-                </div>
+                )}
               </div>
-            );
-          };
-          const AddTaskInput = ({ priority }) => {
-            const [val, setVal] = useState("");
-            return (
-              <form onSubmit={e => { e.preventDefault(); if (val.trim()) { handleAddTask(emp.id, val, priority); setVal(""); } }} style={{ marginBottom: 10 }}>
-                <input value={val} onChange={e => setVal(e.target.value)} placeholder="+ 添加任務" style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px dashed #d0d0d0", fontSize: 13, outline: "none", background: "#fafbff", boxSizing: "border-box" }} />
-              </form>
-            );
-          };
-          return (
-            <div>
-              <button onClick={() => setSelectedEmployee(null)} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", color: "#888", fontSize: 13, cursor: "pointer", marginBottom: 16, padding: 0 }}>
-                <Icon name="back" size={14} /> 返回員工列表
-              </button>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                  <div style={{ width: 56, height: 56, borderRadius: "50%", background: "linear-gradient(135deg,#7c9dff,#a78bfa)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 700 }}>{(emp.name || "?").slice(0, 1)}</div>
-                  <div>
-                    <div style={{ fontSize: 24, fontWeight: 800 }}>{emp.name}</div>
-                    <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>
-                      {[emp.role, emp.phone, emp.email].filter(Boolean).join(" · ") || "—"}
-                    </div>
-                  </div>
-                </div>
-                <button onClick={() => handleDeleteEmployee(emp)} style={{ background: "#fce4ec", border: "none", color: "#e53935", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>刪除員工</button>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginBottom: 24 }}>
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ color: "#ef4444" }}>高優先級</span>
-                    <span style={{ fontSize: 12, color: "#aaa" }}>{cols.high.length}</span>
-                  </div>
-                  <AddTaskInput priority="high" />
-                  {cols.high.map((t, i) => renderTaskCard(t, i))}
-                </div>
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
-                    <span>無優先級</span>
-                    <span style={{ fontSize: 12, color: "#aaa" }}>{cols.none.length}</span>
-                  </div>
-                  <AddTaskInput priority="none" />
-                  {cols.none.map((t, i) => renderTaskCard(t, i))}
-                </div>
-              </div>
-              {cols.abandoned.length > 0 && (
-                <details style={{ marginBottom: 16 }}>
-                  <summary style={{ fontSize: 14, fontWeight: 600, color: "#888", cursor: "pointer", padding: "8px 0" }}>
-                    已放棄 <span style={{ color: "#aaa", marginLeft: 6 }}>{cols.abandoned.length}</span>
-                  </summary>
-                  <div style={{ marginTop: 8 }}>{cols.abandoned.map((t, i) => renderTaskCard(t, i))}</div>
-                </details>
-              )}
-              {cols.done.length > 0 && (
-                <details style={{ marginBottom: 16 }}>
-                  <summary style={{ fontSize: 14, fontWeight: 600, color: "#22c55e", cursor: "pointer", padding: "8px 0" }}>
-                    已完成 <span style={{ color: "#aaa", marginLeft: 6 }}>{cols.done.length}</span>
-                  </summary>
-                  <div style={{ marginTop: 8 }}>{cols.done.map((t, i) => renderTaskCard(t, i))}</div>
-                </details>
-              )}
             </div>
           );
         })()}
@@ -3639,11 +3686,14 @@ export default function App() {
             <div style={{ background: "#fff", borderRadius: 16, padding: 28, width: 540, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => handleUpdateTask(t.id, { priority: t.priority === "high" ? "none" : "high" })} style={{ fontSize: 12, fontWeight: 700, padding: "5px 12px", borderRadius: 20, border: "1px solid " + (t.priority === "high" ? "#ef4444" : "#e0e0e0"), background: t.priority === "high" ? "#fff5f5" : "#fff", color: t.priority === "high" ? "#ef4444" : "#888", cursor: "pointer" }}>
-                    {t.priority === "high" ? "● 高優先級" : "○ 無優先級"}
-                  </button>
-                  {t.status !== "abandoned" && <button onClick={() => handleUpdateTask(t.id, { status: "abandoned" })} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 20, border: "1px solid #e0e0e0", background: "#fff", color: "#888", cursor: "pointer" }}>標記放棄</button>}
-                  {t.status === "abandoned" && <button onClick={() => handleUpdateTask(t.id, { status: "open" })} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 20, border: "1px solid #6382ff", background: "#eef2ff", color: "#6382ff", cursor: "pointer" }}>恢復進行</button>}
+                  {[{v:"high",l:"高優",c:"#ef4444"},{v:"mid",l:"中優",c:"#f59e0b"},{v:"low",l:"低優",c:"#22c55e"}].map(opt => {
+                    const on = t.priority === opt.v || (opt.v === "low" && (t.priority === "none" || !t.priority));
+                    return (
+                      <button key={opt.v} onClick={() => handleUpdateTask(t.id, { priority: opt.v })} style={{ fontSize: 12, fontWeight: 700, padding: "5px 12px", borderRadius: 20, border: "1px solid " + (on ? opt.c : "#e0e0e0"), background: on ? opt.c + "18" : "#fff", color: on ? opt.c : "#888", cursor: "pointer" }}>{opt.l}</button>
+                    );
+                  })}
+                  {t.status !== "abandoned" && <button onClick={() => handleUpdateTask(t.id, { status: "abandoned", completed_at: new Date().toISOString() })} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 20, border: "1px solid #e0e0e0", background: "#fff", color: "#888", cursor: "pointer" }}>標記放棄</button>}
+                  {t.status === "abandoned" && <button onClick={() => handleUpdateTask(t.id, { status: "open", completed_at: null })} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 20, border: "1px solid #6382ff", background: "#eef2ff", color: "#6382ff", cursor: "pointer" }}>恢復進行</button>}
                 </div>
                 <button onClick={() => setEditingTask(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
               </div>
@@ -3663,7 +3713,12 @@ export default function App() {
               </form>
               <div style={{ fontSize: 12, color: "#f59e0b", fontWeight: 700, marginTop: 16, marginBottom: 6 }}>💬 員工反饋</div>
               <textarea value={t.feedback || ""} onChange={e => setEditingTask({ ...t, feedback: e.target.value })} onBlur={() => handleUpdateTask(t.id, { feedback: t.feedback || null })} placeholder="例如：太忙，本週無法完成 / 需要 XXX 支援" style={{ width: "100%", minHeight: 50, padding: "8px 10px", borderRadius: 8, border: "1px solid #f4dca4", fontSize: 13, outline: "none", resize: "vertical", boxSizing: "border-box", background: "#fff9ec", fontFamily: "inherit" }} />
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 20, paddingTop: 16, borderTop: "1px solid #f0f0f0" }}>
+              <div style={{ fontSize: 11, color: "#aaa", marginTop: 16, display: "flex", gap: 14, flexWrap: "wrap" }}>
+                <span>📅 添加於 {new Date(t.created_at).toLocaleString("zh-HK", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                {t.status === "done" && t.completed_at && <span style={{ color: "#22c55e" }}>✓ 完成於 {new Date(t.completed_at).toLocaleString("zh-HK", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>}
+                {t.status === "abandoned" && t.completed_at && <span>✗ 放棄於 {new Date(t.completed_at).toLocaleString("zh-HK", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16, paddingTop: 16, borderTop: "1px solid #f0f0f0" }}>
                 <button onClick={() => handleDeleteTask(t.id)} style={{ background: "none", border: "none", color: "#e53935", fontSize: 13, cursor: "pointer" }}>🗑 刪除任務</button>
                 <button onClick={() => setEditingTask(null)} style={{ background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, padding: "9px 20px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>完成</button>
               </div>
