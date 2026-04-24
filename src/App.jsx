@@ -97,11 +97,11 @@ const StatCard = ({ label, value, sub, accent, icon, onClick }) => (
   </div>
 );
 
-const Input = ({ label, value, onChange, placeholder, type = "text" }) => (
+const Input = ({ label, value, onChange, placeholder, type = "text", readOnly = false }) => (
   <div style={{ marginBottom: 14 }}>
     <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 5 }}>{label}</label>
-    <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-      style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+    <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} readOnly={readOnly}
+      style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", boxSizing: "border-box", background: readOnly ? "#fafbfc" : "#fff", color: readOnly ? "#888" : "#222" }} />
   </div>
 );
 
@@ -266,6 +266,16 @@ export default function App() {
   const [newEmployee, setNewEmployee] = useState({ name: "", role: "", phone: "", email: "", note: "" });
   const [editingTask, setEditingTask] = useState(null); // 任務詳情 modal 當前任務
   const [newTaskDraft, setNewTaskDraft] = useState({ title: "", priority: "low", note: "" });
+  // WhatsApp tab state
+  const [waSettings, setWaSettings] = useState(null);
+  const [waWhitelist, setWaWhitelist] = useState([]);
+  const [waMessages, setWaMessages] = useState([]);
+  const [waUnresolved, setWaUnresolved] = useState([]);
+  const [waReports, setWaReports] = useState([]);
+  const [waSubTab, setWaSubTab] = useState("settings"); // settings | knowledge | prompt | whitelist | messages | unresolved | reports
+  const [waSelectedCustomer, setWaSelectedCustomer] = useState(null);
+  const [waHeartbeat, setWaHeartbeat] = useState(null);
+  const [waSecretUnlocked, setWaSecretUnlocked] = useState(false); // 輸過密碼後這次 session 內放開
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [productOrgDraft, setProductOrgDraft] = useState(null);
   const [expandedSkuGroups, setExpandedSkuGroups] = useState(new Set());
@@ -993,6 +1003,12 @@ export default function App() {
   const qStocks = useQuery({ queryKey: ["bf", "inventory_stock"], queryFn: () => fetchAllTable("inventory_stock", null), enabled: !!userId });
   const qEmployees = useQuery({ queryKey: ["bf", "employees"], queryFn: () => fetchAllTable("employees", "created_at"), enabled: !!userId });
   const qTasks = useQuery({ queryKey: ["bf", "employee_tasks"], queryFn: () => fetchAllTable("employee_tasks", "created_at"), enabled: !!userId });
+  const qWaSettings = useQuery({ queryKey: ["bf", "wa_settings"], queryFn: async () => { const { data } = await supabase.from("wa_settings").select("*").eq("id", 1).maybeSingle(); return data; }, enabled: !!userId, refetchInterval: 30000 });
+  const qWaWhitelist = useQuery({ queryKey: ["bf", "wa_whitelist"], queryFn: () => fetchAllTable("wa_whitelist", "created_at"), enabled: !!userId, refetchInterval: 30000 });
+  const qWaMessages = useQuery({ queryKey: ["bf", "wa_messages"], queryFn: async () => { const { data } = await supabase.from("wa_messages").select("*").order("created_at", { ascending: false }).limit(1000); return data || []; }, enabled: !!userId, refetchInterval: 15000 });
+  const qWaUnresolved = useQuery({ queryKey: ["bf", "wa_unresolved"], queryFn: () => fetchAllTable("wa_unresolved", "created_at", false), enabled: !!userId, refetchInterval: 30000 });
+  const qWaReports = useQuery({ queryKey: ["bf", "wa_daily_reports"], queryFn: () => fetchAllTable("wa_daily_reports", "report_date", false), enabled: !!userId, refetchInterval: 60000 });
+  const qWaHeartbeat = useQuery({ queryKey: ["bf", "wa_heartbeat"], queryFn: async () => { const { data } = await supabase.from("wa_heartbeat").select("*").eq("id", 1).maybeSingle(); return data; }, enabled: !!userId, refetchInterval: 15000 });
 
   // query data 同步到現有 useState，現存的 mutation 代碼（setCustomers 等）照舊工作
   useEffect(() => { if (qProducts.data) setProducts(qProducts.data); }, [qProducts.data]);
@@ -1003,6 +1019,12 @@ export default function App() {
   useEffect(() => { if (qStocks.data) setStocks(qStocks.data); }, [qStocks.data]);
   useEffect(() => { if (qEmployees.data) setEmployees(qEmployees.data); }, [qEmployees.data]);
   useEffect(() => { if (qTasks.data) setTasks(qTasks.data); }, [qTasks.data]);
+  useEffect(() => { if (qWaSettings.data) setWaSettings(qWaSettings.data); }, [qWaSettings.data]);
+  useEffect(() => { if (qWaWhitelist.data) setWaWhitelist(qWaWhitelist.data); }, [qWaWhitelist.data]);
+  useEffect(() => { if (qWaMessages.data) setWaMessages(qWaMessages.data); }, [qWaMessages.data]);
+  useEffect(() => { if (qWaUnresolved.data) setWaUnresolved(qWaUnresolved.data); }, [qWaUnresolved.data]);
+  useEffect(() => { if (qWaReports.data) setWaReports(qWaReports.data); }, [qWaReports.data]);
+  useEffect(() => { if (qWaHeartbeat.data) setWaHeartbeat(qWaHeartbeat.data); }, [qWaHeartbeat.data]);
 
   // 打開編輯庫存弹窗時從 stocks 載入各倉庫當前 qty
   useEffect(() => {
@@ -1225,6 +1247,7 @@ export default function App() {
     { id: "warranty", label: "保修", icon: "warning" },
     { id: "revenue", label: "營收", icon: "trend_up" },
     { id: "employees", label: "員工管理", icon: "customer" },
+    { id: "whatsapp", label: "WhatsApp", icon: "invoice" },
   ];
 
   async function handleSaveCustomer() {
@@ -2967,6 +2990,337 @@ export default function App() {
                   </div>
                 )}
               </div>
+            </div>
+          );
+        })()}
+
+        {/* WHATSAPP — AI 客服控制台 */}
+        {tab === "whatsapp" && (() => {
+          const s = waSettings || {};
+          const subNav = [
+            { id: "settings",   label: "設置 / 模式" },
+            { id: "knowledge",  label: "知識庫" },
+            { id: "prompt",     label: "Boss Prompt" },
+            { id: "whitelist",  label: "白名單" },
+            { id: "messages",   label: "對話歷史" },
+            { id: "unresolved", label: "未解決問題" },
+            { id: "reports",    label: "日報" },
+          ];
+          const saveSettings = async (patch) => {
+            const newVals = { ...s, ...patch, updated_at: new Date().toISOString() };
+            const { error } = await supabase.from("wa_settings").update(patch).eq("id", 1);
+            if (error) { alert(`保存失敗：${error.message}`); return; }
+            setWaSettings(newVals);
+            queryClient.setQueryData(["bf", "wa_settings"], newVals); // 同步 RQ 緩存，dirty 判斷才能歸零
+          };
+          const addWhitelist = async (kind, value, note) => {
+            if (!value.trim()) return;
+            const { data, error } = await supabase.from("wa_whitelist").insert({ kind, value: value.trim(), note: note?.trim() || null, active: true }).select().single();
+            if (error) { alert(`新增失敗：${error.message}`); return; }
+            setWaWhitelist(prev => [data, ...prev]);
+          };
+          const removeWhitelist = async (id) => {
+            if (!window.confirm("確定移除？")) return;
+            const { error } = await supabase.from("wa_whitelist").delete().eq("id", id);
+            if (error) { alert(`移除失敗：${error.message}`); return; }
+            setWaWhitelist(prev => prev.filter(w => w.id !== id));
+          };
+          const toggleWhitelistActive = async (row) => {
+            const { error } = await supabase.from("wa_whitelist").update({ active: !row.active }).eq("id", row.id);
+            if (error) { alert(`更新失敗：${error.message}`); return; }
+            setWaWhitelist(prev => prev.map(w => w.id === row.id ? { ...w, active: !row.active } : w));
+          };
+          const markUnresolved = async (id) => {
+            const { error } = await supabase.from("wa_unresolved").update({ resolved_at: new Date().toISOString() }).eq("id", id);
+            if (error) { alert(`更新失敗：${error.message}`); return; }
+            setWaUnresolved(prev => prev.map(u => u.id === id ? { ...u, resolved_at: new Date().toISOString() } : u));
+          };
+          // 狀態徽標：優先顯示離線（心跳超過 2 分鐘）
+          const lastBeat = waHeartbeat?.last_heartbeat_at ? new Date(waHeartbeat.last_heartbeat_at).getTime() : 0;
+          const isLive = lastBeat && (Date.now() - lastBeat < 120000);
+          const statusCode = !isLive ? (lastBeat ? "offline" : "never") : (waHeartbeat?.status || "unknown");
+          const statusMap = {
+            running:    { label: "正常運行",            color: "#22c55e", bg: "#e8f5e9", dot: "●" },
+            starting:   { label: "啟動中",              color: "#f59e0b", bg: "#fff8e1", dot: "●" },
+            cli_error:  { label: "CLI 錯誤",            color: "#ef4444", bg: "#ffe5e5", dot: "●" },
+            api_error:  { label: "API 錯誤",            color: "#f97316", bg: "#fff1e5", dot: "●" },
+            no_network: { label: "無網絡",              color: "#9ca3af", bg: "#f3f4f6", dot: "●" },
+            offline:    { label: "離線（本地服務已停）", color: "#9ca3af", bg: "#f3f4f6", dot: "○" },
+            never:      { label: "未啟動過",            color: "#9ca3af", bg: "#f3f4f6", dot: "○" },
+            unknown:    { label: "未知",                color: "#9ca3af", bg: "#f3f4f6", dot: "○" },
+          };
+          const stInfo = statusMap[statusCode] || statusMap.unknown;
+          // 敏感字段編輯密碼門檻
+          const ensureUnlocked = () => {
+            if (waSecretUnlocked) return true;
+            if (!s.admin_password) {
+              const pwd = window.prompt("首次設置管理員密碼（用於保護 API Key / Boss Prompt / Model / Base URL 編輯）：");
+              if (!pwd || !pwd.trim()) return false;
+              saveSettings({ admin_password: pwd.trim() });
+              setWaSecretUnlocked(true);
+              return true;
+            }
+            const pwd = window.prompt("請輸入管理員密碼：");
+            if (pwd === s.admin_password) { setWaSecretUnlocked(true); return true; }
+            alert("密碼錯誤");
+            return false;
+          };
+          const kindLabel = { phone: "私聊白名單（手機）", group: "群聊白名單（精確）", group_fuzzy: "群聊白名單（模糊）", staff: "客服名單（手機）" };
+          const customersMap = new Map();
+          for (const m of waMessages) {
+            if (!customersMap.has(m.customer_id)) customersMap.set(m.customer_id, []);
+            customersMap.get(m.customer_id).push(m);
+          }
+          const customerIds = [...customersMap.keys()].sort((a, b) => {
+            const la = customersMap.get(a);
+            const lb = customersMap.get(b);
+            return new Date(lb[0]?.created_at || 0) - new Date(la[0]?.created_at || 0);
+          });
+
+          return (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+                <div>
+                  <div style={{ fontSize: 26, fontWeight: 800 }}>WhatsApp AI 客服</div>
+                  <div style={{ fontSize: 13, color: "#888", marginTop: 4 }}>
+                    模式 <span style={{ fontWeight: 700, color: s.claude_mode === "api" ? "#6382ff" : "#22c55e" }}>{s.claude_mode === "api" ? "API（雲端）" : "CLI（本地）"}</span>
+                    {" · "}共 {customerIds.length} 位客戶 · {waMessages.length} 條消息 · {waUnresolved.filter(u => !u.resolved_at).length} 條未解決
+                  </div>
+                </div>
+                <div title={waHeartbeat?.error_message || (waHeartbeat?.last_heartbeat_at ? "心跳：" + new Date(waHeartbeat.last_heartbeat_at).toLocaleString("zh-HK") : "尚無心跳")}
+                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px", borderRadius: 20, background: stInfo.bg, border: "1px solid " + stInfo.color + "33" }}>
+                  <span style={{ color: stInfo.color, fontSize: 12, lineHeight: 1 }}>{stInfo.dot}</span>
+                  <span style={{ color: stInfo.color, fontSize: 13, fontWeight: 700 }}>{stInfo.label}</span>
+                </div>
+              </div>
+              {/* 子導航 */}
+              <div style={{ display: "flex", gap: 6, borderBottom: "1px solid #e8eaed", marginBottom: 20, overflowX: "auto" }}>
+                {subNav.map(n => (
+                  <button key={n.id} onClick={() => setWaSubTab(n.id)}
+                    style={{ padding: "10px 16px", background: "none", border: "none", borderBottom: "2px solid " + (waSubTab === n.id ? "#6382ff" : "transparent"), color: waSubTab === n.id ? "#6382ff" : "#888", fontSize: 14, fontWeight: waSubTab === n.id ? 700 : 500, cursor: "pointer", whiteSpace: "nowrap" }}>
+                    {n.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* SETTINGS */}
+              {waSubTab === "settings" && (
+                <div style={{ maxWidth: 720 }}>
+                  <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, padding: 20, marginBottom: 16 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>AI 模式</div>
+                    <div style={{ display: "flex", gap: 10, marginBottom: 8 }}>
+                      {[{ v: "cli", l: "CLI（本地 Claude Code，零費用）" }, { v: "api", l: "API（雲端 OpenAI 兼容，可獨立跑）" }].map(opt => {
+                        const on = (s.claude_mode || "cli") === opt.v;
+                        return (
+                          <button key={opt.v} onClick={() => saveSettings({ claude_mode: opt.v })} style={{ flex: 1, padding: "12px 14px", borderRadius: 10, border: "1px solid " + (on ? "#6382ff" : "#e0e0e0"), background: on ? "#eef2ff" : "#fff", color: on ? "#3b58d4" : "#666", fontWeight: 700, fontSize: 13, cursor: "pointer", textAlign: "left" }}>{opt.l}</button>
+                        );
+                      })}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#888", lineHeight: 1.6 }}>CLI 模式需本地開著 Claude Code + server.js；API 模式雲端獨立運行（待接入 Vercel function）。</div>
+                  </div>
+                  <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, padding: 20, marginBottom: 16 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                      <div style={{ fontSize: 15, fontWeight: 700 }}>API 配置（API 模式用）{!waSecretUnlocked && <span style={{ fontSize: 11, color: "#888", marginLeft: 8 }}>🔒 已鎖定</span>}</div>
+                      {!waSecretUnlocked ? (
+                        <button onClick={() => ensureUnlocked()} style={{ padding: "6px 12px", background: "#fff8e1", color: "#f59e0b", border: "1px solid #f4dca4", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>🔓 解鎖編輯</button>
+                      ) : <span style={{ fontSize: 11, color: "#22c55e", fontWeight: 600 }}>✓ 已解鎖</span>}
+                    </div>
+                    <Input label="Base URL" value={s.openai_base_url || ""} onChange={v => setWaSettings({ ...s, openai_base_url: v })} placeholder="https://api.openai.com/v1" readOnly={!waSecretUnlocked} />
+                    <div style={{ fontSize: 11, color: "#888", marginBottom: 14, marginTop: -8 }}>也支持任何 OpenAI 兼容中轉站 / 本地模型</div>
+                    <Input label="API Key" value={waSecretUnlocked ? (s.openai_api_key || "") : (s.openai_api_key ? "•".repeat(Math.min(s.openai_api_key.length, 40)) : "")} onChange={v => setWaSettings({ ...s, openai_api_key: v })} placeholder="sk-..." readOnly={!waSecretUnlocked} />
+                    <Input label="Model" value={s.model || ""} onChange={v => setWaSettings({ ...s, model: v })} placeholder="gpt-4o" readOnly={!waSecretUnlocked} />
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <button disabled={!waSecretUnlocked} onClick={() => saveSettings({ openai_base_url: s.openai_base_url, openai_api_key: s.openai_api_key, model: s.model })} style={{ padding: "9px 18px", background: waSecretUnlocked ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: waSecretUnlocked ? "pointer" : "not-allowed" }}>儲存 API 配置</button>
+                      <button disabled={!s.openai_base_url || !s.openai_api_key || !s.model} onClick={async () => {
+                        try {
+                          const r = await fetch(s.openai_base_url.replace(/\/+$/, '') + '/chat/completions', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + s.openai_api_key },
+                            body: JSON.stringify({ model: s.model, messages: [{ role: 'user', content: 'ping（只需回復 pong）' }], max_tokens: 10 })
+                          });
+                          const d = await r.json();
+                          if (r.ok && d.choices?.[0]?.message?.content) {
+                            alert(`✓ 連接成功\n模型回復：${d.choices[0].message.content.slice(0, 100)}`);
+                          } else {
+                            alert(`✗ 連接失敗 (${r.status})：${d.error?.message || JSON.stringify(d).slice(0, 200)}`);
+                          }
+                        } catch (err) {
+                          alert(`✗ 網絡錯誤：${err.message}`);
+                        }
+                      }} style={{ padding: "9px 18px", background: (!s.openai_base_url || !s.openai_api_key || !s.model) ? "#e0e0e0" : "#22c55e", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: (s.openai_base_url && s.openai_api_key && s.model) ? "pointer" : "not-allowed" }}>測試連接</button>
+                    </div>
+                  </div>
+                  <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, padding: 20 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>運行參數</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
+                      <Input label="BOT 名字（AI 自稱，注入 prompt）" value={s.bot_name || ""} onChange={v => setWaSettings({ ...s, bot_name: v })} placeholder="例如 Allen / 小克" />
+                      <Input label="BOT WhatsApp 手機號（純數字）" value={s.bot_phone || ""} onChange={v => setWaSettings({ ...s, bot_phone: v })} placeholder="852xxxxxxxx" />
+                      <Input label="老板聊天名（BOSS_CHAT_NAME）" value={s.boss_chat_name || ""} onChange={v => setWaSettings({ ...s, boss_chat_name: v })} placeholder="" />
+                      <Input label="真人抢答等待秒數" type="number" value={s.reply_delay_base ?? 60} onChange={v => setWaSettings({ ...s, reply_delay_base: parseInt(v) || 60 })} />
+                      <Input label="冷卻分鐘（真人回復後）" type="number" value={s.cooldown_minutes ?? 30} onChange={v => setWaSettings({ ...s, cooldown_minutes: parseInt(v) || 30 })} />
+                      <Input label="每用戶每分鐘上限" type="number" value={s.max_replies_per_min ?? 3} onChange={v => setWaSettings({ ...s, max_replies_per_min: parseInt(v) || 3 })} />
+                      <Input label="日報發送時（0-23）" type="number" value={s.daily_report_hour ?? 22} onChange={v => setWaSettings({ ...s, daily_report_hour: parseInt(v) || 22 })} />
+                    </div>
+                    <button onClick={() => saveSettings({ bot_name: s.bot_name, bot_phone: s.bot_phone, boss_chat_name: s.boss_chat_name, reply_delay_base: s.reply_delay_base, cooldown_minutes: s.cooldown_minutes, max_replies_per_min: s.max_replies_per_min, daily_report_hour: s.daily_report_hour })} style={{ padding: "9px 18px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", marginTop: 8 }}>儲存運行參數</button>
+                  </div>
+                </div>
+              )}
+
+              {/* KNOWLEDGE */}
+              {waSubTab === "knowledge" && (() => {
+                const serverKb = qWaSettings.data?.knowledge || "";
+                const localKb = s.knowledge || "";
+                const dirty = localKb !== serverKb;
+                return (
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                      <div style={{ fontSize: 13, color: "#888" }}>這裡是 AI 客服回答問題時用的知識庫 —— 老板隨時編輯，本地 server.js 每條消息處理時實時拉取最新版本。</div>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        {dirty && <span style={{ fontSize: 11, color: "#f59e0b", fontWeight: 600 }}>● 未儲存</span>}
+                        <button disabled={!dirty} onClick={() => saveSettings({ knowledge: localKb })} style={{ padding: "7px 18px", background: dirty ? "#22c55e" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: dirty ? "pointer" : "not-allowed" }}>儲存知識庫</button>
+                        {dirty && <button onClick={() => setWaSettings({ ...s, knowledge: serverKb })} style={{ padding: "7px 14px", background: "#f5f5f5", color: "#666", border: "none", borderRadius: 8, fontSize: 12, cursor: "pointer" }}>取消</button>}
+                      </div>
+                    </div>
+                    <textarea value={localKb} onChange={e => setWaSettings({ ...s, knowledge: e.target.value })} placeholder="# 產品線 1 ..." style={{ width: "100%", minHeight: "60vh", padding: 16, borderRadius: 10, border: "1px solid " + (dirty ? "#f59e0b" : "#e0e0e0"), fontSize: 13, outline: "none", fontFamily: "ui-monospace, monospace", resize: "vertical", boxSizing: "border-box" }} />
+                    <div style={{ fontSize: 11, color: "#aaa", marginTop: 8 }}>{localKb.length} 字符{dirty ? "（與雲端不同，點「儲存知識庫」才生效）" : " · 已同步"}</div>
+                  </div>
+                );
+              })()}
+
+              {/* BOSS PROMPT */}
+              {waSubTab === "prompt" && (
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                    <div style={{ fontSize: 13, color: "#888" }}>老板聊天（BOSS_CHAT_NAME）走的是獨立 prompt，不走客服知識庫。{!waSecretUnlocked && <span style={{ marginLeft: 6, color: "#f59e0b", fontWeight: 600 }}>🔒 已鎖定</span>}</div>
+                    {!waSecretUnlocked ? (
+                      <button onClick={() => ensureUnlocked()} style={{ padding: "6px 12px", background: "#fff8e1", color: "#f59e0b", border: "1px solid #f4dca4", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>🔓 解鎖編輯</button>
+                    ) : <span style={{ fontSize: 11, color: "#22c55e", fontWeight: 600 }}>✓ 已解鎖</span>}
+                  </div>
+                  {waSecretUnlocked ? (
+                    <>
+                      <textarea value={s.boss_prompt || ""}
+                        onChange={e => setWaSettings({ ...s, boss_prompt: e.target.value })}
+                        onBlur={() => saveSettings({ boss_prompt: s.boss_prompt || "" })}
+                        placeholder="你的名字叫小克..."
+                        style={{ width: "100%", minHeight: "50vh", padding: 16, borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", fontFamily: "ui-monospace, monospace", resize: "vertical", boxSizing: "border-box", background: "#fff", color: "#222" }} />
+                      <div style={{ fontSize: 11, color: "#aaa", marginTop: 8 }}>失焦自動保存 · {(s.boss_prompt || "").length} 字符</div>
+                    </>
+                  ) : (
+                    <div style={{ width: "100%", minHeight: "50vh", padding: "80px 24px", borderRadius: 10, border: "1px dashed #e0e0e0", background: "#fafbfc", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, color: "#aaa", fontSize: 13, textAlign: "center", boxSizing: "border-box" }}>
+                      <div style={{ fontSize: 32 }}>🔒</div>
+                      <div style={{ fontWeight: 700, color: "#888", fontSize: 15 }}>Boss Prompt 已加密</div>
+                      <div style={{ color: "#aaa", fontSize: 12 }}>目前有 {(s.boss_prompt || "").length} 字符內容<br />點右上角「解鎖編輯」輸入管理員密碼查看 / 修改</div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* WHITELIST */}
+              {waSubTab === "whitelist" && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+                  {["phone", "group", "group_fuzzy", "staff"].map(kind => {
+                    const rows = waWhitelist.filter(w => w.kind === kind);
+                    return (
+                      <div key={kind} style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, padding: 16 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>{kindLabel[kind]} <span style={{ color: "#aaa", fontSize: 11, marginLeft: 6 }}>{rows.length}</span></div>
+                        <form onSubmit={e => { e.preventDefault(); const f = e.target.elements; addWhitelist(kind, f.val.value, f.note.value); f.val.value = ""; f.note.value = ""; }} style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+                          <input name="val" placeholder={kind === "phone" || kind === "staff" ? "852xxx" : "群名"} style={{ flex: 2, padding: "7px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 12, outline: "none" }} />
+                          <input name="note" placeholder="備註（可選）" style={{ flex: 1, padding: "7px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 12, outline: "none" }} />
+                          <button type="submit" style={{ padding: "7px 14px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>加</button>
+                        </form>
+                        {rows.length === 0 ? (
+                          <div style={{ fontSize: 11, color: "#aaa", fontStyle: "italic", padding: "8px 0" }}>尚無記錄</div>
+                        ) : rows.map(w => (
+                          <div key={w.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: "1px solid #f5f5f5", fontSize: 12 }}>
+                            <input type="checkbox" checked={w.active} onChange={() => toggleWhitelistActive(w)} style={{ width: 14, height: 14, cursor: "pointer" }} />
+                            <span style={{ flex: 1, color: w.active ? "#222" : "#aaa", textDecoration: w.active ? "none" : "line-through" }}>{w.value}{w.note ? <span style={{ color: "#999", marginLeft: 6 }}>· {w.note}</span> : null}</span>
+                            <button onClick={() => removeWhitelist(w.id)} style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 14 }}>×</button>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* MESSAGES */}
+              {waSubTab === "messages" && (
+                <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 14, minHeight: "60vh" }}>
+                  <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                    <div style={{ padding: "12px 14px", borderBottom: "1px solid #f0f0f0", fontSize: 13, fontWeight: 700 }}>客戶 <span style={{ color: "#aaa", marginLeft: 4 }}>{customerIds.length}</span></div>
+                    <div style={{ flex: 1, overflowY: "auto" }}>
+                      {customerIds.length === 0 ? <div style={{ padding: 16, fontSize: 12, color: "#aaa", fontStyle: "italic" }}>尚無對話</div>
+                      : customerIds.map(cid => {
+                        const msgs = customersMap.get(cid);
+                        const active = waSelectedCustomer === cid;
+                        return (
+                          <div key={cid} onClick={() => setWaSelectedCustomer(cid)} style={{ padding: "10px 14px", borderBottom: "1px solid #f5f5f5", cursor: "pointer", background: active ? "#eef2ff" : "transparent" }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: active ? "#3b58d4" : "#333", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cid}</div>
+                            <div style={{ fontSize: 11, color: "#999", marginTop: 2 }}>{msgs.length} 條 · {msgs[0]?.created_at?.slice(5, 16).replace("T", " ") || ""}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, padding: 16, overflowY: "auto", maxHeight: "70vh" }}>
+                    {!waSelectedCustomer ? <div style={{ color: "#aaa", fontSize: 13, textAlign: "center", paddingTop: 80 }}>← 從左側選擇客戶查看對話</div>
+                    : (() => {
+                      const msgs = [...(customersMap.get(waSelectedCustomer) || [])].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+                      return (
+                        <>
+                          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12, paddingBottom: 10, borderBottom: "1px solid #f0f0f0" }}>{waSelectedCustomer} · {msgs.length} 條</div>
+                          {msgs.map(m => (
+                            <div key={m.id} style={{ marginBottom: 12, display: "flex", justifyContent: m.role === "assistant" ? "flex-start" : "flex-end" }}>
+                              <div style={{ maxWidth: "75%", background: m.role === "assistant" ? "#f0f4ff" : "#e8f5e9", borderRadius: 10, padding: "8px 12px", fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
+                                {m.content}
+                                <div style={{ fontSize: 10, color: "#999", marginTop: 4 }}>{new Date(m.created_at).toLocaleString("zh-HK", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {/* UNRESOLVED */}
+              {waSubTab === "unresolved" && (
+                <div>
+                  <div style={{ fontSize: 13, color: "#888", marginBottom: 10 }}>共 {waUnresolved.length} 條 · 未處理 {waUnresolved.filter(u => !u.resolved_at).length} · 已解決 {waUnresolved.filter(u => u.resolved_at).length}</div>
+                  {waUnresolved.length === 0 ? (
+                    <div style={{ background: "#fff", borderRadius: 10, padding: 40, textAlign: "center", color: "#aaa", border: "1px dashed #e0e0e0" }}>暫無未解決問題</div>
+                  ) : waUnresolved.map(u => (
+                    <div key={u.id} style={{ background: "#fff", border: "1px solid " + (u.resolved_at ? "#e8f5e9" : "#fce4ec"), borderRadius: 10, padding: "12px 16px", marginBottom: 8, display: "flex", gap: 12, alignItems: "flex-start" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, color: u.resolved_at ? "#999" : "#222", textDecoration: u.resolved_at ? "line-through" : "none" }}>{u.question}</div>
+                        <div style={{ fontSize: 11, color: "#888", marginTop: 4, display: "flex", gap: 10 }}>
+                          <span>{u.customer_id}</span>
+                          <span>{(u.categories || []).join(" · ") || "未分類"}</span>
+                          <span>{new Date(u.created_at).toLocaleString("zh-HK", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                        </div>
+                      </div>
+                      {!u.resolved_at && <button onClick={() => markUnresolved(u.id)} style={{ background: "#e8f5e9", border: "none", color: "#22c55e", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>✓ 標記已解決</button>}
+                      {u.resolved_at && <span style={{ fontSize: 11, color: "#22c55e", whiteSpace: "nowrap" }}>✓ {new Date(u.resolved_at).toLocaleString("zh-HK", { month: "2-digit", day: "2-digit" })}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* REPORTS */}
+              {waSubTab === "reports" && (
+                <div>
+                  <div style={{ fontSize: 13, color: "#888", marginBottom: 10 }}>共 {waReports.length} 份日報</div>
+                  {waReports.length === 0 ? (
+                    <div style={{ background: "#fff", borderRadius: 10, padding: 40, textAlign: "center", color: "#aaa", border: "1px dashed #e0e0e0" }}>暫無日報（server.js 每日 {s.daily_report_hour ?? 22}:00 自動生成）</div>
+                  ) : waReports.map(r => (
+                    <details key={r.id} style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 10, padding: "14px 18px", marginBottom: 10 }}>
+                      <summary style={{ cursor: "pointer", fontSize: 14, fontWeight: 700 }}>{r.report_date} <span style={{ fontSize: 11, color: "#888", marginLeft: 10, fontWeight: 500 }}>{r.unresolved_count} 條未解決</span></summary>
+                      <pre style={{ marginTop: 10, fontSize: 12, color: "#333", whiteSpace: "pre-wrap", fontFamily: "inherit", lineHeight: 1.6 }}>{r.content}</pre>
+                    </details>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })()}
