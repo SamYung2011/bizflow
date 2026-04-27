@@ -10,6 +10,9 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
+// Chrome 雲端版扩展最新版本（發版時跟 chrome-extension-cloud/manifest.json 的 version 同步改）
+const LATEST_EXT_VERSION = "1.0";
+
 // 全量拉取指定表（HEAD 先取 count，再並行分頁拉所有資料）
 async function fetchAllTable(table, orderCol, ascending = true) {
   const size = 1000;
@@ -275,6 +278,8 @@ export default function App() {
   const [waUnresolved, setWaUnresolved] = useState([]);
   const [waReports, setWaReports] = useState([]);
   const [waLogs, setWaLogs] = useState([]);
+  const [waClients, setWaClients] = useState([]);
+  const [showInstallTutorial, setShowInstallTutorial] = useState(false);
   const [waSubTab, setWaSubTab] = useState("settings"); // settings | knowledge | prompt | whitelist | messages | unresolved | reports | logs
   const [waSelectedCustomer, setWaSelectedCustomer] = useState(null);
   const [waHeartbeat, setWaHeartbeat] = useState(null);
@@ -1016,6 +1021,7 @@ export default function App() {
   const qWaReports = useQuery({ queryKey: ["bf", "wa_daily_reports"], queryFn: () => fetchAllTable("wa_daily_reports", "report_date", false), enabled: !!userId, refetchInterval: 60000 });
   const qWaHeartbeat = useQuery({ queryKey: ["bf", "wa_heartbeat"], queryFn: async () => { const { data } = await supabase.from("wa_heartbeat").select("*").eq("id", 1).maybeSingle(); return data; }, enabled: !!userId, refetchInterval: 15000 });
   const qWaLogs = useQuery({ queryKey: ["bf", "wa_logs"], queryFn: async () => { const { data } = await supabase.from("wa_logs").select("*").order("created_at", { ascending: false }).limit(500); return data || []; }, enabled: !!userId, refetchInterval: 5000 });
+  const qWaClients = useQuery({ queryKey: ["bf", "wa_clients"], queryFn: async () => { const { data } = await supabase.from("wa_clients").select("*").order("last_seen", { ascending: false }); return data || []; }, enabled: !!userId, refetchInterval: 15000 });
 
   // query data 同步到現有 useState，現存的 mutation 代碼（setCustomers 等）照舊工作
   useEffect(() => { if (qProducts.data) setProducts(qProducts.data); }, [qProducts.data]);
@@ -1033,6 +1039,7 @@ export default function App() {
   useEffect(() => { if (qWaReports.data) setWaReports(qWaReports.data); }, [qWaReports.data]);
   useEffect(() => { if (qWaHeartbeat.data) setWaHeartbeat(qWaHeartbeat.data); }, [qWaHeartbeat.data]);
   useEffect(() => { if (qWaLogs.data) setWaLogs(qWaLogs.data); }, [qWaLogs.data]);
+  useEffect(() => { if (qWaClients.data) setWaClients(qWaClients.data); }, [qWaClients.data]);
 
   // 打開編輯庫存弹窗時從 stocks 載入各倉庫當前 qty
   useEffect(() => {
@@ -3158,16 +3165,60 @@ export default function App() {
                       })}
                     </div>
                     <div style={{ fontSize: 11, color: "#888", lineHeight: 1.6 }}>{t("CLI / API 模式需本地開著 server.js。")}<b>{t("API 雲端")}</b>{t("模式由 Supabase Edge Function + pg_cron 接管，老板那邊只需安裝 Chrome 雲端版插件。")}</div>
-                    {(s.claude_mode === "api_cloud") && (
-                      <div style={{ marginTop: 12, padding: "10px 14px", background: "#fff8e1", border: "1px solid #f4dca4", borderRadius: 8, fontSize: 12, color: "#8a6900", lineHeight: 1.7 }}>
-                        ⚠️ {t("雲端模式不支持")} <b>{t("日報自動生成")}</b> {t("與")} <b>{t("Boss Prompt 獨立邏輯")}</b>{t("，這兩個功能仍需本地 server.js 運行。")}<br />
-                        {t("雲端 endpoint：")}<code style={{ background: "#fff", padding: "1px 6px", borderRadius: 4, fontSize: 11 }}>https://qxcmimgqsrwkrhqhzpga.supabase.co/functions/v1/wa-message</code>
-                        <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center" }}>
-                          <a href="/whatsapp-extension-cloud.zip" download style={{ padding: "8px 14px", background: "#22c55e", color: "#fff", borderRadius: 8, fontSize: 12, fontWeight: 700, textDecoration: "none" }}>📦 {t("下載 Chrome 插件（雲端版）")}</a>
-                          <span style={{ fontSize: 11, color: "#8a6900" }}>{t("下載後解壓 → chrome://extensions → 開啟開發者模式 → 載入已解壓的擴展")}</span>
+                    {(s.claude_mode === "api_cloud") && (() => {
+                      const liveClients = waClients.filter(c => Date.now() - new Date(c.last_seen).getTime() < 90000);
+                      const outdated = liveClients.filter(c => c.version && c.version !== LATEST_EXT_VERSION);
+                      return (
+                        <div style={{ marginTop: 12, padding: "12px 16px", background: "#fff8e1", border: "1px solid #f4dca4", borderRadius: 8, fontSize: 12, color: "#8a6900", lineHeight: 1.7 }}>
+                          ⚠️ {t("雲端模式不支持")} <b>{t("日報自動生成")}</b> {t("與")} <b>{t("Boss Prompt 獨立邏輯")}</b>{t("，這兩個功能仍需本地 server.js 運行。")}<br />
+                          {t("雲端 endpoint：")}<code style={{ background: "#fff", padding: "1px 6px", borderRadius: 4, fontSize: 11 }}>https://qxcmimgqsrwkrhqhzpga.supabase.co/functions/v1/wa-message</code>
+
+                          {/* 在線雲端客戶端狀態 */}
+                          <div style={{ marginTop: 12, padding: "10px 12px", background: "#fff", borderRadius: 6, border: "1px solid #f4dca4" }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: "#333", marginBottom: 6 }}>
+                              {t("在線雲端客戶端")}：
+                              <span style={{ color: liveClients.length > 0 ? "#22c55e" : "#999", marginLeft: 6 }}>
+                                {liveClients.length === 0 ? `0（${t("無人在線")}）` : `${liveClients.length} ${t("個")}`}
+                              </span>
+                              {outdated.length > 0 && (
+                                <span style={{ marginLeft: 10, color: "#c0392b", fontWeight: 700 }}>
+                                  ⚠️ {outdated.length} {t("個版本落後，請通知對方重新下載")}
+                                </span>
+                              )}
+                            </div>
+                            {liveClients.length > 0 && (
+                              <div style={{ fontSize: 11, color: "#666", display: "grid", gap: 4 }}>
+                                {liveClients.map(c => {
+                                  const ageS = Math.floor((Date.now() - new Date(c.last_seen).getTime()) / 1000);
+                                  const isOld = c.version && c.version !== LATEST_EXT_VERSION;
+                                  return (
+                                    <div key={c.client_id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: ageS < 60 ? "#22c55e" : "#f59e0b", display: "inline-block" }}></span>
+                                      <span style={{ fontFamily: "Consolas, Menlo, monospace" }}>{c.ua || "?"}</span>
+                                      <span style={{ color: isOld ? "#c0392b" : "#666", fontWeight: isOld ? 700 : 400 }}>v{c.version || "?"}{isOld ? ` ⚠️ → v${LATEST_EXT_VERSION}` : ""}</span>
+                                      <span style={{ color: "#999" }}>· {ageS}s {t("前")}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* 下載按鈕 + 教程 + 備注 */}
+                          <div style={{ marginTop: 12, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                            <a href="/whatsapp-extension-cloud.zip" download style={{ padding: "8px 14px", background: "#22c55e", color: "#fff", borderRadius: 8, fontSize: 12, fontWeight: 700, textDecoration: "none" }}>
+                              📦 {t("下載 Chrome 插件（雲端版）")} v{LATEST_EXT_VERSION}
+                            </a>
+                            <button onClick={() => setShowInstallTutorial(true)} style={{ padding: "8px 14px", background: "#fff", color: "#8a6900", border: "1px solid #f4dca4", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                              📖 {t("查看安裝教程")}
+                            </button>
+                          </div>
+                          <div style={{ marginTop: 8, padding: "8px 12px", background: "#fdecea", border: "1px solid #f5c6cb", borderRadius: 6, fontSize: 11, color: "#a32424", lineHeight: 1.6 }}>
+                            ❗ {t("如果下載插件後不需要使用，請去 chrome://extensions 關閉插件，否則網頁 WhatsApp 會一直試圖回覆消息。")}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
                   </div>
                   <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, padding: 20, marginBottom: 16 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
@@ -3482,6 +3533,65 @@ export default function App() {
           );
         })()}
       </main>
+
+      {/* INSTALL TUTORIAL MODAL */}
+      {showInstallTutorial && (
+        <div onClick={() => setShowInstallTutorial(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, width: 600, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+              <div style={{ fontSize: 20, fontWeight: 800 }}>📖 {t("Chrome 插件安裝教程")}</div>
+              <button onClick={() => setShowInstallTutorial(false)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#999" }}>×</button>
+            </div>
+
+            <div style={{ marginBottom: 22 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10, color: "#22c55e" }}>🆕 {t("首次安裝")}</div>
+              <ol style={{ paddingLeft: 20, fontSize: 13, color: "#333", lineHeight: 1.9, margin: 0 }}>
+                <li>{t("點擊上面綠色「下載 Chrome 插件」按鈕，下載 zip")}</li>
+                <li>{t("解壓 zip（右鍵 → 解壓全部 / Mac 雙擊）到任意資料夾")}</li>
+                <li>{t("在 Chrome 地址欄輸入：")}<code style={{ background: "#f5f5f5", padding: "1px 6px", borderRadius: 3, fontSize: 12 }}>chrome://extensions</code>{t("（不加 https）")}</li>
+                <li>{t("打開右上角「開發者模式」開關")}</li>
+                <li>{t("點擊左上角「載入已解壓的擴充功能」")}</li>
+                <li>{t("選擇剛才解壓的資料夾，確認")}</li>
+                <li>{t("看到「WhatsApp AI 客服 (雲端)」出現在列表 = 成功")}</li>
+                <li>{t("打開 web.whatsapp.com，登入 WhatsApp Web，插件自動運行")}</li>
+              </ol>
+            </div>
+
+            <div style={{ marginBottom: 22 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10, color: "#6382ff" }}>🔄 {t("更新版本")}</div>
+              <ol style={{ paddingLeft: 20, fontSize: 13, color: "#333", lineHeight: 1.9, margin: 0 }}>
+                <li>{t("下載新版 zip 並解壓（覆蓋舊資料夾或新建一個都可以）")}</li>
+                <li>{t("打開 chrome://extensions")}</li>
+                <li>{t("找到「WhatsApp AI 客服 (雲端)」舊版，點下方「移除」")}</li>
+                <li>{t("再點左上角「載入已解壓的擴充功能」，選新版資料夾")}</li>
+                <li>{t("重新打開 web.whatsapp.com，新版自動運行")}</li>
+              </ol>
+              <div style={{ marginTop: 10, padding: "8px 12px", background: "#e3f2fd", borderRadius: 6, fontSize: 12, color: "#1565c0" }}>
+                💡 {t("為什麼要更新：WhatsApp Web 經常更新內部代碼，舊版插件可能點擊聊天失敗、扫不到未讀。版本落後時這個頁面會紅字提示。")}
+              </div>
+            </div>
+
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10, color: "#c0392b" }}>⚠️ {t("不需要使用時")}</div>
+              <ol style={{ paddingLeft: 20, fontSize: 13, color: "#333", lineHeight: 1.9, margin: 0 }}>
+                <li>{t("打開 chrome://extensions")}</li>
+                <li>{t("找到「WhatsApp AI 客服 (雲端)」")}</li>
+                <li>{t("關閉右下角開關（變灰）= 暫停運行")}</li>
+                <li>{t("或點「移除」徹底刪除插件")}</li>
+              </ol>
+              <div style={{ marginTop: 10, padding: "8px 12px", background: "#fdecea", borderRadius: 6, fontSize: 12, color: "#a32424" }}>
+                ❗ {t("不關閉的話，只要瀏覽器開著 WhatsApp Web，插件就會一直自動回復客戶消息。")}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 22, textAlign: "right" }}>
+              <button onClick={() => setShowInstallTutorial(false)} style={{ padding: "10px 24px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                {t("我明白了")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* PENDING MERGE PROMPT MODAL */}
       {pendingMerge && (() => {
