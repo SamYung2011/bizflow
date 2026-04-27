@@ -5,6 +5,30 @@ import { createContext, useContext, useState, useEffect } from "react";
 const STORAGE_KEY = "bizflow-lang";
 
 const DICT_EN = {
+  // ── server.js log category badges（WhatsApp tab → 日誌 子 tab 上顯示）──
+  // server.js 寫入 wa_logs.category 是固定中文，前端渲染時 t() 翻譯成英文 badge
+  "启动": "Startup",
+  "重启": "Restart",
+  "恢复": "Recovery",
+  "配置": "Config",
+  "模式": "Mode",
+  "知识库": "Knowledge",
+  "Supabase": "Supabase",
+  "清扫": "Cleanup",
+  "日报": "Daily Report",
+  "操作": "Action",
+  "错误": "Error",
+  "收到": "Received",
+  "回复入队": "Reply Queued",
+  "历史": "History",
+  "跳过": "Skipped",
+  "退避": "Backoff",
+  "限流": "Rate Limit",
+  "生成": "Generating",
+  "等待": "Waiting",
+  "未解决": "Unresolved",
+  "图片": "Image",
+
   // ── 主导航（左侧栏）──
   "業務管理系統": "Business Management",
   "總覽": "Dashboard",

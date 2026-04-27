@@ -3429,11 +3429,11 @@ export default function App() {
                       <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 10, padding: 12, maxHeight: "70vh", overflowY: "auto", fontFamily: "Consolas, Menlo, monospace", fontSize: 12, lineHeight: 1.7 }}>
                         {waLogs.map(r => {
                           const c = catColor[r.category] || { bg: "#f5f5f5", color: "#666" };
-                          const ts = new Date(r.created_at).toLocaleString("zh-HK", { hour12: false });
+                          const ts = new Date(r.created_at).toLocaleString(lang === "en" ? "en-HK" : "zh-HK", { hour12: false });
                           return (
                             <div key={r.id} style={{ display: "flex", gap: 10, padding: "4px 0", borderBottom: "1px solid #fafafa" }}>
                               <span style={{ color: "#999", flexShrink: 0, width: 140 }}>{ts}</span>
-                              <span style={{ background: c.bg, color: c.color, padding: "1px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700, flexShrink: 0, alignSelf: "center", minWidth: 60, textAlign: "center" }}>{r.category}</span>
+                              <span style={{ background: c.bg, color: c.color, padding: "1px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700, flexShrink: 0, alignSelf: "center", minWidth: 60, textAlign: "center" }}>{t(r.category)}</span>
                               <span style={{ color: "#333", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{r.message}</span>
                             </div>
                           );
