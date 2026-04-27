@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@supabase/supabase-js";
 import { INVOICE_SHELL_HEAD, INVOICE_PAGE, INVOICE_SHELL_TAIL } from "./invoiceTemplate.js";
 import { RECEIPT_FRAGMENT } from "./receiptTemplate.js";
+import { useT } from "./i18n.jsx";
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -247,6 +248,7 @@ function printInvoice(inv, customer, items, products = [], mode = { invoice: tru
 
 // ── MAIN APP ───────────────────────────────────────────────────────────────────
 export default function App() {
+  const { t, lang, setLang } = useT();
   // Supabase Auth：session 由 Supabase SDK 管理（localStorage 自動持久化 + 自動 refresh）
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -365,9 +367,9 @@ export default function App() {
     const { vc, clickedCid } = rollbackOpen;
     const primaryCid = vc.id;
     const affected = Array.from(rollbackAffected);
-    if (affected.length === 0) { alert("請至少勾選一條要回退的記錄"); return; }
-    if (rollbackTarget === "mergeTo" && !rollbackMergeTo) { alert("請選擇要合併到的客戶"); return; }
-    if (rollbackTarget === "mergeTo" && affected.includes(rollbackMergeTo)) { alert("不能合併到自己"); return; }
+    if (affected.length === 0) { alert(t("請至少勾選一條要回退的記錄")); return; }
+    if (rollbackTarget === "mergeTo" && !rollbackMergeTo) { alert(t("請選擇要合併到的客戶")); return; }
+    if (rollbackTarget === "mergeTo" && affected.includes(rollbackMergeTo)) { alert(t("不能合併到自己")); return; }
     setRollbackBusy(true);
     const MULTI_DB = ["phone", "phone_mainland", "email", "address", "car_make", "car_model"];
     const patches = new Map(); // cid -> patch
@@ -397,7 +399,7 @@ export default function App() {
     }
     for (const [cid, patch] of patches) {
       const { error } = await supabase.from("customers").update(patch).eq("id", cid);
-      if (error) { setRollbackBusy(false); alert("回退失敗：" + error.message); return; }
+      if (error) { setRollbackBusy(false); alert(t("回退失敗：") + error.message); return; }
     }
     if (patches.size > 0) {
       setCustomers(prev => prev.map(c => patches.has(c.id) ? { ...c, ...patches.get(c.id) } : c));
@@ -407,10 +409,10 @@ export default function App() {
     setMergeHistoryOpen(null);
   }
   async function handleUnmerge(childCid) {
-    const ok = window.confirm(`確定撤銷此合併？該記錄會變回獨立客戶，發票關聯不變。`);
+    const ok = window.confirm(t("確定撤銷此合併？該記錄會變回獨立客戶，發票關聯不變。"));
     if (!ok) return;
     const { error } = await supabase.from("customers").update({ parent_id: null }).eq("id", childCid);
-    if (error) { alert("撤銷失敗：" + error.message); return; }
+    if (error) { alert(t("撤銷失敗：") + error.message); return; }
     setCustomers(prev => prev.map(c => c.id === childCid ? { ...c, parent_id: null } : c));
   }
   async function handleUpgradePhysical(vc) {
@@ -419,13 +421,13 @@ export default function App() {
     const siblings = (vc.groupCids || []).filter(id => id !== primaryCid);
     if (siblings.length === 0) return;
     const ok = window.confirm(
-      `確定把 ${siblings.length} 條疑似重複的記錄物理合併到「${vc.name || '(無名)'}」?\n\n` +
-      `合併後這些記錄會掛在主記錄下，字段（電話/郵箱/地址等）歸主記錄管理；\n` +
-      `下次編輯時刪除字段才會真生效。可在合併記錄裡隨時點「撤銷合併」還原。`
+      `${t("確定把")} ${siblings.length} ${t("條疑似重複的記錄物理合併到")}「${vc.name || t('(無名)')}」?\n\n` +
+      `${t("合併後這些記錄會掛在主記錄下，字段（電話/郵箱/地址等）歸主記錄管理；")}\n` +
+      t("下次編輯時刪除字段才會真生效。可在合併記錄裡隨時點「撤銷合併」還原。")
     );
     if (!ok) return;
     const { error } = await supabase.from("customers").update({ parent_id: primaryCid }).in("id", siblings);
-    if (error) { alert("升級物理合併失敗：" + error.message); return; }
+    if (error) { alert(t("升級物理合併失敗：") + error.message); return; }
     setCustomers(prev => prev.map(c => siblings.includes(c.id) ? { ...c, parent_id: primaryCid } : c));
     setMergeHistoryOpen(null);
   }
@@ -466,7 +468,7 @@ export default function App() {
     console.log("[SAVE] patch", patch);
     const { data: updData, error, status: updStatus } = await supabase.from("customers").update(patch).eq("id", editCustCid).select();
     console.log("[SAVE] update result", { updData, error, updStatus });
-    if (error) { setEditCustSaving(false); alert("保存失敗：" + error.message); return; }
+    if (error) { setEditCustSaving(false); alert(t("保存失敗：") + error.message); return; }
     // 多值字段「反向清理」：form 裡被刪除的值，合并组内其他成員（rule 1 獨立 + 物理子）
     // 對應字段也要移除，否則 customerGroups 聚合會把被刪的值從其他成員裡拉回來。
     const splitMulti = v => String(v || "").split(/\n+/).map(s => s.trim()).filter(Boolean);
@@ -502,7 +504,7 @@ export default function App() {
     }
     for (const [sibCid, sibPatch] of siblingPatchMap) {
       const { error: e } = await supabase.from("customers").update(sibPatch).eq("id", sibCid);
-      if (e) { setEditCustSaving(false); alert("關聯記錄更新失敗：" + e.message); return; }
+      if (e) { setEditCustSaving(false); alert(t("關聯記錄更新失敗：") + e.message); return; }
     }
     if (siblingPatchMap.size > 0) {
       setCustomers(prev => prev.map(c => siblingPatchMap.has(c.id) ? { ...c, ...siblingPatchMap.get(c.id) } : c));
@@ -526,7 +528,7 @@ export default function App() {
     }
     if (cidsToDowngrade.length > 0) {
       const { error: e } = await supabase.from("customers").update({ parent_id: null }).in("id", cidsToDowngrade);
-      if (e) { setEditCustSaving(false); alert("別名降級失敗：" + e.message); return; }
+      if (e) { setEditCustSaving(false); alert(t("別名降級失敗：") + e.message); return; }
     }
     // Add: 先查當前合并组里 rule 1 的独立成员，同名直接 UPDATE parent_id；否則 INSERT 新子記錄
     const gid = customerGroups.idToGroup.get(editCustCid);
@@ -542,14 +544,14 @@ export default function App() {
       const match = ruleOneSiblings.find(s => !usedSiblingIds.has(s.id) && normName(s.name) === normName(aliasName));
       if (match) {
         const { data, error: e } = await supabase.from("customers").update({ parent_id: editCustCid }).eq("id", match.id).select().single();
-        if (e) { setEditCustSaving(false); alert("別名合併失敗：" + e.message); return; }
+        if (e) { setEditCustSaving(false); alert(t("別名合併失敗：") + e.message); return; }
         usedSiblingIds.add(match.id);
         if (data) adoptedRows.push(data);
       } else {
         const { data, error: e } = await supabase.from("customers").insert({
           name: aliasName, parent_id: editCustCid, type: editCustForm.type || "Regular"
         }).select().single();
-        if (e) { setEditCustSaving(false); alert("別名新增失敗：" + e.message); return; }
+        if (e) { setEditCustSaving(false); alert(t("別名新增失敗：") + e.message); return; }
         if (data) insertedRows.push(data);
       }
     }
@@ -580,13 +582,13 @@ export default function App() {
   const [printFieldChoices, setPrintFieldChoices] = useState({}); // { [field]: selected_value }
   const splitMulti = v => String(v || "").split(/\n+/).map(s => s.trim()).filter(Boolean);
   const PRINT_FIELD_DEFS = [
-    { key: "name", label: "姓名", arr: "allNames" },
-    { key: "phone", label: "香港電話", arr: "allPhones" },
-    { key: "phone_mainland", label: "內地電話", arr: "allPhoneMainlands" },
-    { key: "email", label: "郵箱", arr: "allEmails" },
-    { key: "address", label: "地址", arr: "allAddresses" },
-    { key: "car_make", label: "車品牌", arr: "allCarMakes" },
-    { key: "car_model", label: "車型", arr: "allCarModels" },
+    { key: "name", label: t("姓名"), arr: "allNames" },
+    { key: "phone", label: t("香港電話"), arr: "allPhones" },
+    { key: "phone_mainland", label: t("內地電話"), arr: "allPhoneMainlands" },
+    { key: "email", label: t("郵箱"), arr: "allEmails" },
+    { key: "address", label: t("地址"), arr: "allAddresses" },
+    { key: "car_make", label: t("車品牌"), arr: "allCarMakes" },
+    { key: "car_model", label: t("車型"), arr: "allCarModels" },
   ];
   const enterPrintFlow = (inv, customer, items, products) => {
     const multi = {};
@@ -649,11 +651,11 @@ export default function App() {
     }
     if (Object.keys(patch).length > 0) {
       const { error } = await supabase.from("customers").update(patch).eq("id", oldCustomer.id);
-      if (error) { alert("合併失敗（更新老客戶）：" + error.message); setMergeBusy(false); return; }
+      if (error) { alert(t("合併失敗（更新老客戶）：") + error.message); setMergeBusy(false); return; }
     }
     const newNotes = (inv.notes || "").replace(/\s*__PENDING_MERGE__:[\w-]+/g, "").trim();
     const { error: invErr } = await supabase.from("invoices").update({ customer_id: oldCustomer.id, notes: newNotes }).eq("id", inv.id);
-    if (invErr) { alert("合併失敗（更新發票）：" + invErr.message); setMergeBusy(false); return; }
+    if (invErr) { alert(t("合併失敗（更新發票）：") + invErr.message); setMergeBusy(false); return; }
     // 如果临时新客户没挂其他发票，删掉
     const { data: otherInvs } = await supabase.from("invoices").select("id").eq("customer_id", newCustomer.id).neq("id", inv.id).limit(1);
     let deletedNewCust = false;
@@ -1246,14 +1248,14 @@ export default function App() {
   const invoiceTotal = newInvoice.items.reduce((sum, item) => sum + (item.price * item.qty || 0), 0) + extrasTotal;
 
   const navItems = [
-    { id: "dashboard", label: "總覽", icon: "dashboard" },
-    { id: "products", label: "產品", icon: "product" },
-    { id: "customers", label: "客戶", icon: "customer" },
-    { id: "invoices", label: "發票", icon: "invoice" },
-    { id: "warranty", label: "保修", icon: "warning" },
-    { id: "revenue", label: "營收", icon: "trend_up" },
-    { id: "employees", label: "員工管理", icon: "customer" },
-    { id: "whatsapp", label: "WhatsApp", icon: "invoice" },
+    { id: "dashboard", label: t("總覽"), icon: "dashboard" },
+    { id: "products", label: t("產品"), icon: "product" },
+    { id: "customers", label: t("客戶"), icon: "customer" },
+    { id: "invoices", label: t("發票"), icon: "invoice" },
+    { id: "warranty", label: t("保修"), icon: "warning" },
+    { id: "revenue", label: t("營收"), icon: "trend_up" },
+    { id: "employees", label: t("員工管理"), icon: "customer" },
+    { id: "whatsapp", label: t("WhatsApp"), icon: "invoice" },
   ];
 
   async function handleSaveCustomer() {
@@ -1276,7 +1278,7 @@ export default function App() {
       setShowAddCustomer(false);
       setNewCustomer({ name: "", email: "", phone: "", phone_mainland: "", car_make: "", car_model: "", address: "", interest_products: [], referral: "", type: "Lead", notes: "" });
     } else if (error) {
-      alert(`新增客戶失敗：${error.message}`);
+      alert(`${t("新增客戶失敗")}：${error.message}`);
     }
     setSaving(false);
   }
@@ -1334,7 +1336,7 @@ export default function App() {
             }).eq("id", invItem.id);
             if (invErr) {
               console.error(`庫存更新失敗 (item ${invItem.id}):`, invErr);
-              alert(`發票已生成 (#${data[0].invoice_number})，但部分庫存更新失敗：${invErr.message}\n請在庫存頁手動核對。`);
+              alert(`${t("發票已生成")} (#${data[0].invoice_number})，${t("但部分庫存更新失敗")}：${invErr.message}\n${t("請在庫存頁手動核對。")}`);
               continue;
             }
             setInventory(prev => prev.map(i =>
@@ -1349,7 +1351,7 @@ export default function App() {
         closeNewInvoice();
       }, 2000);
     } else if (error) {
-      alert(`發票生成失敗：${error.message}`);
+      alert(`${t("發票生成失敗")}：${error.message}`);
     }
     setSaving(false);
   }
@@ -1395,7 +1397,7 @@ export default function App() {
     const itemsSum = finalItems.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 0), 0);
     const finalTotal = editInvTotalOverride === "" ? itemsSum : (Number(editInvTotalOverride) || 0);
     const { error } = await supabase.from("invoices").update({ items: finalItems, total: finalTotal }).eq("id", editingInvoice.id);
-    if (error) { alert(`儲存失敗：${error.message}`); return; }
+    if (error) { alert(`${t("儲存失敗")}：${error.message}`); return; }
     setInvoices(prev => prev.map(i => i.id === editingInvoice.id ? { ...i, items: finalItems, total: finalTotal } : i));
     closeEditInvoice();
   }
@@ -1414,11 +1416,11 @@ export default function App() {
     const plan = [];
     for (const it of itemsArr) {
       const prod = products.find(p => p.name === it.name);
-      if (!prod) { plan.push({ name: it.name, qty: Number(it.qty) || 0, skip: true, reason: "產品未匹配" }); continue; }
-      if (prod.category === '_archived') { plan.push({ name: it.name, qty: Number(it.qty) || 0, skip: true, reason: "已歸檔老產品" }); continue; }
-      if (parentIds.has(prod.id)) { plan.push({ name: it.name, qty: Number(it.qty) || 0, skip: true, reason: "父 SKU 不扣" }); continue; }
+      if (!prod) { plan.push({ name: it.name, qty: Number(it.qty) || 0, skip: true, reason: t("產品未匹配") }); continue; }
+      if (prod.category === '_archived') { plan.push({ name: it.name, qty: Number(it.qty) || 0, skip: true, reason: t("已歸檔老產品") }); continue; }
+      if (parentIds.has(prod.id)) { plan.push({ name: it.name, qty: Number(it.qty) || 0, skip: true, reason: t("父 SKU 不扣") }); continue; }
       const wid = it.warehouse_id || defaultWh;
-      if (!wid) { plan.push({ name: it.name, qty: Number(it.qty) || 0, skip: true, reason: "無倉庫" }); continue; }
+      if (!wid) { plan.push({ name: it.name, qty: Number(it.qty) || 0, skip: true, reason: t("無倉庫") }); continue; }
       const stock = stocks.find(s => s.product_id === prod.id && s.warehouse_id === wid);
       const current = stock?.qty || 0;
       const deduct = Number(it.qty) || 0;
@@ -1450,7 +1452,7 @@ export default function App() {
       });
     }
     const { error } = await supabase.from("invoices").update({ status: "Paid" }).eq("id", inv.id);
-    if (error) { alert(`標記失敗：${error.message}`); return; }
+    if (error) { alert(`${t("標記失敗")}：${error.message}`); return; }
     setInvoices(prev => prev.map(i => i.id === inv.id ? { ...i, status: "Paid" } : i));
     setStocks(prev => {
       const map = new Map(prev.map(s => [`${s.product_id}|${s.warehouse_id}`, s]));
@@ -1468,51 +1470,51 @@ export default function App() {
     const cids = c.allCids || c.groupCids || [c.id];
     const invCount = invoices.filter(i => cids.includes(i.customer_id)).length;
     if (invCount > 0) {
-      alert(`此客戶有 ${invCount} 張發票，請先刪除該客戶的所有發票，再刪除客戶。`);
+      alert(`${t("此客戶有")} ${invCount} ${t("張發票，請先刪除該客戶的所有發票，再刪除客戶。")}`);
       return;
     }
     const msg = cids.length > 1
-      ? `確定刪除客戶「${c.name || "(無名)"}」及其合併的 ${cids.length} 條重複記錄？\n\n此操作不可撤銷。`
-      : `確定刪除客戶「${c.name || "(無名)"}」？\n\n此操作不可撤銷。`;
+      ? `${t("確定刪除客戶")}「${c.name || t("(無名)")}」${t("及其合併的")} ${cids.length} ${t("條重複記錄？")}\n\n${t("此操作不可撤銷。")}`
+      : `${t("確定刪除客戶")}「${c.name || t("(無名)")}」？\n\n${t("此操作不可撤銷。")}`;
     const confirmed = window.confirm(msg);
     if (!confirmed) return;
     const { error } = await supabase.from("customers").delete().in("id", cids);
-    if (error) { alert(`刪除客戶失敗：${error.message}`); return; }
+    if (error) { alert(`${t("刪除客戶失敗")}：${error.message}`); return; }
     setCustomers(prev => prev.filter(x => !cids.includes(x.id)));
     setSelectedCustomer(null);
   }
 
   async function handleDeleteInvoice(inv) {
     const cust = customers.find(c => c.id === inv.customer_id);
-    const custLine = cust ? (cust.name || "(無名)") + (cust.phone ? ` · ${cust.phone}` : "") : "(無客戶)";
+    const custLine = cust ? (cust.name || t("(無名)")) + (cust.phone ? ` · ${cust.phone}` : "") : t("(無客戶)");
     let itemsArr = inv.items;
     if (typeof itemsArr === "string") { try { itemsArr = JSON.parse(itemsArr); } catch { itemsArr = []; } }
     if (!Array.isArray(itemsArr)) itemsArr = [];
     const itemsLine = itemsArr.length > 0
-      ? itemsArr.map(it => `  • ${it.name || "(未命名)"} × ${it.qty || 1}`).join("\n")
-      : "  (無明細)";
+      ? itemsArr.map(it => `  • ${it.name || t("(未命名)")} × ${it.qty || 1}`).join("\n")
+      : "  " + t("(無明細)");
     const msg =
-      `⚠️ 確認刪除以下發票？\n\n` +
-      `發票號：DC${String(inv.invoice_number || inv.id).replace(/^DC/i, "")}\n` +
-      `客戶：${custLine}\n` +
-      `日期：${inv.date || "-"}\n` +
-      `金額：HKD$${inv.total || 0}\n` +
-      `狀態：${inv.status || "-"}\n` +
-      `明細：\n${itemsLine}\n\n` +
-      `此操作會同時還原對應的庫存狀態（Sold → In Stock），不可撤銷。`;
+      `⚠️ ${t("確認刪除以下發票？")}\n\n` +
+      `${t("發票號")}：DC${String(inv.invoice_number || inv.id).replace(/^DC/i, "")}\n` +
+      `${t("客戶")}：${custLine}\n` +
+      `${t("日期")}：${inv.date || "-"}\n` +
+      `${t("金額")}：HKD$${inv.total || 0}\n` +
+      `${t("狀態")}：${inv.status || "-"}\n` +
+      `${t("明細")}：\n${itemsLine}\n\n` +
+      t("此操作會同時還原對應的庫存狀態（Sold → In Stock），不可撤銷。");
     const confirmed = window.confirm(msg);
     if (!confirmed) return;
     const { data: relatedInv, error: fetchErr } = await supabase
       .from("inventory").select("id").eq("invoice_id", inv.id);
-    if (fetchErr) { alert(`查詢關聯庫存失敗：${fetchErr.message}`); return; }
+    if (fetchErr) { alert(`${t("查詢關聯庫存失敗")}：${fetchErr.message}`); return; }
     if (relatedInv && relatedInv.length > 0) {
       const { error: restoreErr } = await supabase.from("inventory")
         .update({ status: "In Stock", customer_id: null, sold_date: null, warranty_end: null, invoice_id: null })
         .eq("invoice_id", inv.id);
-      if (restoreErr) { alert(`還原庫存失敗：${restoreErr.message}`); return; }
+      if (restoreErr) { alert(`${t("還原庫存失敗")}：${restoreErr.message}`); return; }
     }
     const { error: delErr } = await supabase.from("invoices").delete().eq("id", inv.id);
-    if (delErr) { alert(`刪除發票失敗：${delErr.message}`); return; }
+    if (delErr) { alert(`${t("刪除發票失敗")}：${delErr.message}`); return; }
     setInvoices(prev => prev.filter(i => i.id !== inv.id));
     if (relatedInv && relatedInv.length > 0) {
       const ids = new Set(relatedInv.map(r => r.id));
@@ -1524,7 +1526,7 @@ export default function App() {
 
   // ── 員工管理 ──────────────────────────────────────────────
   async function handleSaveEmployee() {
-    if (!newEmployee.name.trim()) { alert("請輸入員工姓名"); return; }
+    if (!newEmployee.name.trim()) { alert(t("請輸入員工姓名")); return; }
     const { data, error } = await supabase.from("employees").insert({
       name: newEmployee.name.trim(),
       role: newEmployee.role.trim() || null,
@@ -1532,7 +1534,7 @@ export default function App() {
       email: newEmployee.email.trim() || null,
       note: newEmployee.note.trim() || null,
     }).select().single();
-    if (error) { alert(`新增失敗：${error.message}`); return; }
+    if (error) { alert(`${t("新增失敗")}：${error.message}`); return; }
     setEmployees(prev => [...prev, data]);
     setShowAddEmployee(false);
     setNewEmployee({ name: "", role: "", phone: "", email: "", note: "" });
@@ -1541,11 +1543,11 @@ export default function App() {
   async function handleDeleteEmployee(emp) {
     const taskCount = tasks.filter(t => t.employee_id === emp.id).length;
     const msg = taskCount > 0
-      ? `確定刪除員工「${emp.name}」？\n將同時刪除其 ${taskCount} 條任務記錄。此操作不可撤銷。`
-      : `確定刪除員工「${emp.name}」？此操作不可撤銷。`;
+      ? `${t("確定刪除員工")}「${emp.name}」？\n${t("將同時刪除其")} ${taskCount} ${t("條任務記錄。此操作不可撤銷。")}`
+      : `${t("確定刪除員工")}「${emp.name}」？${t("此操作不可撤銷。")}`;
     if (!window.confirm(msg)) return;
     const { error } = await supabase.from("employees").delete().eq("id", emp.id);
-    if (error) { alert(`刪除失敗：${error.message}`); return; }
+    if (error) { alert(`${t("刪除失敗")}：${error.message}`); return; }
     setEmployees(prev => prev.filter(e => e.id !== emp.id));
     setTasks(prev => prev.filter(t => t.employee_id !== emp.id));
     setSelectedEmployee(null);
@@ -1560,14 +1562,14 @@ export default function App() {
       parent_task_id: parentTaskId,
       note: note || null,
     }).select().single();
-    if (error) { alert(`新增任務失敗：${error.message}`); return; }
+    if (error) { alert(`${t("新增任務失敗")}：${error.message}`); return; }
     setTasks(prev => [...prev, data]);
     return data;
   }
 
   async function handleUpdateTask(taskId, patch) {
     const { error } = await supabase.from("employee_tasks").update(patch).eq("id", taskId);
-    if (error) { alert(`更新失敗：${error.message}`); return; }
+    if (error) { alert(`${t("更新失敗")}：${error.message}`); return; }
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...patch } : t));
     if (editingTask?.id === taskId) setEditingTask(prev => ({ ...prev, ...patch }));
   }
@@ -1578,9 +1580,9 @@ export default function App() {
   }
 
   async function handleDeleteTask(taskId) {
-    if (!window.confirm("確定刪除此任務及所有子任務？")) return;
+    if (!window.confirm(t("確定刪除此任務及所有子任務？"))) return;
     const { error } = await supabase.from("employee_tasks").delete().eq("id", taskId);
-    if (error) { alert(`刪除失敗：${error.message}`); return; }
+    if (error) { alert(`${t("刪除失敗")}：${error.message}`); return; }
     setTasks(prev => prev.filter(t => t.id !== taskId && t.parent_task_id !== taskId));
     if (editingTask?.id === taskId) setEditingTask(null);
   }
@@ -1596,11 +1598,11 @@ export default function App() {
   // 未登入 → 顯示登入頁
   if (!session) {
     const tryLogin = async () => {
-      if (!loginEmail || !loginPw) { setLoginError("請輸入郵箱和密碼"); return; }
+      if (!loginEmail || !loginPw) { setLoginError(t("請輸入郵箱和密碼")); return; }
       setLoginBusy(true);
       setLoginError("");
       const { error } = await supabase.auth.signInWithPassword({ email: loginEmail, password: loginPw });
-      if (error) setLoginError(error.message || "登入失敗");
+      if (error) setLoginError(error.message || t("登入失敗"));
       setLoginBusy(false);
     };
     return (
@@ -1609,7 +1611,7 @@ export default function App() {
           <div style={{ textAlign: "center", marginBottom: 28 }}>
             <div style={{ width: 56, height: 56, margin: "0 auto 14px", borderRadius: "50%", background: "linear-gradient(135deg,#6382ff,#a78bfa)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: 800, color: "#fff" }}>H</div>
             <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800 }}>Honnmono BizFlow</h2>
-            <p style={{ margin: "6px 0 0", fontSize: 13, color: "#888" }}>管理員登入</p>
+            <p style={{ margin: "6px 0 0", fontSize: 13, color: "#888" }}>{t("管理員登入")}</p>
           </div>
           <input
             type="email"
@@ -1617,7 +1619,7 @@ export default function App() {
             value={loginEmail}
             onChange={e => { setLoginEmail(e.target.value); setLoginError(""); }}
             onKeyDown={e => { if (e.key === "Enter") tryLogin(); }}
-            placeholder="郵箱"
+            placeholder={t("郵箱")}
             disabled={loginBusy}
             style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 15, outline: "none", boxSizing: "border-box", marginBottom: 10 }}
           />
@@ -1626,13 +1628,13 @@ export default function App() {
             value={loginPw}
             onChange={e => { setLoginPw(e.target.value); setLoginError(""); }}
             onKeyDown={e => { if (e.key === "Enter") tryLogin(); }}
-            placeholder="密碼"
+            placeholder={t("密碼")}
             disabled={loginBusy}
             style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: loginError ? "1px solid #ef4444" : "1px solid #e0e0e0", fontSize: 15, outline: "none", boxSizing: "border-box", marginBottom: 8 }}
           />
           {loginError && <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 8 }}>{loginError}</div>}
           <button onClick={tryLogin} disabled={loginBusy} style={{ width: "100%", padding: 12, background: loginBusy ? "#b0c0ff" : "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: loginBusy ? "wait" : "pointer", marginTop: 8 }}>
-            {loginBusy ? "登入中..." : "登入"}
+            {loginBusy ? t("登入中...") : t("登入")}
           </button>
         </div>
       </div>
@@ -1643,16 +1645,16 @@ export default function App() {
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", flexDirection: "column", gap: 16, background: "#f7f8fc" }}>
       <div style={{ width: 48, height: 48, border: "4px solid #e0e0e0", borderTopColor: "#6382ff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-      <div style={{ color: "#888", fontSize: 15 }}>正在載入 BizFlow...</div>
+      <div style={{ color: "#888", fontSize: 15 }}>{t("正在載入 BizFlow...")}</div>
     </div>
   );
 
   if (loadError) return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", flexDirection: "column", gap: 16, background: "#f7f8fc", padding: 40 }}>
       <div style={{ fontSize: 48 }}>⚠️</div>
-      <div style={{ color: "#d32f2f", fontSize: 18, fontWeight: 700 }}>資料載入失敗</div>
+      <div style={{ color: "#d32f2f", fontSize: 18, fontWeight: 700 }}>{t("資料載入失敗")}</div>
       <div style={{ color: "#666", fontSize: 13, maxWidth: 500, textAlign: "center", wordBreak: "break-all" }}>{loadError}</div>
-      <button onClick={() => window.location.reload()} style={{ padding: "10px 24px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, fontSize: 14, cursor: "pointer" }}>重新載入</button>
+      <button onClick={() => window.location.reload()} style={{ padding: "10px 24px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, fontSize: 14, cursor: "pointer" }}>{t("重新載入")}</button>
     </div>
   );
 
@@ -1663,12 +1665,20 @@ export default function App() {
       <aside style={{ width: 220, background: "#1a1a2e", display: "flex", flexDirection: "column", flexShrink: 0 }}>
         <div style={{ padding: "20px 18px", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
           <img src={`data:image/png;base64,${LOGO_B64}`} style={{ width: "100%", maxHeight: 36, objectFit: "contain", filter: "invert(1)" }} />
-          <div style={{ fontSize: 10, color: "#6b7bb8", marginTop: 6, letterSpacing: "0.1em", textTransform: "uppercase" }}>業務管理系統</div>
+          <div style={{ fontSize: 10, color: "#6b7bb8", marginTop: 6, letterSpacing: "0.1em", textTransform: "uppercase" }}>{t("業務管理系統")}</div>
+          <div style={{ display: "flex", gap: 4, marginTop: 12, padding: 3, background: "rgba(99,130,255,0.1)", borderRadius: 8 }}>
+            {[{ v: "zh", l: "繁體中文" }, { v: "en", l: "English" }].map(opt => (
+              <button key={opt.v} onClick={() => setLang(opt.v)} title={opt.l}
+                style={{ flex: 1, padding: "5px 6px", border: "none", borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: "pointer", background: lang === opt.v ? "#7c9dff" : "transparent", color: lang === opt.v ? "#fff" : "#8899cc" }}>
+                {opt.l}
+              </button>
+            ))}
+          </div>
         </div>
         {warrantyAlerts.length > 0 && (
           <div onClick={() => setTab("warranty")} style={{ margin: "10px 12px", background: "#ff9800", borderRadius: 10, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
             <Icon name="warning" size={13} />
-            <div style={{ color: "#fff", fontSize: 12, fontWeight: 600 }}>{warrantyAlerts.length} 件保修即將到期</div>
+            <div style={{ color: "#fff", fontSize: 12, fontWeight: 600 }}>{warrantyAlerts.length} {t("件保修即將到期")}</div>
           </div>
         )}
         <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 2 }}>
@@ -1683,11 +1693,11 @@ export default function App() {
             <div style={{ width: 30, height: 30, borderRadius: "50%", background: "linear-gradient(135deg,#7c9dff,#a78bfa)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#fff" }}>H</div>
             <div style={{ flex: 1, overflow: "hidden" }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{session?.user?.email || "Honnmono"}</div>
-              <div style={{ fontSize: 11, color: "#6b7bb8" }}>管理員</div>
+              <div style={{ fontSize: 11, color: "#6b7bb8" }}>{isWaAdmin ? t("管理員") : t("只讀")}</div>
             </div>
             <button
               onClick={async () => { await supabase.auth.signOut(); }}
-              title="登出"
+              title={t("登出")}
               style={{ background: "none", border: "none", color: "#6b7bb8", cursor: "pointer", padding: 4, fontSize: 16 }}
             >⎋</button>
           </div>
@@ -1701,19 +1711,19 @@ export default function App() {
         {tab === "dashboard" && (
           <div>
             <div style={{ marginBottom: 28 }}>
-              <h1 style={{ fontSize: 26, fontWeight: 800, margin: 0 }}>早安 👋</h1>
-              <p style={{ color: "#888", margin: "4px 0 0", fontSize: 15 }}>以下是 Honnmono 今日的業務概況。</p>
+              <h1 style={{ fontSize: 26, fontWeight: 800, margin: 0 }}>{t("早安 👋")}</h1>
+              <p style={{ color: "#888", margin: "4px 0 0", fontSize: 15 }}>{t("以下是 Honnmono 今日的業務概況。")}</p>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 28 }}>
-              <StatCard label="本月營收" value={`HKD$${monthlyRevenue.toLocaleString()}`} sub={`${now.getFullYear()}年${now.getMonth() + 1}月`} accent="#6382ff" icon={<Icon name="trend_up" size={20} />} onClick={() => setTab("revenue")} />
-              <StatCard label="庫存數量" value={inStock} sub={`共 ${inventory.length} 件`} accent="#22c55e" icon={<Icon name="inventory" size={20} />} onClick={() => setTab("products")} />
-              <StatCard label="客戶數" value={customers.length} sub="累計" accent="#f59e0b" icon={<Icon name="customer" size={20} />} onClick={() => { setTab("customers"); setSelectedCustomer(null); }} />
-              <StatCard label="保修提醒" value={warrantyAlerts.length} sub="需跟進" accent="#ef4444" icon={<Icon name="warning" size={20} />} onClick={() => setTab("warranty")} />
+              <StatCard label={t("本月營收")} value={`HKD$${monthlyRevenue.toLocaleString()}`} sub={lang === "en" ? `${now.toLocaleString("en", { month: "long", year: "numeric" })}` : `${now.getFullYear()}年${now.getMonth() + 1}月`} accent="#6382ff" icon={<Icon name="trend_up" size={20} />} onClick={() => setTab("revenue")} />
+              <StatCard label={t("庫存數量")} value={inStock} sub={`${t("共")} ${inventory.length} ${t("件")}`} accent="#22c55e" icon={<Icon name="inventory" size={20} />} onClick={() => setTab("products")} />
+              <StatCard label={t("客戶數")} value={customers.length} sub={t("累計")} accent="#f59e0b" icon={<Icon name="customer" size={20} />} onClick={() => { setTab("customers"); setSelectedCustomer(null); }} />
+              <StatCard label={t("保修提醒")} value={warrantyAlerts.length} sub={t("需跟進")} accent="#ef4444" icon={<Icon name="warning" size={20} />} onClick={() => setTab("warranty")} />
             </div>
             <div style={{ position: "relative", marginBottom: 20 }}>
               <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", display: "flex", alignItems: "center", gap: 8 }}>
                 <Icon name="search" size={15} />
-                <input placeholder="搜尋發票、客戶、產品..." value={dashSearch} onChange={e => setDashSearch(e.target.value)} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
+                <input placeholder={t("搜尋發票、客戶、產品...")} value={dashSearch} onChange={e => setDashSearch(e.target.value)} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
                 {dashSearch && (
                   <button onClick={() => setDashSearch("")} style={{ background: "#f5f5f5", border: "none", borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontSize: 12, color: "#666" }}>×</button>
                 )}
@@ -1738,11 +1748,11 @@ export default function App() {
                 const panelStyle = { position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1px solid #e0e0e0", borderRadius: 12, marginTop: 4, boxShadow: "0 8px 28px rgba(0,0,0,0.1)", zIndex: 20, maxHeight: 500, overflowY: "auto" };
                 const hdrStyle = { padding: "10px 16px 4px", fontSize: 11, fontWeight: 700, color: "#888", letterSpacing: "0.08em", textTransform: "uppercase", background: "#fafbff" };
                 const rowStyle = { padding: "10px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12, borderBottom: "1px solid #f5f5f5" };
-                if (total === 0) return (<div style={{ ...panelStyle, padding: 20, textAlign: "center", color: "#999", fontSize: 13 }}>沒有符合的結果</div>);
+                if (total === 0) return (<div style={{ ...panelStyle, padding: 20, textAlign: "center", color: "#999", fontSize: 13 }}>{t("沒有符合的結果")}</div>);
                 return (
                   <div style={panelStyle}>
                     {custMatches.length > 0 && <>
-                      <div style={hdrStyle}>客戶（{custMatches.length}）</div>
+                      <div style={hdrStyle}>{t("客戶")}（{custMatches.length}）</div>
                       {custMatches.map(c => (
                         <div key={"c" + c.id} onClick={() => { setTab("customers"); setSelectedCustomer(c); setDashSearch(""); }} style={rowStyle} onMouseEnter={e => e.currentTarget.style.background = "#f7f8fc"} onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
                           <div style={{ width: 32, height: 32, borderRadius: "50%", background: "linear-gradient(135deg,#6382ff,#a78bfa)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#fff", flexShrink: 0 }}>{(c.name || "?")[0]}</div>
@@ -1754,19 +1764,19 @@ export default function App() {
                       ))}
                     </>}
                     {prodMatches.length > 0 && <>
-                      <div style={hdrStyle}>產品（{prodMatches.length}）</div>
+                      <div style={hdrStyle}>{t("產品")}（{prodMatches.length}）</div>
                       {prodMatches.map(p => (
                         <div key={"p" + p.id} onClick={() => { setTab("products"); setDashSearch(""); }} style={rowStyle} onMouseEnter={e => e.currentTarget.style.background = "#f7f8fc"} onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
                           <div style={{ fontSize: 20, width: 32, textAlign: "center" }}>📦</div>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontWeight: 700, fontSize: 13 }}>{p.name}</div>
-                            <div style={{ fontSize: 11, color: "#888" }}>HKD${p.price} · 保修 {p.warranty_months || "—"} 月</div>
+                            <div style={{ fontSize: 11, color: "#888" }}>HKD${p.price} · {t("保修")} {p.warranty_months || "—"} {t("月")}</div>
                           </div>
                         </div>
                       ))}
                     </>}
                     {invMatches.length > 0 && <>
-                      <div style={hdrStyle}>發票（{invMatches.length}）</div>
+                      <div style={hdrStyle}>{t("發票")}（{invMatches.length}）</div>
                       {invMatches.map(inv => {
                         const c = getCustomer(inv.customer_id);
                         return (
@@ -1788,8 +1798,8 @@ export default function App() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
               <div style={{ background: "#fff", borderRadius: 16, padding: 24, border: "1px solid #f0f0f0", boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-                  <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>最近發票</h2>
-                  <button onClick={() => setTab("invoices")} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>查看全部 →</button>
+                  <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{t("最近發票")}</h2>
+                  <button onClick={() => setTab("invoices")} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>{t("查看全部 →")}</button>
                 </div>
                 {invoices.slice(0, 5).map(inv => {
                   const c = getCustomer(inv.customer_id);
@@ -1797,7 +1807,7 @@ export default function App() {
                     <div key={inv.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 0", borderBottom: "1px solid #f5f5f5" }}>
                       <div>
                         <div style={{ fontWeight: 600, fontSize: 14 }}>{fmtInvNum(inv)}</div>
-                        <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>{(c?.phone || c?.phone_mainland) ? `${c.phone || c.phone_mainland} · ` : ""}{c?.name || "—"} · {inv.date || "日期未知"}</div>
+                        <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>{(c?.phone || c?.phone_mainland) ? `${c.phone || c.phone_mainland} · ` : ""}{c?.name || "—"} · {inv.date || t("日期未知")}</div>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                         <span style={{ fontWeight: 700, fontSize: 15 }}>HKD${inv.total}</span>
@@ -1809,23 +1819,23 @@ export default function App() {
               </div>
               <div style={{ background: "#fff", borderRadius: 16, padding: 24, border: "1px solid #f0f0f0", boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-                  <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>🔔 保修提醒</h2>
+                  <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{t("🔔 保修提醒")}</h2>
                   <Badge status="Warranty Expiring" />
                 </div>
                 {warrantyItems.length === 0 ? (
-                  <div style={{ color: "#aaa", fontSize: 14, textAlign: "center", paddingTop: 20 }}>目前沒有提醒 ✓</div>
+                  <div style={{ color: "#aaa", fontSize: 14, textAlign: "center", paddingTop: 20 }}>{t("目前沒有提醒 ✓")}</div>
                 ) : <>{warrantyItems.slice(0, 5).map((item, idx) => (
                     <div key={idx} onClick={() => { if (item.customer) { setTab("customers"); setSelectedCustomer(item.customer); } }} style={{ background: "#fff8f0", border: "1px solid #ffe0b2", borderRadius: 12, padding: "12px 16px", marginBottom: 10, cursor: item.customer ? "pointer" : "default", transition: "all 0.15s" }}
                       onMouseEnter={e => { if (item.customer) { e.currentTarget.style.borderColor = "#ff9800"; e.currentTarget.style.background = "#fff3e0"; } }}
                       onMouseLeave={e => { e.currentTarget.style.borderColor = "#ffe0b2"; e.currentTarget.style.background = "#fff8f0"; }}>
                       <div style={{ fontWeight: 700, fontSize: 14 }}>{item.productName}</div>
                       <div style={{ fontSize: 12, color: "#666", marginTop: 3 }}>{item.customerName} · {item.invoiceNum}</div>
-                      <div style={{ fontSize: 12, color: "#e65100", marginTop: 4, fontWeight: 600 }}>保修到期：{item.warrantyEnd}（剩餘 {item.daysLeft} 天）</div>
+                      <div style={{ fontSize: 12, color: "#e65100", marginTop: 4, fontWeight: 600 }}>{t("保修到期")}：{item.warrantyEnd}（{t("剩餘")} {item.daysLeft} {t("天")}）</div>
                     </div>
                 ))}
                 {warrantyItems.length > 5 && (
                   <button onClick={() => setTab("warranty")} style={{ display: "block", margin: "8px auto 0", padding: "8px 20px", background: "#fff3e0", color: "#ff9800", border: "1px solid #ffe0b2", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
-                    查看全部保修記錄 →
+                    {t("查看全部保修記錄 →")}
                   </button>
                 )}</>}
               </div>
@@ -1839,18 +1849,18 @@ export default function App() {
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
               <div>
-                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>產品</h1>
-                <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>產品目錄 + 庫存管理</p>
+                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{t("產品")}</h1>
+                <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>{t("產品目錄 + 庫存管理")}</p>
               </div>
             </div>
             <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
               <Icon name="search" size={15} />
-              <input placeholder="搜尋和篩選..." value={search} onChange={e => setSearch(e.target.value)} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
+              <input placeholder={t("搜尋和篩選...")} value={search} onChange={e => setSearch(e.target.value)} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
             </div>
             <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
               {(() => {
                 const cats = [...new Set(products.filter(p => !p.parent_product_id && p.category !== '_archived').map(p => p.category).filter(Boolean))];
-                const all = [["", "全部"], ...cats.map(c => [c, c])];
+                const all = [["", t("全部")], ...cats.map(c => [c, c])];
                 return all.map(([key, label]) => {
                   const active = productCategoryFilter === key;
                   return (
@@ -1865,12 +1875,12 @@ export default function App() {
             <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", overflow: "hidden" }}>
               <div style={{ display: "grid", gridTemplateColumns: "36px 60px 2.5fr 0.8fr 1fr 1fr 0.8fr", gap: 12, padding: "12px 16px", background: "#fafbfc", borderBottom: "1px solid #f0f0f0", fontSize: 12, color: "#666", fontWeight: 600 }}>
                 <div><input type="checkbox" /></div>
-                <div>圖片</div>
-                <div>商品</div>
-                <div>狀態</div>
-                <div>庫存</div>
-                <div>類別</div>
-                <div style={{ textAlign: "right" }}>價格</div>
+                <div>{t("圖片")}</div>
+                <div>{t("商品")}</div>
+                <div>{t("狀態")}</div>
+                <div>{t("庫存")}</div>
+                <div>{t("類別")}</div>
+                <div style={{ textAlign: "right" }}>{t("價格")}</div>
               </div>
               {products.filter(p => {
                 // 只显示顶层产品（非子 SKU）+ 隐藏 _archived 老数据
@@ -1902,7 +1912,7 @@ export default function App() {
                     {p.image_url ? (
                       <img src={p.image_url} style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 8, border: "1px solid #f0f0f0" }} />
                     ) : (
-                      <div style={{ width: 48, height: 48, background: "#f0f2f5", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", color: "#bbb", fontSize: 10 }}>圖</div>
+                      <div style={{ width: 48, height: 48, background: "#f0f2f5", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", color: "#bbb", fontSize: 10 }}>{t("圖")}</div>
                     )}
                     <div>
                       <div style={{ fontSize: 14, fontWeight: 600, color: "#1a1a1a" }}>{p.name}</div>
@@ -1910,11 +1920,11 @@ export default function App() {
                     </div>
                     <div>
                       <span style={{ padding: "3px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600, background: status === "draft" ? "#e5e7eb" : status === "discontinued" ? "#fee2e2" : "#d1fae5", color: status === "draft" ? "#6b7280" : status === "discontinued" ? "#991b1b" : "#047857" }}>
-                        {status === "draft" ? "草稿" : status === "discontinued" ? "停售" : "啟用"}
+                        {status === "draft" ? t("草稿") : status === "discontinued" ? t("停售") : t("啟用")}
                       </span>
                     </div>
                     <div onClick={hasChildren ? undefined : (e) => { e.stopPropagation(); setEditingProduct(p); }} style={{ cursor: hasChildren ? "default" : "pointer" }}>
-                      {hasChildren && <div style={{ fontSize: 11, color: "#888", marginBottom: 2 }}>共 {children.length} 個子類 · 共 {totalStock} 件</div>}
+                      {hasChildren && <div style={{ fontSize: 11, color: "#888", marginBottom: 2 }}>{t("共")} {children.length} {t("個子類")} · {t("共")} {totalStock} {t("件")}</div>}
                       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                         {stockByWarehouse.map(({ warehouse, qty }) => (
                           <span key={warehouse.id} style={{ fontSize: 12 }}>
@@ -1925,13 +1935,13 @@ export default function App() {
                         {!hasChildren && <span style={{ fontSize: 11, color: "#bbb" }}>✏️</span>}
                       </div>
                     </div>
-                    <div style={{ color: "#555" }}>{p.category || "未分類"}</div>
+                    <div style={{ color: "#555" }}>{p.category || t("未分類")}</div>
                     <div style={{ textAlign: "right", fontWeight: 700, color: "#1a1a1a" }}>{priceDisplay}</div>
                   </div>
                 );
               })}
               {products.length === 0 && (
-                <div style={{ padding: 40, textAlign: "center", color: "#aaa" }}>暫無產品</div>
+                <div style={{ padding: 40, textAlign: "center", color: "#aaa" }}>{t("暫無產品")}</div>
               )}
             </div>
           </div>
@@ -1970,7 +1980,7 @@ export default function App() {
           const draft = productOrgDraft || { product_type: p.product_type || "", collections: p.collections || [], tags: p.tags || [] };
           const saveDraft = async () => {
             const { error } = await supabase.from("products").update({ product_type: draft.product_type || null, collections: draft.collections, tags: draft.tags }).eq("id", p.id);
-            if (error) { alert("儲存失敗：" + error.message); return; }
+            if (error) { alert(t("儲存失敗：") + error.message); return; }
             setProducts(prev => prev.map(x => x.id === p.id ? { ...x, ...draft } : x));
             setSelectedProduct(prev => ({ ...prev, ...draft }));
             setProductOrgDraft(null);
@@ -1980,7 +1990,7 @@ export default function App() {
           return (
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
-                <button onClick={() => { setSelectedProduct(null); setProductOrgDraft(null); }} style={{ background: "#f5f5f5", border: "none", borderRadius: 10, padding: "10px 14px", cursor: "pointer", fontSize: 14 }}>← 返回</button>
+                <button onClick={() => { setSelectedProduct(null); setProductOrgDraft(null); }} style={{ background: "#f5f5f5", border: "none", borderRadius: 10, padding: "10px 14px", cursor: "pointer", fontSize: 14 }}>{t("← 返回")}</button>
                 <div>
                   <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{p.name}</h1>
                   <div style={{ fontFamily: "monospace", fontSize: 12, color: "#aaa", marginTop: 4 }}>{p.internal_code}</div>
@@ -1991,37 +2001,37 @@ export default function App() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                   {/* 產品圖片 */}
                   <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: 20 }}>
-                    <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 14 }}>產品圖片</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 14 }}>{t("產品圖片")}</div>
                     {p.image_url ? (
                       <img src={p.image_url} style={{ width: "100%", maxHeight: 320, objectFit: "contain", borderRadius: 10, background: "#fafbfc", border: "1px solid #f0f0f0" }} />
                     ) : (
-                      <div style={{ width: "100%", height: 200, background: "#f7f9fc", borderRadius: 10, border: "1px dashed #e0e0e0", display: "flex", alignItems: "center", justifyContent: "center", color: "#bbb", fontSize: 14 }}>尚無圖片</div>
+                      <div style={{ width: "100%", height: 200, background: "#f7f9fc", borderRadius: 10, border: "1px dashed #e0e0e0", display: "flex", alignItems: "center", justifyContent: "center", color: "#bbb", fontSize: 14 }}>{t("尚無圖片")}</div>
                     )}
                     <label style={{ display: "inline-block", marginTop: 12, padding: "8px 16px", background: "#6382ff", color: "#fff", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 700 }}>
-                      {p.image_url ? "替換圖片" : "上傳圖片"}
+                      {p.image_url ? t("替換圖片") : t("上傳圖片")}
                       <input type="file" accept="image/*" style={{ display: "none" }} onChange={async (e) => {
                         const file = e.target.files?.[0];
                         if (!file) return;
                         const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
                         const path = `${p.internal_code || p.id}/${Date.now()}.${ext}`;
                         const { error: upErr } = await supabase.storage.from('product-images').upload(path, file, { upsert: false });
-                        if (upErr) { alert('上傳失敗：' + upErr.message); return; }
+                        if (upErr) { alert(t('上傳失敗：') + upErr.message); return; }
                         const { data: pub } = supabase.storage.from('product-images').getPublicUrl(path);
                         const url = pub.publicUrl;
                         const { error: dbErr } = await supabase.from('products').update({ image_url: url }).eq('id', p.id);
-                        if (dbErr) { alert('保存失敗：' + dbErr.message); return; }
+                        if (dbErr) { alert(t('保存失敗：') + dbErr.message); return; }
                         setProducts(prev => prev.map(x => x.id === p.id ? { ...x, image_url: url } : x));
                         setSelectedProduct(prev => ({ ...prev, image_url: url }));
                       }} />
                     </label>
                     {p.image_url && (
                       <button onClick={async () => {
-                        if (!confirm('確定移除這張圖片？')) return;
+                        if (!confirm(t('確定移除這張圖片？'))) return;
                         const { error } = await supabase.from('products').update({ image_url: null }).eq('id', p.id);
-                        if (error) { alert('移除失敗：' + error.message); return; }
+                        if (error) { alert(t('移除失敗：') + error.message); return; }
                         setProducts(prev => prev.map(x => x.id === p.id ? { ...x, image_url: null } : x));
                         setSelectedProduct(prev => ({ ...prev, image_url: null }));
-                      }} style={{ marginLeft: 8, padding: "8px 16px", background: "#f5f5f5", color: "#666", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>移除</button>
+                      }} style={{ marginLeft: 8, padding: "8px 16px", background: "#f5f5f5", color: "#666", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>{t("移除")}</button>
                     )}
                   </div>
                   {/* 子類（SKU 變體） */}
@@ -2046,7 +2056,7 @@ export default function App() {
                       const groupKeys = Object.keys(groups).sort((a, b) => parseInt(a) - parseInt(b));
                       return (
                         <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: 20 }}>
-                          <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 14 }}>子類 · 共 {children.length} 個（按規格分組）</div>
+                          <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 14 }}>{t("子類")} · {t("共")} {children.length} {t("個")}（{t("按規格分組")}）</div>
                           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                             {groupKeys.map(key => {
                               const g = groups[key];
@@ -2060,8 +2070,8 @@ export default function App() {
                                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                                       <span style={{ fontSize: 14, color: "#888" }}>{expanded ? "▼" : "▶"}</span>
                                       <div>
-                                        <div style={{ fontSize: 14, fontWeight: 700 }}>Type2 充電樁 {key}</div>
-                                        <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{allInGroup.length} 個 SKU · 共 {groupStock} 件</div>
+                                        <div style={{ fontSize: 14, fontWeight: 700 }}>{t("Type2 充電樁")} {key}</div>
+                                        <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{allInGroup.length} {t("個 SKU")} · {t("共")} {groupStock} {t("件")}</div>
                                       </div>
                                     </div>
                                     <div style={{ fontSize: 12, color: "#666" }}>
@@ -2073,7 +2083,7 @@ export default function App() {
                                       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                                         <thead>
                                           <tr>
-                                            <th style={{ textAlign: "left", padding: "6px 10px", color: "#888", fontWeight: 600, borderBottom: "1px solid #e8eaed" }}>線長</th>
+                                            <th style={{ textAlign: "left", padding: "6px 10px", color: "#888", fontWeight: 600, borderBottom: "1px solid #e8eaed" }}>{t("線長")}</th>
                                             {connOrder.map(cn => (
                                               <th key={cn} style={{ textAlign: "left", padding: "6px 10px", color: "#888", fontWeight: 600, borderBottom: "1px solid #e8eaed" }}>{cn}</th>
                                             ))}
@@ -2120,7 +2130,7 @@ export default function App() {
                     // 其他父产品（充電綫 4 SKU）：平铺
                     return (
                       <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: 20 }}>
-                        <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 14 }}>子類 · 共 {children.length} 個</div>
+                        <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 14 }}>{t("子類")} · {t("共")} {children.length} {t("個")}</div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                           {children.map(c => {
                             const cStockByW = warehouses.map(w => ({ w, qty: stocks.filter(s => s.product_id === c.id && s.warehouse_id === w.id).reduce((sum, s) => sum + (s.qty || 0), 0) }));
@@ -2129,7 +2139,7 @@ export default function App() {
                                 {c.image_url ? (
                                   <img src={c.image_url} style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6, border: "1px solid #f0f0f0" }} />
                                 ) : (
-                                  <div style={{ width: 40, height: 40, background: "#f0f2f5", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", color: "#bbb", fontSize: 9 }}>圖</div>
+                                  <div style={{ width: 40, height: 40, background: "#f0f2f5", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", color: "#bbb", fontSize: 9 }}>{t("圖")}</div>
                                 )}
                                 <div>
                                   <div style={{ fontSize: 13, fontWeight: 600 }}>{c.name}</div>
@@ -2155,17 +2165,17 @@ export default function App() {
                   {/* 主产品无子类时直接显示它自己的库存 */}
                   {!hasChildren && (
                     <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: 20 }}>
-                      <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 14 }}>分倉庫存</div>
+                      <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 14 }}>{t("分倉庫存")}</div>
                       {warehouses.map(w => {
                         const qty = stocks.filter(s => s.product_id === p.id && s.warehouse_id === w.id).reduce((sum, s) => sum + (s.qty || 0), 0);
                         return (
                           <div key={w.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f5f5f5" }}>
                             <span>{w.name}</span>
-                            <span style={{ color: qty > 0 ? "#22c55e" : "#ef4444", fontWeight: 700 }}>{qty} 件</span>
+                            <span style={{ color: qty > 0 ? "#22c55e" : "#ef4444", fontWeight: 700 }}>{qty} {t("件")}</span>
                           </div>
                         );
                       })}
-                      <button onClick={() => setEditingProduct(p)} style={{ marginTop: 12, background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>修改庫存</button>
+                      <button onClick={() => setEditingProduct(p)} style={{ marginTop: 12, background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>{t("修改庫存")}</button>
                     </div>
                   )}
                 </div>
@@ -2173,23 +2183,23 @@ export default function App() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                   {/* 90 天销售额 */}
                   <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: 20 }}>
-                    <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 12 }}>過去 90 天的銷售額</div>
+                    <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 12 }}>{t("過去 90 天的銷售額")}</div>
                     <div style={{ fontSize: 13, color: "#555", lineHeight: 1.8 }}>
-                      <div>• 售出 <b>{soldQty}</b> 件</div>
-                      <div>• <b>{buyers.size}</b> 位買家</div>
-                      <div>• 銷貨淨額 <b>HK$ {soldTotal.toLocaleString()}</b></div>
+                      <div>• {t("售出")} <b>{soldQty}</b> {t("件")}</div>
+                      <div>• <b>{buyers.size}</b> {t("位買家")}</div>
+                      <div>• {t("銷貨淨額")} <b>HK$ {soldTotal.toLocaleString()}</b></div>
                     </div>
                   </div>
                   {/* 商品組織分類 */}
                   <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: 20 }}>
-                    <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 14 }}>商品組織分類</div>
+                    <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 14 }}>{t("商品組織分類")}</div>
                     <div style={{ marginBottom: 12 }}>
-                      <label style={{ fontSize: 12, color: "#888", display: "block", marginBottom: 4 }}>類型</label>
-                      <input value={draft.product_type} onChange={e => setProductOrgDraft({ ...draft, product_type: e.target.value })} placeholder="如 EV / 配件"
+                      <label style={{ fontSize: 12, color: "#888", display: "block", marginBottom: 4 }}>{t("類型")}</label>
+                      <input value={draft.product_type} onChange={e => setProductOrgDraft({ ...draft, product_type: e.target.value })} placeholder={t("如 EV / 配件")}
                         style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, boxSizing: "border-box" }} />
                     </div>
                     <div style={{ marginBottom: 12 }}>
-                      <label style={{ fontSize: 12, color: "#888", display: "block", marginBottom: 4 }}>商品系列</label>
+                      <label style={{ fontSize: 12, color: "#888", display: "block", marginBottom: 4 }}>{t("商品系列")}</label>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
                         {draft.collections.map((c, i) => (
                           <span key={i} style={{ background: "#f0f4ff", color: "#6382ff", padding: "4px 8px", borderRadius: 6, fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
@@ -2198,7 +2208,7 @@ export default function App() {
                           </span>
                         ))}
                       </div>
-                      <input placeholder="輸入後回車新增" list="collection-opts" onKeyDown={e => {
+                      <input placeholder={t("輸入後回車新增")} list="collection-opts" onKeyDown={e => {
                         if (e.key === "Enter" && e.target.value.trim()) {
                           const v = e.target.value.trim();
                           if (!draft.collections.includes(v)) setProductOrgDraft({ ...draft, collections: [...draft.collections, v] });
@@ -2208,7 +2218,7 @@ export default function App() {
                       <datalist id="collection-opts">{collectionOpts.map(o => <option key={o} value={o} />)}</datalist>
                     </div>
                     <div style={{ marginBottom: 12 }}>
-                      <label style={{ fontSize: 12, color: "#888", display: "block", marginBottom: 4 }}>標籤</label>
+                      <label style={{ fontSize: 12, color: "#888", display: "block", marginBottom: 4 }}>{t("標籤")}</label>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
                         {draft.tags.map((t, i) => (
                           <span key={i} style={{ background: "#fff6e5", color: "#b87500", padding: "4px 8px", borderRadius: 6, fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
@@ -2217,7 +2227,7 @@ export default function App() {
                           </span>
                         ))}
                       </div>
-                      <input placeholder="輸入後回車新增" list="tag-opts" onKeyDown={e => {
+                      <input placeholder={t("輸入後回車新增")} list="tag-opts" onKeyDown={e => {
                         if (e.key === "Enter" && e.target.value.trim()) {
                           const v = e.target.value.trim();
                           if (!draft.tags.includes(v)) setProductOrgDraft({ ...draft, tags: [...draft.tags, v] });
@@ -2228,8 +2238,8 @@ export default function App() {
                     </div>
                     {productOrgDraft && (
                       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                        <button onClick={() => setProductOrgDraft(null)} style={{ flex: 1, padding: "8px 10px", background: "#f5f5f5", border: "none", borderRadius: 8, fontSize: 13, cursor: "pointer" }}>取消</button>
-                        <button onClick={saveDraft} style={{ flex: 1, padding: "8px 10px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>儲存</button>
+                        <button onClick={() => setProductOrgDraft(null)} style={{ flex: 1, padding: "8px 10px", background: "#f5f5f5", border: "none", borderRadius: 8, fontSize: 13, cursor: "pointer" }}>{t("取消")}</button>
+                        <button onClick={saveDraft} style={{ flex: 1, padding: "8px 10px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>{t("儲存")}</button>
                       </div>
                     )}
                   </div>
@@ -2244,11 +2254,11 @@ export default function App() {
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
               <div>
-                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>客戶</h1>
+                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{t("客戶")}</h1>
                 <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>
                   {customerTimeRange === "all"
-                    ? `共 ${filteredCustomers.length} 位客戶`
-                    : `共 ${filteredCustomers.length} 位客戶（${customerTimeRange}天內有購買）`}
+                    ? `${t("共")} ${filteredCustomers.length} ${t("位客戶")}`
+                    : `${t("共")} ${filteredCustomers.length} ${t("位客戶")}（${customerTimeRange}${t("天內有購買")}）`}
                 </p>
               </div>
               <div style={{ display: "flex", gap: 10 }}>
@@ -2258,31 +2268,31 @@ export default function App() {
                   return (
                     <button
                       onClick={() => setMergeCandidatesOpen(true)}
-                      title="列出所有虛擬合併的客戶組，一鍵升級為物理合併"
+                      title={t("列出所有虛擬合併的客戶組，一鍵升級為物理合併")}
                       style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff6e5", color: "#b87500", border: "1px solid #ffd88a", borderRadius: 10, padding: "10px 16px", cursor: "pointer", fontWeight: 700, fontSize: 14 }}
-                    >🔍 疑似重複 {candidates.length} 組</button>
+                    >🔍 {t("疑似重複")} {candidates.length} {t("組")}</button>
                   );
                 })()}
                 <button onClick={() => setShowAddCustomer(true)} style={{ display: "flex", alignItems: "center", gap: 8, background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, padding: "10px 18px", cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
-                  <Icon name="plus" size={16} /> 新增客戶
+                  <Icon name="plus" size={16} /> {t("新增客戶")}
                 </button>
               </div>
             </div>
 
             <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
               <Icon name="search" size={15} />
-              <input placeholder="搜尋客戶..." value={search} onChange={e => { setSearch(e.target.value); setVisibleCustomers(30); }} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
+              <input placeholder={t("搜尋客戶...")} value={search} onChange={e => { setSearch(e.target.value); setVisibleCustomers(30); }} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
             </div>
             <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-              <span style={{ fontSize: 13, color: "#888", marginRight: 4 }}>排序：</span>
-              {[["created", "建立時間"], ["lastPurchase", "最近購買"]].map(([k, label]) => (
+              <span style={{ fontSize: 13, color: "#888", marginRight: 4 }}>{t("排序")}：</span>
+              {[["created", t("建立時間")], ["lastPurchase", t("最近購買")]].map(([k, label]) => (
                 <button key={k} onClick={() => { setCustomerSort(k); setVisibleCustomers(30); }} style={{ padding: "6px 14px", borderRadius: 20, border: customerSort === k ? "1px solid #6382ff" : "1px solid #e0e0e0", background: customerSort === k ? "#f0f4ff" : "#fff", color: customerSort === k ? "#6382ff" : "#666", fontSize: 13, fontWeight: customerSort === k ? 700 : 400, cursor: "pointer" }}>{label}</button>
               ))}
-              <button onClick={() => { setCustomerSortDir(d => d === "desc" ? "asc" : "desc"); setVisibleCustomers(30); }} title={customerSortDir === "desc" ? "目前降序（新→舊），點擊切換為升序" : "目前升序（舊→新），點擊切換為降序"} style={{ padding: "6px 14px", borderRadius: 20, border: "1px solid #6382ff", background: "#6382ff", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-                {customerSortDir === "desc" ? "↓ 降序" : "↑ 升序"}
+              <button onClick={() => { setCustomerSortDir(d => d === "desc" ? "asc" : "desc"); setVisibleCustomers(30); }} title={customerSortDir === "desc" ? t("目前降序（新→舊），點擊切換為升序") : t("目前升序（舊→新），點擊切換為降序")} style={{ padding: "6px 14px", borderRadius: 20, border: "1px solid #6382ff", background: "#6382ff", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                {customerSortDir === "desc" ? t("↓ 降序") : t("↑ 升序")}
               </button>
-              <span style={{ fontSize: 13, color: "#888", marginLeft: 12, marginRight: 4 }}>時間：</span>
-              {[["all", "全部"], ["7", "7天"], ["30", "30天"], ["90", "90天"]].map(([k, label]) => (
+              <span style={{ fontSize: 13, color: "#888", marginLeft: 12, marginRight: 4 }}>{t("時間")}：</span>
+              {[["all", t("全部")], ["7", t("7天")], ["30", t("30天")], ["90", t("90天")]].map(([k, label]) => (
                 <button key={k} onClick={() => { setCustomerTimeRange(k); setVisibleCustomers(30); }} style={{ padding: "6px 14px", borderRadius: 20, border: customerTimeRange === k ? "1px solid #6382ff" : "1px solid #e0e0e0", background: customerTimeRange === k ? "#f0f4ff" : "#fff", color: customerTimeRange === k ? "#6382ff" : "#666", fontSize: 13, fontWeight: customerTimeRange === k ? 700 : 400, cursor: "pointer" }}>{label}</button>
               ))}
             </div>
@@ -2310,11 +2320,11 @@ export default function App() {
                         <div style={{ display: "flex", gap: 12, textAlign: "center" }}>
                           <div style={{ padding: "8px 14px", background: "#f0f4ff", borderRadius: 10 }}>
                             <div style={{ fontSize: 16, fontWeight: 800, color: "#6382ff" }}>HKD${total.toLocaleString()}</div>
-                            <div style={{ fontSize: 11, color: "#888" }}>累計</div>
+                            <div style={{ fontSize: 11, color: "#888" }}>{t("累計")}</div>
                           </div>
                           <div style={{ padding: "8px 14px", background: "#fff8f0", borderRadius: 10 }}>
                             <div style={{ fontSize: 16, fontWeight: 800, color: "#f59e0b" }}>{custInvoices.length}</div>
-                            <div style={{ fontSize: 11, color: "#888" }}>訂單</div>
+                            <div style={{ fontSize: 11, color: "#888" }}>{t("訂單")}</div>
                           </div>
                         </div>
                       </div>
@@ -2322,7 +2332,7 @@ export default function App() {
               })}
               {visibleCustomers < filteredCustomers.length && (
                 <button onClick={() => setVisibleCustomers(v => v + 30)} style={{ display: "block", margin: "12px auto", padding: "10px 28px", background: "#f0f4ff", color: "#6382ff", border: "1px solid #e0e8ff", borderRadius: 10, cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
-                  載入更多（{filteredCustomers.length - visibleCustomers} 項待載入）
+                  {t("載入更多")}（{filteredCustomers.length - visibleCustomers} {t("項待載入")}）
                 </button>
               )}
             </div>
@@ -2334,14 +2344,14 @@ export default function App() {
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
               <button onClick={() => setSelectedCustomer(null)} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", color: "#6382ff", fontWeight: 700, fontSize: 14, padding: 0 }}>
-                <Icon name="back" size={16} /> 返回客戶列表
+                <Icon name="back" size={16} /> {t("返回客戶列表")}
               </button>
               <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => openEditCustomer(selectedCustomer)} title="編輯客戶" style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff9ec", color: "#d08700", border: "1px solid #f4dca4", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
-                  ✏️ 編輯客戶
+                <button onClick={() => openEditCustomer(selectedCustomer)} title={t("編輯客戶")} style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff9ec", color: "#d08700", border: "1px solid #f4dca4", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+                  ✏️ {t("編輯客戶")}
                 </button>
-                <button onClick={() => handleDeleteCustomer(selectedCustomer)} title="刪除客戶" style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff0f0", color: "#d14343", border: "1px solid #ffcccc", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
-                  🗑️ 刪除客戶
+                <button onClick={() => handleDeleteCustomer(selectedCustomer)} title={t("刪除客戶")} style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff0f0", color: "#d14343", border: "1px solid #ffcccc", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+                  🗑️ {t("刪除客戶")}
                 </button>
               </div>
             </div>
@@ -2361,9 +2371,9 @@ export default function App() {
                         <button
                           onClick={() => setMergeHistoryOpen(selectedCustomer)}
                           style={{ fontSize: 11, color: "#6382ff", background: "#eef2ff", borderRadius: 20, padding: "2px 10px", fontWeight: 700, border: "none", cursor: "pointer" }}
-                          title="查看合併記錄"
+                          title={t("查看合併記錄")}
                         >
-                          已合併 {totalCount} 條重複記錄 →
+                          {t("已合併")} {totalCount} {t("條重複記錄 →")}
                         </button>
                       );
                     })()}
@@ -2404,14 +2414,14 @@ export default function App() {
                       <>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 14 }}>
                           {blk(emails, v => <>📧 {v}</>)}
-                          {blk(phones, v => <>📱 香港：{v}</>)}
-                          {blk(phoneMainlands, v => <>📱 內地：{v}</>)}
+                          {blk(phones, v => <>📱 {t("香港")}：{v}</>)}
+                          {blk(phoneMainlands, v => <>📱 {t("內地")}：{v}</>)}
                           {blk(cars, v => <>🚗 {v}</>)}
-                          {selectedCustomer.referral && <div>🔗 來源：{selectedCustomer.referral}</div>}
+                          {selectedCustomer.referral && <div>🔗 {t("來源")}：{selectedCustomer.referral}</div>}
                         </div>
                         {addresses.length > 0 && (
                           <div style={{ marginTop: 10, fontSize: 14, display: "flex", flexDirection: "column", gap: 4 }}>
-                            {addresses.map((a, i) => <div key={i}>📍 {addresses.length > 1 ? `地址 ${i + 1}：` : ""}{a}</div>)}
+                            {addresses.map((a, i) => <div key={i}>📍 {addresses.length > 1 ? `${t("地址")} ${i + 1}：` : ""}{a}</div>)}
                           </div>
                         )}
                       </>
@@ -2419,7 +2429,7 @@ export default function App() {
                   })()}
                   {selectedCustomer.interest_products?.length > 0 && (
                     <div style={{ marginTop: 10 }}>
-                      <span style={{ fontSize: 13, color: "#888" }}>感興趣產品：</span>
+                      <span style={{ fontSize: 13, color: "#888" }}>{t("感興趣產品")}：</span>
                       {selectedCustomer.interest_products.map(p => (
                         <span key={p} style={{ background: "#f0f4ff", color: "#6382ff", borderRadius: 20, padding: "3px 10px", fontSize: 12, fontWeight: 600, marginRight: 6 }}>{p}</span>
                       ))}
@@ -2430,7 +2440,7 @@ export default function App() {
               </div>
             </div>
 
-            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>購買記錄</h3>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>{t("購買記錄")}</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {(() => {
                 const scCids = selectedCustomer.allCids || selectedCustomer.groupCids || [selectedCustomer.id];
@@ -2439,25 +2449,25 @@ export default function App() {
                   if (da !== db) return db.localeCompare(da);
                   return String(b.created_at || "").localeCompare(String(a.created_at || ""));
                 });
-                if (myInvoices.length === 0) return (<div style={{ background: "#fff", borderRadius: 14, padding: 24, textAlign: "center", color: "#aaa", border: "1px solid #f0f0f0" }}>暫無購買記錄</div>);
+                if (myInvoices.length === 0) return (<div style={{ background: "#fff", borderRadius: 14, padding: 24, textAlign: "center", color: "#aaa", border: "1px solid #f0f0f0" }}>{t("暫無購買記錄")}</div>);
                 return myInvoices.map(inv => (
                 <div key={inv.id} style={{ background: "#fff", borderRadius: 14, padding: "18px 22px", border: "1px solid #f0f0f0", boxShadow: "0 2px 8px rgba(0,0,0,0.03)", display: "flex", alignItems: "center", gap: 16 }}>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 800, fontSize: 15 }}>{fmtInvNum(inv)}</div>
-                    <div style={{ fontSize: 13, color: "#888", marginTop: 3 }}>{inv.date || "日期未知"} · {formatNotes(inv.notes)}</div>
+                    <div style={{ fontSize: 13, color: "#888", marginTop: 3 }}>{inv.date || t("日期未知")} · {formatNotes(inv.notes)}</div>
                     {Array.isArray(inv.items) && inv.items.map((item, i) => (
                       <div key={i} style={{ fontSize: 12, color: "#666", marginTop: 2 }}>{item.name} ×{item.qty} — HKD${item.price}</div>
                     ))}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                     {(inv.status || "").trim().toLowerCase() !== "paid" && (
-                      <button onClick={() => handleMarkPaid(inv)} title="標記已付款" style={{ fontSize: 12, background: "#e8f5e9", color: "#22c55e", border: "1px solid #c8e6c9", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
-                        ✓ 標記已付款
+                      <button onClick={() => handleMarkPaid(inv)} title={t("標記已付款")} style={{ fontSize: 12, background: "#e8f5e9", color: "#22c55e", border: "1px solid #c8e6c9", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
+                        ✓ {t("標記已付款")}
                       </button>
                     )}
                     <div style={{ fontSize: 18, fontWeight: 800 }}>HKD${inv.total}</div>
                     <Badge status={inv.status} />
-                    <button onClick={() => openEditInvoice(inv)} title="編輯發票" style={{ fontSize: 12, background: "#fff8e1", color: "#f59e0b", border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700 }}>
+                    <button onClick={() => openEditInvoice(inv)} title={t("編輯發票")} style={{ fontSize: 12, background: "#fff8e1", color: "#f59e0b", border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700 }}>
                       ✏️
                     </button>
                     <button onClick={() => openPrintChooser(inv, selectedCustomer, inv.items || [], products)} style={{ fontSize: 12, background: "#f0f4ff", color: "#6382ff", border: "none", borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
@@ -2476,17 +2486,17 @@ export default function App() {
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
               <div>
-                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>發票</h1>
-                <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>共 {invoices.length} 張發票</p>
+                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{t("發票")}</h1>
+                <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>{t("共")} {invoices.length} {t("張發票")}</p>
               </div>
               <button onClick={() => setShowNewInvoice(true)} style={{ display: "flex", alignItems: "center", gap: 8, background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, padding: "10px 18px", cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
-                <Icon name="plus" size={16} /> 新建發票
+                <Icon name="plus" size={16} /> {t("新建發票")}
               </button>
             </div>
 
             <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
               <Icon name="search" size={15} />
-              <input placeholder="搜尋發票..." value={search} onChange={e => { setSearch(e.target.value); setVisibleInvoices(30); }} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
+              <input placeholder={t("搜尋發票...")} value={search} onChange={e => { setSearch(e.target.value); setVisibleInvoices(30); }} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -2496,26 +2506,26 @@ export default function App() {
                   <div key={inv.id} style={{ background: "#fff", borderRadius: 14, padding: "18px 22px", border: "1px solid #f0f0f0", boxShadow: "0 2px 8px rgba(0,0,0,0.03)", display: "flex", alignItems: "center", gap: 18 }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 800, fontSize: 15 }}>{fmtInvNum(inv)}</div>
-                      <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>{(c?.phone || c?.phone_mainland) ? `${c.phone || c.phone_mainland} · ` : ""}{c?.name || "—"} · {inv.date || "日期未知"} · {formatNotes(inv.notes)}</div>
+                      <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>{(c?.phone || c?.phone_mainland) ? `${c.phone || c.phone_mainland} · ` : ""}{c?.name || "—"} · {inv.date || t("日期未知")} · {formatNotes(inv.notes)}</div>
                       {Array.isArray(inv.items) && inv.items.slice(0, 2).map((item, i) => (
                         <div key={i} style={{ fontSize: 12, color: "#999" }}>{item.name} ×{item.qty}</div>
                       ))}
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                       {(inv.status || "").trim().toLowerCase() !== "paid" && (
-                        <button onClick={() => handleMarkPaid(inv)} title="標記已付款" style={{ fontSize: 12, background: "#e8f5e9", color: "#22c55e", border: "1px solid #c8e6c9", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
-                          ✓ 標記已付款
+                        <button onClick={() => handleMarkPaid(inv)} title={t("標記已付款")} style={{ fontSize: 12, background: "#e8f5e9", color: "#22c55e", border: "1px solid #c8e6c9", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
+                          ✓ {t("標記已付款")}
                         </button>
                       )}
                       <div style={{ fontSize: 18, fontWeight: 800 }}>HKD${inv.total}</div>
                       <Badge status={inv.status} />
-                      <button onClick={() => openEditInvoice(inv)} title="編輯發票" style={{ fontSize: 12, background: "#fff8e1", color: "#f59e0b", border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700 }}>
+                      <button onClick={() => openEditInvoice(inv)} title={t("編輯發票")} style={{ fontSize: 12, background: "#fff8e1", color: "#f59e0b", border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700 }}>
                         ✏️
                       </button>
                       <button onClick={() => openPrintChooser(inv, c, inv.items || [], products)} style={{ fontSize: 12, background: "#f0f4ff", color: "#6382ff", border: "none", borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
-                        <Icon name="print" size={13} /> 列印
+                        <Icon name="print" size={13} /> {t("列印")}
                       </button>
-                      <button onClick={() => handleDeleteInvoice(inv)} title="刪除發票" style={{ fontSize: 12, background: "#fff0f0", color: "#d14343", border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
+                      <button onClick={() => handleDeleteInvoice(inv)} title={t("刪除發票")} style={{ fontSize: 12, background: "#fff0f0", color: "#d14343", border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
                         🗑️
                       </button>
                     </div>
@@ -2524,7 +2534,7 @@ export default function App() {
               })}
               {visibleInvoices < filteredInvoices.length && (
                 <button onClick={() => setVisibleInvoices(v => v + 30)} style={{ display: "block", margin: "12px auto", padding: "10px 28px", background: "#f0f4ff", color: "#6382ff", border: "1px solid #e0e8ff", borderRadius: 10, cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
-                  載入更多（{filteredInvoices.length - visibleInvoices} 項待載入）
+                  {t("載入更多")}（{filteredInvoices.length - visibleInvoices} {t("項待載入")}）
                 </button>
               )}
             </div>
@@ -2551,20 +2561,20 @@ export default function App() {
               || (w.invoiceNum || "").toLowerCase().includes(q);
           });
           const bucketColor = (b) => b === "expired" ? "#d14343" : b === "week" ? "#ea580c" : b === "soon" ? "#f59e0b" : b === "near" ? "#6382ff" : "#22c55e";
-          const bucketLabel = (b) => b === "expired" ? "已過期" : b === "week" ? "一週內" : b === "soon" ? "30 天內" : b === "near" ? "90 天內" : "一年內";
+          const bucketLabel = (b) => b === "expired" ? t("已過期") : b === "week" ? t("一週內") : b === "soon" ? t("30 天內") : b === "near" ? t("90 天內") : t("一年內");
           const filterBtns = [
-            { k: "all", label: `全部 (${counts.all})`, color: "#555" },
-            { k: "expired", label: `已過期 (${counts.expired})`, color: "#d14343" },
-            { k: "week", label: `一週內 (${counts.week})`, color: "#ea580c" },
-            { k: "soon", label: `30 天內 (${counts.soon})`, color: "#f59e0b" },
-            { k: "near", label: `90 天內 (${counts.near})`, color: "#6382ff" },
-            { k: "far", label: `一年內 (${counts.far})`, color: "#22c55e" },
+            { k: "all", label: `${t("全部")} (${counts.all})`, color: "#555" },
+            { k: "expired", label: `${t("已過期")} (${counts.expired})`, color: "#d14343" },
+            { k: "week", label: `${t("一週內")} (${counts.week})`, color: "#ea580c" },
+            { k: "soon", label: `${t("30 天內")} (${counts.soon})`, color: "#f59e0b" },
+            { k: "near", label: `${t("90 天內")} (${counts.near})`, color: "#6382ff" },
+            { k: "far", label: `${t("一年內")} (${counts.far})`, color: "#22c55e" },
           ];
           return (
             <div>
               <div style={{ marginBottom: 24 }}>
-                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>保修</h1>
-                <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>共 {counts.all} 件需跟進（過期 30 天內 + 未來 365 天內到期，僅顯示有聯繫方式的客戶）</p>
+                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{t("保修")}</h1>
+                <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>{t("共")} {counts.all} {t("件需跟進（過期 30 天內 + 未來 365 天內到期，僅顯示有聯繫方式的客戶）")}</p>
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
                 {filterBtns.map(b => (
@@ -2573,11 +2583,11 @@ export default function App() {
               </div>
               <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
                 <Icon name="search" size={15} />
-                <input placeholder="搜尋客戶名 / 電話 / 產品 / 發票號..." value={warrantySearch} onChange={e => { setWarrantySearch(e.target.value); setVisibleWarranty(50); }} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
+                <input placeholder={t("搜尋客戶名 / 電話 / 產品 / 發票號...")} value={warrantySearch} onChange={e => { setWarrantySearch(e.target.value); setVisibleWarranty(50); }} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {filtered.length === 0 ? (
-                  <div style={{ padding: 40, textAlign: "center", color: "#999" }}>沒有符合條件的保修記錄</div>
+                  <div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("沒有符合條件的保修記錄")}</div>
                 ) : filtered.slice(0, visibleWarranty).map((w, idx) => (
                   <div key={w.invoiceId + "-" + idx} onClick={() => { if (w.customer) { setTab("customers"); setSelectedCustomer(w.customer); } }} style={{ background: "#fff", borderRadius: 12, padding: "14px 18px", border: "1px solid #f0f0f0", boxShadow: "0 2px 6px rgba(0,0,0,0.02)", display: "flex", alignItems: "center", gap: 14, cursor: w.customer ? "pointer" : "default", transition: "border-color 0.15s" }}
                     onMouseEnter={e => { if (w.customer) e.currentTarget.style.borderColor = "#6382ff"; }}
@@ -2589,17 +2599,17 @@ export default function App() {
                         {w.customerPhone && <span style={{ fontSize: 12, color: "#888" }}>· {w.customerPhone}</span>}
                         <span style={{ fontSize: 11, color: bucketColor(w.bucket), fontWeight: 700, padding: "2px 8px", background: bucketColor(w.bucket) + "18", borderRadius: 8 }}>{bucketLabel(w.bucket)}</span>
                       </div>
-                      <div style={{ fontSize: 13, color: "#666", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.productName} · {w.invoiceNum} · 購買 {w.invoiceDate}</div>
+                      <div style={{ fontSize: 13, color: "#666", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.productName} · {w.invoiceNum} · {t("購買")} {w.invoiceDate}</div>
                     </div>
                     <div style={{ textAlign: "right", flexShrink: 0 }}>
                       <div style={{ fontSize: 14, fontWeight: 800, color: bucketColor(w.bucket) }}>{w.warrantyEnd}</div>
-                      <div style={{ fontSize: 12, color: "#888" }}>{w.daysLeft < 0 ? `已過 ${-w.daysLeft} 天` : `剩餘 ${w.daysLeft} 天`}</div>
+                      <div style={{ fontSize: 12, color: "#888" }}>{w.daysLeft < 0 ? `${t("已過")} ${-w.daysLeft} ${t("天")}` : `${t("剩餘")} ${w.daysLeft} ${t("天")}`}</div>
                     </div>
                   </div>
                 ))}
                 {visibleWarranty < filtered.length && (
                   <button onClick={() => setVisibleWarranty(v => v + 50)} style={{ display: "block", margin: "12px auto", padding: "10px 28px", background: "#f0f4ff", color: "#6382ff", border: "1px solid #e0e8ff", borderRadius: 10, cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
-                    載入更多（{filtered.length - visibleWarranty} 項待載入）
+                    {t("載入更多")}（{filtered.length - visibleWarranty} {t("項待載入")}）
                   </button>
                 )}
               </div>
@@ -2655,7 +2665,7 @@ export default function App() {
           inRange.forEach(i => {
             if (!Array.isArray(i.items)) return;
             i.items.forEach(it => {
-              const name = it.name || "未命名";
+              const name = it.name || t("未命名");
               const amt = (Number(it.price) || 0) * (Number(it.qty) || 0);
               prodMap[name] = (prodMap[name] || 0) + amt;
             });
@@ -2679,7 +2689,7 @@ export default function App() {
             }
             if (!custMap[key]) {
               custMap[key] = {
-                name: names.length > 0 ? names.join(" / ") : "(無名客戶)",
+                name: names.length > 0 ? names.join(" / ") : t("(無名客戶)"),
                 phone: phones.join(", "),
                 email: emails.join(", "),
                 amt: 0,
@@ -2690,18 +2700,18 @@ export default function App() {
           const custTop = Object.values(custMap).sort((a, b) => b.amt - a.amt).slice(0, 10);
           const maxCust = Math.max(1, ...custTop.map(c => c.amt));
           const ranges = [
-            { k: "thisMonth", label: "本月" },
-            { k: "lastMonth", label: "上月" },
-            { k: "3m", label: "近 3 月" },
-            { k: "12m", label: "近 12 月" },
-            { k: "year", label: "本年度" },
-            { k: "all", label: "全部" },
+            { k: "thisMonth", label: t("本月") },
+            { k: "lastMonth", label: t("上月") },
+            { k: "3m", label: t("近 3 月") },
+            { k: "12m", label: t("近 12 月") },
+            { k: "year", label: t("本年度") },
+            { k: "all", label: t("全部") },
           ];
           return (
             <div>
               <div style={{ marginBottom: 20 }}>
-                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>營收</h1>
-                <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>僅統計已付款（Paid）發票</p>
+                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{t("營收")}</h1>
+                <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>{t("僅統計已付款（Paid）發票")}</p>
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20 }}>
                 {ranges.map(r => (
@@ -2711,19 +2721,19 @@ export default function App() {
               {/* KPI cards */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 20 }}>
                 <div style={{ background: "#fff", borderRadius: 14, padding: "20px 24px", border: "1px solid #f0f0f0" }}>
-                  <div style={{ fontSize: 12, color: "#888", fontWeight: 600, letterSpacing: "0.04em" }}>總營收</div>
+                  <div style={{ fontSize: 12, color: "#888", fontWeight: 600, letterSpacing: "0.04em" }}>{t("總營收")}</div>
                   <div style={{ fontSize: 26, fontWeight: 800, color: "#6382ff", marginTop: 4 }}>HKD${Math.round(totalRevenue).toLocaleString()}</div>
                 </div>
                 <div style={{ background: "#fff", borderRadius: 14, padding: "20px 24px", border: "1px solid #f0f0f0" }}>
-                  <div style={{ fontSize: 12, color: "#888", fontWeight: 600, letterSpacing: "0.04em" }}>已付發票數</div>
+                  <div style={{ fontSize: 12, color: "#888", fontWeight: 600, letterSpacing: "0.04em" }}>{t("已付發票數")}</div>
                   <div style={{ fontSize: 26, fontWeight: 800, color: "#22c55e", marginTop: 4 }}>{invCount}</div>
                 </div>
                 <div style={{ background: "#fff", borderRadius: 14, padding: "20px 24px", border: "1px solid #f0f0f0" }}>
-                  <div style={{ fontSize: 12, color: "#888", fontWeight: 600, letterSpacing: "0.04em" }}>平均單據</div>
+                  <div style={{ fontSize: 12, color: "#888", fontWeight: 600, letterSpacing: "0.04em" }}>{t("平均單據")}</div>
                   <div style={{ fontSize: 26, fontWeight: 800, color: "#f59e0b", marginTop: 4 }}>HKD${avgValue.toLocaleString()}</div>
                 </div>
                 <div style={{ background: "#fff", borderRadius: 14, padding: "20px 24px", border: "1px solid #f0f0f0" }}>
-                  <div style={{ fontSize: 12, color: "#888", fontWeight: 600, letterSpacing: "0.04em" }}>未付款</div>
+                  <div style={{ fontSize: 12, color: "#888", fontWeight: 600, letterSpacing: "0.04em" }}>{t("未付款")}</div>
                   <div style={{ fontSize: 26, fontWeight: 800, color: "#d14343", marginTop: 4 }}>{unpaidCount}</div>
                   <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>HKD${unpaidAmount.toLocaleString()}</div>
                 </div>
@@ -2731,7 +2741,7 @@ export default function App() {
               {/* 月度柱状图（多月份）/ 產品佔比餅圖（單月） */}
               {monthKeys.length > 1 ? (
                 <div style={{ background: "#fff", borderRadius: 14, padding: 24, border: "1px solid #f0f0f0", marginBottom: 20 }}>
-                  <h3 style={{ margin: "0 0 16px", fontSize: 15, fontWeight: 700 }}>月度營收趨勢</h3>
+                  <h3 style={{ margin: "0 0 16px", fontSize: 15, fontWeight: 700 }}>{t("月度營收趨勢")}</h3>
                   <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 220, overflowX: "auto", paddingBottom: 6 }}>
                     {monthKeys.map(m => {
                       const v = monthMap[m];
@@ -2752,7 +2762,7 @@ export default function App() {
                 const restSum = sortedProds.slice(6).reduce((s, [, v]) => s + v, 0);
                 const pieData = [
                   ...top6.map(([n, v]) => ({ name: n, value: v })),
-                  ...(restSum > 0 ? [{ name: "其他", value: restSum }] : []),
+                  ...(restSum > 0 ? [{ name: t("其他"), value: restSum }] : []),
                 ];
                 const pieTotal = pieData.reduce((s, d) => s + d.value, 0);
                 const colors = ["#6382ff", "#a78bfa", "#f59e0b", "#22c55e", "#ef4444", "#ea580c", "#14b8a6"];
@@ -2760,7 +2770,7 @@ export default function App() {
                 let offset = -Math.PI / 2;
                 return (
                   <div style={{ background: "#fff", borderRadius: 14, padding: 24, border: "1px solid #f0f0f0", marginBottom: 20 }}>
-                    <h3 style={{ margin: "0 0 16px", fontSize: 15, fontWeight: 700 }}>產品銷售佔比</h3>
+                    <h3 style={{ margin: "0 0 16px", fontSize: 15, fontWeight: 700 }}>{t("產品銷售佔比")}</h3>
                     <div style={{ display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
                       <svg viewBox="0 0 100 100" style={{ width: 240, height: 240, flexShrink: 0 }}>
                         {pieData.length === 1 ? (
@@ -2793,8 +2803,8 @@ export default function App() {
               {/* 产品 Top 10 + 客户 Top 10 */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                 <div style={{ background: "#fff", borderRadius: 14, padding: 24, border: "1px solid #f0f0f0" }}>
-                  <h3 style={{ margin: "0 0 16px", fontSize: 15, fontWeight: 700 }}>熱銷產品 Top 10</h3>
-                  {prodTop.length === 0 ? <div style={{ color: "#aaa", fontSize: 13 }}>沒有數據</div> : prodTop.map(([name, amt]) => (
+                  <h3 style={{ margin: "0 0 16px", fontSize: 15, fontWeight: 700 }}>{t("熱銷產品 Top 10")}</h3>
+                  {prodTop.length === 0 ? <div style={{ color: "#aaa", fontSize: 13 }}>{t("沒有數據")}</div> : prodTop.map(([name, amt]) => (
                     <div key={name} style={{ marginBottom: 10 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
                         <span style={{ fontWeight: 600, color: "#333", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "70%" }}>{name}</span>
@@ -2807,8 +2817,8 @@ export default function App() {
                   ))}
                 </div>
                 <div style={{ background: "#fff", borderRadius: 14, padding: 24, border: "1px solid #f0f0f0" }}>
-                  <h3 style={{ margin: "0 0 16px", fontSize: 15, fontWeight: 700 }}>大客戶 Top 10</h3>
-                  {custTop.length === 0 ? <div style={{ color: "#aaa", fontSize: 13 }}>沒有數據</div> : custTop.map((c, idx) => (
+                  <h3 style={{ margin: "0 0 16px", fontSize: 15, fontWeight: 700 }}>{t("大客戶 Top 10")}</h3>
+                  {custTop.length === 0 ? <div style={{ color: "#aaa", fontSize: 13 }}>{t("沒有數據")}</div> : custTop.map((c, idx) => (
                     <div key={idx} style={{ marginBottom: 10 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
                         <span style={{ fontWeight: 600, color: "#333" }}>{c.name}{c.phone ? ` · ${c.phone}` : ""}</span>
@@ -2890,16 +2900,16 @@ export default function App() {
               <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 14, padding: 20, display: "flex", flexDirection: "column" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
                   <div>
-                    <div style={{ fontSize: 18, fontWeight: 800 }}>員工管理</div>
-                    <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>共 {employees.length} 位員工</div>
+                    <div style={{ fontSize: 18, fontWeight: 800 }}>{t("員工管理")}</div>
+                    <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{t("共")} {employees.length} {t("位員工")}</div>
                   </div>
-                  <button onClick={() => setShowAddEmployee(true)} title="新增員工" style={{ display: "flex", alignItems: "center", gap: 4, background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "7px 11px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                    <Icon name="plus" size={13} /> 新增
+                  <button onClick={() => setShowAddEmployee(true)} title={t("新增員工")} style={{ display: "flex", alignItems: "center", gap: 4, background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "7px 11px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                    <Icon name="plus" size={13} /> {t("新增")}
                   </button>
                 </div>
                 <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
                   {employees.length === 0 ? (
-                    <div style={{ textAlign: "center", padding: 24, color: "#aaa", fontSize: 12, border: "1px dashed #e0e0e0", borderRadius: 10 }}>尚無員工</div>
+                    <div style={{ textAlign: "center", padding: 24, color: "#aaa", fontSize: 12, border: "1px dashed #e0e0e0", borderRadius: 10 }}>{t("尚無員工")}</div>
                   ) : employees.map(e => {
                     const openCount = tasks.filter(t => t.employee_id === e.id && !t.parent_task_id && t.status === "open").length;
                     const doneCount = tasks.filter(t => t.employee_id === e.id && !t.parent_task_id && t.status === "done").length;
@@ -2914,8 +2924,8 @@ export default function App() {
                           </div>
                         </div>
                         <div style={{ display: "flex", gap: 10, fontSize: 11, color: "#666", marginTop: 8 }}>
-                          <span><span style={{ fontWeight: 700, color: "#6382ff" }}>{openCount}</span> 進行</span>
-                          <span><span style={{ fontWeight: 700, color: "#22c55e" }}>{doneCount}</span> 完成</span>
+                          <span><span style={{ fontWeight: 700, color: "#6382ff" }}>{openCount}</span> {t("進行")}</span>
+                          <span><span style={{ fontWeight: 700, color: "#22c55e" }}>{doneCount}</span> {t("完成")}</span>
                         </div>
                       </div>
                     );
@@ -2926,7 +2936,7 @@ export default function App() {
               <div>
                 {!emp ? (
                   <div style={{ background: "#fff", borderRadius: 14, padding: 80, textAlign: "center", color: "#aaa", border: "1px dashed #e0e0e0", minHeight: 400, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    ← 從左側選擇員工查看任務看板
+                    {t("← 從左側選擇員工查看任務看板")}
                   </div>
                 ) : (
                   <div>
@@ -2939,34 +2949,34 @@ export default function App() {
                           <div style={{ fontSize: 12, color: "#888", marginTop: 1 }}>{[emp.role, emp.phone, emp.email].filter(Boolean).join(" · ") || "—"}</div>
                         </div>
                       </div>
-                      <button onClick={() => handleDeleteEmployee(emp)} style={{ background: "#fce4ec", border: "none", color: "#e53935", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>刪除員工</button>
+                      <button onClick={() => handleDeleteEmployee(emp)} style={{ background: "#fce4ec", border: "none", color: "#e53935", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{t("刪除員工")}</button>
                     </div>
                     {/* 3 列 × 2 行網格：高 中 | 添加（跨2行）| 反饋 低 */}
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gridTemplateRows: "auto auto", gap: 14, marginBottom: 20 }}>
-                      <div style={{ gridColumn: 1, gridRow: 1 }}>{colBox("高優先級", "#ef4444", cols.high.length, cols.high)}</div>
-                      <div style={{ gridColumn: 2, gridRow: 1 }}>{colBox("中優先級", "#f59e0b", cols.mid.length, cols.mid)}</div>
+                      <div style={{ gridColumn: 1, gridRow: 1 }}>{colBox(t("高優先級"), "#ef4444", cols.high.length, cols.high)}</div>
+                      <div style={{ gridColumn: 2, gridRow: 1 }}>{colBox(t("中優先級"), "#f59e0b", cols.mid.length, cols.mid)}</div>
                       <div style={{ gridColumn: 3, gridRow: "1 / 3", background: "#fff", border: "1px solid #eef0fa", borderRadius: 12, padding: 16, display: "flex", flexDirection: "column" }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: "#3b58d4" }}>＋ 添加任務</div>
-                        <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>優先級</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: "#3b58d4" }}>{t("＋ 添加任務")}</div>
+                        <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>{t("優先級")}</div>
                         <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-                          {[{ v: "high", l: "高", c: "#ef4444" }, { v: "mid", l: "中", c: "#f59e0b" }, { v: "low", l: "低", c: "#22c55e" }].map(opt => {
+                          {[{ v: "high", l: t("高"), c: "#ef4444" }, { v: "mid", l: t("中"), c: "#f59e0b" }, { v: "low", l: t("低"), c: "#22c55e" }].map(opt => {
                             const on = newTaskDraft.priority === opt.v;
                             return (
                               <button key={opt.v} onClick={() => setNewTaskDraft({ ...newTaskDraft, priority: opt.v })} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1px solid " + (on ? opt.c : "#e0e0e0"), background: on ? opt.c + "18" : "#fff", color: on ? opt.c : "#888", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>{opt.l}</button>
                             );
                           })}
                         </div>
-                        <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>標題</div>
-                        <input value={newTaskDraft.title} onChange={e => setNewTaskDraft({ ...newTaskDraft, title: e.target.value })} placeholder="任務標題..." style={{ width: "100%", padding: "9px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", marginBottom: 10, boxSizing: "border-box" }} />
-                        <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>描述 / 備註（可選）</div>
-                        <textarea value={newTaskDraft.note} onChange={e => setNewTaskDraft({ ...newTaskDraft, note: e.target.value })} placeholder="Deadline / 細節..." style={{ width: "100%", minHeight: 80, padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 12, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit", marginBottom: 12 }} />
-                        <button onClick={async () => { if (!newTaskDraft.title.trim()) return; await handleAddTask(emp.id, newTaskDraft.title, newTaskDraft.priority, null, newTaskDraft.note); setNewTaskDraft({ title: "", priority: "low", note: "" }); }} disabled={!newTaskDraft.title.trim()} style={{ width: "100%", padding: 10, background: newTaskDraft.title.trim() ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: newTaskDraft.title.trim() ? "pointer" : "not-allowed" }}>新增任務</button>
+                        <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>{t("標題")}</div>
+                        <input value={newTaskDraft.title} onChange={e => setNewTaskDraft({ ...newTaskDraft, title: e.target.value })} placeholder={t("任務標題...")} style={{ width: "100%", padding: "9px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", marginBottom: 10, boxSizing: "border-box" }} />
+                        <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>{t("描述 / 備註（可選）")}</div>
+                        <textarea value={newTaskDraft.note} onChange={e => setNewTaskDraft({ ...newTaskDraft, note: e.target.value })} placeholder={t("Deadline / 細節...")} style={{ width: "100%", minHeight: 80, padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 12, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit", marginBottom: 12 }} />
+                        <button onClick={async () => { if (!newTaskDraft.title.trim()) return; await handleAddTask(emp.id, newTaskDraft.title, newTaskDraft.priority, null, newTaskDraft.note); setNewTaskDraft({ title: "", priority: "low", note: "" }); }} disabled={!newTaskDraft.title.trim()} style={{ width: "100%", padding: 10, background: newTaskDraft.title.trim() ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: newTaskDraft.title.trim() ? "pointer" : "not-allowed" }}>{t("新增任務")}</button>
                       </div>
                       <div style={{ gridColumn: 1, gridRow: 2 }}>
                         <div style={{ background: "#fff9ec", border: "1px solid #f4dca4", borderRadius: 12, padding: 14, minHeight: 240 }}>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: "#8a6900", marginBottom: 10 }}>💬 任務反饋記錄 <span style={{ fontSize: 12, color: "#b88a00", marginLeft: 6 }}>{empFeedbacks.length}</span></div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#8a6900", marginBottom: 10 }}>💬 {t("任務反饋記錄")} <span style={{ fontSize: 12, color: "#b88a00", marginLeft: 6 }}>{empFeedbacks.length}</span></div>
                           {empFeedbacks.length === 0 ? (
-                            <div style={{ fontSize: 12, color: "#b8a76a", fontStyle: "italic" }}>暫無反饋</div>
+                            <div style={{ fontSize: 12, color: "#b8a76a", fontStyle: "italic" }}>{t("暫無反饋")}</div>
                           ) : empFeedbacks.map(t => (
                             <div key={t.id} onClick={() => setEditingTask(t)} style={{ background: "#fff", border: "1px solid #f4dca4", borderRadius: 8, padding: "9px 11px", marginBottom: 8, cursor: "pointer" }}>
                               <div style={{ fontSize: 12, fontWeight: 700, color: "#333", marginBottom: 4 }}>{t.title}</div>
@@ -2975,19 +2985,19 @@ export default function App() {
                           ))}
                         </div>
                       </div>
-                      <div style={{ gridColumn: 2, gridRow: 2 }}>{colBox("低優先級", "#22c55e", cols.low.length, cols.low)}</div>
+                      <div style={{ gridColumn: 2, gridRow: 2 }}>{colBox(t("低優先級"), "#22c55e", cols.low.length, cols.low)}</div>
                     </div>
                     {(cols.abandoned.length > 0 || cols.done.length > 0) && (
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                         {cols.abandoned.length > 0 && (
                           <details>
-                            <summary style={{ fontSize: 13, fontWeight: 600, color: "#888", cursor: "pointer", padding: "8px 0" }}>已放棄 <span style={{ color: "#aaa", marginLeft: 6 }}>{cols.abandoned.length}</span></summary>
+                            <summary style={{ fontSize: 13, fontWeight: 600, color: "#888", cursor: "pointer", padding: "8px 0" }}>{t("已放棄")} <span style={{ color: "#aaa", marginLeft: 6 }}>{cols.abandoned.length}</span></summary>
                             <div style={{ marginTop: 8 }}>{cols.abandoned.map((t, i) => renderTaskCard(t, i))}</div>
                           </details>
                         )}
                         {cols.done.length > 0 && (
                           <details>
-                            <summary style={{ fontSize: 13, fontWeight: 600, color: "#22c55e", cursor: "pointer", padding: "8px 0" }}>已完成 <span style={{ color: "#aaa", marginLeft: 6 }}>{cols.done.length}</span></summary>
+                            <summary style={{ fontSize: 13, fontWeight: 600, color: "#22c55e", cursor: "pointer", padding: "8px 0" }}>{t("已完成")} <span style={{ color: "#aaa", marginLeft: 6 }}>{cols.done.length}</span></summary>
                             <div style={{ marginTop: 8 }}>{cols.done.map((t, i) => renderTaskCard(t, i))}</div>
                           </details>
                         )}
@@ -3004,24 +3014,24 @@ export default function App() {
         {tab === "whatsapp" && (() => {
           const s = waSettings || {};
           const subNav = [
-            { id: "settings",   label: "設置 / 模式" },
-            { id: "knowledge",  label: "知識庫" },
+            { id: "settings",   label: t("設置 / 模式") },
+            { id: "knowledge",  label: t("知識庫") },
             { id: "prompt",     label: "Boss Prompt" },
-            { id: "whitelist",  label: "白名單" },
-            { id: "messages",   label: "對話歷史" },
-            { id: "unresolved", label: "未解決問題" },
-            { id: "reports",    label: "日報" },
-            { id: "logs",       label: "日誌" },
+            { id: "whitelist",  label: t("白名單") },
+            { id: "messages",   label: t("對話歷史") },
+            { id: "unresolved", label: t("未解決問題") },
+            { id: "reports",    label: t("日報") },
+            { id: "logs",       label: t("日誌") },
           ];
           const guardAdmin = () => {
-            if (!isWaAdmin) { alert("您是只讀帳戶，無法編輯 WhatsApp 設置。請聯繫管理員。"); return false; }
+            if (!isWaAdmin) { alert(t("您是只讀帳戶，無法編輯 WhatsApp 設置。請聯繫管理員。")); return false; }
             return true;
           };
           const saveSettings = async (patch) => {
             if (!guardAdmin()) return;
             const newVals = { ...s, ...patch, updated_at: new Date().toISOString() };
             const { error } = await supabase.from("wa_settings").update(patch).eq("id", 1);
-            if (error) { alert(`保存失敗：${error.message}`); return; }
+            if (error) { alert(`${t("保存失敗")}：${error.message}`); return; }
             setWaSettings(newVals);
             queryClient.setQueryData(["bf", "wa_settings"], newVals);
           };
@@ -3029,26 +3039,26 @@ export default function App() {
             if (!guardAdmin()) return;
             if (!value.trim()) return;
             const { data, error } = await supabase.from("wa_whitelist").insert({ kind, value: value.trim(), note: note?.trim() || null, active: true }).select().single();
-            if (error) { alert(`新增失敗：${error.message}`); return; }
+            if (error) { alert(`${t("新增失敗")}：${error.message}`); return; }
             setWaWhitelist(prev => [data, ...prev]);
           };
           const removeWhitelist = async (id) => {
             if (!guardAdmin()) return;
-            if (!window.confirm("確定移除？")) return;
+            if (!window.confirm(t("確定移除？"))) return;
             const { error } = await supabase.from("wa_whitelist").delete().eq("id", id);
-            if (error) { alert(`移除失敗：${error.message}`); return; }
+            if (error) { alert(`${t("移除失敗")}：${error.message}`); return; }
             setWaWhitelist(prev => prev.filter(w => w.id !== id));
           };
           const toggleWhitelistActive = async (row) => {
             if (!guardAdmin()) return;
             const { error } = await supabase.from("wa_whitelist").update({ active: !row.active }).eq("id", row.id);
-            if (error) { alert(`更新失敗：${error.message}`); return; }
+            if (error) { alert(`${t("更新失敗")}：${error.message}`); return; }
             setWaWhitelist(prev => prev.map(w => w.id === row.id ? { ...w, active: !row.active } : w));
           };
           const markUnresolved = async (id) => {
             if (!guardAdmin()) return;
             const { error } = await supabase.from("wa_unresolved").update({ resolved_at: new Date().toISOString() }).eq("id", id);
-            if (error) { alert(`更新失敗：${error.message}`); return; }
+            if (error) { alert(`${t("更新失敗")}：${error.message}`); return; }
             setWaUnresolved(prev => prev.map(u => u.id === id ? { ...u, resolved_at: new Date().toISOString() } : u));
           };
           // 狀態徽標：優先顯示離線（心跳超過 2 分鐘）
@@ -3056,33 +3066,33 @@ export default function App() {
           const isLive = lastBeat && (Date.now() - lastBeat < 120000);
           const statusCode = !isLive ? (lastBeat ? "offline" : "never") : (waHeartbeat?.status || "unknown");
           const statusMap = {
-            running:    { label: "正常運行",            color: "#22c55e", bg: "#e8f5e9", dot: "●" },
-            starting:   { label: "啟動中",              color: "#f59e0b", bg: "#fff8e1", dot: "●" },
-            cli_error:  { label: "CLI 錯誤",            color: "#ef4444", bg: "#ffe5e5", dot: "●" },
-            api_error:  { label: "API 錯誤",            color: "#f97316", bg: "#fff1e5", dot: "●" },
-            no_network: { label: "無網絡",              color: "#9ca3af", bg: "#f3f4f6", dot: "●" },
-            offline:    { label: "離線（本地服務已停）", color: "#9ca3af", bg: "#f3f4f6", dot: "○" },
-            never:      { label: "未啟動過",            color: "#9ca3af", bg: "#f3f4f6", dot: "○" },
-            unknown:    { label: "未知",                color: "#9ca3af", bg: "#f3f4f6", dot: "○" },
+            running:    { label: t("正常運行"),            color: "#22c55e", bg: "#e8f5e9", dot: "●" },
+            starting:   { label: t("啟動中"),              color: "#f59e0b", bg: "#fff8e1", dot: "●" },
+            cli_error:  { label: t("CLI 錯誤"),            color: "#ef4444", bg: "#ffe5e5", dot: "●" },
+            api_error:  { label: t("API 錯誤"),            color: "#f97316", bg: "#fff1e5", dot: "●" },
+            no_network: { label: t("無網絡"),              color: "#9ca3af", bg: "#f3f4f6", dot: "●" },
+            offline:    { label: t("離線（本地服務已停）"), color: "#9ca3af", bg: "#f3f4f6", dot: "○" },
+            never:      { label: t("未啟動過"),            color: "#9ca3af", bg: "#f3f4f6", dot: "○" },
+            unknown:    { label: t("未知"),                color: "#9ca3af", bg: "#f3f4f6", dot: "○" },
           };
           const stInfo = statusMap[statusCode] || statusMap.unknown;
           // 敏感字段編輯密碼門檻
           const ensureUnlocked = () => {
             if (waSecretUnlocked) return true;
-            if (!isWaAdmin) { alert("您是只讀帳戶，無法解鎖查看 / 編輯敏感字段（API Key / Boss Prompt 等）。"); return false; }
+            if (!isWaAdmin) { alert(t("您是只讀帳戶，無法解鎖查看 / 編輯敏感字段（API Key / Boss Prompt 等）。")); return false; }
             if (!s.admin_password) {
-              const pwd = window.prompt("首次設置管理員密碼（用於保護 API Key / Boss Prompt / Model / Base URL 編輯）：");
+              const pwd = window.prompt(t("首次設置管理員密碼（用於保護 API Key / Boss Prompt / Model / Base URL 編輯）："));
               if (!pwd || !pwd.trim()) return false;
               saveSettings({ admin_password: pwd.trim() });
               setWaSecretUnlocked(true);
               return true;
             }
-            const pwd = window.prompt("請輸入管理員密碼：");
+            const pwd = window.prompt(t("請輸入管理員密碼："));
             if (pwd === s.admin_password) { setWaSecretUnlocked(true); return true; }
-            alert("密碼錯誤");
+            alert(t("密碼錯誤"));
             return false;
           };
-          const kindLabel = { phone: "私聊白名單（手機）", group: "群聊白名單（精確）", group_fuzzy: "群聊白名單（模糊）", staff: "客服名單（手機）" };
+          const kindLabel = { phone: t("私聊白名單（手機）"), group: t("群聊白名單（精確）"), group_fuzzy: t("群聊白名單（模糊）"), staff: t("客服名單（手機）") };
           const customersMap = new Map();
           for (const m of waMessages) {
             if (!customersMap.has(m.customer_id)) customersMap.set(m.customer_id, []);
@@ -3098,18 +3108,18 @@ export default function App() {
             <div>
               {!isWaAdmin && (
                 <div style={{ background: "#fff8e1", border: "1px solid #f4dca4", borderRadius: 10, padding: "10px 16px", marginBottom: 14, fontSize: 13, color: "#8a6900" }}>
-                  🔒 您是<b>只讀帳戶</b>，可瀏覽 WhatsApp 數據但無法編輯設置 / 知識庫 / 白名單 / Boss Prompt / 標記已解決等。需要編輯請聯繫管理員。
+                  🔒 {t("您是")}<b>{t("只讀帳戶")}</b>{t("，可瀏覽 WhatsApp 數據但無法編輯設置 / 知識庫 / 白名單 / Boss Prompt / 標記已解決等。需要編輯請聯繫管理員。")}
                 </div>
               )}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
                 <div>
-                  <div style={{ fontSize: 26, fontWeight: 800 }}>WhatsApp AI 客服</div>
+                  <div style={{ fontSize: 26, fontWeight: 800 }}>{t("WhatsApp AI 客服")}</div>
                   <div style={{ fontSize: 13, color: "#888", marginTop: 4 }}>
-                    模式 <span style={{ fontWeight: 700, color: s.claude_mode === "api" ? "#6382ff" : "#22c55e" }}>{s.claude_mode === "api" ? "API（雲端）" : "CLI（本地）"}</span>
-                    {" · "}共 {customerIds.length} 位客戶 · {waMessages.length} 條消息 · {waUnresolved.filter(u => !u.resolved_at).length} 條未解決
+                    {t("模式")} <span style={{ fontWeight: 700, color: s.claude_mode === "api" ? "#6382ff" : "#22c55e" }}>{s.claude_mode === "api" ? t("API（雲端）") : t("CLI（本地）")}</span>
+                    {" · "}{t("共")} {customerIds.length} {t("位客戶")} · {waMessages.length} {t("條消息")} · {waUnresolved.filter(u => !u.resolved_at).length} {t("條未解決")}
                   </div>
                 </div>
-                <div title={waHeartbeat?.error_message || (waHeartbeat?.last_heartbeat_at ? "心跳：" + new Date(waHeartbeat.last_heartbeat_at).toLocaleString("zh-HK") : "尚無心跳")}
+                <div title={waHeartbeat?.error_message || (waHeartbeat?.last_heartbeat_at ? t("心跳：") + new Date(waHeartbeat.last_heartbeat_at).toLocaleString("zh-HK") : t("尚無心跳"))}
                   style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px", borderRadius: 20, background: stInfo.bg, border: "1px solid " + stInfo.color + "33" }}>
                   <span style={{ color: stInfo.color, fontSize: 12, lineHeight: 1 }}>{stInfo.dot}</span>
                   <span style={{ color: stInfo.color, fontSize: 13, fontWeight: 700 }}>{stInfo.label}</span>
@@ -3129,49 +3139,49 @@ export default function App() {
               {waSubTab === "settings" && (
                 <div style={{ maxWidth: 720 }}>
                   <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, padding: 20, marginBottom: 16 }}>
-                    <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>AI 模式</div>
+                    <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>{t("AI 模式")}</div>
                     <div style={{ display: "flex", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
                       {[
-                        { v: "cli", l: "CLI（本地 Claude Code，零費用）" },
-                        { v: "api", l: "API（本地 server.js + OpenAI 兼容）" },
-                        { v: "api_cloud", l: "API 雲端（無需本地 server.js）" },
+                        { v: "cli", l: t("CLI（本地 Claude Code，零費用）") },
+                        { v: "api", l: t("API（本地 server.js + OpenAI 兼容）") },
+                        { v: "api_cloud", l: t("API 雲端（無需本地 server.js）") },
                       ].map(opt => {
                         const on = (s.claude_mode || "cli") === opt.v;
                         return (
                           <button key={opt.v} onClick={() => {
                             if (opt.v === "cli" && (s.claude_mode || "cli") !== "cli") {
-                              if (!window.confirm("切換到 CLI 模式需要本地開著 Claude Code 終端 + server.js，否則啟用失敗。確認切換？")) return;
+                              if (!window.confirm(t("切換到 CLI 模式需要本地開著 Claude Code 終端 + server.js，否則啟用失敗。確認切換？"))) return;
                             }
                             saveSettings({ claude_mode: opt.v });
                           }} style={{ flex: "1 1 200px", padding: "12px 14px", borderRadius: 10, border: "1px solid " + (on ? "#6382ff" : "#e0e0e0"), background: on ? "#eef2ff" : "#fff", color: on ? "#3b58d4" : "#666", fontWeight: 700, fontSize: 13, cursor: "pointer", textAlign: "left" }}>{opt.l}</button>
                         );
                       })}
                     </div>
-                    <div style={{ fontSize: 11, color: "#888", lineHeight: 1.6 }}>CLI / API 模式需本地開著 server.js。<b>API 雲端</b>模式由 Supabase Edge Function + pg_cron 接管，老板那邊只需安裝 Chrome 雲端版插件。</div>
+                    <div style={{ fontSize: 11, color: "#888", lineHeight: 1.6 }}>{t("CLI / API 模式需本地開著 server.js。")}<b>{t("API 雲端")}</b>{t("模式由 Supabase Edge Function + pg_cron 接管，老板那邊只需安裝 Chrome 雲端版插件。")}</div>
                     {(s.claude_mode === "api_cloud") && (
                       <div style={{ marginTop: 12, padding: "10px 14px", background: "#fff8e1", border: "1px solid #f4dca4", borderRadius: 8, fontSize: 12, color: "#8a6900", lineHeight: 1.7 }}>
-                        ⚠️ 雲端模式不支持 <b>日報自動生成</b> 與 <b>Boss Prompt 獨立邏輯</b>，這兩個功能仍需本地 server.js 運行。<br />
-                        雲端 endpoint：<code style={{ background: "#fff", padding: "1px 6px", borderRadius: 4, fontSize: 11 }}>https://qxcmimgqsrwkrhqhzpga.supabase.co/functions/v1/wa-message</code>
+                        ⚠️ {t("雲端模式不支持")} <b>{t("日報自動生成")}</b> {t("與")} <b>{t("Boss Prompt 獨立邏輯")}</b>{t("，這兩個功能仍需本地 server.js 運行。")}<br />
+                        {t("雲端 endpoint：")}<code style={{ background: "#fff", padding: "1px 6px", borderRadius: 4, fontSize: 11 }}>https://qxcmimgqsrwkrhqhzpga.supabase.co/functions/v1/wa-message</code>
                         <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center" }}>
-                          <a href="/whatsapp-extension-cloud.zip" download style={{ padding: "8px 14px", background: "#22c55e", color: "#fff", borderRadius: 8, fontSize: 12, fontWeight: 700, textDecoration: "none" }}>📦 下載 Chrome 插件（雲端版）</a>
-                          <span style={{ fontSize: 11, color: "#8a6900" }}>下載後解壓 → chrome://extensions → 開啟開發者模式 → 載入已解壓的擴展</span>
+                          <a href="/whatsapp-extension-cloud.zip" download style={{ padding: "8px 14px", background: "#22c55e", color: "#fff", borderRadius: 8, fontSize: 12, fontWeight: 700, textDecoration: "none" }}>📦 {t("下載 Chrome 插件（雲端版）")}</a>
+                          <span style={{ fontSize: 11, color: "#8a6900" }}>{t("下載後解壓 → chrome://extensions → 開啟開發者模式 → 載入已解壓的擴展")}</span>
                         </div>
                       </div>
                     )}
                   </div>
                   <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, padding: 20, marginBottom: 16 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                      <div style={{ fontSize: 15, fontWeight: 700 }}>API 配置（API 模式用）{!waSecretUnlocked && <span style={{ fontSize: 11, color: "#888", marginLeft: 8 }}>🔒 已鎖定</span>}</div>
+                      <div style={{ fontSize: 15, fontWeight: 700 }}>{t("API 配置（API 模式用）")}{!waSecretUnlocked && <span style={{ fontSize: 11, color: "#888", marginLeft: 8 }}>🔒 {t("已鎖定")}</span>}</div>
                       {!waSecretUnlocked ? (
-                        <button onClick={() => ensureUnlocked()} style={{ padding: "6px 12px", background: "#fff8e1", color: "#f59e0b", border: "1px solid #f4dca4", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>🔓 解鎖編輯</button>
-                      ) : <span style={{ fontSize: 11, color: "#22c55e", fontWeight: 600 }}>✓ 已解鎖</span>}
+                        <button onClick={() => ensureUnlocked()} style={{ padding: "6px 12px", background: "#fff8e1", color: "#f59e0b", border: "1px solid #f4dca4", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>🔓 {t("解鎖編輯")}</button>
+                      ) : <span style={{ fontSize: 11, color: "#22c55e", fontWeight: 600 }}>✓ {t("已解鎖")}</span>}
                     </div>
                     <Input label="Base URL" value={s.openai_base_url || ""} onChange={v => setWaSettings({ ...s, openai_base_url: v })} placeholder="https://api.openai.com/v1" readOnly={!waSecretUnlocked} />
-                    <div style={{ fontSize: 11, color: "#888", marginBottom: 14, marginTop: -8 }}>也支持任何 OpenAI 兼容中轉站 / 本地模型</div>
+                    <div style={{ fontSize: 11, color: "#888", marginBottom: 14, marginTop: -8 }}>{t("也支持任何 OpenAI 兼容中轉站 / 本地模型")}</div>
                     <Input label="API Key" value={waSecretUnlocked ? (s.openai_api_key || "") : (s.openai_api_key ? "•".repeat(Math.min(s.openai_api_key.length, 40)) : "")} onChange={v => setWaSettings({ ...s, openai_api_key: v })} placeholder="sk-..." readOnly={!waSecretUnlocked} />
                     <Input label="Model" value={s.model || ""} onChange={v => setWaSettings({ ...s, model: v })} placeholder="gpt-4o" readOnly={!waSecretUnlocked} />
                     <div style={{ display: "flex", gap: 10 }}>
-                      <button disabled={!waSecretUnlocked} onClick={() => saveSettings({ openai_base_url: s.openai_base_url, openai_api_key: s.openai_api_key, model: s.model })} style={{ padding: "9px 18px", background: waSecretUnlocked ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: waSecretUnlocked ? "pointer" : "not-allowed" }}>儲存 API 配置</button>
+                      <button disabled={!waSecretUnlocked} onClick={() => saveSettings({ openai_base_url: s.openai_base_url, openai_api_key: s.openai_api_key, model: s.model })} style={{ padding: "9px 18px", background: waSecretUnlocked ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: waSecretUnlocked ? "pointer" : "not-allowed" }}>{t("儲存 API 配置")}</button>
                       <button disabled={!s.openai_base_url || !s.openai_api_key || !s.model} onClick={async () => {
                         try {
                           const r = await fetch(s.openai_base_url.replace(/\/+$/, '') + '/chat/completions', {
@@ -3182,33 +3192,33 @@ export default function App() {
                           const d = await r.json();
                           const content = d.choices?.[0]?.message?.content;
                           if (r.ok && content) {
-                            alert(`✓ 連接成功\n模型回復：${content.slice(0, 100)}`);
+                            alert(`✓ ${t("連接成功")}\n${t("模型回復")}：${content.slice(0, 100)}`);
                           } else if (r.ok) {
                             // HTTP 200 但 content 空：常見於推理模型（reasoner）max_tokens 不夠 / 響應結構特殊
                             const finishReason = d.choices?.[0]?.finish_reason || 'unknown';
                             const usage = d.usage ? `tokens=${d.usage.completion_tokens}/${d.usage.total_tokens}` : '';
-                            alert(`⚠️ HTTP 200 但回復為空（finish_reason=${finishReason} ${usage}）\n推理模型可能 max_tokens 用光在思考上。完整響應：\n${JSON.stringify(d).slice(0, 400)}`);
+                            alert(`⚠️ ${t("HTTP 200 但回復為空")}（finish_reason=${finishReason} ${usage}）\n${t("推理模型可能 max_tokens 用光在思考上。完整響應：")}\n${JSON.stringify(d).slice(0, 400)}`);
                           } else {
-                            alert(`✗ 連接失敗 (${r.status})：${d.error?.message || JSON.stringify(d).slice(0, 200)}`);
+                            alert(`✗ ${t("連接失敗")} (${r.status})：${d.error?.message || JSON.stringify(d).slice(0, 200)}`);
                           }
                         } catch (err) {
-                          alert(`✗ 網絡錯誤：${err.message}`);
+                          alert(`✗ ${t("網絡錯誤")}：${err.message}`);
                         }
-                      }} style={{ padding: "9px 18px", background: (!s.openai_base_url || !s.openai_api_key || !s.model) ? "#e0e0e0" : "#22c55e", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: (s.openai_base_url && s.openai_api_key && s.model) ? "pointer" : "not-allowed" }}>測試連接</button>
+                      }} style={{ padding: "9px 18px", background: (!s.openai_base_url || !s.openai_api_key || !s.model) ? "#e0e0e0" : "#22c55e", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: (s.openai_base_url && s.openai_api_key && s.model) ? "pointer" : "not-allowed" }}>{t("測試連接")}</button>
                     </div>
                   </div>
                   <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, padding: 20 }}>
-                    <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>運行參數</div>
+                    <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>{t("運行參數")}</div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
-                      <Input label="BOT 名字（AI 自稱，注入 prompt）" value={s.bot_name || ""} onChange={v => setWaSettings({ ...s, bot_name: v })} placeholder="例如 Allen / 小克" />
-                      <Input label="BOT WhatsApp 手機號（純數字）" value={s.bot_phone || ""} onChange={v => setWaSettings({ ...s, bot_phone: v })} placeholder="852xxxxxxxx" />
-                      <Input label="老板聊天名（BOSS_CHAT_NAME）" value={s.boss_chat_name || ""} onChange={v => setWaSettings({ ...s, boss_chat_name: v })} placeholder="" />
-                      <Input label="真人抢答等待秒數" type="number" value={s.reply_delay_base ?? 60} onChange={v => setWaSettings({ ...s, reply_delay_base: parseInt(v) || 60 })} />
-                      <Input label="冷卻分鐘（真人回復後）" type="number" value={s.cooldown_minutes ?? 30} onChange={v => setWaSettings({ ...s, cooldown_minutes: parseInt(v) || 30 })} />
-                      <Input label="每用戶每分鐘上限" type="number" value={s.max_replies_per_min ?? 3} onChange={v => setWaSettings({ ...s, max_replies_per_min: parseInt(v) || 3 })} />
-                      <Input label="日報發送時（0-23）" type="number" value={s.daily_report_hour ?? 22} onChange={v => setWaSettings({ ...s, daily_report_hour: parseInt(v) || 22 })} />
+                      <Input label={t("BOT 名字（AI 自稱，注入 prompt）")} value={s.bot_name || ""} onChange={v => setWaSettings({ ...s, bot_name: v })} placeholder={t("例如 Allen / 小克")} />
+                      <Input label={t("BOT WhatsApp 手機號（純數字）")} value={s.bot_phone || ""} onChange={v => setWaSettings({ ...s, bot_phone: v })} placeholder="852xxxxxxxx" />
+                      <Input label={t("老板聊天名（BOSS_CHAT_NAME）")} value={s.boss_chat_name || ""} onChange={v => setWaSettings({ ...s, boss_chat_name: v })} placeholder="" />
+                      <Input label={t("真人抢答等待秒數")} type="number" value={s.reply_delay_base ?? 60} onChange={v => setWaSettings({ ...s, reply_delay_base: parseInt(v) || 60 })} />
+                      <Input label={t("冷卻分鐘（真人回復後）")} type="number" value={s.cooldown_minutes ?? 30} onChange={v => setWaSettings({ ...s, cooldown_minutes: parseInt(v) || 30 })} />
+                      <Input label={t("每用戶每分鐘上限")} type="number" value={s.max_replies_per_min ?? 3} onChange={v => setWaSettings({ ...s, max_replies_per_min: parseInt(v) || 3 })} />
+                      <Input label={t("日報發送時（0-23）")} type="number" value={s.daily_report_hour ?? 22} onChange={v => setWaSettings({ ...s, daily_report_hour: parseInt(v) || 22 })} />
                     </div>
-                    <button onClick={() => saveSettings({ bot_name: s.bot_name, bot_phone: s.bot_phone, boss_chat_name: s.boss_chat_name, reply_delay_base: s.reply_delay_base, cooldown_minutes: s.cooldown_minutes, max_replies_per_min: s.max_replies_per_min, daily_report_hour: s.daily_report_hour })} style={{ padding: "9px 18px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", marginTop: 8 }}>儲存運行參數</button>
+                    <button onClick={() => saveSettings({ bot_name: s.bot_name, bot_phone: s.bot_phone, boss_chat_name: s.boss_chat_name, reply_delay_base: s.reply_delay_base, cooldown_minutes: s.cooldown_minutes, max_replies_per_min: s.max_replies_per_min, daily_report_hour: s.daily_report_hour })} style={{ padding: "9px 18px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", marginTop: 8 }}>{t("儲存運行參數")}</button>
                   </div>
                 </div>
               )}
@@ -3221,15 +3231,15 @@ export default function App() {
                 return (
                   <div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                      <div style={{ fontSize: 13, color: "#888" }}>這裡是 AI 客服回答問題時用的知識庫，本地 server.js 每條消息處理時實時拉取最新版本。</div>
+                      <div style={{ fontSize: 13, color: "#888" }}>{t("這裡是 AI 客服回答問題時用的知識庫，本地 server.js 每條消息處理時實時拉取最新版本。")}</div>
                       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                        {dirty && <span style={{ fontSize: 11, color: "#f59e0b", fontWeight: 600 }}>● 未儲存</span>}
-                        <button disabled={!dirty} onClick={() => saveSettings({ knowledge: localKb })} style={{ padding: "7px 18px", background: dirty ? "#22c55e" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: dirty ? "pointer" : "not-allowed" }}>儲存知識庫</button>
-                        {dirty && <button onClick={() => setWaSettings({ ...s, knowledge: serverKb })} style={{ padding: "7px 14px", background: "#f5f5f5", color: "#666", border: "none", borderRadius: 8, fontSize: 12, cursor: "pointer" }}>取消</button>}
+                        {dirty && <span style={{ fontSize: 11, color: "#f59e0b", fontWeight: 600 }}>● {t("未儲存")}</span>}
+                        <button disabled={!dirty} onClick={() => saveSettings({ knowledge: localKb })} style={{ padding: "7px 18px", background: dirty ? "#22c55e" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: dirty ? "pointer" : "not-allowed" }}>{t("儲存知識庫")}</button>
+                        {dirty && <button onClick={() => setWaSettings({ ...s, knowledge: serverKb })} style={{ padding: "7px 14px", background: "#f5f5f5", color: "#666", border: "none", borderRadius: 8, fontSize: 12, cursor: "pointer" }}>{t("取消")}</button>}
                       </div>
                     </div>
-                    <textarea value={localKb} onChange={e => setWaSettings({ ...s, knowledge: e.target.value })} placeholder="# 產品線 1 ..." style={{ width: "100%", minHeight: "60vh", padding: 16, borderRadius: 10, border: "1px solid " + (dirty ? "#f59e0b" : "#e0e0e0"), fontSize: 13, outline: "none", fontFamily: "ui-monospace, monospace", resize: "vertical", boxSizing: "border-box" }} />
-                    <div style={{ fontSize: 11, color: "#aaa", marginTop: 8 }}>{localKb.length} 字符{dirty ? "（與雲端不同，點「儲存知識庫」才生效）" : " · 已同步"}</div>
+                    <textarea value={localKb} onChange={e => setWaSettings({ ...s, knowledge: e.target.value })} placeholder={t("# 產品線 1 ...")} style={{ width: "100%", minHeight: "60vh", padding: 16, borderRadius: 10, border: "1px solid " + (dirty ? "#f59e0b" : "#e0e0e0"), fontSize: 13, outline: "none", fontFamily: "ui-monospace, monospace", resize: "vertical", boxSizing: "border-box" }} />
+                    <div style={{ fontSize: 11, color: "#aaa", marginTop: 8 }}>{localKb.length} {t("字符")}{dirty ? t("（與雲端不同，點「儲存知識庫」才生效）") : " · " + t("已同步")}</div>
                   </div>
                 );
               })()}
@@ -3238,25 +3248,25 @@ export default function App() {
               {waSubTab === "prompt" && (
                 <div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                    <div style={{ fontSize: 13, color: "#888" }}>該聊天（BOSS_CHAT_NAME）走的是獨立 prompt，不走客服知識庫。{!waSecretUnlocked && <span style={{ marginLeft: 6, color: "#f59e0b", fontWeight: 600 }}>🔒 已鎖定</span>}</div>
+                    <div style={{ fontSize: 13, color: "#888" }}>{t("該聊天（BOSS_CHAT_NAME）走的是獨立 prompt，不走客服知識庫。")}{!waSecretUnlocked && <span style={{ marginLeft: 6, color: "#f59e0b", fontWeight: 600 }}>🔒 {t("已鎖定")}</span>}</div>
                     {!waSecretUnlocked ? (
-                      <button onClick={() => ensureUnlocked()} style={{ padding: "6px 12px", background: "#fff8e1", color: "#f59e0b", border: "1px solid #f4dca4", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>🔓 解鎖編輯</button>
-                    ) : <span style={{ fontSize: 11, color: "#22c55e", fontWeight: 600 }}>✓ 已解鎖</span>}
+                      <button onClick={() => ensureUnlocked()} style={{ padding: "6px 12px", background: "#fff8e1", color: "#f59e0b", border: "1px solid #f4dca4", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>🔓 {t("解鎖編輯")}</button>
+                    ) : <span style={{ fontSize: 11, color: "#22c55e", fontWeight: 600 }}>✓ {t("已解鎖")}</span>}
                   </div>
                   {waSecretUnlocked ? (
                     <>
                       <textarea value={s.boss_prompt || ""}
                         onChange={e => setWaSettings({ ...s, boss_prompt: e.target.value })}
                         onBlur={() => saveSettings({ boss_prompt: s.boss_prompt || "" })}
-                        placeholder="你的名字叫小克..."
+                        placeholder={t("你的名字叫小克...")}
                         style={{ width: "100%", minHeight: "50vh", padding: 16, borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", fontFamily: "ui-monospace, monospace", resize: "vertical", boxSizing: "border-box", background: "#fff", color: "#222" }} />
-                      <div style={{ fontSize: 11, color: "#aaa", marginTop: 8 }}>失焦自動保存 · {(s.boss_prompt || "").length} 字符</div>
+                      <div style={{ fontSize: 11, color: "#aaa", marginTop: 8 }}>{t("失焦自動保存")} · {(s.boss_prompt || "").length} {t("字符")}</div>
                     </>
                   ) : (
                     <div style={{ width: "100%", minHeight: "50vh", padding: "80px 24px", borderRadius: 10, border: "1px dashed #e0e0e0", background: "#fafbfc", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, color: "#aaa", fontSize: 13, textAlign: "center", boxSizing: "border-box" }}>
                       <div style={{ fontSize: 32 }}>🔒</div>
-                      <div style={{ fontWeight: 700, color: "#888", fontSize: 15 }}>Boss Prompt 已加密</div>
-                      <div style={{ color: "#aaa", fontSize: 12 }}>目前有 {(s.boss_prompt || "").length} 字符內容<br />點右上角「解鎖編輯」輸入管理員密碼查看 / 修改</div>
+                      <div style={{ fontWeight: 700, color: "#888", fontSize: 15 }}>{t("Boss Prompt 已加密")}</div>
+                      <div style={{ color: "#aaa", fontSize: 12 }}>{t("目前有")} {(s.boss_prompt || "").length} {t("字符內容")}<br />{t("點右上角「解鎖編輯」輸入管理員密碼查看 / 修改")}</div>
                     </div>
                   )}
                 </div>
@@ -3271,12 +3281,12 @@ export default function App() {
                       <div key={kind} style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, padding: 16 }}>
                         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>{kindLabel[kind]} <span style={{ color: "#aaa", fontSize: 11, marginLeft: 6 }}>{rows.length}</span></div>
                         <form onSubmit={e => { e.preventDefault(); const f = e.target.elements; addWhitelist(kind, f.val.value, f.note.value); f.val.value = ""; f.note.value = ""; }} style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-                          <input name="val" placeholder={kind === "phone" || kind === "staff" ? "852xxx" : "群名"} style={{ flex: 2, padding: "7px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 12, outline: "none" }} />
-                          <input name="note" placeholder="備註（可選）" style={{ flex: 1, padding: "7px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 12, outline: "none" }} />
-                          <button type="submit" style={{ padding: "7px 14px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>加</button>
+                          <input name="val" placeholder={kind === "phone" || kind === "staff" ? "852xxx" : t("群名")} style={{ flex: 2, padding: "7px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 12, outline: "none" }} />
+                          <input name="note" placeholder={t("備註（可選）")} style={{ flex: 1, padding: "7px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 12, outline: "none" }} />
+                          <button type="submit" style={{ padding: "7px 14px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{t("加")}</button>
                         </form>
                         {rows.length === 0 ? (
-                          <div style={{ fontSize: 11, color: "#aaa", fontStyle: "italic", padding: "8px 0" }}>尚無記錄</div>
+                          <div style={{ fontSize: 11, color: "#aaa", fontStyle: "italic", padding: "8px 0" }}>{t("尚無記錄")}</div>
                         ) : rows.map(w => (
                           <div key={w.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: "1px solid #f5f5f5", fontSize: 12 }}>
                             <input type="checkbox" checked={w.active} onChange={() => toggleWhitelistActive(w)} style={{ width: 14, height: 14, cursor: "pointer" }} />
@@ -3294,28 +3304,28 @@ export default function App() {
               {waSubTab === "messages" && (
                 <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 14, minHeight: "60vh" }}>
                   <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-                    <div style={{ padding: "12px 14px", borderBottom: "1px solid #f0f0f0", fontSize: 13, fontWeight: 700 }}>客戶 <span style={{ color: "#aaa", marginLeft: 4 }}>{customerIds.length}</span></div>
+                    <div style={{ padding: "12px 14px", borderBottom: "1px solid #f0f0f0", fontSize: 13, fontWeight: 700 }}>{t("客戶")} <span style={{ color: "#aaa", marginLeft: 4 }}>{customerIds.length}</span></div>
                     <div style={{ flex: 1, overflowY: "auto" }}>
-                      {customerIds.length === 0 ? <div style={{ padding: 16, fontSize: 12, color: "#aaa", fontStyle: "italic" }}>尚無對話</div>
+                      {customerIds.length === 0 ? <div style={{ padding: 16, fontSize: 12, color: "#aaa", fontStyle: "italic" }}>{t("尚無對話")}</div>
                       : customerIds.map(cid => {
                         const msgs = customersMap.get(cid);
                         const active = waSelectedCustomer === cid;
                         return (
                           <div key={cid} onClick={() => setWaSelectedCustomer(cid)} style={{ padding: "10px 14px", borderBottom: "1px solid #f5f5f5", cursor: "pointer", background: active ? "#eef2ff" : "transparent" }}>
                             <div style={{ fontSize: 12, fontWeight: 700, color: active ? "#3b58d4" : "#333", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cid}</div>
-                            <div style={{ fontSize: 11, color: "#999", marginTop: 2 }}>{msgs.length} 條 · {msgs[0]?.created_at?.slice(5, 16).replace("T", " ") || ""}</div>
+                            <div style={{ fontSize: 11, color: "#999", marginTop: 2 }}>{msgs.length} {t("條")} · {msgs[0]?.created_at?.slice(5, 16).replace("T", " ") || ""}</div>
                           </div>
                         );
                       })}
                     </div>
                   </div>
                   <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, padding: 16, overflowY: "auto", maxHeight: "70vh" }}>
-                    {!waSelectedCustomer ? <div style={{ color: "#aaa", fontSize: 13, textAlign: "center", paddingTop: 80 }}>← 從左側選擇客戶查看對話</div>
+                    {!waSelectedCustomer ? <div style={{ color: "#aaa", fontSize: 13, textAlign: "center", paddingTop: 80 }}>{t("← 從左側選擇客戶查看對話")}</div>
                     : (() => {
                       const msgs = [...(customersMap.get(waSelectedCustomer) || [])].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
                       return (
                         <>
-                          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12, paddingBottom: 10, borderBottom: "1px solid #f0f0f0" }}>{waSelectedCustomer} · {msgs.length} 條</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12, paddingBottom: 10, borderBottom: "1px solid #f0f0f0" }}>{waSelectedCustomer} · {msgs.length} {t("條")}</div>
                           {msgs.map(m => (
                             <div key={m.id} style={{ marginBottom: 12, display: "flex", justifyContent: m.role === "assistant" ? "flex-start" : "flex-end" }}>
                               <div style={{ maxWidth: "75%", background: m.role === "assistant" ? "#f0f4ff" : "#e8f5e9", borderRadius: 10, padding: "8px 12px", fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
@@ -3334,20 +3344,20 @@ export default function App() {
               {/* UNRESOLVED */}
               {waSubTab === "unresolved" && (
                 <div>
-                  <div style={{ fontSize: 13, color: "#888", marginBottom: 10 }}>共 {waUnresolved.length} 條 · 未處理 {waUnresolved.filter(u => !u.resolved_at).length} · 已解決 {waUnresolved.filter(u => u.resolved_at).length}</div>
+                  <div style={{ fontSize: 13, color: "#888", marginBottom: 10 }}>{t("共")} {waUnresolved.length} {t("條")} · {t("未處理")} {waUnresolved.filter(u => !u.resolved_at).length} · {t("已解決")} {waUnresolved.filter(u => u.resolved_at).length}</div>
                   {waUnresolved.length === 0 ? (
-                    <div style={{ background: "#fff", borderRadius: 10, padding: 40, textAlign: "center", color: "#aaa", border: "1px dashed #e0e0e0" }}>暫無未解決問題</div>
+                    <div style={{ background: "#fff", borderRadius: 10, padding: 40, textAlign: "center", color: "#aaa", border: "1px dashed #e0e0e0" }}>{t("暫無未解決問題")}</div>
                   ) : waUnresolved.map(u => (
                     <div key={u.id} style={{ background: "#fff", border: "1px solid " + (u.resolved_at ? "#e8f5e9" : "#fce4ec"), borderRadius: 10, padding: "12px 16px", marginBottom: 8, display: "flex", gap: 12, alignItems: "flex-start" }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13, color: u.resolved_at ? "#999" : "#222", textDecoration: u.resolved_at ? "line-through" : "none" }}>{u.question}</div>
                         <div style={{ fontSize: 11, color: "#888", marginTop: 4, display: "flex", gap: 10 }}>
                           <span>{u.customer_id}</span>
-                          <span>{(u.categories || []).join(" · ") || "未分類"}</span>
+                          <span>{(u.categories || []).join(" · ") || t("未分類")}</span>
                           <span>{new Date(u.created_at).toLocaleString("zh-HK", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
                         </div>
                       </div>
-                      {!u.resolved_at && <button onClick={() => markUnresolved(u.id)} style={{ background: "#e8f5e9", border: "none", color: "#22c55e", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>✓ 標記已解決</button>}
+                      {!u.resolved_at && <button onClick={() => markUnresolved(u.id)} style={{ background: "#e8f5e9", border: "none", color: "#22c55e", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>✓ {t("標記已解決")}</button>}
                       {u.resolved_at && <span style={{ fontSize: 11, color: "#22c55e", whiteSpace: "nowrap" }}>✓ {new Date(u.resolved_at).toLocaleString("zh-HK", { month: "2-digit", day: "2-digit" })}</span>}
                     </div>
                   ))}
@@ -3357,12 +3367,12 @@ export default function App() {
               {/* REPORTS */}
               {waSubTab === "reports" && (
                 <div>
-                  <div style={{ fontSize: 13, color: "#888", marginBottom: 10 }}>共 {waReports.length} 份日報</div>
+                  <div style={{ fontSize: 13, color: "#888", marginBottom: 10 }}>{t("共")} {waReports.length} {t("份日報")}</div>
                   {waReports.length === 0 ? (
-                    <div style={{ background: "#fff", borderRadius: 10, padding: 40, textAlign: "center", color: "#aaa", border: "1px dashed #e0e0e0" }}>暫無日報（server.js 每日 {s.daily_report_hour ?? 22}:00 自動生成）</div>
+                    <div style={{ background: "#fff", borderRadius: 10, padding: 40, textAlign: "center", color: "#aaa", border: "1px dashed #e0e0e0" }}>{t("暫無日報（server.js 每日")} {s.daily_report_hour ?? 22}{t(":00 自動生成）")}</div>
                   ) : waReports.map(r => (
                     <details key={r.id} style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 10, padding: "14px 18px", marginBottom: 10 }}>
-                      <summary style={{ cursor: "pointer", fontSize: 14, fontWeight: 700 }}>{r.report_date} <span style={{ fontSize: 11, color: "#888", marginLeft: 10, fontWeight: 500 }}>{r.unresolved_count} 條未解決</span></summary>
+                      <summary style={{ cursor: "pointer", fontSize: 14, fontWeight: 700 }}>{r.report_date} <span style={{ fontSize: 11, color: "#888", marginLeft: 10, fontWeight: 500 }}>{r.unresolved_count} {t("條未解決")}</span></summary>
                       <pre style={{ marginTop: 10, fontSize: 12, color: "#333", whiteSpace: "pre-wrap", fontFamily: "inherit", lineHeight: 1.6 }}>{r.content}</pre>
                     </details>
                   ))}
@@ -3406,14 +3416,14 @@ export default function App() {
                 return (
                   <div>
                     <div style={{ fontSize: 13, color: "#888", marginBottom: 10 }}>
-                      共 {waLogs.length} 條 · 雲端保留 24 小時 · 5s 自動刷新
+                      {t("共")} {waLogs.length} {t("條")} · {t("雲端保留 24 小時 · 5s 自動刷新")}
                       <span style={{ marginLeft: 10, color: "#aaa", fontSize: 12 }}>
-                        （收到/回復入隊/未解決的客戶原話自動脫敏）
+                        {t("（收到/回復入隊/未解決的客戶原話自動脫敏）")}
                       </span>
                     </div>
                     {waLogs.length === 0 ? (
                       <div style={{ background: "#fff", borderRadius: 10, padding: 40, textAlign: "center", color: "#aaa", border: "1px dashed #e0e0e0" }}>
-                        暫無日誌（等 server.js 重啟後或下次同步出問題時會自動填）
+                        {t("暫無日誌（等 server.js 重啟後或下次同步出問題時會自動填）")}
                       </div>
                     ) : (
                       <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 10, padding: 12, maxHeight: "70vh", overflowY: "auto", fontFamily: "Consolas, Menlo, monospace", fontSize: 12, lineHeight: 1.7 }}>
@@ -3443,28 +3453,28 @@ export default function App() {
         const { newCustomer: nc, oldCustomer: oc } = pendingMerge;
         const isEmpty = v => v == null || String(v).trim() === "";
         const rows = [
-          ["姓名", "name"],
-          ["香港電話", "phone"],
-          ["內地電話", "phone_mainland"],
-          ["郵箱", "email"],
-          ["地址", "address"],
-          ["車品牌", "car_make"],
-          ["車型", "car_model"],
-          ["推薦人", "referral"],
+          [t("姓名"), "name"],
+          [t("香港電話"), "phone"],
+          [t("內地電話"), "phone_mainland"],
+          [t("郵箱"), "email"],
+          [t("地址"), "address"],
+          [t("車品牌"), "car_make"],
+          [t("車型"), "car_model"],
+          [t("推薦人"), "referral"],
         ];
         return (
           <div onClick={() => !mergeBusy && setPendingMerge(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, width: 720, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
-              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>🔔 疑似重複客戶，是否合併？</div>
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>🔔 {t("疑似重複客戶，是否合併？")}</div>
               <div style={{ fontSize: 13, color: "#666", marginBottom: 18, lineHeight: 1.6 }}>
-                此表單提交的新客戶匹配到原有客戶（姓名/電話/郵箱/地址命中 3 分以上）。<br/>
-                合併邏輯：<b>原有資料不變</b>，只將老客戶空的欄位填入新表單值。帶 🆕 的是新客戶獨有的資訊。
+                {t("此表單提交的新客戶匹配到原有客戶（姓名/電話/郵箱/地址命中 3 分以上）。")}<br/>
+                {t("合併邏輯：")}<b>{t("原有資料不變")}</b>{t("，只將老客戶空的欄位填入新表單值。帶 🆕 的是新客戶獨有的資訊。")}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "100px 1fr 1fr 180px", gap: 0, border: "1px solid #eee", borderRadius: 10, overflow: "hidden", marginBottom: 18 }}>
-                <div style={{ background: "#fafafa", padding: "10px 12px", fontSize: 12, fontWeight: 700, color: "#888" }}>欄位</div>
-                <div style={{ background: "#fafafa", padding: "10px 12px", fontSize: 12, fontWeight: 700, color: "#888", borderLeft: "1px solid #eee" }}>原有客戶</div>
-                <div style={{ background: "#fff9ec", padding: "10px 12px", fontSize: 12, fontWeight: 700, color: "#8a6900", borderLeft: "1px solid #eee" }}>新表單客戶</div>
-                <div style={{ background: "#fafafa", padding: "10px 12px", fontSize: 12, fontWeight: 700, color: "#888", borderLeft: "1px solid #eee", textAlign: "center" }}>差異處理</div>
+                <div style={{ background: "#fafafa", padding: "10px 12px", fontSize: 12, fontWeight: 700, color: "#888" }}>{t("欄位")}</div>
+                <div style={{ background: "#fafafa", padding: "10px 12px", fontSize: 12, fontWeight: 700, color: "#888", borderLeft: "1px solid #eee" }}>{t("原有客戶")}</div>
+                <div style={{ background: "#fff9ec", padding: "10px 12px", fontSize: 12, fontWeight: 700, color: "#8a6900", borderLeft: "1px solid #eee" }}>{t("新表單客戶")}</div>
+                <div style={{ background: "#fafafa", padding: "10px 12px", fontSize: 12, fontWeight: 700, color: "#888", borderLeft: "1px solid #eee", textAlign: "center" }}>{t("差異處理")}</div>
                 {rows.map(([label, key]) => {
                   const oldVal = oc[key];
                   const newVal = nc[key];
@@ -3497,19 +3507,19 @@ export default function App() {
                       <div key={key+"-n"} style={{ padding: "10px 12px", fontSize: 13, color: isEmpty(newVal) ? "#bbb" : "#111", borderLeft: "1px solid #eee", borderTop: "1px solid #eee", display: "flex", alignItems: "center", gap: 6 }}>
                         <span style={{ flex: 1 }}>{isEmpty(newVal) ? "—" : newVal}</span>
                         {isNew && <span style={{ background: "#d4edda", color: "#155724", fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4 }}>🆕 NEW</span>}
-                        {isDiff && <span style={{ background: "#f8d7da", color: "#721c24", fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4 }}>差異</span>}
+                        {isDiff && <span style={{ background: "#f8d7da", color: "#721c24", fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4 }}>{t("差異")}</span>}
                       </div>
                       <div key={key+"-c"} style={{ padding: "6px 8px", borderLeft: "1px solid #eee", borderTop: "1px solid #eee", display: "flex", alignItems: "center", gap: 4 }}>
-                        {isDiff ? (<>{btn("keep", "保留")}{btn("overwrite", "覆蓋")}{btn("append", "追加")}</>) : (<span style={{ flex: 1, textAlign: "center", color: "#bbb", fontSize: 11 }}>{isNew ? "自動補" : "—"}</span>)}
+                        {isDiff ? (<>{btn("keep", t("保留"))}{btn("overwrite", t("覆蓋"))}{btn("append", t("追加"))}</>) : (<span style={{ flex: 1, textAlign: "center", color: "#bbb", fontSize: 11 }}>{isNew ? t("自動補") : "—"}</span>)}
                       </div>
                     </>
                   );
                 })}
               </div>
               <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-                <button disabled={mergeBusy} onClick={() => setPendingMerge(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: mergeBusy ? "not-allowed" : "pointer" }}>關閉（下次再決定）</button>
+                <button disabled={mergeBusy} onClick={() => setPendingMerge(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: mergeBusy ? "not-allowed" : "pointer" }}>{t("關閉（下次再決定）")}</button>
                 <button disabled={mergeBusy} onClick={handleConfirmMerge} style={{ background: mergeBusy ? "#ccc" : "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 700, cursor: mergeBusy ? "not-allowed" : "pointer" }}>
-                  {mergeBusy ? "合併中…" : "合併到原客戶"}
+                  {mergeBusy ? t("合併中…") : t("合併到原客戶")}
                 </button>
               </div>
             </div>
@@ -3530,9 +3540,9 @@ export default function App() {
         return (
           <div onClick={() => setMergeHistoryOpen(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, width: 720, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
-              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>合併記錄</div>
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>{t("合併記錄")}</div>
               <div style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>
-                此客戶由 {rows.length} 條原始記錄組成（虛擬：字段命中 3+ 自動合併；物理：除名字外完全相等已合併到主記錄）
+                {t("此客戶由")} {rows.length} {t("條原始記錄組成（虛擬：字段命中 3+ 自動合併；物理：除名字外完全相等已合併到主記錄）")}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {rows.map(({ real, isPhysicalChild }) => {
@@ -3544,19 +3554,19 @@ export default function App() {
                         {!isPrimary && (
                           <button
                             onClick={() => openRollback(vc, real.id)}
-                            title="回退：從合併組分離、改合併到其他客戶、或恢復字段值"
+                            title={t("回退：從合併組分離、改合併到其他客戶、或恢復字段值")}
                             style={{ fontSize: 12, background: "#fff0f0", color: "#d14343", border: "1px solid #ffcccc", borderRadius: 6, padding: "5px 10px", cursor: "pointer", fontWeight: 600 }}
-                          >回退</button>
+                          >{t("回退")}</button>
                         )}
-                        <span style={{ fontWeight: 700, fontSize: 14 }}>{real.name || "(無名)"}</span>
-                        {isPrimary && <span style={{ fontSize: 10, color: "#2b4eb5", background: "#e0e8ff", borderRadius: 4, padding: "2px 6px", fontWeight: 700 }}>主記錄</span>}
-                        {isPhysicalChild && <span style={{ fontSize: 10, color: "#8a6900", background: "#fde8b0", borderRadius: 4, padding: "2px 6px", fontWeight: 700 }}>物理合併</span>}
+                        <span style={{ fontWeight: 700, fontSize: 14 }}>{real.name || t("(無名)")}</span>
+                        {isPrimary && <span style={{ fontSize: 10, color: "#2b4eb5", background: "#e0e8ff", borderRadius: 4, padding: "2px 6px", fontWeight: 700 }}>{t("主記錄")}</span>}
+                        {isPhysicalChild && <span style={{ fontSize: 10, color: "#8a6900", background: "#fde8b0", borderRadius: 4, padding: "2px 6px", fontWeight: 700 }}>{t("物理合併")}</span>}
                       </div>
                     </div>
                     <div style={{ fontSize: 12, color: "#666", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
-                      <div>📱 香港：{real.phone || "—"}</div>
+                      <div>📱 {t("香港")}：{real.phone || "—"}</div>
                       <div>📧 {real.email || "—"}</div>
-                      {real.phone_mainland && <div>📱 內地：{real.phone_mainland}</div>}
+                      {real.phone_mainland && <div>📱 {t("內地")}：{real.phone_mainland}</div>}
                       {real.address && <div>📍 {real.address}</div>}
                       {real.car_make && <div>🚗 {real.car_make} {real.car_model || ""}</div>}
                       <div style={{ color: "#aaa", fontSize: 11 }}>id: {real.id.slice(0, 8)}…</div>
@@ -3572,12 +3582,12 @@ export default function App() {
                   return (
                     <button
                       onClick={() => handleUpgradePhysical(vc)}
-                      title="把 rule 1 虛擬合併的成員真正綁定到主記錄，之後刪除字段才真生效"
+                      title={t("把 rule 1 虛擬合併的成員真正綁定到主記錄，之後刪除字段才真生效")}
                       style={{ background: "#fff6e5", color: "#b87500", border: "1px solid #ffd88a", borderRadius: 8, padding: "10px 16px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}
-                    >升級為物理合併 ({upgradeable})</button>
+                    >{t("升級為物理合併")} ({upgradeable})</button>
                   );
                 })()}
-                <button onClick={() => setMergeHistoryOpen(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: "pointer" }}>關閉</button>
+                <button onClick={() => setMergeHistoryOpen(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: "pointer" }}>{t("關閉")}</button>
               </div>
             </div>
           </div>
@@ -3608,12 +3618,12 @@ export default function App() {
           return Array.from(s);
         };
         const FIELD_DEFS = [
-          { dbKey: "phone", label: "香港電話" },
-          { dbKey: "phone_mainland", label: "內地電話" },
-          { dbKey: "email", label: "郵箱" },
-          { dbKey: "address", label: "地址" },
-          { dbKey: "car_make", label: "車品牌" },
-          { dbKey: "car_model", label: "車型" },
+          { dbKey: "phone", label: t("香港電話") },
+          { dbKey: "phone_mainland", label: t("內地電話") },
+          { dbKey: "email", label: t("郵箱") },
+          { dbKey: "address", label: t("地址") },
+          { dbKey: "car_make", label: t("車品牌") },
+          { dbKey: "car_model", label: t("車型") },
         ];
         // 搜合併目標：排除自己合併組成員（已在組內，合併無意義）
         const excludeForTarget = new Set(allIds);
@@ -3632,15 +3642,15 @@ export default function App() {
         return (
           <div onClick={() => !rollbackBusy && setRollbackOpen(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, width: 720, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
-              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>回退合併</div>
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>{t("回退合併")}</div>
               <div style={{ fontSize: 12, color: "#888", marginBottom: 18 }}>
-                主記錄：<b>{primaryRec?.name || "(無名)"}</b>（id: {primaryCid.slice(0,8)}…）<br/>
-                點擊的記錄：<b>{clickedRec?.name || "(無名)"}</b>（id: {clickedCid.slice(0,8)}…）
+                {t("主記錄")}：<b>{primaryRec?.name || t("(無名)")}</b>（id: {primaryCid.slice(0,8)}…）<br/>
+                {t("點擊的記錄")}：<b>{clickedRec?.name || t("(無名)")}</b>（id: {clickedCid.slice(0,8)}…）
               </div>
 
               {/* 影響範圍 */}
               <div style={{ marginBottom: 18 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#333", marginBottom: 8 }}>1. 影響範圍（勾選要一併回退的記錄）</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#333", marginBottom: 8 }}>{t("1. 影響範圍（勾選要一併回退的記錄）")}</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 180, overflowY: "auto", border: "1px solid #eee", borderRadius: 8, padding: 10 }}>
                   {records.map(r => {
                     const checked = rollbackAffected.has(r.id);
@@ -3648,8 +3658,8 @@ export default function App() {
                     return (
                       <label key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", border: "1px solid " + (checked ? "#6382ff" : "#eee"), background: checked ? "#f0f4ff" : "#fff", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
                         <input type="checkbox" checked={checked} onChange={() => toggleAffected(r.id)} />
-                        <span style={{ fontWeight: 600 }}>{r.name || "(無名)"}</span>
-                        <span style={{ fontSize: 10, color: isPhys ? "#8a6900" : "#2b4eb5", background: isPhys ? "#fde8b0" : "#e0e8ff", borderRadius: 4, padding: "1px 6px", fontWeight: 700 }}>{isPhys ? "物理子" : "rule 1 獨立"}</span>
+                        <span style={{ fontWeight: 600 }}>{r.name || t("(無名)")}</span>
+                        <span style={{ fontSize: 10, color: isPhys ? "#8a6900" : "#2b4eb5", background: isPhys ? "#fde8b0" : "#e0e8ff", borderRadius: 4, padding: "1px 6px", fontWeight: 700 }}>{isPhys ? t("物理子") : t("rule 1 獨立")}</span>
                         <span style={{ color: "#888" }}>{r.phone || "—"} · {r.email || "—"}</span>
                         <span style={{ color: "#aaa", marginLeft: "auto" }}>id: {r.id.slice(0,8)}…</span>
                       </label>
@@ -3660,20 +3670,20 @@ export default function App() {
 
               {/* 目標 */}
               <div style={{ marginBottom: 18 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#333", marginBottom: 8 }}>2. 回退後的目標</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#333", marginBottom: 8 }}>{t("2. 回退後的目標")}</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", border: "1px solid " + (rollbackTarget === "independent" ? "#6382ff" : "#e0e0e0"), background: rollbackTarget === "independent" ? "#f0f4ff" : "#fff", borderRadius: 8, cursor: "pointer" }}>
                     <input type="radio" checked={rollbackTarget === "independent"} onChange={() => setRollbackTarget("independent")} />
                     <div>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>變為獨立客戶</div>
-                      <div style={{ fontSize: 11, color: "#888" }}>物理子記錄會清 parent_id；rule 1 獨立會加入 merge_exclude 不再自動合併回主記錄</div>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{t("變為獨立客戶")}</div>
+                      <div style={{ fontSize: 11, color: "#888" }}>{t("物理子記錄會清 parent_id；rule 1 獨立會加入 merge_exclude 不再自動合併回主記錄")}</div>
                     </div>
                   </label>
                   <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", border: "1px solid " + (rollbackTarget === "mergeTo" ? "#6382ff" : "#e0e0e0"), background: rollbackTarget === "mergeTo" ? "#f0f4ff" : "#fff", borderRadius: 8, cursor: "pointer" }}>
                     <input type="radio" checked={rollbackTarget === "mergeTo"} onChange={() => setRollbackTarget("mergeTo")} />
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>合併到其他客戶</div>
-                      <div style={{ fontSize: 11, color: "#888", marginBottom: rollbackTarget === "mergeTo" ? 6 : 0 }}>所選記錄 UPDATE parent_id = 目標客戶</div>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{t("合併到其他客戶")}</div>
+                      <div style={{ fontSize: 11, color: "#888", marginBottom: rollbackTarget === "mergeTo" ? 6 : 0 }}>{t("所選記錄 UPDATE parent_id = 目標客戶")}</div>
                       {rollbackTarget === "mergeTo" && (
                         <div style={{ position: "relative" }}>
                           <input
@@ -3681,19 +3691,19 @@ export default function App() {
                             onChange={e => { setRollbackMergeToQuery(e.target.value); setRollbackMergeToOpen(true); if (rollbackMergeTo) setRollbackMergeTo(""); }}
                             onFocus={() => setRollbackMergeToOpen(true)}
                             onBlur={() => setTimeout(() => setRollbackMergeToOpen(false), 150)}
-                            placeholder="輸入客戶姓名 / 電話 / 郵箱..."
+                            placeholder={t("輸入客戶姓名 / 電話 / 郵箱...")}
                             style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid " + (rollbackMergeTo ? "#6382ff" : "#e0e0e0"), fontSize: 13, outline: "none", boxSizing: "border-box" }}
                           />
                           {rollbackMergeToOpen && rollbackMergeToQuery && (
                             <div style={{ position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, maxHeight: 200, overflowY: "auto", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.08)", zIndex: 10 }}>
                               {mergeToCandidates.length === 0 ? (
-                                <div style={{ padding: "8px 12px", fontSize: 12, color: "#999" }}>沒找到</div>
+                                <div style={{ padding: "8px 12px", fontSize: 12, color: "#999" }}>{t("沒找到")}</div>
                               ) : mergeToCandidates.map(v => (
-                                <div key={v.id} onMouseDown={() => { setRollbackMergeTo(v.id); setRollbackMergeToQuery(`${v.name || "(無名)"} · ${v.phone || "—"}`); setRollbackMergeToOpen(false); }}
+                                <div key={v.id} onMouseDown={() => { setRollbackMergeTo(v.id); setRollbackMergeToQuery(`${v.name || t("(無名)")} · ${v.phone || "—"}`); setRollbackMergeToOpen(false); }}
                                   style={{ padding: "7px 12px", fontSize: 12, cursor: "pointer", borderBottom: "1px solid #f5f5f5" }}
                                   onMouseEnter={e => e.currentTarget.style.background = "#f8f9ff"}
                                   onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                                  <div style={{ fontWeight: 600 }}>{v.name || "(無名)"}</div>
+                                  <div style={{ fontWeight: 600 }}>{v.name || t("(無名)")}</div>
                                   <div style={{ color: "#888", fontSize: 11 }}>{v.phone || "—"} · {v.email || "—"}</div>
                                 </div>
                               ))}
@@ -3709,8 +3719,8 @@ export default function App() {
               {/* 字段恢復 */}
               {rollbackAffected.has(clickedCid) && clickedRec && (
                 <div style={{ marginBottom: 18 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#333", marginBottom: 4 }}>3. 字段恢復（僅對點擊的記錄 {clickedRec.name || "(無名)"}）</div>
-                  <div style={{ fontSize: 11, color: "#888", marginBottom: 10 }}>可選：從合併組其他成員的字段池裡挑值覆蓋。選「不修改」保留當前值。</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#333", marginBottom: 4 }}>{t("3. 字段恢復（僅對點擊的記錄")} {clickedRec.name || t("(無名)")}）</div>
+                  <div style={{ fontSize: 11, color: "#888", marginBottom: 10 }}>{t("可選：從合併組其他成員的字段池裡挑值覆蓋。選「不修改」保留當前值。")}</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {FIELD_DEFS.map(({ dbKey, label }) => {
                       const vals = gather(dbKey);
@@ -3723,9 +3733,9 @@ export default function App() {
                             onChange={e => setRollbackFields(prev => ({ ...prev, [dbKey]: e.target.value }))}
                             style={{ padding: "6px 8px", border: "1px solid #e0e0e0", borderRadius: 6, fontSize: 12, background: "#fff" }}
                           >
-                            <option value="">-- 不修改（當前：{cur ? String(cur).slice(0, 30) + (String(cur).length > 30 ? "…" : "") : "空"}）--</option>
+                            <option value="">-- {t("不修改（當前：")}{cur ? String(cur).slice(0, 30) + (String(cur).length > 30 ? "…" : "") : t("空")}）--</option>
                             {vals.map(v => <option key={v} value={v}>{v.slice(0, 60)}{v.length > 60 ? "…" : ""}</option>)}
-                            <option value="__clear__">-- 清空 --</option>
+                            <option value="__clear__">-- {t("清空")} --</option>
                           </select>
                         </div>
                       );
@@ -3736,8 +3746,8 @@ export default function App() {
 
               {/* 按鈕 */}
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-                <button onClick={() => !rollbackBusy && setRollbackOpen(null)} disabled={rollbackBusy} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: rollbackBusy ? "not-allowed" : "pointer" }}>取消</button>
-                <button onClick={handleRollback} disabled={rollbackBusy} style={{ background: rollbackBusy ? "#ccc" : "#d14343", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 700, cursor: rollbackBusy ? "not-allowed" : "pointer" }}>{rollbackBusy ? "執行中..." : "確認回退"}</button>
+                <button onClick={() => !rollbackBusy && setRollbackOpen(null)} disabled={rollbackBusy} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: rollbackBusy ? "not-allowed" : "pointer" }}>{t("取消")}</button>
+                <button onClick={handleRollback} disabled={rollbackBusy} style={{ background: rollbackBusy ? "#ccc" : "#d14343", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 700, cursor: rollbackBusy ? "not-allowed" : "pointer" }}>{rollbackBusy ? t("執行中...") : t("確認回退")}</button>
               </div>
             </div>
           </div>
@@ -3752,13 +3762,13 @@ export default function App() {
         return (
           <div onClick={() => setMergeCandidatesOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, width: 760, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
-              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>疑似重複客戶檢測</div>
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>{t("疑似重複客戶檢測")}</div>
               <div style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>
-                共 {candidates.length} 組虛擬合併（資料命中 3+ 字段自動合併）。點「物理合併」把成員綁定到主記錄，之後刪字段才真生效。
+                {t("共")} {candidates.length} {t("組虛擬合併（資料命中 3+ 字段自動合併）。點「物理合併」把成員綁定到主記錄，之後刪字段才真生效。")}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {candidates.length === 0 && (
-                  <div style={{ textAlign: "center", color: "#aaa", padding: 30, fontSize: 13 }}>沒有疑似重複的客戶</div>
+                  <div style={{ textAlign: "center", color: "#aaa", padding: 30, fontSize: 13 }}>{t("沒有疑似重複的客戶")}</div>
                 )}
                 {candidates.map(vc => {
                   const siblingCount = (vc.groupCids || []).filter(id => id !== vc.id).length;
@@ -3767,30 +3777,30 @@ export default function App() {
                     <div key={vc.id} style={{ border: "1px solid #eee", borderRadius: 10, padding: "12px 14px", background: "#fafbff", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2, display: "flex", alignItems: "center", gap: 6 }}>
-                          {vc.name || "(無名)"}
-                          <span style={{ fontSize: 10, color: "#6382ff", background: "#eef2ff", borderRadius: 20, padding: "1px 8px", fontWeight: 700 }}>合併組 {vc.groupCids.length} 條</span>
+                          {vc.name || t("(無名)")}
+                          <span style={{ fontSize: 10, color: "#6382ff", background: "#eef2ff", borderRadius: 20, padding: "1px 8px", fontWeight: 700 }}>{t("合併組")} {vc.groupCids.length} {t("條")}</span>
                         </div>
                         <div style={{ fontSize: 12, color: "#666", marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{preview || "—"}</div>
                         {vc.allNames && vc.allNames.length > 1 && (
-                          <div style={{ fontSize: 11, color: "#888" }}>別名：{vc.allNames.filter(n => n !== vc.name).join(" / ")}</div>
+                          <div style={{ fontSize: 11, color: "#888" }}>{t("別名")}：{vc.allNames.filter(n => n !== vc.name).join(" / ")}</div>
                         )}
                       </div>
                       <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
                         <button
                           onClick={() => { setMergeCandidatesOpen(false); setSelectedCustomer(vc); }}
                           style={{ fontSize: 12, background: "#f5f5f5", color: "#666", border: "none", borderRadius: 6, padding: "7px 12px", cursor: "pointer", fontWeight: 600 }}
-                        >查看</button>
+                        >{t("查看")}</button>
                         <button
                           onClick={() => handleUpgradePhysical(vc)}
                           style={{ fontSize: 12, background: "#6382ff", color: "#fff", border: "none", borderRadius: 6, padding: "7px 12px", cursor: "pointer", fontWeight: 700, whiteSpace: "nowrap" }}
-                        >物理合併 {siblingCount}</button>
+                        >{t("物理合併")} {siblingCount}</button>
                       </div>
                     </div>
                   );
                 })}
               </div>
               <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
-                <button onClick={() => setMergeCandidatesOpen(false)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: "pointer" }}>關閉</button>
+                <button onClick={() => setMergeCandidatesOpen(false)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: "pointer" }}>{t("關閉")}</button>
               </div>
             </div>
           </div>
@@ -3837,7 +3847,7 @@ export default function App() {
                     style={{ flex: 1, padding: "8px 10px", border: "1px solid #e0e0e0", borderRadius: 8, fontSize: 14, color: "#111" }}
                   />
                   {arr.length > 1 && (
-                    <button type="button" onClick={() => removeAt(idx)} title="刪除" style={{ width: 34, background: "#fff0f0", color: "#d14343", border: "1px solid #ffcccc", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>×</button>
+                    <button type="button" onClick={() => removeAt(idx)} title={t("刪除")} style={{ width: 34, background: "#fff0f0", color: "#d14343", border: "1px solid #ffcccc", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>×</button>
                   )}
                 </div>
               ))}
@@ -3848,12 +3858,12 @@ export default function App() {
         return (
           <div onClick={() => !editCustSaving && setEditingCustomer(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, width: 620, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
-              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>編輯客戶資料</div>
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>{t("編輯客戶資料")}</div>
               <div style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>id: {editCustCid}</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
-                {inp("姓名 Name", "name")}
+                {inp(t("姓名 Name"), "name")}
                 <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#666", fontWeight: 600 }}>
-                  類型 Type
+                  {t("類型 Type")}
                   <select value={editCustForm.type} onChange={e => setEditCustForm(f => ({ ...f, type: e.target.value }))} style={{ padding: "8px 10px", border: "1px solid #e0e0e0", borderRadius: 8, fontSize: 14, color: "#111", background: "#fff" }}>
                     <option value="Regular">Regular</option>
                     <option value="Lead">Lead</option>
@@ -3861,30 +3871,30 @@ export default function App() {
                 </label>
               </div>
               <div style={{ marginBottom: 14 }}>
-                {multiFld("別名 Aliases", "aliases", "例：公司別名或其他稱呼", "新增別名")}
+                {multiFld(t("別名 Aliases"), "aliases", t("例：公司別名或其他稱呼"), t("新增別名"))}
               </div>
               <div style={{ marginBottom: 14 }}>
-                {inp("推薦人 Referral", "referral")}
+                {inp(t("推薦人 Referral"), "referral")}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
-                {multiFld("香港電話 Phone", "phones", "例：9123 4567", "新增香港電話")}
-                {multiFld("內地電話 Phone (CN)", "phoneMainlands", "例：138 0013 8000", "新增內地電話")}
+                {multiFld(t("香港電話 Phone"), "phones", t("例：9123 4567"), t("新增香港電話"))}
+                {multiFld(t("內地電話 Phone (CN)"), "phoneMainlands", t("例：138 0013 8000"), t("新增內地電話"))}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
-                {multiFld("郵箱 Email", "emails", "例：user@example.com", "新增郵箱")}
-                {multiFld("車品牌 Car Make", "carMakes", "例：Tesla", "新增車品牌")}
+                {multiFld(t("郵箱 Email"), "emails", t("例：user@example.com"), t("新增郵箱"))}
+                {multiFld(t("車品牌 Car Make"), "carMakes", t("例：Tesla"), t("新增車品牌"))}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
-                {multiFld("車型 Car Model", "carModels", "例：Model 3", "新增車型")}
+                {multiFld(t("車型 Car Model"), "carModels", t("例：Model 3"), t("新增車型"))}
                 <div />
               </div>
               <div style={{ marginBottom: 18 }}>
-                {multiFld("地址 Address", "addresses", "請輸入完整地址", "新增地址")}
+                {multiFld(t("地址 Address"), "addresses", t("請輸入完整地址"), t("新增地址"))}
               </div>
               <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-                <button disabled={editCustSaving} onClick={() => setEditingCustomer(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: editCustSaving ? "not-allowed" : "pointer" }}>取消</button>
+                <button disabled={editCustSaving} onClick={() => setEditingCustomer(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: editCustSaving ? "not-allowed" : "pointer" }}>{t("取消")}</button>
                 <button disabled={editCustSaving} onClick={handleSaveCustomerEdit} style={{ background: editCustSaving ? "#ccc" : "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 700, cursor: editCustSaving ? "not-allowed" : "pointer" }}>
-                  {editCustSaving ? "保存中…" : "保存"}
+                  {editCustSaving ? t("保存中…") : t("保存")}
                 </button>
               </div>
             </div>
@@ -3899,8 +3909,8 @@ export default function App() {
         return (
           <div onClick={() => setPrintFieldChooser(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 2050, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, width: 520, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
-              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>選擇本次列印使用的資訊</div>
-              <div style={{ fontSize: 12, color: "#888", marginBottom: 18 }}>此客戶在以下欄位存了多個值，請勾選本張發票/收據使用哪個。</div>
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>{t("選擇本次列印使用的資訊")}</div>
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 18 }}>{t("此客戶在以下欄位存了多個值，請勾選本張發票/收據使用哪個。")}</div>
               {Object.keys(multi).map(field => (
                 <div key={field} style={{ marginBottom: 16 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: "#555", marginBottom: 8 }}>{labels[field] || field}</div>
@@ -3915,7 +3925,7 @@ export default function App() {
                 </div>
               ))}
               <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 20 }}>
-                <button onClick={() => setPrintFieldChooser(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: "pointer" }}>取消</button>
+                <button onClick={() => setPrintFieldChooser(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: "pointer" }}>{t("取消")}</button>
                 <button
                   onClick={() => {
                     const { inv, customer, items, products } = printFieldChooser;
@@ -3926,7 +3936,7 @@ export default function App() {
                     setPrintChooser({ inv, customer: override, items, products });
                   }}
                   style={{ background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 700, cursor: "pointer" }}
-                >下一步</button>
+                >{t("下一步")}</button>
               </div>
             </div>
           </div>
@@ -3937,20 +3947,20 @@ export default function App() {
       {printChooser && (
         <div onClick={() => setPrintChooser(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, width: 360, maxWidth: "90vw", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
-            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>選擇列印內容</div>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>{t("選擇列印內容")}</div>
             <div style={{ fontSize: 13, color: "#888", marginBottom: 18 }}>
               DC{String(printChooser.inv.invoice_number || "").replace(/^DC/i, "") || (printChooser.inv.id || "").slice(0, 8)}
             </div>
             <label style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", border: "1px solid #eee", borderRadius: 10, marginBottom: 10, cursor: "pointer" }}>
               <input type="checkbox" checked={printWantInvoice} onChange={e => setPrintWantInvoice(e.target.checked)} style={{ width: 16, height: 16 }} />
-              <span style={{ fontWeight: 600 }}>發票 Invoice</span>
+              <span style={{ fontWeight: 600 }}>{t("發票 Invoice")}</span>
             </label>
             <label style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", border: "1px solid #eee", borderRadius: 10, marginBottom: 18, cursor: "pointer" }}>
               <input type="checkbox" checked={printWantReceipt} onChange={e => setPrintWantReceipt(e.target.checked)} style={{ width: 16, height: 16 }} />
-              <span style={{ fontWeight: 600 }}>收據 Receipt</span>
+              <span style={{ fontWeight: 600 }}>{t("收據 Receipt")}</span>
             </label>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-              <button onClick={() => setPrintChooser(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: "pointer" }}>取消</button>
+              <button onClick={() => setPrintChooser(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: "pointer" }}>{t("取消")}</button>
               <button
                 disabled={!printWantInvoice && !printWantReceipt}
                 onClick={() => {
@@ -3959,7 +3969,7 @@ export default function App() {
                   printInvoice(inv, customer, items, products, { invoice: printWantInvoice, receipt: printWantReceipt });
                 }}
                 style={{ background: (!printWantInvoice && !printWantReceipt) ? "#ccc" : "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 700, cursor: (!printWantInvoice && !printWantReceipt) ? "not-allowed" : "pointer" }}
-              >確定列印</button>
+              >{t("確定列印")}</button>
             </div>
           </div>
         </div>
@@ -3979,36 +3989,36 @@ export default function App() {
             <div style={{ background: "#fff", borderRadius: 20, padding: 32, width: 700, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
                 <div>
-                  <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>編輯發票</h2>
+                  <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{t("編輯發票")}</h2>
                   <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>#{editingInvoice.invoice_number || editingInvoice.id}</div>
                 </div>
                 <button onClick={closeEditInvoice} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
               </div>
               <div style={{ marginBottom: 14 }}>
-                <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>明細</label>
+                <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>{t("明細")}</label>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 56px 90px 72px 36px", gap: 6, fontSize: 11, color: "#888", marginBottom: 6, paddingLeft: 4 }}>
-                  <div>產品名稱</div><div style={{ textAlign: "center" }}>數量</div><div>單價 HKD</div><div>倉庫</div><div></div>
+                  <div>{t("產品名稱")}</div><div style={{ textAlign: "center" }}>{t("數量")}</div><div>{t("單價 HKD")}</div><div>{t("倉庫")}</div><div></div>
                 </div>
                 {editInvItems.map((item, idx) => (
                   <div key={item.id} style={{ display: "grid", gridTemplateColumns: "1fr 56px 90px 72px 36px", gap: 6, marginBottom: 8 }}>
-                    <input value={item.name} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, name: e.target.value }; setEditInvItems(arr); }} placeholder="產品名" style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
+                    <input value={item.name} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, name: e.target.value }; setEditInvItems(arr); }} placeholder={t("產品名")} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
                     <input type="number" value={item.qty} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, qty: parseInt(e.target.value) || 0 }; setEditInvItems(arr); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "center" }} />
                     <input type="number" value={item.price} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, price: parseFloat(e.target.value) || 0 }; setEditInvItems(arr); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
-                    <select value={item.warehouse_id || ''} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, warehouse_id: e.target.value || null }; setEditInvItems(arr); }} title="扣庫存的倉庫（不顯示在發票/收據上）" style={{ padding: "9px 6px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", background: "#fff" }}>
+                    <select value={item.warehouse_id || ''} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, warehouse_id: e.target.value || null }; setEditInvItems(arr); }} title={t("扣庫存的倉庫（不顯示在發票/收據上）")} style={{ padding: "9px 6px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", background: "#fff" }}>
                       <option value="">—</option>
                       {warehouses.map(w => <option key={w.id} value={w.id}>{w.name.replace("分部", "")}</option>)}
                     </select>
                     <button onClick={() => setEditInvItems(editInvItems.filter(i => i.id !== item.id))} style={{ background: "#fce4ec", border: "none", borderRadius: 8, cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
                   </div>
                 ))}
-                <button onClick={() => setEditInvItems([...editInvItems, mkItem(warehouses[0]?.id)])} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", width: "100%", marginTop: 4 }}>+ 新增項目</button>
+                <button onClick={() => setEditInvItems([...editInvItems, mkItem(warehouses[0]?.id)])} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", width: "100%", marginTop: 4 }}>+ {t("新增項目")}</button>
               </div>
               <div style={{ marginBottom: 14, padding: "14px 16px", background: "#fafbff", borderRadius: 12, border: "1px solid #eef0fa" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#555", marginBottom: 10 }}>額外費用</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#555", marginBottom: 10 }}>{t("額外費用")}</div>
                 {[
-                  { key: "deposit", label: "押金", sign: "+", color: "#6382ff" },
-                  { key: "discount", label: "優惠", sign: "−", color: "#d14343" },
-                  { key: "surcharge", label: "手續費", sign: "+", color: "#f59e0b" },
+                  { key: "deposit", label: t("押金"), sign: "+", color: "#6382ff" },
+                  { key: "discount", label: t("優惠"), sign: "−", color: "#d14343" },
+                  { key: "surcharge", label: t("手續費"), sign: "+", color: "#f59e0b" },
                 ].map(({ key, label, sign, color }) => {
                   const v = editInvExtras[key] || { enabled: false, amount: 0 };
                   return (
@@ -4018,7 +4028,7 @@ export default function App() {
                         <span style={{ color, marginRight: 4 }}>{sign}</span>{label}
                       </label>
                       {v.enabled && (
-                        <input type="number" min="0" value={v.amount || ""} onChange={e => setEditInvExtras({ ...editInvExtras, [key]: { ...v, amount: parseFloat(e.target.value) || 0 } })} placeholder="金額 HKD" style={{ flex: 1, padding: "7px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
+                        <input type="number" min="0" value={v.amount || ""} onChange={e => setEditInvExtras({ ...editInvExtras, [key]: { ...v, amount: parseFloat(e.target.value) || 0 } })} placeholder={t("金額 HKD")} style={{ flex: 1, padding: "7px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
                       )}
                     </div>
                   );
@@ -4026,21 +4036,21 @@ export default function App() {
               </div>
               <div style={{ background: "#fafbff", borderRadius: 12, padding: "14px 18px", marginBottom: 16, border: "1px solid #eef0fa" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, marginBottom: 8 }}>
-                  <span style={{ color: "#666" }}>明細合計（含額外費用）</span>
+                  <span style={{ color: "#666" }}>{t("明細合計（含額外費用）")}</span>
                   <span style={{ fontWeight: 700 }}>HKD${Math.round(itemsSum).toLocaleString()}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontSize: 13, color: "#666" }}>發票總額（留空=跟明細）</span>
+                  <span style={{ fontSize: 13, color: "#666" }}>{t("發票總額（留空=跟明細）")}</span>
                   <input type="number" value={editInvTotalOverride} onChange={e => setEditInvTotalOverride(e.target.value)} placeholder={String(Math.round(itemsSum))} style={{ width: 160, padding: "8px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "right" }} />
                 </div>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 20px", background: "#1a1a2e", borderRadius: 12, marginBottom: 16 }}>
-                <span style={{ color: "#aaa", fontSize: 14 }}>最終總額</span>
+                <span style={{ color: "#aaa", fontSize: 14 }}>{t("最終總額")}</span>
                 <span style={{ color: "#fff", fontSize: 22, fontWeight: 800 }}>HKD${Math.round(finalTotal).toLocaleString()}</span>
               </div>
               <div style={{ display: "flex", gap: 10 }}>
-                <button onClick={closeEditInvoice} style={{ flex: 1, padding: 12, background: "#f5f5f5", color: "#555", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>取消</button>
-                <button onClick={handleSaveInvoice} style={{ flex: 2, padding: 12, background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>儲存修改</button>
+                <button onClick={closeEditInvoice} style={{ flex: 1, padding: 12, background: "#f5f5f5", color: "#555", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>{t("取消")}</button>
+                <button onClick={handleSaveInvoice} style={{ flex: 2, padding: 12, background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>{t("儲存修改")}</button>
               </div>
             </div>
           </div>
@@ -4059,11 +4069,11 @@ export default function App() {
         return (
           <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }}>
             <div style={{ background: "#fff", borderRadius: 16, padding: 24, width: 520, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
-              <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 4 }}>標記已付款</div>
-              <div style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>#{inv.invoice_number || inv.id} · 將從庫存扣除對應數量</div>
+              <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 4 }}>{t("標記已付款")}</div>
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>#{inv.invoice_number || inv.id} · {t("將從庫存扣除對應數量")}</div>
               {anyMissing && (
                 <div style={{ marginBottom: 14, padding: "12px 14px", background: "#fff8e1", borderRadius: 10, border: "1px solid #f4dca4" }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#8a6900", marginBottom: 8 }}>此發票有商品未指定倉庫，統一扣：</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#8a6900", marginBottom: 8 }}>{t("此發票有商品未指定倉庫，統一扣：")}</div>
                   <div style={{ display: "flex", gap: 8 }}>
                     {warehouses.map(w => (
                       <button key={w.id} onClick={() => setMarkPaidCtx({ ...markPaidCtx, defaultWh: w.id })}
@@ -4076,15 +4086,15 @@ export default function App() {
               )}
               <div style={{ border: "1px solid #eef0fa", borderRadius: 10, overflow: "hidden", marginBottom: 14 }}>
                 <div style={{ background: "#fafbff", padding: "8px 12px", fontSize: 11, color: "#888", display: "grid", gridTemplateColumns: "1fr 48px 60px 72px", gap: 6 }}>
-                  <div>產品</div><div style={{ textAlign: "center" }}>數量</div><div>倉庫</div><div style={{ textAlign: "right" }}>扣後</div>
+                  <div>{t("產品")}</div><div style={{ textAlign: "center" }}>{t("數量")}</div><div>{t("倉庫")}</div><div style={{ textAlign: "right" }}>{t("扣後")}</div>
                 </div>
                 {plan.map((p, i) => {
                   const wh = warehouses.find(w => w.id === p.warehouse_id);
                   return (
                     <div key={i} style={{ padding: "9px 12px", fontSize: 12, borderTop: "1px solid #f5f5f5", display: "grid", gridTemplateColumns: "1fr 48px 60px 72px", gap: 6, alignItems: "center", background: p.skip ? "#fafafa" : (p.after < 0 ? "#fff5f5" : "#fff") }}>
-                      <div style={{ color: p.skip ? "#999" : "#222", fontStyle: p.skip ? "italic" : "normal" }}>{p.name || "(空)"}</div>
+                      <div style={{ color: p.skip ? "#999" : "#222", fontStyle: p.skip ? "italic" : "normal" }}>{p.name || t("(空)")}</div>
                       <div style={{ textAlign: "center", color: "#555" }}>{p.qty}</div>
-                      <div style={{ color: "#666", fontSize: 11 }}>{p.skip ? "—" : (wh ? wh.name.replace("分部", "") : "？")}</div>
+                      <div style={{ color: "#666", fontSize: 11 }}>{p.skip ? "—" : (wh ? wh.name.replace("分部", "") : t("？"))}</div>
                       <div style={{ textAlign: "right", fontWeight: 700, color: p.skip ? "#999" : (p.after < 0 ? "#e53935" : "#22c55e") }}>
                         {p.skip ? p.reason : `${p.current} → ${p.after}`}
                       </div>
@@ -4094,15 +4104,15 @@ export default function App() {
               </div>
               {insufficient.length > 0 && (
                 <div style={{ marginBottom: 14, padding: "10px 14px", background: "#fff5f5", borderRadius: 10, border: "1px solid #f4c4c4", fontSize: 12, color: "#c53030" }}>
-                  ⚠ 以下商品庫存不足，確認後將扣成負數：
+                  ⚠ {t("以下商品庫存不足，確認後將扣成負數：")}
                   <div style={{ marginTop: 4, fontSize: 11 }}>
-                    {insufficient.map((p, i) => <div key={i}>• {p.name}：剩 {p.current}，需扣 {p.qty}</div>)}
+                    {insufficient.map((p, i) => <div key={i}>• {p.name}：{t("剩")} {p.current}，{t("需扣")} {p.qty}</div>)}
                   </div>
                 </div>
               )}
               <div style={{ display: "flex", gap: 10 }}>
-                <button onClick={() => setMarkPaidCtx(null)} style={{ flex: 1, padding: 10, background: "#f5f5f5", color: "#555", border: "none", borderRadius: 10, fontWeight: 700, cursor: "pointer" }}>取消</button>
-                <button onClick={executeMarkPaid} disabled={anyMissing && !defaultWh} style={{ flex: 2, padding: 10, background: (anyMissing && !defaultWh) ? "#e0e0e0" : "#22c55e", color: "#fff", border: "none", borderRadius: 10, fontWeight: 800, cursor: (anyMissing && !defaultWh) ? "not-allowed" : "pointer" }}>確認付款並扣庫存</button>
+                <button onClick={() => setMarkPaidCtx(null)} style={{ flex: 1, padding: 10, background: "#f5f5f5", color: "#555", border: "none", borderRadius: 10, fontWeight: 700, cursor: "pointer" }}>{t("取消")}</button>
+                <button onClick={executeMarkPaid} disabled={anyMissing && !defaultWh} style={{ flex: 2, padding: 10, background: (anyMissing && !defaultWh) ? "#e0e0e0" : "#22c55e", color: "#fff", border: "none", borderRadius: 10, fontWeight: 800, cursor: (anyMissing && !defaultWh) ? "not-allowed" : "pointer" }}>{t("確認付款並扣庫存")}</button>
               </div>
             </div>
           </div>
@@ -4114,14 +4124,14 @@ export default function App() {
         <div style={{ position: "fixed", right: 28, bottom: 28, width: 440, background: "#fff", borderRadius: 14, boxShadow: "0 10px 32px rgba(0,0,0,0.18)", border: "1px solid #f4c4c4", padding: "18px 18px 18px 20px", zIndex: 300, display: "flex", gap: 14, alignItems: "flex-start" }}>
           <div style={{ fontSize: 26, color: "#ef4444", lineHeight: 1, marginTop: 2 }}>⚠</div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>庫存不足提醒</div>
-            <div style={{ fontSize: 13, color: "#888", marginBottom: 10 }}>以下 {stockToast.items.length} 個 SKU 庫存為 0 或負數</div>
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 4 }}>{t("庫存不足提醒")}</div>
+            <div style={{ fontSize: 13, color: "#888", marginBottom: 10 }}>{t("以下")} {stockToast.items.length} {t("個 SKU 庫存為 0 或負數")}</div>
             <div style={{ fontSize: 13, color: "#333", maxHeight: 200, overflowY: "auto", lineHeight: 1.7 }}>
               {stockToast.items.slice(0, 10).map((n, i) => <div key={i} style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>• {n}</div>)}
-              {stockToast.items.length > 10 && <div style={{ color: "#999", marginTop: 4 }}>... 還有 {stockToast.items.length - 10} 個</div>}
+              {stockToast.items.length > 10 && <div style={{ color: "#999", marginTop: 4 }}>... {t("還有")} {stockToast.items.length - 10} {t("個")}</div>}
             </div>
           </div>
-          <button onClick={() => setStockToast(null)} title="關閉" style={{ background: "none", border: "none", color: "#aaa", cursor: "pointer", fontSize: 24, padding: 0, lineHeight: 1, marginTop: -4 }}>×</button>
+          <button onClick={() => setStockToast(null)} title={t("關閉")} style={{ background: "none", border: "none", color: "#aaa", cursor: "pointer", fontSize: 24, padding: 0, lineHeight: 1, marginTop: -4 }}>×</button>
         </div>
       )}
 
@@ -4130,63 +4140,63 @@ export default function App() {
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
           <div style={{ background: "#fff", borderRadius: 16, padding: 28, width: 460, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>新增員工</h2>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{t("新增員工")}</h2>
               <button onClick={() => { setShowAddEmployee(false); setNewEmployee({ name: "", role: "", phone: "", email: "", note: "" }); }} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
             </div>
-            <Input label="姓名 *" value={newEmployee.name} onChange={v => setNewEmployee({ ...newEmployee, name: v })} placeholder="員工姓名" />
-            <Input label="職位" value={newEmployee.role} onChange={v => setNewEmployee({ ...newEmployee, role: v })} placeholder="例如 客服 / 技術 / 銷售" />
-            <Input label="電話" value={newEmployee.phone} onChange={v => setNewEmployee({ ...newEmployee, phone: v })} placeholder="+852" />
+            <Input label={t("姓名 *")} value={newEmployee.name} onChange={v => setNewEmployee({ ...newEmployee, name: v })} placeholder={t("員工姓名")} />
+            <Input label={t("職位")} value={newEmployee.role} onChange={v => setNewEmployee({ ...newEmployee, role: v })} placeholder={t("例如 客服 / 技術 / 銷售")} />
+            <Input label={t("電話")} value={newEmployee.phone} onChange={v => setNewEmployee({ ...newEmployee, phone: v })} placeholder="+852" />
             <Input label="Email" value={newEmployee.email} onChange={v => setNewEmployee({ ...newEmployee, email: v })} placeholder="email@example.com" />
-            <Input label="備註" value={newEmployee.note} onChange={v => setNewEmployee({ ...newEmployee, note: v })} placeholder="其他備註..." />
-            <button onClick={handleSaveEmployee} disabled={!newEmployee.name.trim()} style={{ width: "100%", padding: 12, background: newEmployee.name.trim() ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 800, cursor: newEmployee.name.trim() ? "pointer" : "not-allowed", marginTop: 8 }}>儲存員工</button>
+            <Input label={t("備註")} value={newEmployee.note} onChange={v => setNewEmployee({ ...newEmployee, note: v })} placeholder={t("其他備註...")} />
+            <button onClick={handleSaveEmployee} disabled={!newEmployee.name.trim()} style={{ width: "100%", padding: 12, background: newEmployee.name.trim() ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 800, cursor: newEmployee.name.trim() ? "pointer" : "not-allowed", marginTop: 8 }}>{t("儲存員工")}</button>
           </div>
         </div>
       )}
 
       {/* TASK DETAIL MODAL */}
       {editingTask && (() => {
-        const t = editingTask;
-        const subtasks = tasks.filter(s => s.parent_task_id === t.id);
+        const tk = editingTask;
+        const subtasks = tasks.filter(s => s.parent_task_id === tk.id);
         return (
           <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 110 }}>
             <div style={{ background: "#fff", borderRadius: 16, padding: 28, width: 540, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
                 <div style={{ display: "flex", gap: 8 }}>
-                  {[{v:"high",l:"高優",c:"#ef4444"},{v:"mid",l:"中優",c:"#f59e0b"},{v:"low",l:"低優",c:"#22c55e"}].map(opt => {
-                    const on = t.priority === opt.v || (opt.v === "low" && (t.priority === "none" || !t.priority));
+                  {[{v:"high",l:t("高優"),c:"#ef4444"},{v:"mid",l:t("中優"),c:"#f59e0b"},{v:"low",l:t("低優"),c:"#22c55e"}].map(opt => {
+                    const on = tk.priority === opt.v || (opt.v === "low" && (tk.priority === "none" || !tk.priority));
                     return (
-                      <button key={opt.v} onClick={() => handleUpdateTask(t.id, { priority: opt.v })} style={{ fontSize: 12, fontWeight: 700, padding: "5px 12px", borderRadius: 20, border: "1px solid " + (on ? opt.c : "#e0e0e0"), background: on ? opt.c + "18" : "#fff", color: on ? opt.c : "#888", cursor: "pointer" }}>{opt.l}</button>
+                      <button key={opt.v} onClick={() => handleUpdateTask(tk.id, { priority: opt.v })} style={{ fontSize: 12, fontWeight: 700, padding: "5px 12px", borderRadius: 20, border: "1px solid " + (on ? opt.c : "#e0e0e0"), background: on ? opt.c + "18" : "#fff", color: on ? opt.c : "#888", cursor: "pointer" }}>{opt.l}</button>
                     );
                   })}
-                  {t.status !== "abandoned" && <button onClick={() => handleUpdateTask(t.id, { status: "abandoned", completed_at: new Date().toISOString() })} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 20, border: "1px solid #e0e0e0", background: "#fff", color: "#888", cursor: "pointer" }}>標記放棄</button>}
-                  {t.status === "abandoned" && <button onClick={() => handleUpdateTask(t.id, { status: "open", completed_at: null })} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 20, border: "1px solid #6382ff", background: "#eef2ff", color: "#6382ff", cursor: "pointer" }}>恢復進行</button>}
+                  {tk.status !== "abandoned" && <button onClick={() => handleUpdateTask(tk.id, { status: "abandoned", completed_at: new Date().toISOString() })} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 20, border: "1px solid #e0e0e0", background: "#fff", color: "#888", cursor: "pointer" }}>{t("標記放棄")}</button>}
+                  {tk.status === "abandoned" && <button onClick={() => handleUpdateTask(tk.id, { status: "open", completed_at: null })} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 20, border: "1px solid #6382ff", background: "#eef2ff", color: "#6382ff", cursor: "pointer" }}>{t("恢復進行")}</button>}
                 </div>
                 <button onClick={() => setEditingTask(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
               </div>
-              <input value={t.title} onChange={e => setEditingTask({ ...t, title: e.target.value })} onBlur={() => handleUpdateTask(t.id, { title: t.title })} style={{ width: "100%", padding: "10px 0", fontSize: 22, fontWeight: 800, border: "none", outline: "none", marginBottom: 4, boxSizing: "border-box" }} />
-              <div style={{ fontSize: 12, color: "#888", marginBottom: 4, marginTop: 8 }}>描述 / 備註 / Deadline</div>
-              <textarea value={t.note || ""} onChange={e => setEditingTask({ ...t, note: e.target.value })} onBlur={() => handleUpdateTask(t.id, { note: t.note || null })} placeholder="輸入描述..." style={{ width: "100%", minHeight: 60, padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit" }} />
-              <div style={{ fontSize: 12, color: "#888", marginTop: 16, marginBottom: 6 }}>子任務</div>
+              <input value={tk.title} onChange={e => setEditingTask({ ...tk, title: e.target.value })} onBlur={() => handleUpdateTask(tk.id, { title: tk.title })} style={{ width: "100%", padding: "10px 0", fontSize: 22, fontWeight: 800, border: "none", outline: "none", marginBottom: 4, boxSizing: "border-box" }} />
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 4, marginTop: 8 }}>{t("描述 / 備註 / Deadline")}</div>
+              <textarea value={tk.note || ""} onChange={e => setEditingTask({ ...tk, note: e.target.value })} onBlur={() => handleUpdateTask(tk.id, { note: tk.note || null })} placeholder={t("輸入描述...")} style={{ width: "100%", minHeight: 60, padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit" }} />
+              <div style={{ fontSize: 12, color: "#888", marginTop: 16, marginBottom: 6 }}>{t("子任務")}</div>
               {subtasks.map((st, i) => (
                 <div key={st.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid #f5f5f5" }}>
                   <input type="checkbox" checked={st.status === "done"} onChange={() => handleToggleTaskDone(st)} style={{ width: 15, height: 15, cursor: "pointer" }} />
                   <span style={{ flex: 1, fontSize: 13, textDecoration: st.status === "done" ? "line-through" : "none", color: st.status === "done" ? "#999" : "#333" }}>{st.title}</span>
-                  <button onClick={() => handleDeleteTask(st.id)} title="刪除" style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 14 }}>×</button>
+                  <button onClick={() => handleDeleteTask(st.id)} title={t("刪除")} style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 14 }}>×</button>
                 </div>
               ))}
-              <form onSubmit={e => { e.preventDefault(); const v = e.target.elements.sub.value.trim(); if (v) { handleAddTask(t.employee_id, v, "none", t.id); e.target.reset(); } }} style={{ marginTop: 8 }}>
-                <input name="sub" placeholder="+ 添加子任務" style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px dashed #d0d0d0", fontSize: 13, outline: "none", background: "#fafbff", boxSizing: "border-box" }} />
+              <form onSubmit={e => { e.preventDefault(); const v = e.target.elements.sub.value.trim(); if (v) { handleAddTask(tk.employee_id, v, "none", tk.id); e.target.reset(); } }} style={{ marginTop: 8 }}>
+                <input name="sub" placeholder={t("+ 添加子任務")} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px dashed #d0d0d0", fontSize: 13, outline: "none", background: "#fafbff", boxSizing: "border-box" }} />
               </form>
-              <div style={{ fontSize: 12, color: "#f59e0b", fontWeight: 700, marginTop: 16, marginBottom: 6 }}>💬 員工反饋</div>
-              <textarea value={t.feedback || ""} onChange={e => setEditingTask({ ...t, feedback: e.target.value })} onBlur={() => handleUpdateTask(t.id, { feedback: t.feedback || null })} placeholder="例如：太忙，本週無法完成 / 需要 XXX 支援" style={{ width: "100%", minHeight: 50, padding: "8px 10px", borderRadius: 8, border: "1px solid #f4dca4", fontSize: 13, outline: "none", resize: "vertical", boxSizing: "border-box", background: "#fff9ec", fontFamily: "inherit" }} />
+              <div style={{ fontSize: 12, color: "#f59e0b", fontWeight: 700, marginTop: 16, marginBottom: 6 }}>💬 {t("員工反饋")}</div>
+              <textarea value={tk.feedback || ""} onChange={e => setEditingTask({ ...tk, feedback: e.target.value })} onBlur={() => handleUpdateTask(tk.id, { feedback: tk.feedback || null })} placeholder={t("例如：太忙，本週無法完成 / 需要 XXX 支援")} style={{ width: "100%", minHeight: 50, padding: "8px 10px", borderRadius: 8, border: "1px solid #f4dca4", fontSize: 13, outline: "none", resize: "vertical", boxSizing: "border-box", background: "#fff9ec", fontFamily: "inherit" }} />
               <div style={{ fontSize: 11, color: "#aaa", marginTop: 16, display: "flex", gap: 14, flexWrap: "wrap" }}>
-                <span>📅 添加於 {new Date(t.created_at).toLocaleString("zh-HK", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
-                {t.status === "done" && t.completed_at && <span style={{ color: "#22c55e" }}>✓ 完成於 {new Date(t.completed_at).toLocaleString("zh-HK", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>}
-                {t.status === "abandoned" && t.completed_at && <span>✗ 放棄於 {new Date(t.completed_at).toLocaleString("zh-HK", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>}
+                <span>📅 {t("添加於")} {new Date(tk.created_at).toLocaleString("zh-HK", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                {tk.status === "done" && tk.completed_at && <span style={{ color: "#22c55e" }}>✓ {t("完成於")} {new Date(tk.completed_at).toLocaleString("zh-HK", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>}
+                {tk.status === "abandoned" && tk.completed_at && <span>✗ {t("放棄於")} {new Date(tk.completed_at).toLocaleString("zh-HK", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>}
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16, paddingTop: 16, borderTop: "1px solid #f0f0f0" }}>
-                <button onClick={() => handleDeleteTask(t.id)} style={{ background: "none", border: "none", color: "#e53935", fontSize: 13, cursor: "pointer" }}>🗑 刪除任務</button>
-                <button onClick={() => setEditingTask(null)} style={{ background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, padding: "9px 20px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>完成</button>
+                <button onClick={() => handleDeleteTask(tk.id)} style={{ background: "none", border: "none", color: "#e53935", fontSize: 13, cursor: "pointer" }}>🗑 {t("刪除任務")}</button>
+                <button onClick={() => setEditingTask(null)} style={{ background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, padding: "9px 20px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>{t("完成")}</button>
               </div>
             </div>
           </div>
@@ -4197,22 +4207,22 @@ export default function App() {
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
           <div style={{ background: "#fff", borderRadius: 20, padding: 32, width: 580, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>新增客戶</h2>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{t("新增客戶")}</h2>
               <button onClick={() => setShowAddCustomer(false)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
-              <Input label="中文名 / Name *" value={newCustomer.name} onChange={v => setNewCustomer({...newCustomer, name: v})} placeholder="客戶名稱" />
+              <Input label={t("中文名 / Name *")} value={newCustomer.name} onChange={v => setNewCustomer({...newCustomer, name: v})} placeholder={t("客戶名稱")} />
               <Input label="Email" value={newCustomer.email} onChange={v => setNewCustomer({...newCustomer, email: v})} placeholder="email@example.com" />
-              <Input label="香港電話" value={newCustomer.phone} onChange={v => setNewCustomer({...newCustomer, phone: v})} placeholder="+852" />
-              <Input label="內地電話" value={newCustomer.phone_mainland} onChange={v => setNewCustomer({...newCustomer, phone_mainland: v})} placeholder="+86" />
-              <Select label="汽車品牌 Car Brand" value={newCustomer.car_make} onChange={v => setNewCustomer({...newCustomer, car_make: v})} options={CAR_BRANDS} />
-              <Input label="型號 Car Model" value={newCustomer.car_model} onChange={v => setNewCustomer({...newCustomer, car_model: v})} placeholder="e.g. Model 3, Han EV" />
-              <Select label="客戶狀態" value={newCustomer.type} onChange={v => setNewCustomer({...newCustomer, type: v})} options={["Lead","Regular","VIP"]} />
-              <Select label="客戶來源" value={newCustomer.referral} onChange={v => setNewCustomer({...newCustomer, referral: v})} options={REFERRAL_SOURCES} />
+              <Input label={t("香港電話")} value={newCustomer.phone} onChange={v => setNewCustomer({...newCustomer, phone: v})} placeholder="+852" />
+              <Input label={t("內地電話")} value={newCustomer.phone_mainland} onChange={v => setNewCustomer({...newCustomer, phone_mainland: v})} placeholder="+86" />
+              <Select label={t("汽車品牌 Car Brand")} value={newCustomer.car_make} onChange={v => setNewCustomer({...newCustomer, car_make: v})} options={CAR_BRANDS} />
+              <Input label={t("型號 Car Model")} value={newCustomer.car_model} onChange={v => setNewCustomer({...newCustomer, car_model: v})} placeholder="e.g. Model 3, Han EV" />
+              <Select label={t("客戶狀態")} value={newCustomer.type} onChange={v => setNewCustomer({...newCustomer, type: v})} options={["Lead","Regular","VIP"]} />
+              <Select label={t("客戶來源")} value={newCustomer.referral} onChange={v => setNewCustomer({...newCustomer, referral: v})} options={REFERRAL_SOURCES} />
             </div>
-            <Input label="地址" value={newCustomer.address} onChange={v => setNewCustomer({...newCustomer, address: v})} placeholder="完整地址" />
+            <Input label={t("地址")} value={newCustomer.address} onChange={v => setNewCustomer({...newCustomer, address: v})} placeholder={t("完整地址")} />
             <div style={{ marginBottom: 14 }}>
-              <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>有興趣產品 Interested Products</label>
+              <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>{t("有興趣產品 Interested Products")}</label>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {PRODUCTS_LIST.map(p => (
                   <label key={p} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", background: newCustomer.interest_products.includes(p) ? "#e8edff" : "#f5f5f5", borderRadius: 20, cursor: "pointer", fontSize: 13, border: newCustomer.interest_products.includes(p) ? "1px solid #6382ff" : "1px solid transparent", color: newCustomer.interest_products.includes(p) ? "#6382ff" : "#555", fontWeight: newCustomer.interest_products.includes(p) ? 700 : 400 }}>
@@ -4224,9 +4234,9 @@ export default function App() {
                 ))}
               </div>
             </div>
-            <Input label="備註" value={newCustomer.notes} onChange={v => setNewCustomer({...newCustomer, notes: v})} placeholder="其他備註..." />
+            <Input label={t("備註")} value={newCustomer.notes} onChange={v => setNewCustomer({...newCustomer, notes: v})} placeholder={t("其他備註...")} />
             <button onClick={handleSaveCustomer} disabled={!newCustomer.name || saving} style={{ width: "100%", padding: 14, background: newCustomer.name ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 12, fontSize: 16, fontWeight: 800, cursor: newCustomer.name ? "pointer" : "not-allowed" }}>
-              {saving ? "儲存中..." : "儲存客戶"}
+              {saving ? t("儲存中...") : t("儲存客戶")}
             </button>
           </div>
         </div>
@@ -4239,17 +4249,17 @@ export default function App() {
             {invoiceGenerated ? (
               <div style={{ textAlign: "center", padding: "40px 20px" }}>
                 <div style={{ width: 72, height: 72, borderRadius: "50%", background: "#e8f5e9", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", color: "#22c55e" }}><Icon name="check" size={36} /></div>
-                <div style={{ fontSize: 22, fontWeight: 800 }}>發票已生成！</div>
-                <div style={{ color: "#888", marginTop: 8, fontSize: 14 }}>PDF 已列印並儲存到資料庫</div>
+                <div style={{ fontSize: 22, fontWeight: 800 }}>{t("發票已生成！")}</div>
+                <div style={{ color: "#888", marginTop: 8, fontSize: 14 }}>{t("PDF 已列印並儲存到資料庫")}</div>
               </div>
             ) : (
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-                  <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>新建發票</h2>
+                  <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{t("新建發票")}</h2>
                   <button onClick={closeNewInvoice} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
                 </div>
                 <div style={{ marginBottom: 14 }}>
-                  <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 5 }}>客戶</label>
+                  <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 5 }}>{t("客戶")}</label>
                   <div style={{ position: "relative" }}>
                     <input
                       value={customerQuery}
@@ -4260,7 +4270,7 @@ export default function App() {
                       }}
                       onFocus={() => setCustomerDropdownOpen(true)}
                       onBlur={() => setTimeout(() => setCustomerDropdownOpen(false), 150)}
-                      placeholder="輸入客戶姓名 / 電話 / 郵箱 / 車型搜索..."
+                      placeholder={t("輸入客戶姓名 / 電話 / 郵箱 / 車型搜索...")}
                       style={{ width: "100%", padding: "10px 14px", paddingRight: newInvoice.customerId ? 38 : 14, borderRadius: 10, border: newInvoice.customerId ? "1px solid #6382ff" : "1px solid #e0e0e0", fontSize: 14, outline: "none", background: "#fff", boxSizing: "border-box" }}
                     />
                     {newInvoice.customerId && (
@@ -4284,7 +4294,7 @@ export default function App() {
                       return (
                         <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, maxHeight: 260, overflowY: "auto", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 10, boxShadow: "0 4px 16px rgba(0,0,0,0.08)", zIndex: 100 }}>
                           {top.length === 0 ? (
-                            <div style={{ padding: "12px 14px", fontSize: 13, color: "#999" }}>沒有符合的客戶，檢查拼寫或去「客戶」頁新增</div>
+                            <div style={{ padding: "12px 14px", fontSize: 13, color: "#999" }}>{t("沒有符合的客戶，檢查拼寫或去「客戶」頁新增")}</div>
                           ) : (
                             <>
                               {top.map(v => {
@@ -4312,8 +4322,8 @@ export default function App() {
                                     onMouseLeave={e => e.currentTarget.style.background = "transparent"}
                                   >
                                     <div style={{ fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
-                                      {v.name || "(未命名客戶)"}
-                                      {merged && <span style={{ fontSize: 10, color: "#6382ff", background: "#eef2ff", borderRadius: 20, padding: "1px 8px", fontWeight: 700 }}>已合併 {v.groupCids.length}</span>}
+                                      {v.name || t("(未命名客戶)")}
+                                      {merged && <span style={{ fontSize: 10, color: "#6382ff", background: "#eef2ff", borderRadius: 20, padding: "1px 8px", fontWeight: 700 }}>{t("已合併")} {v.groupCids.length}</span>}
                                     </div>
                                     <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{preview || "—"}</div>
                                   </div>
@@ -4321,7 +4331,7 @@ export default function App() {
                               })}
                               {matched.length > 20 && (
                                 <div style={{ padding: "8px 14px", fontSize: 11, color: "#999", background: "#fafafa", textAlign: "center" }}>
-                                  還有 {matched.length - 20} 位客戶，繼續輸入縮小範圍
+                                  {t("還有")} {matched.length - 20} {t("位客戶，繼續輸入縮小範圍")}
                                 </div>
                               )}
                             </>
@@ -4340,13 +4350,13 @@ export default function App() {
                   return (
                     <div style={{ marginBottom: 14, padding: "12px 14px", background: "#eef4ff", borderRadius: 10, border: "1px solid #c7d7ff", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
                       <div style={{ fontSize: 13, color: "#2b4eb5", lineHeight: 1.4 }}>
-                        <div style={{ fontWeight: 700, marginBottom: 2 }}>偵測到 {upgradeable} 條疑似重複客戶</div>
-                        <div style={{ fontSize: 11, color: "#5b75b8" }}>虛擬合併中（資料命中 3+ 字段），可一鍵物理合併到主記錄</div>
+                        <div style={{ fontWeight: 700, marginBottom: 2 }}>{t("偵測到")} {upgradeable} {t("條疑似重複客戶")}</div>
+                        <div style={{ fontSize: 11, color: "#5b75b8" }}>{t("虛擬合併中（資料命中 3+ 字段），可一鍵物理合併到主記錄")}</div>
                       </div>
                       <button
                         onClick={() => handleUpgradePhysical(virtual)}
                         style={{ background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", fontWeight: 700, cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}
-                      >合併並繼續</button>
+                      >{t("合併並繼續")}</button>
                     </div>
                   );
                 })()}
@@ -4366,7 +4376,7 @@ export default function App() {
                   const labels = Object.fromEntries(PRINT_FIELD_DEFS.map(d => [d.key, d.label]));
                   return (
                     <div style={{ marginBottom: 14, padding: "14px 16px", background: "#fff9ec", borderRadius: 12, border: "1px solid #f4dca4" }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "#8a6900", marginBottom: 10 }}>此客戶有多個資料，請選擇本次發票使用的</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#8a6900", marginBottom: 10 }}>{t("此客戶有多個資料，請選擇本次發票使用的")}</div>
                       {Object.keys(multi).map(field => (
                         <div key={field} style={{ marginBottom: 10 }}>
                           <div style={{ fontSize: 12, fontWeight: 600, color: "#666", marginBottom: 6 }}>{labels[field] || field}</div>
@@ -4387,7 +4397,7 @@ export default function App() {
                   );
                 })()}
                 <div style={{ marginBottom: 14 }}>
-                  <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>商品項目</label>
+                  <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>{t("商品項目")}</label>
                   {newInvoice.items.map((item, idx) => (
                     <div key={item.id} style={{ display: "grid", gridTemplateColumns: "1fr 56px 82px 72px auto", gap: 6, marginBottom: 8, alignItems: "start" }}>
                       <div style={{ position: "relative" }}>
@@ -4396,7 +4406,7 @@ export default function App() {
                           onChange={e => { const items = [...newInvoice.items]; items[idx] = {...item, name: e.target.value}; setNewInvoice({...newInvoice, items}); }}
                           onFocus={() => setProductPickerOpenId(item.id)}
                           onBlur={() => setTimeout(() => setProductPickerOpenId(cur => cur === item.id ? null : cur), 150)}
-                          placeholder="產品 / 服務（輸入關鍵字）"
+                          placeholder={t("產品 / 服務（輸入關鍵字）")}
                           style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", width: "100%", boxSizing: "border-box" }}
                         />
                         {productPickerOpenId === item.id && (() => {
@@ -4428,13 +4438,13 @@ export default function App() {
                                 >
                                   <div style={{ fontSize: 13, fontWeight: 600 }}>{p.name}</div>
                                   <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
-                                    HK${p.price ?? "—"}{p.category ? ` · ${p.category}` : ""}{p.stock != null ? ` · 庫存 ${p.stock}` : ""}
+                                    HK${p.price ?? "—"}{p.category ? ` · ${p.category}` : ""}{p.stock != null ? ` · ${t("庫存")} ${p.stock}` : ""}
                                   </div>
                                 </div>
                               ))}
                               {matched.length > 10 && (
                                 <div style={{ padding: "6px 12px", fontSize: 10, color: "#999", background: "#fafafa", textAlign: "center" }}>
-                                  還有 {matched.length - 10} 個產品，繼續輸入縮小範圍
+                                  {t("還有")} {matched.length - 10} {t("個產品，繼續輸入縮小範圍")}
                                 </div>
                               )}
                             </div>
@@ -4442,8 +4452,8 @@ export default function App() {
                         })()}
                       </div>
                       <input type="number" min="1" value={item.qty} onChange={e => { const items = [...newInvoice.items]; items[idx].qty = parseInt(e.target.value) || 1; setNewInvoice({...newInvoice, items}); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "center" }} />
-                      <input type="number" value={item.price} onChange={e => { const items = [...newInvoice.items]; items[idx].price = parseFloat(e.target.value) || 0; setNewInvoice({...newInvoice, items}); }} placeholder="價格" style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
-                      <select value={item.warehouse_id || ''} onChange={e => { const items = [...newInvoice.items]; items[idx] = {...item, warehouse_id: e.target.value || null}; setNewInvoice({...newInvoice, items}); }} title="扣庫存的倉庫（不顯示在發票/收據上）" style={{ padding: "9px 6px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", background: "#fff" }}>
+                      <input type="number" value={item.price} onChange={e => { const items = [...newInvoice.items]; items[idx].price = parseFloat(e.target.value) || 0; setNewInvoice({...newInvoice, items}); }} placeholder={t("價格")} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
+                      <select value={item.warehouse_id || ''} onChange={e => { const items = [...newInvoice.items]; items[idx] = {...item, warehouse_id: e.target.value || null}; setNewInvoice({...newInvoice, items}); }} title={t("扣庫存的倉庫（不顯示在發票/收據上）")} style={{ padding: "9px 6px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", background: "#fff" }}>
                         {warehouses.map(w => <option key={w.id} value={w.id}>{w.name.replace("分部", "")}</option>)}
                       </select>
                       <button onClick={() => { const items = newInvoice.items.filter(i => i.id !== item.id); setNewInvoice({...newInvoice, items: items.length ? items : [mkItem(warehouses[0]?.id)]}); }} style={{ background: "#fce4ec", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
@@ -4452,11 +4462,11 @@ export default function App() {
                   <button onClick={() => setNewInvoice({...newInvoice, items: [...newInvoice.items, mkItem(warehouses[0]?.id)]})} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", width: "100%" }}>+ 新增項目</button>
                 </div>
                 <div style={{ marginBottom: 14, padding: "14px 16px", background: "#fafbff", borderRadius: 12, border: "1px solid #eef0fa" }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#555", marginBottom: 10 }}>額外費用（可選）</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#555", marginBottom: 10 }}>{t("額外費用（可選）")}</div>
                   {[
-                    { key: "deposit", label: "押金", sign: "+", color: "#6382ff" },
-                    { key: "discount", label: "優惠", sign: "−", color: "#d14343" },
-                    { key: "surcharge", label: "手續費", sign: "+", color: "#f59e0b" },
+                    { key: "deposit", label: t("押金"), sign: "+", color: "#6382ff" },
+                    { key: "discount", label: t("優惠"), sign: "−", color: "#d14343" },
+                    { key: "surcharge", label: t("手續費"), sign: "+", color: "#f59e0b" },
                   ].map(({ key, label, sign, color }) => {
                     const v = newInvoice[key] || { enabled: false, amount: 0 };
                     return (
@@ -4473,19 +4483,19 @@ export default function App() {
                   })}
                 </div>
                 <div style={{ marginBottom: 14 }}>
-                  <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 5 }}>備註</label>
-                  <input value={newInvoice.notes} onChange={e => setNewInvoice({...newInvoice, notes: e.target.value})} placeholder="例如 Shopify 訂單 #1055、WhatsApp 訂單..." style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+                  <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 5 }}>{t("備註")}</label>
+                  <input value={newInvoice.notes} onChange={e => setNewInvoice({...newInvoice, notes: e.target.value})} placeholder={t("例如 Shopify 訂單 #1055、WhatsApp 訂單...")} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", background: "#f0f4ff", borderRadius: 12, marginBottom: 20 }}>
                   <input type="checkbox" id="warranty" checked={newInvoice.warranty} onChange={e => setNewInvoice({...newInvoice, warranty: e.target.checked})} style={{ width: 16, height: 16, cursor: "pointer" }} />
-                  <label htmlFor="warranty" style={{ fontSize: 14, cursor: "pointer", fontWeight: 600 }}>客戶需要延長保修（+1 年）</label>
+                  <label htmlFor="warranty" style={{ fontSize: 14, cursor: "pointer", fontWeight: 600 }}>{t("客戶需要延長保修（+1 年）")}</label>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", background: "#1a1a2e", borderRadius: 12, marginBottom: 16 }}>
-                  <span style={{ color: "#aaa", fontSize: 14 }}>合計</span>
+                  <span style={{ color: "#aaa", fontSize: 14 }}>{t("合計")}</span>
                   <span style={{ color: "#fff", fontSize: 24, fontWeight: 800 }}>HKD${invoiceTotal.toLocaleString()}</span>
                 </div>
                 <button onClick={handleGenerateInvoice} disabled={invoiceTotal === 0 || !newInvoice.customerId || saving} style={{ width: "100%", padding: 14, background: (invoiceTotal > 0 && newInvoice.customerId) ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 12, fontSize: 16, fontWeight: 800, cursor: (invoiceTotal > 0 && newInvoice.customerId) ? "pointer" : "not-allowed" }}>
-                  {saving ? "生成中..." : !newInvoice.customerId ? "請先選擇客戶" : "生成發票並列印 PDF"}
+                  {saving ? t("生成中...") : !newInvoice.customerId ? t("請先選擇客戶") : t("生成發票並列印 PDF")}
                 </button>
               </>
             )}
@@ -4498,7 +4508,7 @@ export default function App() {
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
           <div style={{ background: "#fff", borderRadius: 20, padding: 32, width: 440, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>修改庫存</h2>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{t("修改庫存")}</h2>
               <button onClick={() => setEditingProduct(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
             </div>
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{editingProduct.name}</div>
@@ -4512,7 +4522,7 @@ export default function App() {
               </div>
             ))}
             <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
-              <button onClick={() => setEditingProduct(null)} style={{ flex: 1, padding: 12, background: "#f5f5f5", color: "#666", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>取消</button>
+              <button onClick={() => setEditingProduct(null)} style={{ flex: 1, padding: 12, background: "#f5f5f5", color: "#666", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>{t("取消")}</button>
               <button onClick={async () => {
                 const upserts = [];
                 const movements = [];
@@ -4526,7 +4536,7 @@ export default function App() {
                 }
                 if (upserts.length === 0) { setEditingProduct(null); return; }
                 const { error: upErr } = await supabase.from("inventory_stock").upsert(upserts, { onConflict: "product_id,warehouse_id" });
-                if (upErr) { alert(`庫存儲存失敗：${upErr.message}`); return; }
+                if (upErr) { alert(`${t("庫存儲存失敗")}：${upErr.message}`); return; }
                 if (movements.length > 0) {
                   await supabase.from("inventory_movements").insert(movements);
                 }
@@ -4541,7 +4551,7 @@ export default function App() {
                   return [...map.values()];
                 });
                 setEditingProduct(null);
-              }} style={{ flex: 1, padding: 12, background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>儲存</button>
+              }} style={{ flex: 1, padding: 12, background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>{t("儲存")}</button>
             </div>
           </div>
         </div>
