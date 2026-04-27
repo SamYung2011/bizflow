@@ -993,6 +993,9 @@ export default function App() {
 
   // 登入後才加載數據 — 用 user.id 作為依賴
   const userId = session?.user?.id;
+  // WhatsApp tab 管理員白名單：非 admin 帳戶只讀（前端 disable + 後端 RLS 雙保險）
+  const WA_ADMIN_EMAILS = ["samyung2011@gmail.com"];
+  const isWaAdmin = !!session?.user?.email && WA_ADMIN_EMAILS.includes(session.user.email);
   const queryClient = useQueryClient();
 
   // 使用 React Query 管理 4 張表的 fetch + 緩存
@@ -3010,31 +3013,40 @@ export default function App() {
             { id: "reports",    label: "日報" },
             { id: "logs",       label: "日誌" },
           ];
+          const guardAdmin = () => {
+            if (!isWaAdmin) { alert("您是只讀帳戶，無法編輯 WhatsApp 設置。請聯繫管理員。"); return false; }
+            return true;
+          };
           const saveSettings = async (patch) => {
+            if (!guardAdmin()) return;
             const newVals = { ...s, ...patch, updated_at: new Date().toISOString() };
             const { error } = await supabase.from("wa_settings").update(patch).eq("id", 1);
             if (error) { alert(`保存失敗：${error.message}`); return; }
             setWaSettings(newVals);
-            queryClient.setQueryData(["bf", "wa_settings"], newVals); // 同步 RQ 緩存，dirty 判斷才能歸零
+            queryClient.setQueryData(["bf", "wa_settings"], newVals);
           };
           const addWhitelist = async (kind, value, note) => {
+            if (!guardAdmin()) return;
             if (!value.trim()) return;
             const { data, error } = await supabase.from("wa_whitelist").insert({ kind, value: value.trim(), note: note?.trim() || null, active: true }).select().single();
             if (error) { alert(`新增失敗：${error.message}`); return; }
             setWaWhitelist(prev => [data, ...prev]);
           };
           const removeWhitelist = async (id) => {
+            if (!guardAdmin()) return;
             if (!window.confirm("確定移除？")) return;
             const { error } = await supabase.from("wa_whitelist").delete().eq("id", id);
             if (error) { alert(`移除失敗：${error.message}`); return; }
             setWaWhitelist(prev => prev.filter(w => w.id !== id));
           };
           const toggleWhitelistActive = async (row) => {
+            if (!guardAdmin()) return;
             const { error } = await supabase.from("wa_whitelist").update({ active: !row.active }).eq("id", row.id);
             if (error) { alert(`更新失敗：${error.message}`); return; }
             setWaWhitelist(prev => prev.map(w => w.id === row.id ? { ...w, active: !row.active } : w));
           };
           const markUnresolved = async (id) => {
+            if (!guardAdmin()) return;
             const { error } = await supabase.from("wa_unresolved").update({ resolved_at: new Date().toISOString() }).eq("id", id);
             if (error) { alert(`更新失敗：${error.message}`); return; }
             setWaUnresolved(prev => prev.map(u => u.id === id ? { ...u, resolved_at: new Date().toISOString() } : u));
@@ -3057,6 +3069,7 @@ export default function App() {
           // 敏感字段編輯密碼門檻
           const ensureUnlocked = () => {
             if (waSecretUnlocked) return true;
+            if (!isWaAdmin) { alert("您是只讀帳戶，無法解鎖查看 / 編輯敏感字段（API Key / Boss Prompt 等）。"); return false; }
             if (!s.admin_password) {
               const pwd = window.prompt("首次設置管理員密碼（用於保護 API Key / Boss Prompt / Model / Base URL 編輯）：");
               if (!pwd || !pwd.trim()) return false;
@@ -3083,6 +3096,11 @@ export default function App() {
 
           return (
             <div>
+              {!isWaAdmin && (
+                <div style={{ background: "#fff8e1", border: "1px solid #f4dca4", borderRadius: 10, padding: "10px 16px", marginBottom: 14, fontSize: 13, color: "#8a6900" }}>
+                  🔒 您是<b>只讀帳戶</b>，可瀏覽 WhatsApp 數據但無法編輯設置 / 知識庫 / 白名單 / Boss Prompt / 標記已解決等。需要編輯請聯繫管理員。
+                </div>
+              )}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
                 <div>
                   <div style={{ fontSize: 26, fontWeight: 800 }}>WhatsApp AI 客服</div>
@@ -3159,11 +3177,17 @@ export default function App() {
                           const r = await fetch(s.openai_base_url.replace(/\/+$/, '') + '/chat/completions', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + s.openai_api_key },
-                            body: JSON.stringify({ model: s.model, messages: [{ role: 'user', content: 'ping（只需回復 pong）' }], max_tokens: 10 })
+                            body: JSON.stringify({ model: s.model, messages: [{ role: 'user', content: 'ping（只需回復 pong）' }], max_tokens: 8192 })
                           });
                           const d = await r.json();
-                          if (r.ok && d.choices?.[0]?.message?.content) {
-                            alert(`✓ 連接成功\n模型回復：${d.choices[0].message.content.slice(0, 100)}`);
+                          const content = d.choices?.[0]?.message?.content;
+                          if (r.ok && content) {
+                            alert(`✓ 連接成功\n模型回復：${content.slice(0, 100)}`);
+                          } else if (r.ok) {
+                            // HTTP 200 但 content 空：常見於推理模型（reasoner）max_tokens 不夠 / 響應結構特殊
+                            const finishReason = d.choices?.[0]?.finish_reason || 'unknown';
+                            const usage = d.usage ? `tokens=${d.usage.completion_tokens}/${d.usage.total_tokens}` : '';
+                            alert(`⚠️ HTTP 200 但回復為空（finish_reason=${finishReason} ${usage}）\n推理模型可能 max_tokens 用光在思考上。完整響應：\n${JSON.stringify(d).slice(0, 400)}`);
                           } else {
                             alert(`✗ 連接失敗 (${r.status})：${d.error?.message || JSON.stringify(d).slice(0, 200)}`);
                           }
