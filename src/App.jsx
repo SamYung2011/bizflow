@@ -3558,14 +3558,16 @@ export default function App() {
             </div>
 
             <div style={{ marginBottom: 22 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10, color: "#6382ff" }}>🔄 {t("更新版本")}</div>
+              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10, color: "#6382ff" }}>🔄 {t("更新版本（推薦快速法）")}</div>
               <ol style={{ paddingLeft: 20, fontSize: 13, color: "#333", lineHeight: 1.9, margin: 0 }}>
-                <li>{t("下載新版 zip 並解壓（覆蓋舊資料夾或新建一個都可以）")}</li>
+                <li>{t("下載新版 zip 並解壓，覆蓋到原來的資料夾（路徑保持不變）")}</li>
                 <li>{t("打開 chrome://extensions")}</li>
-                <li>{t("找到「WhatsApp AI 客服 (雲端)」舊版，點下方「移除」")}</li>
-                <li>{t("再點左上角「載入已解壓的擴充功能」，選新版資料夾")}</li>
+                <li>{t("找到「WhatsApp AI 客服 (雲端)」卡片，點右下角的🔄「重新載入」按鈕")}</li>
                 <li>{t("重新打開 web.whatsapp.com，新版自動運行")}</li>
               </ol>
+              <div style={{ marginTop: 10, padding: "8px 12px", background: "#fafafa", borderRadius: 6, fontSize: 12, color: "#666" }}>
+                {t("如果新版解壓到不同資料夾（怕舊文件殘留），則需先「移除」舊扩展，再重新點「載入已解壓的擴充功能」選新資料夾。")}
+              </div>
               <div style={{ marginTop: 10, padding: "8px 12px", background: "#e3f2fd", borderRadius: 6, fontSize: 12, color: "#1565c0" }}>
                 💡 {t("為什麼要更新：WhatsApp Web 經常更新內部代碼，舊版插件可能點擊聊天失敗、扫不到未讀。版本落後時這個頁面會紅字提示。")}
               </div>
