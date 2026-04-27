@@ -272,7 +272,8 @@ export default function App() {
   const [waMessages, setWaMessages] = useState([]);
   const [waUnresolved, setWaUnresolved] = useState([]);
   const [waReports, setWaReports] = useState([]);
-  const [waSubTab, setWaSubTab] = useState("settings"); // settings | knowledge | prompt | whitelist | messages | unresolved | reports
+  const [waLogs, setWaLogs] = useState([]);
+  const [waSubTab, setWaSubTab] = useState("settings"); // settings | knowledge | prompt | whitelist | messages | unresolved | reports | logs
   const [waSelectedCustomer, setWaSelectedCustomer] = useState(null);
   const [waHeartbeat, setWaHeartbeat] = useState(null);
   const [waSecretUnlocked, setWaSecretUnlocked] = useState(false); // 輸過密碼後這次 session 內放開
@@ -1009,6 +1010,7 @@ export default function App() {
   const qWaUnresolved = useQuery({ queryKey: ["bf", "wa_unresolved"], queryFn: () => fetchAllTable("wa_unresolved", "created_at", false), enabled: !!userId, refetchInterval: 30000 });
   const qWaReports = useQuery({ queryKey: ["bf", "wa_daily_reports"], queryFn: () => fetchAllTable("wa_daily_reports", "report_date", false), enabled: !!userId, refetchInterval: 60000 });
   const qWaHeartbeat = useQuery({ queryKey: ["bf", "wa_heartbeat"], queryFn: async () => { const { data } = await supabase.from("wa_heartbeat").select("*").eq("id", 1).maybeSingle(); return data; }, enabled: !!userId, refetchInterval: 15000 });
+  const qWaLogs = useQuery({ queryKey: ["bf", "wa_logs"], queryFn: async () => { const { data } = await supabase.from("wa_logs").select("*").order("created_at", { ascending: false }).limit(500); return data || []; }, enabled: !!userId, refetchInterval: 5000 });
 
   // query data 同步到現有 useState，現存的 mutation 代碼（setCustomers 等）照舊工作
   useEffect(() => { if (qProducts.data) setProducts(qProducts.data); }, [qProducts.data]);
@@ -1025,6 +1027,7 @@ export default function App() {
   useEffect(() => { if (qWaUnresolved.data) setWaUnresolved(qWaUnresolved.data); }, [qWaUnresolved.data]);
   useEffect(() => { if (qWaReports.data) setWaReports(qWaReports.data); }, [qWaReports.data]);
   useEffect(() => { if (qWaHeartbeat.data) setWaHeartbeat(qWaHeartbeat.data); }, [qWaHeartbeat.data]);
+  useEffect(() => { if (qWaLogs.data) setWaLogs(qWaLogs.data); }, [qWaLogs.data]);
 
   // 打開編輯庫存弹窗時從 stocks 載入各倉庫當前 qty
   useEffect(() => {
@@ -3005,6 +3008,7 @@ export default function App() {
             { id: "messages",   label: "對話歷史" },
             { id: "unresolved", label: "未解決問題" },
             { id: "reports",    label: "日報" },
+            { id: "logs",       label: "日誌" },
           ];
           const saveSettings = async (patch) => {
             const newVals = { ...s, ...patch, updated_at: new Date().toISOString() };
@@ -3174,7 +3178,7 @@ export default function App() {
                 return (
                   <div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                      <div style={{ fontSize: 13, color: "#888" }}>這裡是 AI 客服回答問題時用的知識庫 —— 老板隨時編輯，本地 server.js 每條消息處理時實時拉取最新版本。</div>
+                      <div style={{ fontSize: 13, color: "#888" }}>這裡是 AI 客服回答問題時用的知識庫，本地 server.js 每條消息處理時實時拉取最新版本。</div>
                       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                         {dirty && <span style={{ fontSize: 11, color: "#f59e0b", fontWeight: 600 }}>● 未儲存</span>}
                         <button disabled={!dirty} onClick={() => saveSettings({ knowledge: localKb })} style={{ padding: "7px 18px", background: dirty ? "#22c55e" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: dirty ? "pointer" : "not-allowed" }}>儲存知識庫</button>
@@ -3191,7 +3195,7 @@ export default function App() {
               {waSubTab === "prompt" && (
                 <div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                    <div style={{ fontSize: 13, color: "#888" }}>老板聊天（BOSS_CHAT_NAME）走的是獨立 prompt，不走客服知識庫。{!waSecretUnlocked && <span style={{ marginLeft: 6, color: "#f59e0b", fontWeight: 600 }}>🔒 已鎖定</span>}</div>
+                    <div style={{ fontSize: 13, color: "#888" }}>該聊天（BOSS_CHAT_NAME）走的是獨立 prompt，不走客服知識庫。{!waSecretUnlocked && <span style={{ marginLeft: 6, color: "#f59e0b", fontWeight: 600 }}>🔒 已鎖定</span>}</div>
                     {!waSecretUnlocked ? (
                       <button onClick={() => ensureUnlocked()} style={{ padding: "6px 12px", background: "#fff8e1", color: "#f59e0b", border: "1px solid #f4dca4", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>🔓 解鎖編輯</button>
                     ) : <span style={{ fontSize: 11, color: "#22c55e", fontWeight: 600 }}>✓ 已解鎖</span>}
@@ -3321,6 +3325,71 @@ export default function App() {
                   ))}
                 </div>
               )}
+
+              {waSubTab === "logs" && (() => {
+                const catColor = {
+                  // 服務生命週期 — 綠
+                  "启动":     { bg: "#e8f5e9", color: "#22863a" },
+                  "重启":     { bg: "#e8f5e9", color: "#22863a" },
+                  "恢复":     { bg: "#e8f5e9", color: "#22863a" },
+                  // 配置 — 藍
+                  "配置":     { bg: "#e3f2fd", color: "#1565c0" },
+                  "模式":     { bg: "#e3f2fd", color: "#1565c0" },
+                  "知识库":   { bg: "#e3f2fd", color: "#1565c0" },
+                  // 雲端同步 — 紫
+                  "Supabase": { bg: "#f3e5f5", color: "#7b1fa2" },
+                  // 維護任務 — 橙
+                  "清扫":     { bg: "#fff3e0", color: "#a65a00" },
+                  "日报":     { bg: "#fff3e0", color: "#a65a00" },
+                  "操作":     { bg: "#fff3e0", color: "#a65a00" },
+                  // 錯誤 — 紅
+                  "错误":     { bg: "#fdecea", color: "#c0392b" },
+                  // 對話流（內容已雲端脫敏）— 灰
+                  "收到":     { bg: "#f5f5f5", color: "#555" },
+                  "回复入队": { bg: "#f5f5f5", color: "#555" },
+                  "历史":     { bg: "#f5f5f5", color: "#555" },
+                  // 流控 — 黃
+                  "跳过":     { bg: "#fff8e1", color: "#8a6900" },
+                  "退避":     { bg: "#fff8e1", color: "#8a6900" },
+                  "限流":     { bg: "#fff8e1", color: "#8a6900" },
+                  // 處理中 — 藍淺
+                  "生成":     { bg: "#e1f5fe", color: "#01579b" },
+                  "等待":     { bg: "#e1f5fe", color: "#01579b" },
+                  // 待處理 — 紅淺
+                  "未解决":   { bg: "#fff0f0", color: "#a32424" },
+                  // 圖片 — 中性
+                  "图片":     { bg: "#f5f5f5", color: "#555" },
+                };
+                return (
+                  <div>
+                    <div style={{ fontSize: 13, color: "#888", marginBottom: 10 }}>
+                      共 {waLogs.length} 條 · 雲端保留 24 小時 · 5s 自動刷新
+                      <span style={{ marginLeft: 10, color: "#aaa", fontSize: 12 }}>
+                        （收到/回復入隊/未解決的客戶原話自動脫敏）
+                      </span>
+                    </div>
+                    {waLogs.length === 0 ? (
+                      <div style={{ background: "#fff", borderRadius: 10, padding: 40, textAlign: "center", color: "#aaa", border: "1px dashed #e0e0e0" }}>
+                        暫無日誌（等 server.js 重啟後或下次同步出問題時會自動填）
+                      </div>
+                    ) : (
+                      <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 10, padding: 12, maxHeight: "70vh", overflowY: "auto", fontFamily: "Consolas, Menlo, monospace", fontSize: 12, lineHeight: 1.7 }}>
+                        {waLogs.map(r => {
+                          const c = catColor[r.category] || { bg: "#f5f5f5", color: "#666" };
+                          const ts = new Date(r.created_at).toLocaleString("zh-HK", { hour12: false });
+                          return (
+                            <div key={r.id} style={{ display: "flex", gap: 10, padding: "4px 0", borderBottom: "1px solid #fafafa" }}>
+                              <span style={{ color: "#999", flexShrink: 0, width: 140 }}>{ts}</span>
+                              <span style={{ background: c.bg, color: c.color, padding: "1px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700, flexShrink: 0, alignSelf: "center", minWidth: 60, textAlign: "center" }}>{r.category}</span>
+                              <span style={{ color: "#333", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{r.message}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           );
         })()}
