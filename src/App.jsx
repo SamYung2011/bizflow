@@ -3112,15 +3112,34 @@ export default function App() {
                 <div style={{ maxWidth: 720 }}>
                   <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, padding: 20, marginBottom: 16 }}>
                     <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>AI 模式</div>
-                    <div style={{ display: "flex", gap: 10, marginBottom: 8 }}>
-                      {[{ v: "cli", l: "CLI（本地 Claude Code，零費用）" }, { v: "api", l: "API（雲端 OpenAI 兼容，可獨立跑）" }].map(opt => {
+                    <div style={{ display: "flex", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+                      {[
+                        { v: "cli", l: "CLI（本地 Claude Code，零費用）" },
+                        { v: "api", l: "API（本地 server.js + OpenAI 兼容）" },
+                        { v: "api_cloud", l: "API 雲端（無需本地 server.js）" },
+                      ].map(opt => {
                         const on = (s.claude_mode || "cli") === opt.v;
                         return (
-                          <button key={opt.v} onClick={() => saveSettings({ claude_mode: opt.v })} style={{ flex: 1, padding: "12px 14px", borderRadius: 10, border: "1px solid " + (on ? "#6382ff" : "#e0e0e0"), background: on ? "#eef2ff" : "#fff", color: on ? "#3b58d4" : "#666", fontWeight: 700, fontSize: 13, cursor: "pointer", textAlign: "left" }}>{opt.l}</button>
+                          <button key={opt.v} onClick={() => {
+                            if (opt.v === "cli" && (s.claude_mode || "cli") !== "cli") {
+                              if (!window.confirm("切換到 CLI 模式需要本地開著 Claude Code 終端 + server.js，否則啟用失敗。確認切換？")) return;
+                            }
+                            saveSettings({ claude_mode: opt.v });
+                          }} style={{ flex: "1 1 200px", padding: "12px 14px", borderRadius: 10, border: "1px solid " + (on ? "#6382ff" : "#e0e0e0"), background: on ? "#eef2ff" : "#fff", color: on ? "#3b58d4" : "#666", fontWeight: 700, fontSize: 13, cursor: "pointer", textAlign: "left" }}>{opt.l}</button>
                         );
                       })}
                     </div>
-                    <div style={{ fontSize: 11, color: "#888", lineHeight: 1.6 }}>CLI 模式需本地開著 Claude Code + server.js；API 模式雲端獨立運行（待接入 Vercel function）。</div>
+                    <div style={{ fontSize: 11, color: "#888", lineHeight: 1.6 }}>CLI / API 模式需本地開著 server.js。<b>API 雲端</b>模式由 Supabase Edge Function + pg_cron 接管，老板那邊只需安裝 Chrome 雲端版插件。</div>
+                    {(s.claude_mode === "api_cloud") && (
+                      <div style={{ marginTop: 12, padding: "10px 14px", background: "#fff8e1", border: "1px solid #f4dca4", borderRadius: 8, fontSize: 12, color: "#8a6900", lineHeight: 1.7 }}>
+                        ⚠️ 雲端模式不支持 <b>日報自動生成</b> 與 <b>Boss Prompt 獨立邏輯</b>，這兩個功能仍需本地 server.js 運行。<br />
+                        雲端 endpoint：<code style={{ background: "#fff", padding: "1px 6px", borderRadius: 4, fontSize: 11 }}>https://qxcmimgqsrwkrhqhzpga.supabase.co/functions/v1/wa-message</code>
+                        <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center" }}>
+                          <a href="/whatsapp-extension-cloud.zip" download style={{ padding: "8px 14px", background: "#22c55e", color: "#fff", borderRadius: 8, fontSize: 12, fontWeight: 700, textDecoration: "none" }}>📦 下載 Chrome 插件（雲端版）</a>
+                          <span style={{ fontSize: 11, color: "#8a6900" }}>下載後解壓 → chrome://extensions → 開啟開發者模式 → 載入已解壓的擴展</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, padding: 20, marginBottom: 16 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
