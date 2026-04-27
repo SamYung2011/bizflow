@@ -3164,7 +3164,7 @@ export default function App() {
                         );
                       })}
                     </div>
-                    <div style={{ fontSize: 11, color: "#888", lineHeight: 1.6 }}>{t("CLI / API 模式需本地開著 server.js。")}<b>{t("API 雲端")}</b>{t("模式由 Supabase Edge Function + pg_cron 接管，老板那邊只需安裝 Chrome 雲端版插件。")}</div>
+                    <div style={{ fontSize: 11, color: "#888", lineHeight: 1.6 }}>{t("CLI / API 模式需本地開著 server.js。")}<b>{t("API 雲端")}</b>{t("模式由 Supabase Edge Function + pg_cron 接管，使用者只需安裝 Chrome 雲端版插件。")}</div>
                     {(s.claude_mode === "api_cloud") && (() => {
                       const liveClients = waClients.filter(c => Date.now() - new Date(c.last_seen).getTime() < 30000);
                       const outdated = liveClients.filter(c => c.version && c.version !== LATEST_EXT_VERSION);
@@ -3263,7 +3263,7 @@ export default function App() {
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
                       <Input label={t("BOT 名字（AI 自稱，注入 prompt）")} value={s.bot_name || ""} onChange={v => setWaSettings({ ...s, bot_name: v })} placeholder={t("例如 Allen / 小克")} />
                       <Input label={t("BOT WhatsApp 手機號（純數字）")} value={s.bot_phone || ""} onChange={v => setWaSettings({ ...s, bot_phone: v })} placeholder="852xxxxxxxx" />
-                      <Input label={t("老板聊天名（BOSS_CHAT_NAME）")} value={s.boss_chat_name || ""} onChange={v => setWaSettings({ ...s, boss_chat_name: v })} placeholder="" />
+                      <Input label={t("特殊聊天名（BOSS_CHAT_NAME）")} value={s.boss_chat_name || ""} onChange={v => setWaSettings({ ...s, boss_chat_name: v })} placeholder="" />
                       <Input label={t("真人抢答等待秒數")} type="number" value={s.reply_delay_base ?? 60} onChange={v => setWaSettings({ ...s, reply_delay_base: parseInt(v) || 60 })} />
                       <Input label={t("冷卻分鐘（真人回復後）")} type="number" value={s.cooldown_minutes ?? 30} onChange={v => setWaSettings({ ...s, cooldown_minutes: parseInt(v) || 30 })} />
                       <Input label={t("每用戶每分鐘上限")} type="number" value={s.max_replies_per_min ?? 3} onChange={v => setWaSettings({ ...s, max_replies_per_min: parseInt(v) || 3 })} />
