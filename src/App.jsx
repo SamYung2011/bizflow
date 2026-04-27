@@ -3380,6 +3380,41 @@ export default function App() {
               )}
 
               {waSubTab === "logs" && (() => {
+                // 雲端 log message 翻譯（regex 替換固定 pattern，保留數字 / URL / 變量）
+                // server.js 後端固定中文 → 前端 lang === en 時翻成英文 message
+                const translateLogMsg = (msg) => {
+                  if (lang !== "en" || typeof msg !== "string") return msg;
+                  return msg
+                    // 啟動
+                    .replace(/^服务端运行在 (.+) \(CLI模式\)$/, "Server running at $1 (CLI mode)")
+                    .replace(/^服务端运行在 (.+) \(API模式\)$/, "Server running at $1 (API mode)")
+                    // Supabase 同步
+                    .replace(/^已同步雲端配置（knowledge (\d+) 字 \/ boss_prompt (\d+) 字）$/, "Synced cloud config (knowledge $1 chars / boss_prompt $2 chars)")
+                    .replace(/^同步失敗：(.+)$/, "Sync failed: $1")
+                    .replace(/^存消息失敗：(.+)$/, "Failed to save message: $1")
+                    .replace(/^存未解決失敗：(.+)$/, "Failed to save unresolved: $1")
+                    .replace(/^存日報失敗：(.+)$/, "Failed to save daily report: $1")
+                    // 配置
+                    .replace(/^模式=(\S+) \| 模型=(.+?) \| 延迟=(\d+s) \| 冷却=(\d+min)$/, "Mode=$1 | Model=$2 | Delay=$3 | Cooldown=$4")
+                    .replace(/^Bot=未设置 \| 私聊白名单=(.*)$/, "Bot=Not set | Whitelist=$1")
+                    .replace(/^Bot=(\S+) \| 私聊白名单=(.*)$/, "Bot=$1 | Whitelist=$2")
+                    .replace(/^群聊白名单=(.*?) \| 群聊模糊=(.*)$/, "Group whitelist=$1 | Group fuzzy=$2")
+                    .replace(/^群聊白名单=无 \| 群聊模糊=(.*)$/, "Group whitelist=none | Group fuzzy=$1")
+                    .replace(/^配置已通过面板更新$/, "Config updated via panel")
+                    // 恢復
+                    .replace(/^从磁盘恢复 (\d+) 个已回复客户记录$/, "Restored $1 replied-customer records from disk")
+                    // 模式切換
+                    .replace(/^雲端切換 (\S+) → (\S+)$/, "Cloud switch $1 → $2")
+                    // 知識庫
+                    .replace(/^已通过面板更新 \((\d+) 字\)，即時生效$/, "Updated via panel ($1 chars), live")
+                    // 重啟
+                    .replace(/^配置已更新，关闭当前服务后重启\.\.\.$/, "Config updated, closing current service to restart...")
+                    // 清掃
+                    .replace(/^已删除 (\d+) 个过期聊天记录$/, "Cleaned $1 expired chat records")
+                    .replace(/^清扫失败: (.+)$/, "Cleanup failed: $1")
+                    // 錯誤（保留前綴翻譯，動態內容原樣）
+                    .replace(/^Claude CLI 不可用，请在浏览器中切换到 API 模式$/, "Claude CLI unavailable, switch to API mode in browser");
+                };
                 const catColor = {
                   // 服務生命週期 — 綠
                   "启动":     { bg: "#e8f5e9", color: "#22863a" },
@@ -3434,7 +3469,7 @@ export default function App() {
                             <div key={r.id} style={{ display: "flex", gap: 10, padding: "4px 0", borderBottom: "1px solid #fafafa" }}>
                               <span style={{ color: "#999", flexShrink: 0, width: 140 }}>{ts}</span>
                               <span style={{ background: c.bg, color: c.color, padding: "1px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700, flexShrink: 0, alignSelf: "center", minWidth: 60, textAlign: "center" }}>{t(r.category)}</span>
-                              <span style={{ color: "#333", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{r.message}</span>
+                              <span style={{ color: "#333", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{translateLogMsg(r.message)}</span>
                             </div>
                           );
                         })}
