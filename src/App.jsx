@@ -1021,7 +1021,7 @@ export default function App() {
   const qWaReports = useQuery({ queryKey: ["bf", "wa_daily_reports"], queryFn: () => fetchAllTable("wa_daily_reports", "report_date", false), enabled: !!userId, refetchInterval: 60000 });
   const qWaHeartbeat = useQuery({ queryKey: ["bf", "wa_heartbeat"], queryFn: async () => { const { data } = await supabase.from("wa_heartbeat").select("*").eq("id", 1).maybeSingle(); return data; }, enabled: !!userId, refetchInterval: 15000 });
   const qWaLogs = useQuery({ queryKey: ["bf", "wa_logs"], queryFn: async () => { const { data } = await supabase.from("wa_logs").select("*").order("created_at", { ascending: false }).limit(500); return data || []; }, enabled: !!userId, refetchInterval: 5000 });
-  const qWaClients = useQuery({ queryKey: ["bf", "wa_clients"], queryFn: async () => { const { data } = await supabase.from("wa_clients").select("*").order("last_seen", { ascending: false }); return data || []; }, enabled: !!userId, refetchInterval: 15000 });
+  const qWaClients = useQuery({ queryKey: ["bf", "wa_clients"], queryFn: async () => { const { data } = await supabase.from("wa_clients").select("*").order("last_seen", { ascending: false }); return data || []; }, enabled: !!userId, refetchInterval: 5000 });
 
   // query data 同步到現有 useState，現存的 mutation 代碼（setCustomers 等）照舊工作
   useEffect(() => { if (qProducts.data) setProducts(qProducts.data); }, [qProducts.data]);
@@ -3166,7 +3166,7 @@ export default function App() {
                     </div>
                     <div style={{ fontSize: 11, color: "#888", lineHeight: 1.6 }}>{t("CLI / API 模式需本地開著 server.js。")}<b>{t("API 雲端")}</b>{t("模式由 Supabase Edge Function + pg_cron 接管，老板那邊只需安裝 Chrome 雲端版插件。")}</div>
                     {(s.claude_mode === "api_cloud") && (() => {
-                      const liveClients = waClients.filter(c => Date.now() - new Date(c.last_seen).getTime() < 90000);
+                      const liveClients = waClients.filter(c => Date.now() - new Date(c.last_seen).getTime() < 30000);
                       const outdated = liveClients.filter(c => c.version && c.version !== LATEST_EXT_VERSION);
                       return (
                         <div style={{ marginTop: 12, padding: "12px 16px", background: "#fff8e1", border: "1px solid #f4dca4", borderRadius: 8, fontSize: 12, color: "#8a6900", lineHeight: 1.7 }}>
@@ -3193,7 +3193,7 @@ export default function App() {
                                   const isOld = c.version && c.version !== LATEST_EXT_VERSION;
                                   return (
                                     <div key={c.client_id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: ageS < 60 ? "#22c55e" : "#f59e0b", display: "inline-block" }}></span>
+                                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: ageS < 15 ? "#22c55e" : "#f59e0b", display: "inline-block" }}></span>
                                       <span style={{ fontFamily: "Consolas, Menlo, monospace" }}>{c.ua || "?"}</span>
                                       <span style={{ color: isOld ? "#c0392b" : "#666", fontWeight: isOld ? 700 : 400 }}>v{c.version || "?"}{isOld ? ` ⚠️ → v${LATEST_EXT_VERSION}` : ""}</span>
                                       <span style={{ color: "#999" }}>· {ageS}s {t("前")}</span>
