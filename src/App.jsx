@@ -1674,7 +1674,7 @@ export default function App() {
           <img src={`data:image/png;base64,${LOGO_B64}`} style={{ width: "100%", maxHeight: 36, objectFit: "contain", filter: "invert(1)" }} />
           <div style={{ fontSize: 10, color: "#6b7bb8", marginTop: 6, letterSpacing: "0.1em", textTransform: "uppercase" }}>{t("業務管理系統")}</div>
           <div style={{ display: "flex", gap: 4, marginTop: 12, padding: 3, background: "rgba(99,130,255,0.1)", borderRadius: 8 }}>
-            {[{ v: "zh", l: "繁體中文" }, { v: "en", l: "English" }].map(opt => (
+            {[{ v: "zh", l: "繁體中文" }, { v: "en", l: "English" }, { v: "fr", l: "Français" }].map(opt => (
               <button key={opt.v} onClick={() => setLang(opt.v)} title={opt.l}
                 style={{ flex: 1, padding: "5px 6px", border: "none", borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: "pointer", background: lang === opt.v ? "#7c9dff" : "transparent", color: lang === opt.v ? "#fff" : "#8899cc" }}>
                 {opt.l}
@@ -3434,37 +3434,54 @@ export default function App() {
                 // 雲端 log message 翻譯（regex 替換固定 pattern，保留數字 / URL / 變量）
                 // server.js 後端固定中文 → 前端 lang === en 時翻成英文 message
                 const translateLogMsg = (msg) => {
-                  if (lang !== "en" || typeof msg !== "string") return msg;
-                  return msg
-                    // 啟動
-                    .replace(/^服务端运行在 (.+) \(CLI模式\)$/, "Server running at $1 (CLI mode)")
-                    .replace(/^服务端运行在 (.+) \(API模式\)$/, "Server running at $1 (API mode)")
-                    // Supabase 同步
-                    .replace(/^已同步雲端配置（knowledge (\d+) 字 \/ boss_prompt (\d+) 字）$/, "Synced cloud config (knowledge $1 chars / boss_prompt $2 chars)")
-                    .replace(/^同步失敗：(.+)$/, "Sync failed: $1")
-                    .replace(/^存消息失敗：(.+)$/, "Failed to save message: $1")
-                    .replace(/^存未解決失敗：(.+)$/, "Failed to save unresolved: $1")
-                    .replace(/^存日報失敗：(.+)$/, "Failed to save daily report: $1")
-                    // 配置
-                    .replace(/^模式=(\S+) \| 模型=(.+?) \| 延迟=(\d+s) \| 冷却=(\d+min)$/, "Mode=$1 | Model=$2 | Delay=$3 | Cooldown=$4")
-                    .replace(/^Bot=未设置 \| 私聊白名单=(.*)$/, "Bot=Not set | Whitelist=$1")
-                    .replace(/^Bot=(\S+) \| 私聊白名单=(.*)$/, "Bot=$1 | Whitelist=$2")
-                    .replace(/^群聊白名单=(.*?) \| 群聊模糊=(.*)$/, "Group whitelist=$1 | Group fuzzy=$2")
-                    .replace(/^群聊白名单=无 \| 群聊模糊=(.*)$/, "Group whitelist=none | Group fuzzy=$1")
-                    .replace(/^配置已通过面板更新$/, "Config updated via panel")
-                    // 恢復
-                    .replace(/^从磁盘恢复 (\d+) 个已回复客户记录$/, "Restored $1 replied-customer records from disk")
-                    // 模式切換
-                    .replace(/^雲端切換 (\S+) → (\S+)$/, "Cloud switch $1 → $2")
-                    // 知識庫
-                    .replace(/^已通过面板更新 \((\d+) 字\)，即時生效$/, "Updated via panel ($1 chars), live")
-                    // 重啟
-                    .replace(/^配置已更新，关闭当前服务后重启\.\.\.$/, "Config updated, closing current service to restart...")
-                    // 清掃
-                    .replace(/^已删除 (\d+) 个过期聊天记录$/, "Cleaned $1 expired chat records")
-                    .replace(/^清扫失败: (.+)$/, "Cleanup failed: $1")
-                    // 錯誤（保留前綴翻譯，動態內容原樣）
-                    .replace(/^Claude CLI 不可用，请在浏览器中切换到 API 模式$/, "Claude CLI unavailable, switch to API mode in browser");
+                  if (typeof msg !== "string" || lang === "zh") return msg;
+                  if (lang === "en") {
+                    return msg
+                      .replace(/^服务端运行在 (.+) \(CLI模式\)$/, "Server running at $1 (CLI mode)")
+                      .replace(/^服务端运行在 (.+) \(API模式\)$/, "Server running at $1 (API mode)")
+                      .replace(/^已同步雲端配置（knowledge (\d+) 字 \/ boss_prompt (\d+) 字）$/, "Synced cloud config (knowledge $1 chars / boss_prompt $2 chars)")
+                      .replace(/^同步失敗：(.+)$/, "Sync failed: $1")
+                      .replace(/^存消息失敗：(.+)$/, "Failed to save message: $1")
+                      .replace(/^存未解決失敗：(.+)$/, "Failed to save unresolved: $1")
+                      .replace(/^存日報失敗：(.+)$/, "Failed to save daily report: $1")
+                      .replace(/^模式=(\S+) \| 模型=(.+?) \| 延迟=(\d+s) \| 冷却=(\d+min)$/, "Mode=$1 | Model=$2 | Delay=$3 | Cooldown=$4")
+                      .replace(/^Bot=未设置 \| 私聊白名单=(.*)$/, "Bot=Not set | Whitelist=$1")
+                      .replace(/^Bot=(\S+) \| 私聊白名单=(.*)$/, "Bot=$1 | Whitelist=$2")
+                      .replace(/^群聊白名单=(.*?) \| 群聊模糊=(.*)$/, "Group whitelist=$1 | Group fuzzy=$2")
+                      .replace(/^群聊白名单=无 \| 群聊模糊=(.*)$/, "Group whitelist=none | Group fuzzy=$1")
+                      .replace(/^配置已通过面板更新$/, "Config updated via panel")
+                      .replace(/^从磁盘恢复 (\d+) 个已回复客户记录$/, "Restored $1 replied-customer records from disk")
+                      .replace(/^雲端切換 (\S+) → (\S+)$/, "Cloud switch $1 → $2")
+                      .replace(/^已通过面板更新 \((\d+) 字\)，即時生效$/, "Updated via panel ($1 chars), live")
+                      .replace(/^配置已更新，关闭当前服务后重启\.\.\.$/, "Config updated, closing current service to restart...")
+                      .replace(/^已删除 (\d+) 个过期聊天记录$/, "Cleaned $1 expired chat records")
+                      .replace(/^清扫失败: (.+)$/, "Cleanup failed: $1")
+                      .replace(/^Claude CLI 不可用，请在浏览器中切换到 API 模式$/, "Claude CLI unavailable, switch to API mode in browser");
+                  }
+                  if (lang === "fr") {
+                    return msg
+                      .replace(/^服务端运行在 (.+) \(CLI模式\)$/, "Serveur en cours d'exécution sur $1 (mode CLI)")
+                      .replace(/^服务端运行在 (.+) \(API模式\)$/, "Serveur en cours d'exécution sur $1 (mode API)")
+                      .replace(/^已同步雲端配置（knowledge (\d+) 字 \/ boss_prompt (\d+) 字）$/, "Configuration cloud synchronisée (knowledge $1 car. / boss_prompt $2 car.)")
+                      .replace(/^同步失敗：(.+)$/, "Échec de synchronisation : $1")
+                      .replace(/^存消息失敗：(.+)$/, "Échec de l'enregistrement du message : $1")
+                      .replace(/^存未解決失敗：(.+)$/, "Échec de l'enregistrement du non-résolu : $1")
+                      .replace(/^存日報失敗：(.+)$/, "Échec de l'enregistrement du rapport quotidien : $1")
+                      .replace(/^模式=(\S+) \| 模型=(.+?) \| 延迟=(\d+s) \| 冷却=(\d+min)$/, "Mode=$1 | Modèle=$2 | Délai=$3 | Refroidissement=$4")
+                      .replace(/^Bot=未设置 \| 私聊白名单=(.*)$/, "Bot=Non défini | Liste blanche=$1")
+                      .replace(/^Bot=(\S+) \| 私聊白名单=(.*)$/, "Bot=$1 | Liste blanche=$2")
+                      .replace(/^群聊白名单=(.*?) \| 群聊模糊=(.*)$/, "Liste blanche groupe=$1 | Groupe flou=$2")
+                      .replace(/^群聊白名单=无 \| 群聊模糊=(.*)$/, "Liste blanche groupe=aucun | Groupe flou=$1")
+                      .replace(/^配置已通过面板更新$/, "Configuration mise à jour via le panneau")
+                      .replace(/^从磁盘恢复 (\d+) 个已回复客户记录$/, "Restauration de $1 enregistrements de clients déjà répondus depuis le disque")
+                      .replace(/^雲端切換 (\S+) → (\S+)$/, "Bascule cloud $1 → $2")
+                      .replace(/^已通过面板更新 \((\d+) 字\)，即時生效$/, "Mise à jour via le panneau ($1 car.), effective immédiatement")
+                      .replace(/^配置已更新，关闭当前服务后重启\.\.\.$/, "Configuration mise à jour, fermeture du service actuel pour redémarrer...")
+                      .replace(/^已删除 (\d+) 个过期聊天记录$/, "Suppression de $1 enregistrements de chat expirés")
+                      .replace(/^清扫失败: (.+)$/, "Échec du nettoyage : $1")
+                      .replace(/^Claude CLI 不可用，请在浏览器中切换到 API 模式$/, "Claude CLI indisponible, basculez en mode API dans le navigateur");
+                  }
+                  return msg;
                 };
                 const catColor = {
                   // 服務生命週期 — 綠
@@ -3515,7 +3532,7 @@ export default function App() {
                       <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 10, padding: 12, maxHeight: "70vh", overflowY: "auto", fontFamily: "Consolas, Menlo, monospace", fontSize: 12, lineHeight: 1.7 }}>
                         {waLogs.map(r => {
                           const c = catColor[r.category] || { bg: "#f5f5f5", color: "#666" };
-                          const ts = new Date(r.created_at).toLocaleString(lang === "en" ? "en-HK" : "zh-HK", { hour12: false });
+                          const ts = new Date(r.created_at).toLocaleString(lang === "en" ? "en-HK" : lang === "fr" ? "fr-FR" : "zh-HK", { hour12: false });
                           return (
                             <div key={r.id} style={{ display: "flex", gap: 10, padding: "4px 0", borderBottom: "1px solid #fafafa" }}>
                               <span style={{ color: "#999", flexShrink: 0, width: 140 }}>{ts}</span>
