@@ -266,6 +266,9 @@ const DICT_EN = {
   "所有疑似重複的記錄會掛到主記錄下，字段歸主記錄管理。可隨時撤銷。": "All suspected duplicates will be attached under their primary record; fields are owned by the primary. Can be undone anytime.",
   "部分合併失敗": "Some merges failed",
   "件保修需跟進": "warranty items to follow up",
+  "只能修改自己的任務": "Only your own tasks can be modified",
+  "只能添加給自己": "only for your own card",
+  "只讀模式：只能查看，不能修改別人的任務": "Read-only: you can view but cannot modify others' tasks",
 
   // ── Customers ──
   "搜尋客戶...": "Search customers...",
@@ -1016,6 +1019,9 @@ const DICT_FR = {
   "所有疑似重複的記錄會掛到主記錄下，字段歸主記錄管理。可隨時撤銷。": "Tous les doublons suspectés seront rattachés à leur enregistrement principal ; les champs appartiennent au principal. Annulable à tout moment.",
   "部分合併失敗": "Certaines fusions ont échoué",
   "件保修需跟進": "garanties à suivre",
+  "只能修改自己的任務": "Vous ne pouvez modifier que vos propres tâches",
+  "只能添加給自己": "uniquement pour votre fiche",
+  "只讀模式：只能查看，不能修改別人的任務": "Lecture seule : vous pouvez consulter mais pas modifier les tâches d'autrui",
 
   // ── Customers ──
   "搜尋客戶...": "Rechercher des clients...",

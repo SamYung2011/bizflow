@@ -3097,6 +3097,8 @@ export default function App() {
         {/* EMPLOYEES — 員工管理（左列表 + 右三欄看板） */}
         {tab === "employees" && (() => {
           const emp = selectedEmployee;
+          const canEditEmp = (e) => isBfAdmin || (currentEmployee && e && e.id === currentEmployee.id);
+          const canEditCurrent = canEditEmp(emp);
           const topTasks = emp ? tasks.filter(t => t.employee_id === emp.id && !t.parent_task_id) : [];
           const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
           const within7Days = (t) => {
@@ -3138,7 +3140,7 @@ export default function App() {
               <div key={t.id} style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 10, padding: "10px 12px", marginBottom: 8, opacity: (isDone || isAbandoned) ? 0.6 : 1, cursor: "pointer" }}
                 onClick={(e) => { if (e.target.tagName !== "INPUT") setEditingTask(t); }}>
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                  <input type="checkbox" checked={isDone} onChange={() => handleToggleTaskDone(t)} onClick={e => e.stopPropagation()} style={{ width: 15, height: 15, marginTop: 2, cursor: "pointer" }} />
+                  <input type="checkbox" checked={isDone} disabled={!canEditCurrent} onChange={() => canEditCurrent && handleToggleTaskDone(t)} onClick={e => e.stopPropagation()} title={canEditCurrent ? "" : t("只能修改自己的任務")} style={{ width: 15, height: 15, marginTop: 2, cursor: canEditCurrent ? "pointer" : "not-allowed" }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, textDecoration: isDone ? "line-through" : "none", color: (isDone || isAbandoned) ? "#999" : "#222", lineHeight: 1.4 }}>
                       {idx != null && <span style={{ color: "#aaa", marginRight: 5 }}>{idx + 1}.</span>}{t.title}
@@ -3268,8 +3270,11 @@ export default function App() {
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gridTemplateRows: "auto auto", gap: 14, marginBottom: 20 }}>
                       <div style={{ gridColumn: 1, gridRow: 1 }}>{colBox(t("高優先級"), "#ef4444", cols.high.length, cols.high)}</div>
                       <div style={{ gridColumn: 2, gridRow: 1 }}>{colBox(t("中優先級"), "#f59e0b", cols.mid.length, cols.mid)}</div>
-                      <div style={{ gridColumn: 3, gridRow: "1 / 3", background: "#fff", border: "1px solid #eef0fa", borderRadius: 12, padding: 16, display: "flex", flexDirection: "column" }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: "#3b58d4" }}>{t("＋ 添加任務")}</div>
+                      <div style={{ gridColumn: 3, gridRow: "1 / 3", background: canEditCurrent ? "#fff" : "#fafbfc", border: "1px solid #eef0fa", borderRadius: 12, padding: 16, display: "flex", flexDirection: "column", opacity: canEditCurrent ? 1 : 0.55 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, color: "#3b58d4" }}>
+                          {t("＋ 添加任務")}
+                          {!canEditCurrent && <span style={{ fontSize: 11, color: "#888", marginLeft: 6, fontWeight: 400 }}>· {t("只能添加給自己")}</span>}
+                        </div>
                         <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>{t("優先級")}</div>
                         <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
                           {[{ v: "high", l: t("高"), c: "#ef4444" }, { v: "mid", l: t("中"), c: "#f59e0b" }, { v: "low", l: t("低"), c: "#22c55e" }].map(opt => {
@@ -3296,7 +3301,7 @@ export default function App() {
                             </span>
                           ))}
                         </div>
-                        <button onClick={async () => { if (!newTaskDraft.title.trim()) return; await handleAddTask(emp.id, newTaskDraft.title, newTaskDraft.priority, null, newTaskDraft.note, newTaskAttachments); setNewTaskDraft({ title: "", priority: "low", note: "" }); setNewTaskAttachments([]); }} disabled={!newTaskDraft.title.trim()} style={{ width: "100%", padding: 10, background: newTaskDraft.title.trim() ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: newTaskDraft.title.trim() ? "pointer" : "not-allowed" }}>{t("新增任務")}</button>
+                        <button onClick={async () => { if (!newTaskDraft.title.trim() || !canEditCurrent) return; await handleAddTask(emp.id, newTaskDraft.title, newTaskDraft.priority, null, newTaskDraft.note, newTaskAttachments); setNewTaskDraft({ title: "", priority: "low", note: "" }); setNewTaskAttachments([]); }} disabled={!newTaskDraft.title.trim() || !canEditCurrent} style={{ width: "100%", padding: 10, background: (newTaskDraft.title.trim() && canEditCurrent) ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: (newTaskDraft.title.trim() && canEditCurrent) ? "pointer" : "not-allowed" }}>{t("新增任務")}</button>
                       </div>
                       <div style={{ gridColumn: 1, gridRow: 2 }}>
                         <div style={{ background: "#fff9ec", border: "1px solid #f4dca4", borderRadius: 12, padding: 14, minHeight: 240 }}>
@@ -4766,26 +4771,33 @@ export default function App() {
       {editingTask && (() => {
         const tk = editingTask;
         const subtasks = tasks.filter(s => s.parent_task_id === tk.id);
+        const canEditTk = isBfAdmin || (currentEmployee && tk.employee_id === currentEmployee.id);
+        const ro = !canEditTk;
         return (
           <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 110 }}>
             <div style={{ background: "#fff", borderRadius: 16, padding: 28, width: 540, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+              {ro && (
+                <div style={{ background: "#fff9ec", border: "1px solid #f4dca4", color: "#8a6900", padding: "8px 12px", borderRadius: 8, fontSize: 12, marginBottom: 12, fontWeight: 600 }}>
+                  🔒 {t("只讀模式：只能查看，不能修改別人的任務")}
+                </div>
+              )}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
                 <div style={{ display: "flex", gap: 8 }}>
                   {[{v:"high",l:t("高優"),c:"#ef4444"},{v:"mid",l:t("中優"),c:"#f59e0b"},{v:"low",l:t("低優"),c:"#22c55e"}].map(opt => {
                     const on = tk.priority === opt.v || (opt.v === "low" && (tk.priority === "none" || !tk.priority));
                     return (
-                      <button key={opt.v} onClick={() => handleUpdateTask(tk.id, { priority: opt.v })} style={{ fontSize: 12, fontWeight: 700, padding: "5px 12px", borderRadius: 20, border: "1px solid " + (on ? opt.c : "#e0e0e0"), background: on ? opt.c + "18" : "#fff", color: on ? opt.c : "#888", cursor: "pointer" }}>{opt.l}</button>
+                      <button key={opt.v} disabled={ro} onClick={() => !ro && handleUpdateTask(tk.id, { priority: opt.v })} style={{ fontSize: 12, fontWeight: 700, padding: "5px 12px", borderRadius: 20, border: "1px solid " + (on ? opt.c : "#e0e0e0"), background: on ? opt.c + "18" : "#fff", color: on ? opt.c : "#888", cursor: ro ? "not-allowed" : "pointer", opacity: ro ? 0.6 : 1 }}>{opt.l}</button>
                     );
                   })}
-                  {tk.status !== "abandoned" && <button onClick={() => handleUpdateTask(tk.id, { status: "abandoned", completed_at: new Date().toISOString() })} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 20, border: "1px solid #e0e0e0", background: "#fff", color: "#888", cursor: "pointer" }}>{t("標記放棄")}</button>}
-                  {tk.status === "abandoned" && <button onClick={() => handleUpdateTask(tk.id, { status: "open", completed_at: null })} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 20, border: "1px solid #6382ff", background: "#eef2ff", color: "#6382ff", cursor: "pointer" }}>{t("恢復進行")}</button>}
+                  {tk.status !== "abandoned" && <button disabled={ro} onClick={() => !ro && handleUpdateTask(tk.id, { status: "abandoned", completed_at: new Date().toISOString() })} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 20, border: "1px solid #e0e0e0", background: "#fff", color: "#888", cursor: ro ? "not-allowed" : "pointer", opacity: ro ? 0.6 : 1 }}>{t("標記放棄")}</button>}
+                  {tk.status === "abandoned" && <button disabled={ro} onClick={() => !ro && handleUpdateTask(tk.id, { status: "open", completed_at: null })} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 20, border: "1px solid #6382ff", background: "#eef2ff", color: "#6382ff", cursor: ro ? "not-allowed" : "pointer", opacity: ro ? 0.6 : 1 }}>{t("恢復進行")}</button>}
                 </div>
                 <button onClick={() => setEditingTask(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
               </div>
-              <input value={tk.title} onChange={e => setEditingTask({ ...tk, title: e.target.value })} onBlur={() => handleUpdateTask(tk.id, { title: tk.title })} style={{ width: "100%", padding: "10px 0", fontSize: 22, fontWeight: 800, border: "none", outline: "none", marginBottom: 4, boxSizing: "border-box" }} />
+              <input value={tk.title} readOnly={ro} onChange={e => !ro && setEditingTask({ ...tk, title: e.target.value })} onBlur={() => !ro && handleUpdateTask(tk.id, { title: tk.title })} style={{ width: "100%", padding: "10px 0", fontSize: 22, fontWeight: 800, border: "none", outline: "none", marginBottom: 4, boxSizing: "border-box", background: "transparent", color: ro ? "#666" : "#222" }} />
               <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 8, marginBottom: 4 }}>
                 <div style={{ fontSize: 12, color: "#888" }}>{t("截止日期")}</div>
-                <input type="date" value={tk.due_date || ""} onChange={e => setEditingTask({ ...tk, due_date: e.target.value || null })} onBlur={() => handleUpdateTask(tk.id, { due_date: tk.due_date || null })} style={{ padding: "5px 8px", borderRadius: 6, border: "1px solid #e0e0e0", fontSize: 12, outline: "none" }} />
+                <input type="date" value={tk.due_date || ""} readOnly={ro} onChange={e => !ro && setEditingTask({ ...tk, due_date: e.target.value || null })} onBlur={() => !ro && handleUpdateTask(tk.id, { due_date: tk.due_date || null })} style={{ padding: "5px 8px", borderRadius: 6, border: "1px solid #e0e0e0", fontSize: 12, outline: "none", background: ro ? "#fafbfc" : "#fff" }} />
                 {tk.due_date && (() => {
                   const days = Math.ceil((new Date(tk.due_date) - new Date()) / (1000 * 60 * 60 * 24));
                   if (days < 0) return <span style={{ fontSize: 11, color: "#ef4444", fontWeight: 700 }}>⚠ {t("已過期")} {Math.abs(days)} {t("天")}</span>;
@@ -4794,7 +4806,7 @@ export default function App() {
                 })()}
               </div>
               <div style={{ fontSize: 12, color: "#888", marginBottom: 4, marginTop: 8 }}>{t("描述 / 備註")}</div>
-              <textarea value={tk.note || ""} onChange={e => setEditingTask({ ...tk, note: e.target.value })} onBlur={() => handleUpdateTask(tk.id, { note: tk.note || null })} placeholder={t("輸入描述...")} style={{ width: "100%", minHeight: 60, padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit" }} />
+              <textarea value={tk.note || ""} readOnly={ro} onChange={e => !ro && setEditingTask({ ...tk, note: e.target.value })} onBlur={() => !ro && handleUpdateTask(tk.id, { note: tk.note || null })} placeholder={t("輸入描述...")} style={{ width: "100%", minHeight: 60, padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit", background: ro ? "#fafbfc" : "#fff" }} />
               {/* 任務級附件（task.attachments） */}
               {(Array.isArray(tk.attachments) && tk.attachments.length > 0 || true) && (
                 <div style={{ marginTop: 12 }}>
@@ -4811,15 +4823,15 @@ export default function App() {
                           ) : (
                             <a href={a.url} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px", background: "#fafbff", borderRadius: 6, fontSize: 11, color: "#3b58d4", textDecoration: "none", border: "1px solid #c6d3ff" }}>📎 {a.name}</a>
                           )}
-                          <button onClick={async () => {
+                          {!ro && <button onClick={async () => {
                             if (!window.confirm(t("確定移除此附件？"))) return;
                             const rest = tk.attachments.filter((_, j) => j !== i);
                             await handleUpdateTask(tk.id, { attachments: rest.length > 0 ? rest : null });
-                          }} title={t("移除")} style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 14, padding: 0 }}>×</button>
+                          }} title={t("移除")} style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 14, padding: 0 }}>×</button>}
                         </div>
                       );
                     })}
-                    <label style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "5px 10px", background: "#fafbff", border: "1px dashed #c6d3ff", borderRadius: 6, fontSize: 11, color: "#6382ff", cursor: "pointer" }}>
+                    {!ro && <label style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "5px 10px", background: "#fafbff", border: "1px dashed #c6d3ff", borderRadius: 6, fontSize: 11, color: "#6382ff", cursor: "pointer" }}>
                       ＋ {t("添加")}
                       <input type="file" multiple style={{ display: "none" }} onChange={async e => {
                         const files = Array.from(e.target.files || []);
@@ -4831,7 +4843,7 @@ export default function App() {
                           await handleUpdateTask(tk.id, { attachments: merged });
                         } catch (err) { alert(`${t("附件上傳失敗")}：${err.message}`); }
                       }} />
-                    </label>
+                    </label>}
                   </div>
                 </div>
               )}
@@ -4841,17 +4853,17 @@ export default function App() {
                 const stHasAttach = Array.isArray(st.attachments) && st.attachments.length > 0;
                 return (
                 <div key={st.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid #f5f5f5" }}>
-                  <input type="checkbox" checked={st.status === "done"} onChange={() => handleToggleTaskDone(st)} onClick={e => e.stopPropagation()} style={{ width: 15, height: 15, cursor: "pointer" }} />
+                  <input type="checkbox" checked={st.status === "done"} disabled={ro} onChange={() => !ro && handleToggleTaskDone(st)} onClick={e => e.stopPropagation()} style={{ width: 15, height: 15, cursor: ro ? "not-allowed" : "pointer" }} />
                   <span onClick={() => setEditingTask(st)} title={t("打開子任務詳情（含獨立反饋線程）")} style={{ flex: 1, fontSize: 13, textDecoration: st.status === "done" ? "line-through" : "none", color: st.status === "done" ? "#999" : "#333", cursor: "pointer" }}>{st.title}</span>
                   {stFbCount > 0 && <span style={{ fontSize: 10, color: "#f59e0b" }}>💬 {stFbCount}</span>}
                   {stHasAttach && <span style={{ fontSize: 10, color: "#6382ff" }}>📎 {st.attachments.length}</span>}
-                  <button onClick={() => handleDeleteTask(st.id)} title={t("刪除")} style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 14 }}>×</button>
+                  {!ro && <button onClick={() => handleDeleteTask(st.id)} title={t("刪除")} style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 14 }}>×</button>}
                 </div>
                 );
               })}
-              <form onSubmit={e => { e.preventDefault(); const v = e.target.elements.sub.value.trim(); if (v) { handleAddTask(tk.employee_id, v, "none", tk.id); e.target.reset(); } }} style={{ marginTop: 8 }}>
+              {!ro && <form onSubmit={e => { e.preventDefault(); const v = e.target.elements.sub.value.trim(); if (v) { handleAddTask(tk.employee_id, v, "none", tk.id); e.target.reset(); } }} style={{ marginTop: 8 }}>
                 <input name="sub" placeholder={t("+ 添加子任務")} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px dashed #d0d0d0", fontSize: 13, outline: "none", background: "#fafbff", boxSizing: "border-box" }} />
-              </form>
+              </form>}
               <div style={{ fontSize: 12, color: "#f59e0b", fontWeight: 700, marginTop: 16, marginBottom: 6 }}>💬 {t("反饋記錄")} <span style={{ fontSize: 11, color: "#b88a00", marginLeft: 4 }}>{feedbacks.filter(f => f.task_id === tk.id).length}</span></div>
               <div style={{ background: "#fff9ec", border: "1px solid #f4dca4", borderRadius: 8, padding: 10, marginBottom: 8, maxHeight: 280, overflowY: "auto" }}>
                 {(() => {
@@ -4931,7 +4943,7 @@ export default function App() {
                 {tk.status === "abandoned" && tk.completed_at && <span>✗ {t("放棄於")} {new Date(tk.completed_at).toLocaleString("zh-HK", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>}
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16, paddingTop: 16, borderTop: "1px solid #f0f0f0" }}>
-                <button onClick={() => handleDeleteTask(tk.id)} style={{ background: "none", border: "none", color: "#e53935", fontSize: 13, cursor: "pointer" }}>🗑 {t("刪除任務")}</button>
+                {ro ? <span /> : <button onClick={() => handleDeleteTask(tk.id)} style={{ background: "none", border: "none", color: "#e53935", fontSize: 13, cursor: "pointer" }}>🗑 {t("刪除任務")}</button>}
                 <button onClick={() => setEditingTask(null)} style={{ background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, padding: "9px 20px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>{t("完成")}</button>
               </div>
             </div>
