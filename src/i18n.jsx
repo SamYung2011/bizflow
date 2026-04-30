@@ -265,6 +265,7 @@ const DICT_EN = {
   "合併中…": "Merging…",
   "所有疑似重複的記錄會掛到主記錄下，字段歸主記錄管理。可隨時撤銷。": "All suspected duplicates will be attached under their primary record; fields are owned by the primary. Can be undone anytime.",
   "部分合併失敗": "Some merges failed",
+  "件保修需跟進": "warranty items to follow up",
 
   // ── Customers ──
   "搜尋客戶...": "Search customers...",
@@ -1014,6 +1015,7 @@ const DICT_FR = {
   "合併中…": "Fusion en cours…",
   "所有疑似重複的記錄會掛到主記錄下，字段歸主記錄管理。可隨時撤銷。": "Tous les doublons suspectés seront rattachés à leur enregistrement principal ; les champs appartiennent au principal. Annulable à tout moment.",
   "部分合併失敗": "Certaines fusions ont échoué",
+  "件保修需跟進": "garanties à suivre",
 
   // ── Customers ──
   "搜尋客戶...": "Rechercher des clients...",

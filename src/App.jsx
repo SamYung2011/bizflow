@@ -1300,7 +1300,6 @@ export default function App() {
       return a.daysLeft - b.daysLeft;
     });
   }, [invoices, products, customers]);
-  const warrantyAlerts = warrantyItems;
 
   // 庫存不足 SKU（活 SKU + 非父 + 所有倉庫合計 <= 0）
   const outOfStockSkus = useMemo(() => {
@@ -1359,6 +1358,7 @@ export default function App() {
     }
     return results.sort((a, b) => a.daysLeft - b.daysLeft);
   }, [invoices, products, customers]);
+  const warrantyAlerts = allWarrantyItems;
 
   // 從發票反推庫存：按產品聚合已售數量
   const derivedInventory = useMemo(() => {
@@ -1875,7 +1875,7 @@ export default function App() {
         {warrantyAlerts.length > 0 && (
           <div onClick={() => setTab("warranty")} style={{ margin: "10px 12px", background: "#ff9800", borderRadius: 10, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
             <Icon name="warning" size={13} />
-            <div style={{ color: "#fff", fontSize: 12, fontWeight: 600 }}>{warrantyAlerts.length} {t("件保修即將到期")}</div>
+            <div style={{ color: "#fff", fontSize: 12, fontWeight: 600 }}>{warrantyAlerts.length} {t("件保修需跟進")}</div>
           </div>
         )}
         <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 2 }}>
