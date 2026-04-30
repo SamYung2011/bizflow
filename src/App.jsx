@@ -1267,7 +1267,17 @@ export default function App() {
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const monthlyRevenue = useMemo(() => invoices.filter(i => (i.date || "").startsWith(currentMonth) && (i.status || "").trim().toLowerCase() === "paid").reduce((s, i) => s + (i.total || 0), 0), [invoices, currentMonth]);
   const totalRevenue = invoices.reduce((s, i) => s + (i.total || 0), 0);
-  const inStock = inventory.filter(i => i.status === "In Stock").length;
+  const stockSummary = useMemo(() => {
+    const byProd = {};
+    for (const s of stocks) byProd[s.product_id] = (byProd[s.product_id] || 0) + (s.qty || 0);
+    const activeIds = new Set(products.filter(p => p.category !== '_archived' && (p.status || 'active') !== 'discontinued').map(p => p.id));
+    let skuCount = 0, totalQty = 0;
+    for (const [pid, qty] of Object.entries(byProd)) {
+      if (qty > 0 && activeIds.has(pid)) { skuCount++; totalQty += qty; }
+    }
+    return { skuCount, totalQty };
+  }, [stocks, products]);
+  const inStock = stockSummary.skuCount;
 
   // 非保修項黑名單：運費 / 配件 / 費用類 不進保修提醒
   const isNonWarrantyItem = (name) => {
@@ -1913,7 +1923,7 @@ export default function App() {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 28 }}>
               <StatCard label={t("本月營收")} value={`HKD$${monthlyRevenue.toLocaleString()}`} sub={lang === "en" ? `${now.toLocaleString("en", { month: "long", year: "numeric" })}` : `${now.getFullYear()}年${now.getMonth() + 1}月`} accent="#6382ff" icon={<Icon name="trend_up" size={20} />} onClick={() => setTab("revenue")} />
-              <StatCard label={t("庫存數量")} value={inStock} sub={`${t("共")} ${inventory.length} ${t("件")}`} accent="#22c55e" icon={<Icon name="inventory" size={20} />} onClick={() => setTab("products")} />
+              <StatCard label={t("庫存數量")} value={inStock} sub={`${t("共")} ${stockSummary.totalQty} ${t("件")}`} accent="#22c55e" icon={<Icon name="inventory" size={20} />} onClick={() => setTab("products")} />
               <StatCard label={t("客戶數")} value={customerGroups.virtualCustomers.filter(c => c.allEmails.length > 0 || c.allPhones.length > 0).length} sub={t("累計")} accent="#f59e0b" icon={<Icon name="customer" size={20} />} onClick={() => { setTab("customers"); setSelectedCustomer(null); }} />
               <StatCard label={t("保修提醒")} value={warrantyAlerts.length} sub={t("需跟進")} accent="#ef4444" icon={<Icon name="warning" size={20} />} onClick={() => setTab("warranty")} />
             </div>
