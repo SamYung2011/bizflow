@@ -1248,12 +1248,15 @@ export default function App() {
   // notes 里的 ISO 时间戳 (UTC) 自动转成 HK 时间显示
   const formatNotes = (notes) => {
     if (!notes) return "";
-    return notes.replace(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?Z/g, (_, y, mo, d, h, mi) => {
+    // 隱藏內部 marker：__FORMS_BUY__ / __PENDING_MERGE__:cid 等（雙下劃線包圍的全大寫詞，可帶 :id 後綴）
+    let out = notes.replace(/__[A-Z_]+__(?::[\w-]+)?\s*/g, "");
+    out = out.replace(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?Z/g, (_, y, mo, d, h, mi) => {
       const utc = new Date(Date.UTC(+y, +mo - 1, +d, +h, +mi));
       const hk = new Date(utc.getTime() + 8 * 60 * 60 * 1000);
       const pad = (n) => String(n).padStart(2, "0");
       return `${hk.getUTCFullYear()}-${pad(hk.getUTCMonth() + 1)}-${pad(hk.getUTCDate())} ${pad(hk.getUTCHours())}:${pad(hk.getUTCMinutes())}`;
     });
+    return out.trim();
   };
 
   const getProduct = (id) => products.find(p => p.id === id);
