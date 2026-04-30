@@ -3096,7 +3096,8 @@ export default function App() {
 
         {/* EMPLOYEES — 員工管理（左列表 + 右三欄看板） */}
         {tab === "employees" && (() => {
-          const emp = selectedEmployee;
+          // 用 employees 數組裡實時的版本，避免 onChange 改了 employees 但 selectedEmployee state 沒同步導致 input 看著沒反應
+          const emp = selectedEmployee ? (employees.find(e => e.id === selectedEmployee.id) || selectedEmployee) : null;
           const canEditEmp = (e) => isBfAdmin || (currentEmployee && e && e.id === currentEmployee.id);
           const canEditCurrent = canEditEmp(emp);
           const topTasks = emp ? tasks.filter(t => t.employee_id === emp.id && !t.parent_task_id) : [];
