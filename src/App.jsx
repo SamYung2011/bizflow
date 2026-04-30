@@ -101,13 +101,59 @@ const StatCard = ({ label, value, sub, accent, icon, onClick }) => (
   </div>
 );
 
-const Input = ({ label, value, onChange, placeholder, type = "text", readOnly = false }) => (
+const COMMON_EMAIL_DOMAINS = [
+  'gmail.com', 'yahoo.com', 'yahoo.com.hk', 'yahoo.com.tw',
+  'hotmail.com', 'outlook.com', 'live.com', 'icloud.com', 'me.com',
+  'qq.com', '163.com', '126.com', 'foxmail.com', 'sina.com', 'aol.com',
+];
+const editDistance = (a, b) => {
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  let prev = new Array(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    const curr = new Array(n + 1);
+    curr[0] = i;
+    for (let j = 1; j <= n; j++) {
+      curr[j] = a[i - 1] === b[j - 1] ? prev[j - 1] : 1 + Math.min(prev[j - 1], prev[j], curr[j - 1]);
+    }
+    prev = curr;
+  }
+  return prev[n];
+};
+const suggestEmail = (val) => {
+  if (!val) return null;
+  const v = String(val).trim();
+  const at = v.indexOf('@');
+  if (at <= 0 || at >= v.length - 1) return null;
+  const local = v.slice(0, at);
+  const domain = v.slice(at + 1).toLowerCase();
+  if (COMMON_EMAIL_DOMAINS.includes(domain)) return null;
+  let best = null, bd = Infinity;
+  for (const d of COMMON_EMAIL_DOMAINS) {
+    const dist = editDistance(domain, d);
+    if (dist > 0 && dist < bd && dist <= 2) { bd = dist; best = d; }
+  }
+  return best ? `${local}@${best}` : null;
+};
+
+const Input = ({ label, value, onChange, placeholder, type = "text", readOnly = false, suggest = null }) => {
+  const sg = (suggest && value) ? suggest(value) : null;
+  return (
   <div style={{ marginBottom: 14 }}>
     <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 5 }}>{label}</label>
     <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} readOnly={readOnly}
       style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", boxSizing: "border-box", background: readOnly ? "#fafbfc" : "#fff", color: readOnly ? "#888" : "#222" }} />
+    {sg && (
+      <div style={{ marginTop: 6, padding: "6px 10px", background: "#fef3c7", color: "#92400e", borderRadius: 8, fontSize: 12, display: "flex", alignItems: "center", gap: 8 }}>
+        <span>💡 是不是 <b>{sg}</b>？</span>
+        <button type="button" onClick={() => onChange(sg)} style={{ marginLeft: "auto", background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>修正</button>
+      </div>
+    )}
   </div>
-);
+  );
+};
 
 const Select = ({ label, value, onChange, options }) => (
   <div style={{ marginBottom: 14 }}>
@@ -327,6 +373,8 @@ export default function App() {
   const [dashSearch, setDashSearch] = useState("");
   const [editingCustomer, setEditingCustomer] = useState(null); // 当前被编辑的真实 customer 对象（单条记录，不是 virtualCustomer）
   const [editCustCid, setEditCustCid] = useState(""); // 合并组内选中要编辑的 cid
+  const [manualMergeOpen, setManualMergeOpen] = useState(false);
+  const [manualMergeQuery, setManualMergeQuery] = useState("");
   // 多值字段（phone/phone_mainland/address/car_make/car_model）在表单里用 string[] 管理，每项对应一个 input
   const loadMultiField = raw => {
     const arr = String(raw || "").split(/\n+/).map(s => s.trim()).filter(Boolean);
@@ -454,6 +502,38 @@ export default function App() {
     if (error) { alert(t("升級物理合併失敗：") + error.message); return; }
     setCustomers(prev => prev.map(c => siblings.includes(c.id) ? { ...c, parent_id: primaryCid } : c));
     setMergeHistoryOpen(null);
+  }
+  const [mergeAllBusy, setMergeAllBusy] = useState(false);
+  async function handleMergeAllPhysical(candidates) {
+    const updates = candidates
+      .map(vc => ({ keeper: vc.id, siblings: (vc.groupCids || []).filter(id => id !== vc.id) }))
+      .filter(u => u.siblings.length > 0);
+    const total = updates.reduce((s, u) => s + u.siblings.length, 0);
+    if (total === 0) return;
+    const ok = window.confirm(
+      `${t("確定一鍵合併全部")} ${updates.length} ${t("組")}（${t("共")} ${total} ${t("條")}）？\n\n` +
+      `${t("所有疑似重複的記錄會掛到主記錄下，字段歸主記錄管理。可隨時撤銷。")}`
+    );
+    if (!ok) return;
+    setMergeAllBusy(true);
+    const errors = [];
+    const okUpdates = [];
+    const BATCH = 10;
+    for (let i = 0; i < updates.length; i += BATCH) {
+      const batch = updates.slice(i, i + BATCH);
+      const results = await Promise.all(batch.map(async u => {
+        const { error } = await supabase.from("customers").update({ parent_id: u.keeper }).in("id", u.siblings);
+        return { u, error };
+      }));
+      results.forEach(r => { if (r.error) errors.push(r.error.message); else okUpdates.push(r.u); });
+    }
+    setCustomers(prev => prev.map(c => {
+      for (const u of okUpdates) if (u.siblings.includes(c.id)) return { ...c, parent_id: u.keeper };
+      return c;
+    }));
+    setMergeAllBusy(false);
+    setMergeCandidatesOpen(false);
+    if (errors.length) alert(`${t("部分合併失敗")}：\n` + errors.slice(0, 5).join("\n"));
   }
   const openEditCustomer = (virtualC) => {
     const cids = virtualC.groupCids || [virtualC.id];
@@ -717,6 +797,18 @@ export default function App() {
   const [editStock, setEditStock] = useState(0);
   const [editStocks, setEditStocks] = useState({});
 
+  // 新增產品 modal
+  const emptyNewProduct = () => ({
+    name: "", category: "", internal_code: "", price: "",
+    warranty_months: 12, specs: "",
+    image_file: null, image_preview: "",
+    has_variants: false,
+    variants: [],
+  });
+  const [newProductOpen, setNewProductOpen] = useState(false);
+  const [newProduct, setNewProduct] = useState(emptyNewProduct());
+  const [newProductSaving, setNewProductSaving] = useState(false);
+
   const [newCustomer, setNewCustomer] = useState({
     name: "", email: "", phone: "", phone_mainland: "",
     car_make: "", car_model: "", address: "",
@@ -757,50 +849,61 @@ export default function App() {
   //     parent_id 非空的子記錄不作為獨立客戶顯示，名字作別名加入 keeper 的 allNames
   const customerGroups = useMemo(() => {
     const norm = s => (s || "").trim().toLowerCase();
-    const fields = ["name", "phone", "email", "address"];
-    // 地址模糊匹配：edit distance ≤ 1 視為相同（容忍 1 個字的錯漏）
+    // fields：multi=多值（按 \n 分行）；fuzzy=允許每行 edit distance ≤ 1 命中
+    const fields = [
+      { key: "name",           multi: false, fuzzy: false },
+      { key: "phone",          multi: true,  fuzzy: false },
+      { key: "phone_mainland", multi: true,  fuzzy: false },
+      { key: "email",          multi: true,  fuzzy: true  },
+      { key: "address",        multi: true,  fuzzy: true  },
+    ];
+    // edit distance ≤ 1（容忍 1 個字的錯漏）
     const editDist1 = (a, b) => {
       if (a === b) return true;
       const la = a.length, lb = b.length;
       if (Math.abs(la - lb) > 1) return false;
-      // 最多 1 次編輯：替換/插入/刪除
       let i = 0, j = 0, edits = 0;
       while (i < la && j < lb) {
         if (a[i] === b[j]) { i++; j++; continue; }
         if (++edits > 1) return false;
-        if (la === lb) { i++; j++; }         // 替換
-        else if (la > lb) i++;               // a 多一字，刪 a
-        else j++;                            // b 多一字，刪 b
+        if (la === lb) { i++; j++; }
+        else if (la > lb) i++;
+        else j++;
       }
       if (i < la || j < lb) edits++;
       return edits <= 1;
     };
-    const splitAddr = s => String(s || "").split(/\n+/).map(x => x.trim().toLowerCase()).filter(Boolean);
-    const addrMatch = (a, b) => {
-      const A = splitAddr(a), B = splitAddr(b);
-      if (A.length === 0 || B.length === 0) return false;
-      for (const x of A) for (const y of B) if (editDist1(x, y)) return true;
-      return false;
+    const splitLinesLower = s => String(s || "").split(/\n+/).map(x => x.trim().toLowerCase()).filter(Boolean);
+    const lineMatch = (a, b, fuzzy) => fuzzy ? editDist1(a, b) : a === b;
+    const fieldMatch = (f, ca, cb) => {
+      if (f.multi) {
+        const A = splitLinesLower(ca[f.key]), B = splitLinesLower(cb[f.key]);
+        if (A.length === 0 || B.length === 0) return false;
+        for (const x of A) for (const y of B) if (lineMatch(x, y, f.fuzzy)) return true;
+        return false;
+      }
+      const a = norm(ca[f.key]), b = norm(cb[f.key]);
+      return !!a && a === b;
     };
     const idToCustomer = new Map();
     customers.forEach(c => idToCustomer.set(c.id, c));
-    // 規則 2 子記錄：parent_id 非空的 customer，按 parent_id 分組
-    const childrenByParent = new Map(); // parentId -> [child customers]
+    const childrenByParent = new Map();
     customers.forEach(c => {
       if (c.parent_id) {
         if (!childrenByParent.has(c.parent_id)) childrenByParent.set(c.parent_id, []);
         childrenByParent.get(c.parent_id).push(c);
       }
     });
-    // 只用 parent_id IS NULL 的 customer 做 union-find（子記錄不獨立成組）
     const independents = customers.filter(c => !c.parent_id);
+    // exact-match indexes：multi 字段每行一個 entry，single 字段整字段
     const indexes = fields.map(() => new Map());
     independents.forEach(c => {
       fields.forEach((f, i) => {
-        const v = norm(c[f]);
-        if (!v) return;
-        if (!indexes[i].has(v)) indexes[i].set(v, []);
-        indexes[i].get(v).push(c.id);
+        const lines = f.multi ? splitLinesLower(c[f.key]) : [norm(c[f.key])].filter(Boolean);
+        lines.forEach(line => {
+          if (!indexes[i].has(line)) indexes[i].set(line, []);
+          indexes[i].get(line).push(c.id);
+        });
       });
     });
     const parent = new Map();
@@ -815,26 +918,19 @@ export default function App() {
     independents.forEach(c => {
       const candidates = new Set();
       fields.forEach((f, i) => {
-        const v = norm(c[f]);
-        if (!v) return;
-        indexes[i].get(v)?.forEach(id => { if (id !== c.id) candidates.add(id); });
+        const lines = f.multi ? splitLinesLower(c[f.key]) : [norm(c[f.key])].filter(Boolean);
+        lines.forEach(line => {
+          indexes[i].get(line)?.forEach(id => { if (id !== c.id) candidates.add(id); });
+        });
       });
       candidates.forEach(id => {
         const other = idToCustomer.get(id);
         if (!other) return;
-        // 回退合併：若任一方把對方加入 merge_exclude，跳過自動合併
         const ex1 = Array.isArray(c.merge_exclude) ? c.merge_exclude : [];
         const ex2 = Array.isArray(other.merge_exclude) ? other.merge_exclude : [];
         if (ex1.includes(other.id) || ex2.includes(c.id)) return;
         let matches = 0;
-        fields.forEach(f => {
-          if (f === "address") {
-            if (addrMatch(c.address, other.address)) matches++;
-          } else {
-            const a = norm(c[f]), b = norm(other[f]);
-            if (a && a === b) matches++;
-          }
-        });
+        fields.forEach(f => { if (fieldMatch(f, c, other)) matches++; });
         if (matches >= 3) {
           const ra = find(c.id), rb = find(id);
           if (ra !== rb) parent.set(ra, rb);
@@ -1953,6 +2049,22 @@ export default function App() {
                 <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{t("產品")}</h1>
                 <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>{t("產品目錄 + 庫存管理")}</p>
               </div>
+              <button
+                onClick={() => {
+                  const init = emptyNewProduct();
+                  const re = /^PRD-(\d{4})(?:-\d+)?$/;
+                  let max = 0;
+                  for (const p of products) {
+                    const m = (p.internal_code || '').match(re);
+                    if (m) max = Math.max(max, parseInt(m[1], 10));
+                  }
+                  init.internal_code = `PRD-${String(max + 1).padStart(4, '0')}`;
+                  setNewProduct(init);
+                  setNewProductOpen(true);
+                }}
+                style={{ background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, padding: "10px 18px", cursor: "pointer", fontSize: 14, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 18, lineHeight: 1 }}>+</span> {t("新增產品")}
+              </button>
             </div>
             <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
               <Icon name="search" size={15} />
@@ -2088,14 +2200,44 @@ export default function App() {
           };
           const collectionOpts = [...new Set(products.flatMap(x => x.collections || []))].filter(Boolean);
           const tagOpts = [...new Set(products.flatMap(x => x.tags || []))].filter(Boolean);
+          const isDiscontinued = (p.status || "active") === "discontinued";
+          const toggleStatus = async () => {
+            const next = isDiscontinued ? "active" : "discontinued";
+            const ids = [p.id, ...children.map(c => c.id)];
+            const { error } = await supabase.from("products").update({ status: next }).in("id", ids);
+            if (error) { alert((isDiscontinued ? t("啟用失敗") : t("停售失敗")) + "：" + error.message); return; }
+            setProducts(prev => prev.map(x => ids.includes(x.id) ? { ...x, status: next } : x));
+            setSelectedProduct(prev => ({ ...prev, status: next }));
+          };
+          const deleteProduct = async () => {
+            const childCount = children.length;
+            const msg = childCount > 0
+              ? `${t("確定刪除")}「${p.name}」？\n${t("會一併刪除")} ${childCount} ${t("個子型號")}，${t("此操作不可恢復")}。`
+              : `${t("確定刪除")}「${p.name}」？\n${t("此操作不可恢復")}。`;
+            if (!confirm(msg)) return;
+            const ids = [p.id, ...children.map(c => c.id)];
+            await supabase.from("inventory_stock").delete().in("product_id", ids);
+            await supabase.from("inventory_movements").delete().in("product_id", ids);
+            const { error } = await supabase.from("products").delete().eq("id", p.id);
+            if (error) { alert(t("刪除失敗") + "：" + error.message); return; }
+            setProducts(prev => prev.filter(x => !ids.includes(x.id)));
+            setSelectedProduct(null);
+            setProductOrgDraft(null);
+          };
           return (
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
                 <button onClick={() => { setSelectedProduct(null); setProductOrgDraft(null); }} style={{ background: "#f5f5f5", border: "none", borderRadius: 10, padding: "10px 14px", cursor: "pointer", fontSize: 14 }}>{t("← 返回")}</button>
-                <div>
+                <div style={{ flex: 1 }}>
                   <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{p.name}</h1>
                   <div style={{ fontFamily: "monospace", fontSize: 12, color: "#aaa", marginTop: 4 }}>{p.internal_code}</div>
                 </div>
+                <button onClick={toggleStatus} style={{ background: isDiscontinued ? "#d1fae5" : "#fef3c7", color: isDiscontinued ? "#047857" : "#92400e", border: "none", borderRadius: 10, padding: "10px 16px", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>
+                  {isDiscontinued ? t("啟用") : t("停售")}
+                </button>
+                <button onClick={deleteProduct} style={{ background: "#fef2f2", color: "#ef4444", border: "none", borderRadius: 10, padding: "10px 16px", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>
+                  {t("刪除")}
+                </button>
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20 }}>
@@ -2450,6 +2592,9 @@ export default function App() {
               <div style={{ display: "flex", gap: 8 }}>
                 <button onClick={() => openEditCustomer(selectedCustomer)} title={t("編輯客戶")} style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff9ec", color: "#d08700", border: "1px solid #f4dca4", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
                   ✏️ {t("編輯客戶")}
+                </button>
+                <button onClick={() => { setManualMergeQuery(""); setManualMergeOpen(true); }} title={t("合併到其他客戶")} style={{ display: "flex", alignItems: "center", gap: 6, background: "#eef2ff", color: "#6382ff", border: "1px solid #c7d2fe", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+                  🔗 {t("合併到其他客戶")}
                 </button>
                 <button onClick={() => handleDeleteCustomer(selectedCustomer)} title={t("刪除客戶")} style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff0f0", color: "#d14343", border: "1px solid #ffcccc", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
                   🗑️ {t("刪除客戶")}
@@ -4097,7 +4242,18 @@ export default function App() {
         return (
           <div onClick={() => setMergeCandidatesOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 28, width: 760, maxWidth: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
-              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>{t("疑似重複客戶檢測")}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, gap: 12 }}>
+                <div style={{ fontSize: 18, fontWeight: 700 }}>{t("疑似重複客戶檢測")}</div>
+                {candidates.length > 0 && (
+                  <button
+                    onClick={() => handleMergeAllPhysical(candidates)}
+                    disabled={mergeAllBusy}
+                    style={{ background: mergeAllBusy ? "#a8b8e8" : "#6382ff", color: "#fff", border: "none", borderRadius: 10, padding: "10px 18px", cursor: mergeAllBusy ? "not-allowed" : "pointer", fontWeight: 700, fontSize: 13, whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6 }}
+                  >
+                    {mergeAllBusy ? t("合併中…") : `⚡ ${t("一鍵合併全部")} ${candidates.length} ${t("組")}`}
+                  </button>
+                )}
+              </div>
               <div style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>
                 {t("共")} {candidates.length} {t("組虛擬合併（資料命中 3+ 字段自動合併）。點「物理合併」把成員綁定到主記錄，之後刪字段才真生效。")}
               </div>
@@ -4157,7 +4313,7 @@ export default function App() {
           </label>
         );
         // 多值字段渲染：每项独立 input + × 删除 + "+ 新增" 按钮
-        const multiFld = (label, key, placeholder, addText) => {
+        const multiFld = (label, key, placeholder, addText, suggest) => {
           const arr = editCustForm[key] || [""];
           const updateAt = (idx, val) => setEditCustForm(f => {
             const next = [...(f[key] || [""])];
@@ -4172,20 +4328,31 @@ export default function App() {
           return (
             <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: "#666", fontWeight: 600 }}>
               <div>{label}</div>
-              {arr.map((v, idx) => (
-                <div key={idx} style={{ display: "flex", gap: 6 }}>
-                  <input
-                    type="text"
-                    value={v}
-                    placeholder={placeholder}
-                    onChange={e => updateAt(idx, e.target.value)}
-                    style={{ flex: 1, padding: "8px 10px", border: "1px solid #e0e0e0", borderRadius: 8, fontSize: 14, color: "#111" }}
-                  />
-                  {arr.length > 1 && (
-                    <button type="button" onClick={() => removeAt(idx)} title={t("刪除")} style={{ width: 34, background: "#fff0f0", color: "#d14343", border: "1px solid #ffcccc", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>×</button>
-                  )}
-                </div>
-              ))}
+              {arr.map((v, idx) => {
+                const sg = (suggest && v) ? suggest(v) : null;
+                return (
+                  <div key={idx} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <input
+                        type="text"
+                        value={v}
+                        placeholder={placeholder}
+                        onChange={e => updateAt(idx, e.target.value)}
+                        style={{ flex: 1, padding: "8px 10px", border: "1px solid #e0e0e0", borderRadius: 8, fontSize: 14, color: "#111" }}
+                      />
+                      {arr.length > 1 && (
+                        <button type="button" onClick={() => removeAt(idx)} title={t("刪除")} style={{ width: 34, background: "#fff0f0", color: "#d14343", border: "1px solid #ffcccc", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>×</button>
+                      )}
+                    </div>
+                    {sg && (
+                      <div style={{ padding: "5px 10px", background: "#fef3c7", color: "#92400e", borderRadius: 6, fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
+                        <span>💡 {t("是不是")} <b>{sg}</b>？</span>
+                        <button type="button" onClick={() => updateAt(idx, sg)} style={{ marginLeft: "auto", background: "#f59e0b", color: "#fff", border: "none", borderRadius: 5, padding: "2px 8px", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>{t("修正")}</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               <button type="button" onClick={addNew} style={{ alignSelf: "flex-start", background: "none", color: "#6382ff", border: "1px dashed #6382ff", borderRadius: 8, padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>+ {addText}</button>
             </div>
           );
@@ -4216,7 +4383,7 @@ export default function App() {
                 {multiFld(t("內地電話 Phone (CN)"), "phoneMainlands", t("例：138 0013 8000"), t("新增內地電話"))}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
-                {multiFld(t("郵箱 Email"), "emails", t("例：user@example.com"), t("新增郵箱"))}
+                {multiFld(t("郵箱 Email"), "emails", t("例：user@example.com"), t("新增郵箱"), suggestEmail)}
                 {multiFld(t("車品牌 Car Make"), "carMakes", t("例：Tesla"), t("新增車品牌"))}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
@@ -4231,6 +4398,74 @@ export default function App() {
                 <button disabled={editCustSaving} onClick={handleSaveCustomerEdit} style={{ background: editCustSaving ? "#ccc" : "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 700, cursor: editCustSaving ? "not-allowed" : "pointer" }}>
                   {editCustSaving ? t("保存中…") : t("保存")}
                 </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* MANUAL MERGE MODAL — 把當前客戶合並到另一個客戶 */}
+      {manualMergeOpen && selectedCustomer && (() => {
+        const fromCids = selectedCustomer.allCids || selectedCustomer.groupCids || [selectedCustomer.id];
+        const candidates = (customerGroups?.virtualCustomers || []).filter(vc => {
+          if (fromCids.includes(vc.id)) return false;
+          const inGroup = (vc.allCids || vc.groupCids || []);
+          if (inGroup.some(id => fromCids.includes(id))) return false;
+          const q = manualMergeQuery.trim().toLowerCase();
+          if (!q) return false;
+          return [vc.name, vc.email, vc.phone, vc.phone_mainland].some(v => (v || "").toLowerCase().includes(q));
+        }).slice(0, 30);
+        const doMerge = async (keeper) => {
+          if (!confirm(`${t("確認把")}「${selectedCustomer.name || t("(無名)")}」${t("合併到")}「${keeper.name || t("(無名)")}」？\n${t("合併後當前客戶會變成 keeper 的子記錄，發票關聯不變。")}`)) return;
+          const { error } = await supabase.from("customers").update({ parent_id: keeper.id }).in("id", fromCids);
+          if (error) { alert(t("合併失敗") + "：" + error.message); return; }
+          setCustomers(prev => prev.map(c => fromCids.includes(c.id) ? { ...c, parent_id: keeper.id } : c));
+          setManualMergeOpen(false);
+          setManualMergeQuery("");
+          setSelectedCustomer(keeper);
+        };
+        return (
+          <div onClick={() => setManualMergeOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2100, padding: 20 }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, width: 540, maxWidth: "100%", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+              <div style={{ padding: "20px 24px", borderBottom: "1px solid #f0f0f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>{t("合併到其他客戶")}</h2>
+                  <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>{t("把")}「{selectedCustomer.name || t("(無名)")}」{t("作為子記錄，掛到所選客戶下")}</div>
+                </div>
+                <button onClick={() => setManualMergeOpen(false)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
+              </div>
+              <div style={{ padding: 20 }}>
+                <input
+                  autoFocus
+                  type="text"
+                  value={manualMergeQuery}
+                  onChange={e => setManualMergeQuery(e.target.value)}
+                  placeholder={t("搜尋姓名 / 電話 / 郵箱")}
+                  style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", boxSizing: "border-box" }}
+                />
+              </div>
+              <div style={{ flex: 1, overflowY: "auto", padding: "0 16px 20px" }}>
+                {!manualMergeQuery.trim() ? (
+                  <div style={{ padding: 30, textAlign: "center", color: "#aaa", fontSize: 13 }}>{t("輸入關鍵字搜尋目標客戶")}</div>
+                ) : candidates.length === 0 ? (
+                  <div style={{ padding: 30, textAlign: "center", color: "#aaa", fontSize: 13 }}>{t("沒有符合的客戶")}</div>
+                ) : (
+                  candidates.map(vc => (
+                    <div key={vc.id} onClick={() => doMerge(vc)} style={{ padding: "10px 12px", borderRadius: 10, cursor: "pointer", border: "1px solid #f0f0f0", marginBottom: 6, display: "flex", alignItems: "center", gap: 12 }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "#f7f8fc"; e.currentTarget.style.borderColor = "#6382ff"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.borderColor = "#f0f0f0"; }}>
+                      <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#6382ff,#a78bfa)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: "#fff", flexShrink: 0 }}>
+                        {(vc.name || "?")[0]}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700 }}>{vc.name || t("(無名)")}</div>
+                        <div style={{ fontSize: 11, color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {[vc.email, vc.phone, vc.phone_mainland].filter(Boolean).join(" · ")}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
@@ -4481,7 +4716,7 @@ export default function App() {
             <Input label={t("姓名 *")} value={newEmployee.name} onChange={v => setNewEmployee({ ...newEmployee, name: v })} placeholder={t("員工姓名")} />
             <Input label={t("職位")} value={newEmployee.role} onChange={v => setNewEmployee({ ...newEmployee, role: v })} placeholder={t("例如 客服 / 技術 / 銷售")} />
             <Input label={t("電話")} value={newEmployee.phone} onChange={v => setNewEmployee({ ...newEmployee, phone: v })} placeholder="+852" />
-            <Input label="Email" value={newEmployee.email} onChange={v => setNewEmployee({ ...newEmployee, email: v })} placeholder="email@example.com" />
+            <Input label="Email" value={newEmployee.email} onChange={v => setNewEmployee({ ...newEmployee, email: v })} placeholder="email@example.com" suggest={suggestEmail} />
             <Input label={t("備註")} value={newEmployee.note} onChange={v => setNewEmployee({ ...newEmployee, note: v })} placeholder={t("其他備註...")} />
             <button onClick={handleSaveEmployee} disabled={!newEmployee.name.trim()} style={{ width: "100%", padding: 12, background: newEmployee.name.trim() ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 800, cursor: newEmployee.name.trim() ? "pointer" : "not-allowed", marginTop: 8 }}>{t("儲存員工")}</button>
           </div>
@@ -4700,7 +4935,7 @@ export default function App() {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
               <Input label={t("中文名 / Name *")} value={newCustomer.name} onChange={v => setNewCustomer({...newCustomer, name: v})} placeholder={t("客戶名稱")} />
-              <Input label="Email" value={newCustomer.email} onChange={v => setNewCustomer({...newCustomer, email: v})} placeholder="email@example.com" />
+              <Input label="Email" value={newCustomer.email} onChange={v => setNewCustomer({...newCustomer, email: v})} placeholder="email@example.com" suggest={suggestEmail} />
               <Input label={t("香港電話")} value={newCustomer.phone} onChange={v => setNewCustomer({...newCustomer, phone: v})} placeholder="+852" />
               <Input label={t("內地電話")} value={newCustomer.phone_mainland} onChange={v => setNewCustomer({...newCustomer, phone_mainland: v})} placeholder="+86" />
               <Select label={t("汽車品牌 Car Brand")} value={newCustomer.car_make} onChange={v => setNewCustomer({...newCustomer, car_make: v})} options={CAR_BRANDS} />
@@ -5044,6 +5279,228 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* NEW PRODUCT MODAL */}
+      {newProductOpen && (() => {
+        const np = newProduct;
+        const CATEGORY_PREFIX = { '轉插': 'ADP', '充電線': 'CBL', '便攜充電': 'PTC', '充電樁': 'CHG', '停售': 'DSC' };
+        const codePrefix = (cat) => CATEGORY_PREFIX[(cat || '').trim()] || 'PRD';
+        const nextParentCode = (cat) => {
+          const prefix = codePrefix(cat);
+          const re = new RegExp('^' + prefix + '-(\\d{4})(?:-\\d+)?$');
+          let max = 0;
+          for (const p of products) {
+            const m = (p.internal_code || '').match(re);
+            if (m) max = Math.max(max, parseInt(m[1], 10));
+          }
+          return prefix + '-' + String(max + 1).padStart(4, '0');
+        };
+        const nextChildCode = (parentCode, variants) => {
+          if (!parentCode) return '';
+          const re = new RegExp('^' + parentCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '-(\\d+)$');
+          let max = 0;
+          for (const v of variants) {
+            const m = (v.internal_code || '').match(re);
+            if (m) max = Math.max(max, parseInt(m[1], 10));
+          }
+          return parentCode + '-' + String(max + 1).padStart(2, '0');
+        };
+        const reChildSuffix = /-(\d+)$/;
+        const setNp = (patch) => setNewProduct(prev => ({ ...prev, ...patch }));
+        const setCategory = (cat) => setNewProduct(prev => ({ ...prev, category: cat, internal_code: nextParentCode(cat) }));
+        const setParentCode = (code) => setNewProduct(prev => ({
+          ...prev,
+          internal_code: code,
+          variants: prev.variants.map(v => {
+            const m = (v.internal_code || '').match(reChildSuffix);
+            return m ? { ...v, internal_code: code + m[0] } : v;
+          }),
+        }));
+        const setVariant = (idx, patch) => setNewProduct(prev => ({
+          ...prev,
+          variants: prev.variants.map((v, i) => i === idx ? { ...v, ...patch } : v),
+        }));
+        const addVariant = () => setNewProduct(prev => ({
+          ...prev,
+          variants: [...prev.variants, { name: "", price: "", internal_code: nextChildCode(prev.internal_code, prev.variants), specs: "", warranty_months: prev.warranty_months || 12 }],
+        }));
+        const removeVariant = (idx) => setNewProduct(prev => ({
+          ...prev,
+          variants: prev.variants.filter((_, i) => i !== idx),
+        }));
+        const existingCats = [...new Set(products.filter(p => !p.parent_product_id && p.category && p.category !== '_archived').map(p => p.category))];
+        const close = () => { setNewProductOpen(false); setNewProduct(emptyNewProduct()); };
+        const onPickImage = (file) => {
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = (e) => setNp({ image_file: file, image_preview: e.target.result });
+          reader.readAsDataURL(file);
+        };
+        const handleCreate = async () => {
+          if (!np.image_file) { alert(t("請上傳產品圖片")); return; }
+          if (!np.name.trim()) { alert(t("請輸入產品名稱")); return; }
+          if (np.has_variants) {
+            if (np.variants.length === 0) { alert(t("子型號至少需要一行")); return; }
+            for (const [i, v] of np.variants.entries()) {
+              if (!v.name.trim()) { alert(`${t("子型號")} #${i + 1} ${t("缺少名稱")}`); return; }
+              if (v.price === "" || isNaN(Number(v.price))) { alert(`${t("子型號")} #${i + 1} ${t("缺少價格")}`); return; }
+            }
+          } else {
+            if (np.price === "" || isNaN(Number(np.price))) { alert(t("請填寫價格")); return; }
+          }
+          setNewProductSaving(true);
+          try {
+            const ext = (np.image_file.name.split('.').pop() || 'jpg').toLowerCase();
+            const folder = (np.internal_code || np.name).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40) || 'new';
+            const path = `${folder}/${Date.now()}.${ext}`;
+            const { error: upErr } = await supabase.storage.from('product-images').upload(path, np.image_file, { upsert: false });
+            if (upErr) throw new Error(t("圖片上傳失敗") + "：" + upErr.message);
+            const { data: pub } = supabase.storage.from('product-images').getPublicUrl(path);
+            const imageUrl = pub.publicUrl;
+
+            const parentRow = {
+              name: np.name.trim(),
+              price: np.has_variants ? 0 : Number(np.price),
+              stock: 0,
+              warranty_months: Number(np.warranty_months) || null,
+              category: np.category.trim() || null,
+              internal_code: np.internal_code.trim() || null,
+              specs: np.specs.trim() || null,
+              image_url: imageUrl,
+              status: 'active',
+            };
+            const { data: inserted, error: insErr } = await supabase.from('products').insert(parentRow).select().single();
+            if (insErr) throw new Error(t("建立產品失敗") + "：" + insErr.message);
+
+            let allInserted = [inserted];
+            if (np.has_variants) {
+              const childRows = np.variants.map(v => ({
+                name: v.name.trim(),
+                price: Number(v.price),
+                stock: 0,
+                warranty_months: Number(v.warranty_months) || Number(np.warranty_months) || null,
+                category: np.category.trim() || null,
+                internal_code: v.internal_code.trim() || null,
+                specs: v.specs.trim() || null,
+                image_url: imageUrl,
+                status: 'active',
+                parent_product_id: inserted.id,
+              }));
+              const { data: childInserted, error: childErr } = await supabase.from('products').insert(childRows).select();
+              if (childErr) throw new Error(t("建立子型號失敗") + "：" + childErr.message);
+              allInserted = [inserted, ...(childInserted || [])];
+            }
+            setProducts(prev => [...prev, ...allInserted]);
+            close();
+          } catch (e) {
+            alert(e.message || String(e));
+          } finally {
+            setNewProductSaving(false);
+          }
+        };
+        const inputStyle = { width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", boxSizing: "border-box" };
+        const labelStyle = { fontSize: 12, fontWeight: 700, color: "#555", display: "block", marginBottom: 6 };
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 }}>
+            <div style={{ background: "#fff", borderRadius: 20, width: 640, maxWidth: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px", borderBottom: "1px solid #f0f0f0" }}>
+                <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{t("新增產品")}</h2>
+                <button onClick={close} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
+              </div>
+              <div style={{ padding: 24, overflowY: "auto", flex: 1 }}>
+                {/* 圖片 */}
+                <div style={{ marginBottom: 20 }}>
+                  <label style={labelStyle}>{t("產品圖片")} <span style={{ color: "#ef4444" }}>*</span></label>
+                  {np.image_preview ? (
+                    <div style={{ position: "relative", display: "inline-block" }}>
+                      <img src={np.image_preview} style={{ width: 180, height: 180, objectFit: "cover", borderRadius: 10, border: "1px solid #f0f0f0" }} />
+                      <button onClick={() => setNp({ image_file: null, image_preview: "" })} style={{ position: "absolute", top: 6, right: 6, background: "rgba(0,0,0,0.6)", color: "#fff", border: "none", borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontSize: 12 }}>{t("移除")}</button>
+                    </div>
+                  ) : (
+                    <label style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: 180, height: 180, border: "2px dashed #d0d5dd", borderRadius: 10, cursor: "pointer", background: "#fafbfc", color: "#888" }}>
+                      <div style={{ fontSize: 32, marginBottom: 4 }}>+</div>
+                      <div style={{ fontSize: 12 }}>{t("點擊上傳圖片")}</div>
+                      <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => onPickImage(e.target.files?.[0])} />
+                    </label>
+                  )}
+                </div>
+
+                {/* 基本信息 */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+                  <div>
+                    <label style={labelStyle}>{t("產品名稱")} <span style={{ color: "#ef4444" }}>*</span></label>
+                    <input value={np.name} onChange={e => setNp({ name: e.target.value })} placeholder={t("例如：Type2 便携式充電器")} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>{t("類別")}</label>
+                    <input list="np-cat-list" value={np.category} onChange={e => setCategory(e.target.value)} placeholder={t("選擇或輸入新類別")} style={inputStyle} />
+                    <datalist id="np-cat-list">
+                      {existingCats.map(c => <option key={c} value={c} />)}
+                    </datalist>
+                  </div>
+                  <div>
+                    <label style={labelStyle}>{t("內部編號")} <span style={{ color: "#aaa", fontWeight: 400 }}>· {t("自動生成")}</span></label>
+                    <input value={np.internal_code} onChange={e => setParentCode(e.target.value)} placeholder="PRD-0001" style={{ ...inputStyle, fontFamily: "monospace" }} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>{t("保修月數")}</label>
+                    <input type="number" min="0" value={np.warranty_months} onChange={e => setNp({ warranty_months: e.target.value })} style={inputStyle} />
+                  </div>
+                  {!np.has_variants && (
+                    <div>
+                      <label style={labelStyle}>{t("價格")} (HK$) <span style={{ color: "#ef4444" }}>*</span></label>
+                      <input type="number" min="0" value={np.price} onChange={e => setNp({ price: e.target.value })} placeholder="0" style={inputStyle} />
+                    </div>
+                  )}
+                  <div style={{ gridColumn: np.has_variants ? "span 2" : "auto" }}>
+                    <label style={labelStyle}>{t("規格")}</label>
+                    <textarea value={np.specs} onChange={e => setNp({ specs: e.target.value })} rows={2} placeholder={t("可選")} style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }} />
+                  </div>
+                </div>
+
+                {/* 子型號 */}
+                <div style={{ marginTop: 8, padding: 14, background: "#fafbfc", borderRadius: 10, border: "1px solid #f0f0f0" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 14, fontWeight: 700 }}>
+                    <input type="checkbox" checked={np.has_variants} onChange={e => {
+                      const checked = e.target.checked;
+                      setNewProduct(prev => ({
+                        ...prev,
+                        has_variants: checked,
+                        variants: checked && prev.variants.length === 0
+                          ? [{ name: "", price: "", internal_code: nextChildCode(prev.internal_code, []), specs: "", warranty_months: prev.warranty_months || 12 }]
+                          : prev.variants,
+                      }));
+                    }} />
+                    {t("有其他型號（子型號）")}
+                  </label>
+                  {np.has_variants && (
+                    <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+                      {np.variants.map((v, idx) => (
+                        <div key={idx} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1.2fr 36px", gap: 8, alignItems: "center", padding: 10, background: "#fff", borderRadius: 8, border: "1px solid #f0f0f0" }}>
+                          <input value={v.name} onChange={e => setVariant(idx, { name: e.target.value })} placeholder={t("子型號名稱") + " *"} style={inputStyle} />
+                          <input type="number" min="0" value={v.price} onChange={e => setVariant(idx, { price: e.target.value })} placeholder={t("價格") + " *"} style={inputStyle} />
+                          <input value={v.internal_code} onChange={e => setVariant(idx, { internal_code: e.target.value })} placeholder={t("內部編號")} style={{ ...inputStyle, fontFamily: "monospace" }} />
+                          <button onClick={() => removeVariant(idx)} title={t("刪除")} style={{ background: "#fef2f2", color: "#ef4444", border: "none", borderRadius: 8, height: 38, cursor: "pointer", fontSize: 16, fontWeight: 700 }}>×</button>
+                        </div>
+                      ))}
+                      <button onClick={addVariant} style={{ alignSelf: "flex-start", background: "#fff", color: "#6382ff", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 14px", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>
+                        + {t("添加子型號")}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 10, padding: "16px 24px", borderTop: "1px solid #f0f0f0" }}>
+                <button onClick={close} disabled={newProductSaving} style={{ flex: 1, padding: 12, background: "#f5f5f5", color: "#666", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: newProductSaving ? "not-allowed" : "pointer" }}>{t("取消")}</button>
+                <button onClick={handleCreate} disabled={newProductSaving} style={{ flex: 2, padding: 12, background: newProductSaving ? "#a8b8e8" : "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: newProductSaving ? "not-allowed" : "pointer" }}>
+                  {newProductSaving ? t("建立中...") : t("建立產品")}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
