@@ -1914,7 +1914,7 @@ export default function App() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 28 }}>
               <StatCard label={t("本月營收")} value={`HKD$${monthlyRevenue.toLocaleString()}`} sub={lang === "en" ? `${now.toLocaleString("en", { month: "long", year: "numeric" })}` : `${now.getFullYear()}年${now.getMonth() + 1}月`} accent="#6382ff" icon={<Icon name="trend_up" size={20} />} onClick={() => setTab("revenue")} />
               <StatCard label={t("庫存數量")} value={inStock} sub={`${t("共")} ${inventory.length} ${t("件")}`} accent="#22c55e" icon={<Icon name="inventory" size={20} />} onClick={() => setTab("products")} />
-              <StatCard label={t("客戶數")} value={customers.length} sub={t("累計")} accent="#f59e0b" icon={<Icon name="customer" size={20} />} onClick={() => { setTab("customers"); setSelectedCustomer(null); }} />
+              <StatCard label={t("客戶數")} value={customerGroups.virtualCustomers.filter(c => c.allEmails.length > 0 || c.allPhones.length > 0).length} sub={t("累計")} accent="#f59e0b" icon={<Icon name="customer" size={20} />} onClick={() => { setTab("customers"); setSelectedCustomer(null); }} />
               <StatCard label={t("保修提醒")} value={warrantyAlerts.length} sub={t("需跟進")} accent="#ef4444" icon={<Icon name="warning" size={20} />} onClick={() => setTab("warranty")} />
             </div>
             <div style={{ position: "relative", marginBottom: 20 }}>
