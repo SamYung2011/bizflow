@@ -258,6 +258,24 @@ export default function App() {
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPw, setLoginPw] = useState("");
   const [loginError, setLoginError] = useState("");
+  // 反饋附件待上傳文件（task edit modal 內，editingTask 切換時清空）
+  const [pendingAttachments, setPendingAttachments] = useState([]);
+  // 添加任務時待上傳的附件（員工管理頁右側「+ 添加任務」表單）
+  const [newTaskAttachments, setNewTaskAttachments] = useState([]);
+  // 任務未讀反饋追蹤的 dummy tick（更新 localStorage 後遞增讓任務卡重渲染）
+  const [taskSeenTick, setTaskSeenTick] = useState(0);
+  // 員工資料編輯模式（id = 當前正在編輯的員工 id；null = 全部 view 模式）
+  const [editingEmpId, setEditingEmpId] = useState(null);
+  // 反饋回復模式（id = 正在回復的反饋 id；null = 普通新發反饋）
+  const [replyingToFb, setReplyingToFb] = useState(null);
+  // 個人資料 modal
+  const [showProfile, setShowProfile] = useState(false);
+  const [profileDraft, setProfileDraft] = useState({ name: "", role: "", phone: "", email: "", note: "" });
+  // 強制改密 modal（首次登入用初始密碼進來時）
+  const [forceChangePw1, setForceChangePw1] = useState("");
+  const [forceChangePw2, setForceChangePw2] = useState("");
+  const [forceChangePwErr, setForceChangePwErr] = useState("");
+  const [forceChangePwLoading, setForceChangePwLoading] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false);
 
   const [tab, setTab] = useState("dashboard");
@@ -266,6 +284,7 @@ export default function App() {
   const [stocks, setStocks] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [tasks, setTasks] = useState([]);
+  const [feedbacks, setFeedbacks] = useState([]); // employee_task_feedbacks (comments thread)
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [showAddEmployee, setShowAddEmployee] = useState(false);
   const [newEmployee, setNewEmployee] = useState({ name: "", role: "", phone: "", email: "", note: "" });
@@ -1000,9 +1019,13 @@ export default function App() {
 
   // 登入後才加載數據 — 用 user.id 作為依賴
   const userId = session?.user?.id;
-  // WhatsApp tab 管理員白名單：非 admin 帳戶只讀（前端 disable + 後端 RLS 雙保險）
-  const WA_ADMIN_EMAILS = ["samyung2011@gmail.com"];
-  const isWaAdmin = !!session?.user?.email && WA_ADMIN_EMAILS.includes(session.user.email);
+  // 当前登录的 employee 记录（按 user_id 反查 employees 表）
+  const currentEmployee = userId ? employees.find(e => e.user_id === userId) : null;
+  // bizflow 管理员（按 employees.is_admin 反查；samyung 老 admin 兼容保留）
+  const isBfAdmin = (currentEmployee && currentEmployee.is_admin === true) || (!!session?.user?.email && session.user.email === "samyung2011@gmail.com");
+  // WhatsApp tab 管理员（沿用旧名兼容现有代码）
+  const WA_ADMIN_EMAILS = ["samyung2011@gmail.com", "a1017339632@gmail.com"];
+  const isWaAdmin = isBfAdmin || (!!session?.user?.email && WA_ADMIN_EMAILS.includes(session.user.email));
   const queryClient = useQueryClient();
 
   // 使用 React Query 管理 4 張表的 fetch + 緩存
@@ -1014,6 +1037,7 @@ export default function App() {
   const qStocks = useQuery({ queryKey: ["bf", "inventory_stock"], queryFn: () => fetchAllTable("inventory_stock", null), enabled: !!userId });
   const qEmployees = useQuery({ queryKey: ["bf", "employees"], queryFn: () => fetchAllTable("employees", "created_at"), enabled: !!userId });
   const qTasks = useQuery({ queryKey: ["bf", "employee_tasks"], queryFn: () => fetchAllTable("employee_tasks", "created_at"), enabled: !!userId });
+  const qFeedbacks = useQuery({ queryKey: ["bf", "employee_task_feedbacks"], queryFn: () => fetchAllTable("employee_task_feedbacks", "created_at"), enabled: !!userId });
   const qWaSettings = useQuery({ queryKey: ["bf", "wa_settings"], queryFn: async () => { const { data } = await supabase.from("wa_settings").select("*").eq("id", 1).maybeSingle(); return data; }, enabled: !!userId, refetchInterval: 30000 });
   const qWaWhitelist = useQuery({ queryKey: ["bf", "wa_whitelist"], queryFn: () => fetchAllTable("wa_whitelist", "created_at"), enabled: !!userId, refetchInterval: 30000 });
   const qWaMessages = useQuery({ queryKey: ["bf", "wa_messages"], queryFn: async () => { const { data } = await supabase.from("wa_messages").select("*").order("created_at", { ascending: false }).limit(1000); return data || []; }, enabled: !!userId, refetchInterval: 15000 });
@@ -1032,6 +1056,7 @@ export default function App() {
   useEffect(() => { if (qStocks.data) setStocks(qStocks.data); }, [qStocks.data]);
   useEffect(() => { if (qEmployees.data) setEmployees(qEmployees.data); }, [qEmployees.data]);
   useEffect(() => { if (qTasks.data) setTasks(qTasks.data); }, [qTasks.data]);
+  useEffect(() => { if (qFeedbacks.data) setFeedbacks(qFeedbacks.data); }, [qFeedbacks.data]);
   useEffect(() => { if (qWaSettings.data) setWaSettings(qWaSettings.data); }, [qWaSettings.data]);
   useEffect(() => { if (qWaWhitelist.data) setWaWhitelist(qWaWhitelist.data); }, [qWaWhitelist.data]);
   useEffect(() => { if (qWaMessages.data) setWaMessages(qWaMessages.data); }, [qWaMessages.data]);
@@ -1040,6 +1065,16 @@ export default function App() {
   useEffect(() => { if (qWaHeartbeat.data) setWaHeartbeat(qWaHeartbeat.data); }, [qWaHeartbeat.data]);
   useEffect(() => { if (qWaLogs.data) setWaLogs(qWaLogs.data); }, [qWaLogs.data]);
   useEffect(() => { if (qWaClients.data) setWaClients(qWaClients.data); }, [qWaClients.data]);
+
+  // 進 task detail modal 時自動標記該 task 反饋為已讀（更新 localStorage + 觸發任務卡重渲染）
+  useEffect(() => {
+    if (editingTask?.id && userId) {
+      localStorage.setItem(`bf_task_seen_${editingTask.id}_${userId}`, Date.now().toString());
+      setTaskSeenTick(v => v + 1);
+    }
+    // 切換 task 時清空 pendingAttachments
+    setPendingAttachments([]);
+  }, [editingTask?.id, userId]);
 
   // 打開編輯庫存弹窗時從 stocks 載入各倉庫當前 qty
   useEffect(() => {
@@ -1560,7 +1595,7 @@ export default function App() {
     setSelectedEmployee(null);
   }
 
-  async function handleAddTask(employeeId, title, priority = "low", parentTaskId = null, note = null) {
+  async function handleAddTask(employeeId, title, priority = "low", parentTaskId = null, note = null, files = []) {
     if (!title || !title.trim()) return;
     const { data, error } = await supabase.from("employee_tasks").insert({
       employee_id: employeeId,
@@ -1570,15 +1605,27 @@ export default function App() {
       note: note || null,
     }).select().single();
     if (error) { alert(`${t("新增任務失敗")}：${error.message}`); return; }
-    setTasks(prev => [...prev, data]);
-    return data;
+    let row = data;
+    // 有附件就上傳到新建 task 下，再 UPDATE attachments 列
+    if (files && files.length > 0) {
+      try {
+        const attachments = await Promise.all(files.map(f => uploadAttachment(f, data.id)));
+        const { data: upd, error: e2 } = await supabase.from("employee_tasks").update({ attachments }).eq("id", data.id).select().single();
+        if (e2) { alert(`${t("附件保存失敗")}：${e2.message}`); }
+        else { row = upd; }
+      } catch (e) { alert(`${t("附件上傳失敗")}：${e.message}`); }
+    }
+    setTasks(prev => [...prev, row]);
+    return row;
   }
 
   async function handleUpdateTask(taskId, patch) {
     const { error } = await supabase.from("employee_tasks").update(patch).eq("id", taskId);
     if (error) { alert(`${t("更新失敗")}：${error.message}`); return; }
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...patch } : t));
-    if (editingTask?.id === taskId) setEditingTask(prev => ({ ...prev, ...patch }));
+    // prev 可能在 async 期間被 setEditingTask(null) 改成 null（用戶點完成關 modal 時 onBlur 後 update 才回來），
+    // 要 guard：prev 為 null 或不是同一 task 時保持原樣不要 merge 進空白對象（避免空白 modal 重彈）
+    setEditingTask(prev => (prev && prev.id === taskId) ? ({ ...prev, ...patch }) : prev);
   }
 
   async function handleToggleTaskDone(task) {
@@ -1591,7 +1638,54 @@ export default function App() {
     const { error } = await supabase.from("employee_tasks").delete().eq("id", taskId);
     if (error) { alert(`${t("刪除失敗")}：${error.message}`); return; }
     setTasks(prev => prev.filter(t => t.id !== taskId && t.parent_task_id !== taskId));
+    setFeedbacks(prev => prev.filter(f => f.task_id !== taskId)); // CASCADE 在 db 自动删，本地也同步
     if (editingTask?.id === taskId) setEditingTask(null);
+  }
+
+  // ── 任務反饋 (comments thread) ─────────────────────────────
+  // 上傳單個附件到 task-attachments storage bucket，返回 {url, name, size, type}
+  async function uploadAttachment(file, taskId) {
+    const ext = (file.name.split(".").pop() || "bin").toLowerCase();
+    const path = `${taskId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const { error } = await supabase.storage.from("task-attachments").upload(path, file, {
+      contentType: file.type || "application/octet-stream",
+      upsert: false,
+    });
+    if (error) throw error;
+    const { data: pub } = supabase.storage.from("task-attachments").getPublicUrl(path);
+    return { url: pub.publicUrl, name: file.name, size: file.size, type: file.type || "application/octet-stream" };
+  }
+
+  async function handleAddFeedback(taskId, body, files = [], parentFeedbackId = null) {
+    if ((!body || !body.trim()) && (!files || files.length === 0)) return;
+    if (!userId) return;
+    const authorName = currentEmployee?.name || (session?.user?.email ? session.user.email.split("@")[0] : "user");
+    let attachments = null;
+    try {
+      if (files && files.length > 0) {
+        attachments = await Promise.all(files.map(f => uploadAttachment(f, taskId)));
+      }
+    } catch (e) { alert(`${t("附件上傳失敗")}：${e.message}`); return; }
+    const { data, error } = await supabase.from("employee_task_feedbacks").insert({
+      task_id: taskId,
+      author_user_id: userId,
+      author_name: authorName,
+      body: (body || "").trim(),
+      attachments,
+      parent_feedback_id: parentFeedbackId,
+    }).select().single();
+    if (error) { alert(`${t("發送失敗")}：${error.message}`); return; }
+    setFeedbacks(prev => [...prev, data]);
+    setPendingAttachments([]);
+    setReplyingToFb(null);
+    return data;
+  }
+
+  async function handleDeleteFeedback(fbId) {
+    if (!window.confirm(t("確定刪除此反饋？"))) return;
+    const { error } = await supabase.from("employee_task_feedbacks").delete().eq("id", fbId);
+    if (error) { alert(`${t("刪除失敗")}：${error.message}`); return; }
+    setFeedbacks(prev => prev.filter(f => f.id !== fbId));
   }
 
   // 認證載入中（Supabase 正在讀 session）
@@ -1697,10 +1791,10 @@ export default function App() {
         </nav>
         <div style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.07)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "rgba(99,130,255,0.1)", borderRadius: 10 }}>
-            <div style={{ width: 30, height: 30, borderRadius: "50%", background: "linear-gradient(135deg,#7c9dff,#a78bfa)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#fff" }}>H</div>
+            <div style={{ width: 30, height: 30, borderRadius: "50%", background: "linear-gradient(135deg,#7c9dff,#a78bfa)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#fff" }}>{(currentEmployee?.name || session?.user?.email || "H").charAt(0).toUpperCase()}</div>
             <div style={{ flex: 1, overflow: "hidden" }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{session?.user?.email || "Honnmono"}</div>
-              <div style={{ fontSize: 11, color: "#6b7bb8" }}>{isWaAdmin ? t("管理員") : t("只讀")}</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{currentEmployee?.name || session?.user?.email || "Honnmono"}</div>
+              <div style={{ fontSize: 11, color: "#6b7bb8", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{currentEmployee?.role || currentEmployee?.email || session?.user?.email || ""}</div>
             </div>
             <button
               onClick={async () => { await supabase.auth.signOut(); }}
@@ -2858,7 +2952,18 @@ export default function App() {
             abandoned: topTasks.filter(t => t.status === "abandoned" && within7Days(t)),
             done: topTasks.filter(t => t.status === "done" && within7Days(t)),
           } : null;
-          const empFeedbacks = emp ? tasks.filter(t => t.employee_id === emp.id && t.feedback && t.feedback.trim()) : [];
+          // 该员工所有 task 的最新反馈（每个 task 取最近一条 comment 作摘要展示）
+          const empTaskIds = emp ? new Set(tasks.filter(t => t.employee_id === emp.id).map(t => t.id)) : new Set();
+          const empFeedbackTasksMap = new Map(); // task_id → latest feedback row
+          for (const fb of feedbacks) {
+            if (!empTaskIds.has(fb.task_id)) continue;
+            const cur = empFeedbackTasksMap.get(fb.task_id);
+            if (!cur || new Date(fb.created_at) > new Date(cur.created_at)) empFeedbackTasksMap.set(fb.task_id, fb);
+          }
+          const empFeedbacks = Array.from(empFeedbackTasksMap.entries()).map(([tid, fb]) => {
+            const tk = tasks.find(t => t.id === tid);
+            return tk ? { ...tk, _latestFb: fb } : null;
+          }).filter(Boolean).sort((a, b) => new Date(b._latestFb.created_at) - new Date(a._latestFb.created_at));
           const fmtShortDate = (iso) => {
             if (!iso) return "";
             const d = new Date(iso);
@@ -2882,10 +2987,27 @@ export default function App() {
                     </div>
                     <div style={{ fontSize: 10, color: "#aaa", marginTop: 4, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                       <span>📅 {fmtShortDate(t.created_at)}</span>
+                      {t.due_date && (() => {
+                        const days = Math.ceil((new Date(t.due_date) - new Date()) / (1000 * 60 * 60 * 24));
+                        if (isDone || isAbandoned) return <span style={{ color: "#888" }}>⏰ {t.due_date}</span>;
+                        if (days < 0) return <span style={{ color: "#ef4444", fontWeight: 700 }}>⚠ {t.due_date}（過期 {Math.abs(days)}d）</span>;
+                        if (days <= 3) return <span style={{ color: "#f59e0b", fontWeight: 700 }}>⏰ {t.due_date}（{days}d）</span>;
+                        return <span style={{ color: "#888" }}>⏰ {t.due_date}</span>;
+                      })()}
                       {isDone && t.completed_at && <span style={{ color: "#22c55e" }}>✓ {fmtShortDate(t.completed_at)}</span>}
                       {isAbandoned && t.completed_at && <span>✗ {fmtShortDate(t.completed_at)}</span>}
                       {subtasks.length > 0 && <span style={{ color: "#888" }}>☑ {subDone}/{subtasks.length}</span>}
-                      {t.feedback && <span style={{ color: "#f59e0b" }}>💬</span>}
+                      {feedbacks.some(f => f.task_id === t.id) && (() => {
+                        const list = feedbacks.filter(f => f.task_id === t.id);
+                        const lastSeen = parseInt(localStorage.getItem(`bf_task_seen_${t.id}_${userId}`) || "0", 10);
+                        const unread = list.filter(f => new Date(f.created_at).getTime() > lastSeen && f.author_user_id !== userId).length;
+                        return (
+                          <span style={{ color: unread > 0 ? "#ef4444" : "#f59e0b", fontWeight: unread > 0 ? 700 : 400 }}>
+                            💬 {list.length}{unread > 0 && <span style={{ background: "#ef4444", color: "#fff", borderRadius: 8, padding: "0 5px", marginLeft: 3, fontSize: 9 }}>{unread} 新</span>}
+                          </span>
+                        );
+                      })()}
+                      {Array.isArray(t.attachments) && t.attachments.length > 0 && <span style={{ color: "#6382ff" }}>📎 {t.attachments.length}</span>}
                     </div>
                   </div>
                 </div>
@@ -2926,8 +3048,13 @@ export default function App() {
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                           <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#7c9dff,#a78bfa)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, flexShrink: 0 }}>{(e.name || "?").slice(0, 1)}</div>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 14, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: active ? "#3b58d4" : "#222" }}>{e.name}</div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <div style={{ fontSize: 14, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: active ? "#3b58d4" : "#222" }}>{e.name}</div>
+                              {!e.user_id && <span style={{ fontSize: 9, fontWeight: 700, color: "#aaa", background: "#f5f5f5", borderRadius: 4, padding: "1px 5px" }}>{t("未綁帳號")}</span>}
+                              {e.must_change_password && <span title={t("待首次改密")} style={{ fontSize: 9, color: "#f59e0b" }}>🔐</span>}
+                            </div>
                             {e.role && <div style={{ fontSize: 11, color: "#888", marginTop: 1 }}>{e.role}</div>}
+                            {e.email && <div style={{ fontSize: 10, color: "#aaa", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.email}</div>}
                           </div>
                         </div>
                         <div style={{ display: "flex", gap: 10, fontSize: 11, color: "#666", marginTop: 8 }}>
@@ -2947,16 +3074,37 @@ export default function App() {
                   </div>
                 ) : (
                   <div>
-                    {/* 員工頭部 */}
+                    {/* 員工頭部 — admin 或本人點"編輯資料"進編輯模式 */}
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1 }}>
                         <div style={{ width: 44, height: 44, borderRadius: "50%", background: "linear-gradient(135deg,#7c9dff,#a78bfa)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 700 }}>{(emp.name || "?").slice(0, 1)}</div>
-                        <div>
-                          <div style={{ fontSize: 20, fontWeight: 800 }}>{emp.name}</div>
-                          <div style={{ fontSize: 12, color: "#888", marginTop: 1 }}>{[emp.role, emp.phone, emp.email].filter(Boolean).join(" · ") || "—"}</div>
+                        <div style={{ flex: 1 }}>
+                          {editingEmpId === emp.id ? (
+                            <>
+                              <input value={emp.name || ""} onChange={e => setEmployees(prev => prev.map(x => x.id === emp.id ? { ...x, name: e.target.value } : x))} onBlur={async () => { const { error } = await supabase.from("employees").update({ name: (emp.name || "").trim() || null }).eq("id", emp.id); if (error) alert(`${t("保存失敗")}：${error.message}`); }} placeholder={t("姓名")} style={{ border: "1px solid #6382ff", outline: "none", padding: "6px 10px", borderRadius: 6, fontFamily: "inherit", fontSize: 18, fontWeight: 800, width: 200, marginBottom: 6, boxSizing: "border-box" }} />
+                              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                <input value={emp.role || ""} onChange={e => setEmployees(prev => prev.map(x => x.id === emp.id ? { ...x, role: e.target.value } : x))} onBlur={async () => { const { error } = await supabase.from("employees").update({ role: (emp.role || "").trim() || null }).eq("id", emp.id); if (error) alert(`${t("保存失敗")}：${error.message}`); }} placeholder={t("職位")} style={{ border: "1px solid #d0d0d0", outline: "none", padding: "5px 8px", borderRadius: 6, fontFamily: "inherit", fontSize: 12, width: 100 }} />
+                                <input value={emp.phone || ""} onChange={e => setEmployees(prev => prev.map(x => x.id === emp.id ? { ...x, phone: e.target.value } : x))} onBlur={async () => { const { error } = await supabase.from("employees").update({ phone: (emp.phone || "").trim() || null }).eq("id", emp.id); if (error) alert(`${t("保存失敗")}：${error.message}`); }} placeholder={t("電話")} style={{ border: "1px solid #d0d0d0", outline: "none", padding: "5px 8px", borderRadius: 6, fontFamily: "inherit", fontSize: 12, width: 140 }} />
+                                <input value={emp.email || ""} onChange={e => setEmployees(prev => prev.map(x => x.id === emp.id ? { ...x, email: e.target.value } : x))} onBlur={async () => { const { error } = await supabase.from("employees").update({ email: (emp.email || "").trim() || null }).eq("id", emp.id); if (error) alert(`${t("保存失敗")}：${error.message}`); }} placeholder="email" style={{ border: "1px solid #d0d0d0", outline: "none", padding: "5px 8px", borderRadius: 6, fontFamily: "inherit", fontSize: 12, width: 220 }} />
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div style={{ fontSize: 20, fontWeight: 800 }}>{emp.name}</div>
+                              <div style={{ fontSize: 12, color: "#888", marginTop: 1 }}>{[emp.role, emp.phone, emp.email].filter(Boolean).join(" · ") || "—"}</div>
+                            </>
+                          )}
                         </div>
                       </div>
-                      <button onClick={() => handleDeleteEmployee(emp)} style={{ background: "#fce4ec", border: "none", color: "#e53935", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{t("刪除員工")}</button>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        {(isBfAdmin || (currentEmployee && emp.id === currentEmployee.id)) && (
+                          <button
+                            onClick={() => setEditingEmpId(editingEmpId === emp.id ? null : emp.id)}
+                            style={{ background: editingEmpId === emp.id ? "#6382ff" : "#eef2ff", border: "none", color: editingEmpId === emp.id ? "#fff" : "#3b58d4", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                          >{editingEmpId === emp.id ? `✓ ${t("完成")}` : `✏️ ${t("編輯資料")}`}</button>
+                        )}
+                        {isBfAdmin && <button onClick={() => handleDeleteEmployee(emp)} style={{ background: "#fce4ec", border: "none", color: "#e53935", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{t("刪除員工")}</button>}
+                      </div>
                     </div>
                     {/* 3 列 × 2 行網格：高 中 | 添加（跨2行）| 反饋 低 */}
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gridTemplateRows: "auto auto", gap: 14, marginBottom: 20 }}>
@@ -2976,20 +3124,43 @@ export default function App() {
                         <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>{t("標題")}</div>
                         <input value={newTaskDraft.title} onChange={e => setNewTaskDraft({ ...newTaskDraft, title: e.target.value })} placeholder={t("任務標題...")} style={{ width: "100%", padding: "9px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", marginBottom: 10, boxSizing: "border-box" }} />
                         <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>{t("描述 / 備註（可選）")}</div>
-                        <textarea value={newTaskDraft.note} onChange={e => setNewTaskDraft({ ...newTaskDraft, note: e.target.value })} placeholder={t("Deadline / 細節...")} style={{ width: "100%", minHeight: 80, padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 12, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit", marginBottom: 12 }} />
-                        <button onClick={async () => { if (!newTaskDraft.title.trim()) return; await handleAddTask(emp.id, newTaskDraft.title, newTaskDraft.priority, null, newTaskDraft.note); setNewTaskDraft({ title: "", priority: "low", note: "" }); }} disabled={!newTaskDraft.title.trim()} style={{ width: "100%", padding: 10, background: newTaskDraft.title.trim() ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: newTaskDraft.title.trim() ? "pointer" : "not-allowed" }}>{t("新增任務")}</button>
+                        <textarea value={newTaskDraft.note} onChange={e => setNewTaskDraft({ ...newTaskDraft, note: e.target.value })} placeholder={t("Deadline / 細節...")} style={{ width: "100%", minHeight: 80, padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 12, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit", marginBottom: 8 }} />
+                        <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>{t("附件（可選）")}</div>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+                          <label style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "5px 10px", background: "#fafbff", border: "1px dashed #d0d0d0", borderRadius: 8, fontSize: 11, color: "#6382ff", cursor: "pointer" }}>
+                            📎 {t("選文件")}
+                            <input type="file" multiple style={{ display: "none" }} onChange={e => { const files = Array.from(e.target.files || []); setNewTaskAttachments(prev => [...prev, ...files]); e.target.value = ""; }} />
+                          </label>
+                          {newTaskAttachments.map((f, i) => (
+                            <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", background: "#eef2ff", borderRadius: 6, fontSize: 10, color: "#3b58d4", border: "1px solid #c6d3ff" }}>
+                              {f.name}
+                              <button onClick={() => setNewTaskAttachments(prev => prev.filter((_, j) => j !== i))} style={{ background: "none", border: "none", color: "#6382ff", cursor: "pointer", fontSize: 12, padding: 0, marginLeft: 2 }}>×</button>
+                            </span>
+                          ))}
+                        </div>
+                        <button onClick={async () => { if (!newTaskDraft.title.trim()) return; await handleAddTask(emp.id, newTaskDraft.title, newTaskDraft.priority, null, newTaskDraft.note, newTaskAttachments); setNewTaskDraft({ title: "", priority: "low", note: "" }); setNewTaskAttachments([]); }} disabled={!newTaskDraft.title.trim()} style={{ width: "100%", padding: 10, background: newTaskDraft.title.trim() ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: newTaskDraft.title.trim() ? "pointer" : "not-allowed" }}>{t("新增任務")}</button>
                       </div>
                       <div style={{ gridColumn: 1, gridRow: 2 }}>
                         <div style={{ background: "#fff9ec", border: "1px solid #f4dca4", borderRadius: 12, padding: 14, minHeight: 240 }}>
                           <div style={{ fontSize: 14, fontWeight: 700, color: "#8a6900", marginBottom: 10 }}>💬 {t("任務反饋記錄")} <span style={{ fontSize: 12, color: "#b88a00", marginLeft: 6 }}>{empFeedbacks.length}</span></div>
                           {empFeedbacks.length === 0 ? (
                             <div style={{ fontSize: 12, color: "#b8a76a", fontStyle: "italic" }}>{t("暫無反饋")}</div>
-                          ) : empFeedbacks.map(t => (
-                            <div key={t.id} onClick={() => setEditingTask(t)} style={{ background: "#fff", border: "1px solid #f4dca4", borderRadius: 8, padding: "9px 11px", marginBottom: 8, cursor: "pointer" }}>
-                              <div style={{ fontSize: 12, fontWeight: 700, color: "#333", marginBottom: 4 }}>{t.title}</div>
-                              <div style={{ fontSize: 11, color: "#8a6900", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{t.feedback}</div>
-                            </div>
-                          ))}
+                          ) : empFeedbacks.map(tk => {
+                            const fb = tk._latestFb;
+                            const totalCount = feedbacks.filter(f => f.task_id === tk.id).length;
+                            return (
+                              <div key={tk.id} onClick={() => setEditingTask(tk)} style={{ background: "#fff", border: "1px solid #f4dca4", borderRadius: 8, padding: "9px 11px", marginBottom: 8, cursor: "pointer" }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                                  <div style={{ fontSize: 12, fontWeight: 700, color: "#333" }}>{tk.title}</div>
+                                  {totalCount > 1 && <span style={{ fontSize: 10, color: "#b88a00", background: "#fff4d6", borderRadius: 6, padding: "1px 6px" }}>{totalCount}</span>}
+                                </div>
+                                <div style={{ fontSize: 10, color: "#b88a00", marginBottom: 3 }}>
+                                  {fb.author_name || t("未知")} · {new Date(fb.created_at).toLocaleString("zh-HK", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                                </div>
+                                <div style={{ fontSize: 11, color: "#8a6900", lineHeight: 1.5, whiteSpace: "pre-wrap", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{fb.body}</div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                       <div style={{ gridColumn: 2, gridRow: 2 }}>{colBox(t("低優先級"), "#22c55e", cols.low.length, cols.low)}</div>
@@ -4318,6 +4489,32 @@ export default function App() {
       )}
 
       {/* TASK DETAIL MODAL */}
+      {/* 強制改密 modal — 員工首次用初始密碼登入時彈出，不可關閉，改完強制重新登入 */}
+      {session && currentEmployee && currentEmployee.must_change_password === true && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: 32, width: 420, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>🔐 {t("首次登入：請設置新密碼")}</div>
+            <div style={{ fontSize: 12, color: "#888", marginBottom: 20, lineHeight: 1.6 }}>
+              {t("為了你賬號的安全，請將初始密碼改為僅你自己知道的密碼。改完會自動退出，使用新密碼重新登入。")}
+            </div>
+            <input type="password" value={forceChangePw1} onChange={e => { setForceChangePw1(e.target.value); setForceChangePwErr(""); }} placeholder={t("新密碼（至少 6 位）")} autoFocus style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", marginBottom: 10, boxSizing: "border-box" }} />
+            <input type="password" value={forceChangePw2} onChange={e => { setForceChangePw2(e.target.value); setForceChangePwErr(""); }} placeholder={t("再次輸入新密碼")} style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", marginBottom: 10, boxSizing: "border-box" }} />
+            {forceChangePwErr && <div style={{ color: "#ef4444", fontSize: 12, marginBottom: 10 }}>{forceChangePwErr}</div>}
+            <button disabled={forceChangePwLoading} onClick={async () => {
+              if (forceChangePw1.length < 6) return setForceChangePwErr(t("密碼至少 6 位"));
+              if (forceChangePw1 !== forceChangePw2) return setForceChangePwErr(t("兩次輸入不一致"));
+              setForceChangePwLoading(true);
+              const { error: e1 } = await supabase.auth.updateUser({ password: forceChangePw1 });
+              if (e1) { setForceChangePwLoading(false); return setForceChangePwErr(e1.message); }
+              const { error: e2 } = await supabase.from("employees").update({ must_change_password: false }).eq("id", currentEmployee.id);
+              if (e2) { setForceChangePwLoading(false); return setForceChangePwErr(`${t("更新狀態失敗")}：${e2.message}`); }
+              alert(t("密碼已修改，請使用新密碼重新登入"));
+              await supabase.auth.signOut();
+            }} style={{ width: "100%", padding: 12, background: forceChangePwLoading ? "#aaa" : "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: forceChangePwLoading ? "wait" : "pointer" }}>{forceChangePwLoading ? t("處理中...") : t("修改並重新登入")}</button>
+          </div>
+        </div>
+      )}
+
       {editingTask && (() => {
         const tk = editingTask;
         const subtasks = tasks.filter(s => s.parent_task_id === tk.id);
@@ -4338,21 +4535,148 @@ export default function App() {
                 <button onClick={() => setEditingTask(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
               </div>
               <input value={tk.title} onChange={e => setEditingTask({ ...tk, title: e.target.value })} onBlur={() => handleUpdateTask(tk.id, { title: tk.title })} style={{ width: "100%", padding: "10px 0", fontSize: 22, fontWeight: 800, border: "none", outline: "none", marginBottom: 4, boxSizing: "border-box" }} />
-              <div style={{ fontSize: 12, color: "#888", marginBottom: 4, marginTop: 8 }}>{t("描述 / 備註 / Deadline")}</div>
+              <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 8, marginBottom: 4 }}>
+                <div style={{ fontSize: 12, color: "#888" }}>{t("截止日期")}</div>
+                <input type="date" value={tk.due_date || ""} onChange={e => setEditingTask({ ...tk, due_date: e.target.value || null })} onBlur={() => handleUpdateTask(tk.id, { due_date: tk.due_date || null })} style={{ padding: "5px 8px", borderRadius: 6, border: "1px solid #e0e0e0", fontSize: 12, outline: "none" }} />
+                {tk.due_date && (() => {
+                  const days = Math.ceil((new Date(tk.due_date) - new Date()) / (1000 * 60 * 60 * 24));
+                  if (days < 0) return <span style={{ fontSize: 11, color: "#ef4444", fontWeight: 700 }}>⚠ {t("已過期")} {Math.abs(days)} {t("天")}</span>;
+                  if (days <= 3) return <span style={{ fontSize: 11, color: "#f59e0b", fontWeight: 700 }}>⏰ {t("剩")} {days} {t("天")}</span>;
+                  return <span style={{ fontSize: 11, color: "#888" }}>{t("剩")} {days} {t("天")}</span>;
+                })()}
+              </div>
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 4, marginTop: 8 }}>{t("描述 / 備註")}</div>
               <textarea value={tk.note || ""} onChange={e => setEditingTask({ ...tk, note: e.target.value })} onBlur={() => handleUpdateTask(tk.id, { note: tk.note || null })} placeholder={t("輸入描述...")} style={{ width: "100%", minHeight: 60, padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit" }} />
+              {/* 任務級附件（task.attachments） */}
+              {(Array.isArray(tk.attachments) && tk.attachments.length > 0 || true) && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: 12, color: "#888", marginBottom: 6 }}>📎 {t("任務附件")}{Array.isArray(tk.attachments) && tk.attachments.length > 0 && <span style={{ marginLeft: 4, color: "#aaa" }}>{tk.attachments.length}</span>}</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                    {Array.isArray(tk.attachments) && tk.attachments.map((a, i) => {
+                      const isImg = (a.type || "").startsWith("image/");
+                      return (
+                        <div key={i} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          {isImg ? (
+                            <a href={a.url} target="_blank" rel="noopener noreferrer" title={a.name}>
+                              <img src={a.url} style={{ maxWidth: 120, maxHeight: 80, borderRadius: 4, border: "1px solid #e0e0e0", display: "block" }} alt={a.name} />
+                            </a>
+                          ) : (
+                            <a href={a.url} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px", background: "#fafbff", borderRadius: 6, fontSize: 11, color: "#3b58d4", textDecoration: "none", border: "1px solid #c6d3ff" }}>📎 {a.name}</a>
+                          )}
+                          <button onClick={async () => {
+                            if (!window.confirm(t("確定移除此附件？"))) return;
+                            const rest = tk.attachments.filter((_, j) => j !== i);
+                            await handleUpdateTask(tk.id, { attachments: rest.length > 0 ? rest : null });
+                          }} title={t("移除")} style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 14, padding: 0 }}>×</button>
+                        </div>
+                      );
+                    })}
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "5px 10px", background: "#fafbff", border: "1px dashed #c6d3ff", borderRadius: 6, fontSize: 11, color: "#6382ff", cursor: "pointer" }}>
+                      ＋ {t("添加")}
+                      <input type="file" multiple style={{ display: "none" }} onChange={async e => {
+                        const files = Array.from(e.target.files || []);
+                        e.target.value = "";
+                        if (files.length === 0) return;
+                        try {
+                          const newOnes = await Promise.all(files.map(f => uploadAttachment(f, tk.id)));
+                          const merged = [...(Array.isArray(tk.attachments) ? tk.attachments : []), ...newOnes];
+                          await handleUpdateTask(tk.id, { attachments: merged });
+                        } catch (err) { alert(`${t("附件上傳失敗")}：${err.message}`); }
+                      }} />
+                    </label>
+                  </div>
+                </div>
+              )}
               <div style={{ fontSize: 12, color: "#888", marginTop: 16, marginBottom: 6 }}>{t("子任務")}</div>
-              {subtasks.map((st, i) => (
+              {subtasks.map((st, i) => {
+                const stFbCount = feedbacks.filter(f => f.task_id === st.id).length;
+                const stHasAttach = Array.isArray(st.attachments) && st.attachments.length > 0;
+                return (
                 <div key={st.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid #f5f5f5" }}>
-                  <input type="checkbox" checked={st.status === "done"} onChange={() => handleToggleTaskDone(st)} style={{ width: 15, height: 15, cursor: "pointer" }} />
-                  <span style={{ flex: 1, fontSize: 13, textDecoration: st.status === "done" ? "line-through" : "none", color: st.status === "done" ? "#999" : "#333" }}>{st.title}</span>
+                  <input type="checkbox" checked={st.status === "done"} onChange={() => handleToggleTaskDone(st)} onClick={e => e.stopPropagation()} style={{ width: 15, height: 15, cursor: "pointer" }} />
+                  <span onClick={() => setEditingTask(st)} title={t("打開子任務詳情（含獨立反饋線程）")} style={{ flex: 1, fontSize: 13, textDecoration: st.status === "done" ? "line-through" : "none", color: st.status === "done" ? "#999" : "#333", cursor: "pointer" }}>{st.title}</span>
+                  {stFbCount > 0 && <span style={{ fontSize: 10, color: "#f59e0b" }}>💬 {stFbCount}</span>}
+                  {stHasAttach && <span style={{ fontSize: 10, color: "#6382ff" }}>📎 {st.attachments.length}</span>}
                   <button onClick={() => handleDeleteTask(st.id)} title={t("刪除")} style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 14 }}>×</button>
                 </div>
-              ))}
+                );
+              })}
               <form onSubmit={e => { e.preventDefault(); const v = e.target.elements.sub.value.trim(); if (v) { handleAddTask(tk.employee_id, v, "none", tk.id); e.target.reset(); } }} style={{ marginTop: 8 }}>
                 <input name="sub" placeholder={t("+ 添加子任務")} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px dashed #d0d0d0", fontSize: 13, outline: "none", background: "#fafbff", boxSizing: "border-box" }} />
               </form>
-              <div style={{ fontSize: 12, color: "#f59e0b", fontWeight: 700, marginTop: 16, marginBottom: 6 }}>💬 {t("員工反饋")}</div>
-              <textarea value={tk.feedback || ""} onChange={e => setEditingTask({ ...tk, feedback: e.target.value })} onBlur={() => handleUpdateTask(tk.id, { feedback: tk.feedback || null })} placeholder={t("例如：太忙，本週無法完成 / 需要 XXX 支援")} style={{ width: "100%", minHeight: 50, padding: "8px 10px", borderRadius: 8, border: "1px solid #f4dca4", fontSize: 13, outline: "none", resize: "vertical", boxSizing: "border-box", background: "#fff9ec", fontFamily: "inherit" }} />
+              <div style={{ fontSize: 12, color: "#f59e0b", fontWeight: 700, marginTop: 16, marginBottom: 6 }}>💬 {t("反饋記錄")} <span style={{ fontSize: 11, color: "#b88a00", marginLeft: 4 }}>{feedbacks.filter(f => f.task_id === tk.id).length}</span></div>
+              <div style={{ background: "#fff9ec", border: "1px solid #f4dca4", borderRadius: 8, padding: 10, marginBottom: 8, maxHeight: 280, overflowY: "auto" }}>
+                {(() => {
+                  const list = feedbacks.filter(f => f.task_id === tk.id).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+                  if (list.length === 0) return <div style={{ fontSize: 12, color: "#b8a76a", fontStyle: "italic", padding: "6px 4px" }}>{t("暫無反饋")}</div>;
+                  return list.map(fb => {
+                    const isOwn = fb.author_user_id === userId;
+                    const canDelete = isOwn || isBfAdmin;
+                    const isReply = !!fb.parent_feedback_id;
+                    const parent = isReply ? list.find(p => p.id === fb.parent_feedback_id) : null;
+                    return (
+                      <div key={fb.id} style={{ background: "#fff", border: "1px solid #f4dca4", borderRadius: 6, padding: "7px 10px", marginBottom: 6, marginLeft: isReply ? 24 : 0, position: "relative" }}>
+                        {isReply && (
+                          <div style={{ fontSize: 10, color: "#b88a00", marginBottom: 3, fontStyle: "italic" }}>↪ {t("回復")} <b>{parent?.author_name || t("未知")}</b>: <span style={{ color: "#aaa" }}>{(parent?.body || "").slice(0, 30)}{(parent?.body || "").length > 30 ? "..." : ""}</span></div>
+                        )}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#8a6900" }}>
+                            {fb.author_name || t("未知")}
+                            <span style={{ fontWeight: 400, marginLeft: 6, color: "#aaa" }}>{new Date(fb.created_at).toLocaleString("zh-HK", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                          </div>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button onClick={() => setReplyingToFb(fb.id)} title={t("回復此反饋")} style={{ background: "none", border: "none", color: "#b88a00", cursor: "pointer", fontSize: 11, padding: 0 }}>↩ {t("回復")}</button>
+                            {canDelete && <button onClick={() => handleDeleteFeedback(fb.id)} title={t("刪除")} style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 14, padding: 0 }}>×</button>}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 12, color: "#333", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{fb.body}</div>
+                        {Array.isArray(fb.attachments) && fb.attachments.length > 0 && (
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                            {fb.attachments.map((a, i) => {
+                              const isImg = (a.type || "").startsWith("image/");
+                              return isImg ? (
+                                <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" title={a.name}>
+                                  <img src={a.url} style={{ maxWidth: 140, maxHeight: 90, borderRadius: 4, border: "1px solid #e0e0e0", display: "block" }} alt={a.name} />
+                                </a>
+                              ) : (
+                                <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", background: "#fff", borderRadius: 6, fontSize: 11, color: "#555", textDecoration: "none", border: "1px solid #e0e0e0" }}>📎 {a.name}</a>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+              {replyingToFb && (() => {
+                const target = feedbacks.find(f => f.id === replyingToFb);
+                if (!target) return null;
+                return (
+                  <div style={{ background: "#fff4d6", border: "1px solid #f4dca4", borderRadius: 6, padding: "5px 10px", marginBottom: 6, fontSize: 11, color: "#8a6900", display: "flex", alignItems: "center", gap: 6 }}>
+                    ↩ {t("回復")} <b>{target.author_name || t("未知")}</b>: <span style={{ flex: 1, color: "#b88a00", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(target.body || "").slice(0, 60)}</span>
+                    <button onClick={() => setReplyingToFb(null)} style={{ background: "none", border: "none", color: "#b88a00", cursor: "pointer", fontSize: 14, padding: 0 }}>×</button>
+                  </div>
+                );
+              })()}
+              {pendingAttachments.length > 0 && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+                  {pendingAttachments.map((f, i) => (
+                    <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", background: "#fff4d6", borderRadius: 6, fontSize: 11, color: "#8a6900", border: "1px solid #f4dca4" }}>
+                      📎 {f.name}
+                      <button onClick={() => setPendingAttachments(prev => prev.filter((_, j) => j !== i))} style={{ background: "none", border: "none", color: "#b88a00", cursor: "pointer", fontSize: 12, padding: 0, marginLeft: 2 }}>×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <form onSubmit={async e => { e.preventDefault(); const v = e.target.elements.fb.value; if ((v && v.trim()) || pendingAttachments.length > 0) { await handleAddFeedback(tk.id, v, pendingAttachments, replyingToFb); e.target.reset(); } }} style={{ display: "flex", gap: 6 }}>
+                <label style={{ display: "inline-flex", alignItems: "center", padding: "8px 10px", background: "#fff9ec", border: "1px solid #f4dca4", borderRadius: 8, fontSize: 14, cursor: "pointer" }} title={t("添加附件")}>
+                  📎
+                  <input type="file" multiple style={{ display: "none" }} onChange={e => { const files = Array.from(e.target.files || []); setPendingAttachments(prev => [...prev, ...files]); e.target.value = ""; }} />
+                </label>
+                <input name="fb" placeholder={t("追加反饋...")} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #f4dca4", fontSize: 12, outline: "none", boxSizing: "border-box", background: "#fff" }} />
+                <button type="submit" style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{t("發送")}</button>
+              </form>
               <div style={{ fontSize: 11, color: "#aaa", marginTop: 16, display: "flex", gap: 14, flexWrap: "wrap" }}>
                 <span>📅 {t("添加於")} {new Date(tk.created_at).toLocaleString("zh-HK", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
                 {tk.status === "done" && tk.completed_at && <span style={{ color: "#22c55e" }}>✓ {t("完成於")} {new Date(tk.completed_at).toLocaleString("zh-HK", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>}
