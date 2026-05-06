@@ -224,6 +224,8 @@ function printInvoice(inv, customer, items, products = [], mode = { invoice: tru
   let invNumShort;
   if (inv.invoice_number) {
     invNumShort = String(inv.invoice_number).replace(/^DC/i, "");
+    // 純數字 → pad 到 5 位
+    if (/^\d+$/.test(invNumShort)) invNumShort = invNumShort.padStart(5, "0");
   } else {
     const idStr = String(inv.id || "");
     invNumShort = idStr.replace(/^DC/i, "").split("-")[0];
@@ -292,6 +294,8 @@ function printInvoice(inv, customer, items, products = [], mode = { invoice: tru
   }
   w.document.write(html);
   w.document.close();
+  // 設置 document.title 讓「另存為 PDF」默認檔名為發票編號（DC1525.pdf）
+  try { w.document.title = "DC" + invNumShort; } catch {}
   setTimeout(() => w.print(), 500);
 }
 
@@ -363,6 +367,16 @@ export default function App() {
   const [showAddCustomer, setShowAddCustomer] = useState(false);
   const [showNewInvoice, setShowNewInvoice] = useState(false);
   const [invoiceGenerated, setInvoiceGenerated] = useState(false);
+  // 物流發貨 modal
+  const [shippingInvoice, setShippingInvoice] = useState(null);   // 當前要發貨的發票
+  const [shippingNumber, setShippingNumber] = useState("");
+  const [shippingMethod, setShippingMethod] = useState("sf");     // sf | self_pickup
+  const [shippingBusy, setShippingBusy] = useState(false);
+  // 物流軌跡查看 modal
+  const [trackingInvoice, setTrackingInvoice] = useState(null);
+  const [trackingEvents, setTrackingEvents] = useState([]);
+  const [trackingRefreshing, setTrackingRefreshing] = useState(false);
+  const [shippingFilter, setShippingFilter] = useState("all"); // all | pending | in_transit | exception | delivered
   const [saving, setSaving] = useState(false);
   const [visibleCustomers, setVisibleCustomers] = useState(30);
   const [visibleInvoices, setVisibleInvoices] = useState(30);
@@ -1086,20 +1100,36 @@ export default function App() {
   }, [customerGroups, invoices, search, customerSort, customerSortDir, customerTimeRange]);
 
   // 發票頁過濾：按搜索關鍵字 (發票號 / 客戶名 / 備註)
+  // 物流狀態的派生：沒填單號就是「待發貨」，否則用 shipping_status（保底）
+  const deriveShippingStatus = (inv) => {
+    if (inv.shipping_status) return inv.shipping_status;
+    return inv.tracking_number ? '已發貨' : '待發貨';
+  };
   const filteredInvoices = useMemo(() => {
     const q = search.toLowerCase();
-    const base = !q ? invoices : invoices.filter(inv => {
+    let base = !q ? invoices : invoices.filter(inv => {
       const c = customers.find(x => x.id === inv.customer_id);
       return String(inv.invoice_number || "").toLowerCase().includes(q)
         || (c?.name || "").toLowerCase().includes(q)
-        || (inv.notes || "").toLowerCase().includes(q);
+        || (inv.notes || "").toLowerCase().includes(q)
+        || (inv.tracking_number || "").toLowerCase().includes(q);
     });
+    if (shippingFilter !== "all") {
+      base = base.filter(inv => {
+        const ss = deriveShippingStatus(inv);
+        if (shippingFilter === "pending")    return ss === '待發貨';
+        if (shippingFilter === "in_transit") return ['已發貨','在途','派送中'].includes(ss);
+        if (shippingFilter === "exception")  return ss === '異常';
+        if (shippingFilter === "delivered")  return ss === '已簽收';
+        return true;
+      });
+    }
     return [...base].sort((a, b) => {
       const da = a.date || "", db = b.date || "";
       if (da !== db) return db.localeCompare(da);
       return String(b.created_at || "").localeCompare(String(a.created_at || ""));
     });
-  }, [invoices, customers, search]);
+  }, [invoices, customers, search, shippingFilter]);
 
   // Supabase Auth：初始化 + 監聽 session 變化
   useEffect(() => {
@@ -1122,6 +1152,8 @@ export default function App() {
   // WhatsApp tab 管理员（沿用旧名兼容现有代码）
   const WA_ADMIN_EMAILS = ["samyung2011@gmail.com", "a1017339632@gmail.com"];
   const isWaAdmin = isBfAdmin || (!!session?.user?.email && WA_ADMIN_EMAILS.includes(session.user.email));
+  // 發貨權限：admin 或 employees.can_ship=true 的人
+  const canShip = isBfAdmin || (currentEmployee && currentEmployee.can_ship === true);
   const queryClient = useQueryClient();
 
   // 使用 React Query 管理 4 張表的 fetch + 緩存
@@ -1262,8 +1294,21 @@ export default function App() {
   const getProduct = (id) => products.find(p => p.id === id);
   const getCustomer = (id) => customers.find(c => c.id === id);
   const fmtInvNum = (inv) => {
-    const num = String(inv.invoice_number || inv.id);
-    return num.toUpperCase().startsWith("DC") ? num : `DC${num}`;
+    const raw = String(inv.invoice_number || inv.id);
+    const stripped = raw.replace(/^DC/i, "");
+    // 純數字 → 補齊到 5 位（DC01502 / DC10532）；UUID fallback 不動
+    const formatted = /^\d+$/.test(stripped) ? stripped.padStart(5, "0") : stripped;
+    return `DC${formatted}`;
+  };
+  // 推斷發票來源（Shopify 直接訂單 / Framer 表單 / 手動）
+  const invoiceSource = (inv) => {
+    const notes = inv?.notes || "";
+    if (notes.includes("__FORMS_BUY__")) return { label: "Framer", color: "#6382ff", bg: "#eef2ff" };
+    // notes 空 + invoice_number 純數字 → 大概率 Shopify 同步進來的
+    if (inv?.invoice_number && /^\d+$/.test(String(inv.invoice_number))) {
+      return { label: "Shopify", color: "#16a34a", bg: "#dcfce7" };
+    }
+    return { label: t("手動"), color: "#888", bg: "#f5f5f5" };
   };
   // 月營收（當月）
   const now = new Date();
@@ -1617,6 +1662,103 @@ export default function App() {
     setMarkPaidCtx(null);
   }
 
+  // ─── 物流發貨 handlers ─────────────────────────────────
+  function openShippingModal(inv) {
+    if (!canShip) { alert(t("您沒有發貨權限。請聯繫管理員。")); return; }
+    setShippingInvoice(inv);
+    setShippingNumber(inv.tracking_number || "");
+    // 已存在的自提發票打開時保留自提模式，否則默認順豐
+    setShippingMethod(inv.carrier === "self_pickup" ? "self_pickup" : "sf");
+  }
+  async function submitShipping() {
+    if (!shippingInvoice) return;
+    setShippingBusy(true);
+    try {
+      let updates;
+      if (shippingMethod === "self_pickup") {
+        // 自提：carrier=self_pickup，直接標已簽收，shipped_at + delivered_at 同時記
+        const now = new Date().toISOString();
+        updates = {
+          carrier: "self_pickup",
+          tracking_number: null,
+          shipping_status: "已簽收",
+          shipped_at: now,
+          delivered_at: now,
+        };
+      } else {
+        const num = (shippingNumber || "").trim();
+        if (!num) { alert(t("請填寫順豐單號")); setShippingBusy(false); return; }
+        if (!/^[A-Za-z0-9]{6,}$/.test(num)) {
+          if (!window.confirm(t("單號格式可能異常，仍要保存嗎？"))) { setShippingBusy(false); return; }
+        }
+        updates = {
+          tracking_number: num,
+          carrier: "SF HK",
+        };
+      }
+      const { error } = await supabase.from("invoices").update(updates).eq("id", shippingInvoice.id);
+      if (error) { alert(`${t("發貨保存失敗")}：${error.message}`); return; }
+      // trigger 會自動 set shipped_at + shipping_status='已發貨'（順豐情況），重新拉一次拿準確值
+      const { data: fresh } = await supabase.from("invoices").select("*").eq("id", shippingInvoice.id).maybeSingle();
+      const merged = (i) => ({ ...i, ...(fresh || updates) });
+      setInvoices(prev => prev.map(i => i.id === shippingInvoice.id ? merged(i) : i));
+      queryClient.setQueryData(["bf", "invoices"], (old) => Array.isArray(old) ? old.map(i => i.id === shippingInvoice.id ? merged(i) : i) : old);
+      setShippingInvoice(null);
+      setShippingNumber("");
+    } finally {
+      setShippingBusy(false);
+    }
+  }
+  async function openTrackingModal(inv) {
+    setTrackingInvoice(inv);
+    setTrackingEvents([]);
+    const { data, error } = await supabase
+      .from("shipment_events")
+      .select("*")
+      .eq("invoice_id", inv.id)
+      .order("event_at", { ascending: false });
+    if (!error) setTrackingEvents(data || []);
+  }
+  async function refreshTracking() {
+    if (!trackingInvoice) return;
+    setTrackingRefreshing(true);
+    try {
+      const { data: { session: s } } = await supabase.auth.getSession();
+      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/track-shipments`;
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${s?.access_token}` },
+        body: JSON.stringify({ invoice_id: trackingInvoice.id }),
+      });
+      if (!resp.ok) {
+        alert(`${t("刷新失敗")}：${resp.status}（${t("可能順豐 API 還未配置")}）`);
+        return;
+      }
+      // 重新拉軌跡 + invoice
+      const { data: events } = await supabase.from("shipment_events").select("*").eq("invoice_id", trackingInvoice.id).order("event_at", { ascending: false });
+      setTrackingEvents(events || []);
+      const { data: inv } = await supabase.from("invoices").select("*").eq("id", trackingInvoice.id).maybeSingle();
+      if (inv) {
+        setTrackingInvoice(inv);
+        setInvoices(prev => prev.map(i => i.id === inv.id ? inv : i));
+        queryClient.setQueryData(["bf", "invoices"], (old) => Array.isArray(old) ? old.map(i => i.id === inv.id ? inv : i) : old);
+      }
+    } catch (e) {
+      alert(`${t("刷新失敗")}：${e.message}`);
+    } finally {
+      setTrackingRefreshing(false);
+    }
+  }
+  async function handleMarkShippingException() {
+    if (!trackingInvoice) return;
+    if (!window.confirm(t("標為「異常」？"))) return;
+    const { error } = await supabase.from("invoices").update({ shipping_status: "異常" }).eq("id", trackingInvoice.id);
+    if (error) { alert(`${t("操作失敗")}：${error.message}`); return; }
+    setInvoices(prev => prev.map(i => i.id === trackingInvoice.id ? { ...i, shipping_status: "異常" } : i));
+    queryClient.setQueryData(["bf", "invoices"], (old) => Array.isArray(old) ? old.map(i => i.id === trackingInvoice.id ? { ...i, shipping_status: "異常" } : i) : old);
+    setTrackingInvoice(prev => prev ? { ...prev, shipping_status: "異常" } : prev);
+  }
+
   async function handleDeleteCustomer(c) {
     const cids = c.allCids || c.groupCids || [c.id];
     const invCount = invoices.filter(i => cids.includes(i.customer_id)).length;
@@ -1924,12 +2066,33 @@ export default function App() {
               <h1 style={{ fontSize: 26, fontWeight: 800, margin: 0 }}>{t("早安 👋")}</h1>
               <p style={{ color: "#888", margin: "4px 0 0", fontSize: 15 }}>{t("以下是 Honnmono 今日的業務概況。")}</p>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 28 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 16 }}>
               <StatCard label={t("本月營收")} value={`HKD$${monthlyRevenue.toLocaleString()}`} sub={lang === "en" ? `${now.toLocaleString("en", { month: "long", year: "numeric" })}` : `${now.getFullYear()}年${now.getMonth() + 1}月`} accent="#6382ff" icon={<Icon name="trend_up" size={20} />} onClick={() => setTab("revenue")} />
               <StatCard label={t("庫存數量")} value={inStock} sub={`${t("共")} ${stockSummary.totalQty} ${t("件")}`} accent="#22c55e" icon={<Icon name="inventory" size={20} />} onClick={() => setTab("products")} />
               <StatCard label={t("客戶數")} value={customerGroups.virtualCustomers.filter(c => c.allEmails.length > 0 || c.allPhones.length > 0).length} sub={t("累計")} accent="#f59e0b" icon={<Icon name="customer" size={20} />} onClick={() => { setTab("customers"); setSelectedCustomer(null); }} />
               <StatCard label={t("保修提醒")} value={warrantyAlerts.length} sub={t("需跟進")} accent="#ef4444" icon={<Icon name="warning" size={20} />} onClick={() => setTab("warranty")} />
             </div>
+            {/* 物流 3 卡（dashboard 第二行） */}
+            {(() => {
+              const paidInvoices = invoices.filter(i => (i.status || "").trim().toLowerCase() === "paid");
+              const pending = paidInvoices.filter(i => deriveShippingStatus(i) === '待發貨').length;
+              const inTransit = paidInvoices.filter(i => ['已發貨','在途','派送中'].includes(deriveShippingStatus(i))).length;
+              const fourteenDaysAgo = Date.now() - 14 * 24 * 60 * 60 * 1000;
+              const overdue = paidInvoices.filter(i => {
+                const ss = deriveShippingStatus(i);
+                if (!['已發貨','在途','派送中'].includes(ss)) return false;
+                if (!i.shipped_at) return false;
+                return new Date(i.shipped_at).getTime() < fourteenDaysAgo;
+              }).length;
+              const goShipping = (k) => { setTab("invoices"); setShippingFilter(k); setVisibleInvoices(30); setSearch(""); };
+              return (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 28 }}>
+                  <StatCard label={t("待發貨")} value={pending} sub={t("已付款待出庫")} accent="#888" icon={<Icon name="inventory" size={20} />} onClick={() => goShipping("pending")} />
+                  <StatCard label={t("運送中")} value={inTransit} sub={t("已發貨待簽收")} accent="#6382ff" icon={<Icon name="trend_up" size={20} />} onClick={() => goShipping("in_transit")} />
+                  <StatCard label={t("超期未簽")} value={overdue} sub={`> 14 ${t("天未簽收")}`} accent="#ef4444" icon={<Icon name="warning" size={20} />} onClick={() => goShipping("in_transit")} />
+                </div>
+              );
+            })()}
             <div style={{ position: "relative", marginBottom: 20 }}>
               <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", display: "flex", alignItems: "center", gap: 8 }}>
                 <Icon name="search" size={15} />
@@ -2753,9 +2916,25 @@ export default function App() {
               </button>
             </div>
 
-            <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
               <Icon name="search" size={15} />
-              <input placeholder={t("搜尋發票...")} value={search} onChange={e => { setSearch(e.target.value); setVisibleInvoices(30); }} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
+              <input placeholder={t("搜尋發票 / 順豐單號...")} value={search} onChange={e => { setSearch(e.target.value); setVisibleInvoices(30); }} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
+            </div>
+
+            {/* 物流狀態 filter */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+              {[
+                { k: "all",        label: t("全部"),       color: "#555" },
+                { k: "pending",    label: t("待發貨"),     color: "#888" },
+                { k: "in_transit", label: t("運送中"),     color: "#6382ff" },
+                { k: "exception",  label: t("異常"),       color: "#d14343" },
+                { k: "delivered",  label: t("已簽收"),     color: "#22c55e" },
+              ].map(b => (
+                <button key={b.k} onClick={() => { setShippingFilter(b.k); setVisibleInvoices(30); }}
+                  style={{ padding: "6px 14px", borderRadius: 18, border: shippingFilter === b.k ? `2px solid ${b.color}` : "1px solid #e0e0e0", background: shippingFilter === b.k ? b.color + "18" : "#fff", color: shippingFilter === b.k ? b.color : "#555", fontSize: 12, fontWeight: shippingFilter === b.k ? 700 : 500, cursor: "pointer" }}>
+                  {b.label}
+                </button>
+              ))}
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -2764,7 +2943,10 @@ export default function App() {
                 return (
                   <div key={inv.id} style={{ background: "#fff", borderRadius: 14, padding: "18px 22px", border: "1px solid #f0f0f0", boxShadow: "0 2px 8px rgba(0,0,0,0.03)", display: "flex", alignItems: "center", gap: 18 }}>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 800, fontSize: 15 }}>{fmtInvNum(inv)}</div>
+                      <div style={{ fontWeight: 800, fontSize: 15, display: "flex", alignItems: "center", gap: 8 }}>
+                        {fmtInvNum(inv)}
+                        {(() => { const s = invoiceSource(inv); return <span style={{ fontSize: 10, fontWeight: 700, color: s.color, background: s.bg, padding: "2px 7px", borderRadius: 6 }}>{s.label}</span>; })()}
+                      </div>
                       <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>{(c?.phone || c?.phone_mainland) ? `${c.phone || c.phone_mainland} · ` : ""}{c?.name || "—"} · {inv.date || t("日期未知")} · {formatNotes(inv.notes)}</div>
                       {Array.isArray(inv.items) && inv.items.slice(0, 2).map((item, i) => (
                         <div key={i} style={{ fontSize: 12, color: "#999" }}>{item.name} ×{item.qty}</div>
@@ -2778,6 +2960,33 @@ export default function App() {
                       )}
                       <div style={{ fontSize: 18, fontWeight: 800 }}>HKD${inv.total}</div>
                       <Badge status={inv.status} />
+                      {(() => {
+                        const ss = deriveShippingStatus(inv);
+                        const isSelfPickup = inv.carrier === "self_pickup";
+                        const map = {
+                          '待發貨': { color: '#888',    bg: '#f5f5f5', label: t('待發貨') },
+                          '已發貨': { color: '#6382ff', bg: '#eef2ff', label: t('已發貨') },
+                          '在途':   { color: '#b45309', bg: '#fef3c7', label: t('在途') },
+                          '派送中': { color: '#c2410c', bg: '#ffedd5', label: t('派送中') },
+                          '已簽收': { color: '#16a34a', bg: '#dcfce7', label: t('已簽收') },
+                          '異常':   { color: '#b91c1c', bg: '#fee2e2', label: t('異常') },
+                        };
+                        const selfPickupTag = { color: '#16a34a', bg: '#dcfce7', label: t('已自提') };
+                        const m = isSelfPickup ? selfPickupTag : (map[ss] || map['待發貨']);
+                        const isPending = ss === '待發貨' && !isSelfPickup;
+                        const onClick = isPending
+                          ? (canShip ? () => openShippingModal(inv) : null)
+                          : () => openTrackingModal(inv);
+                        const title = isPending
+                          ? (canShip ? t("點擊發貨") : t("待發貨（無發貨權限）"))
+                          : (isSelfPickup ? t("店面自提") : `${t("順豐")} ${inv.tracking_number || ""}`);
+                        return (
+                          <button onClick={onClick} disabled={!onClick} title={title}
+                            style={{ background: m.bg, color: m.color, border: "none", borderRadius: 8, padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: onClick ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}>
+                            {m.label}
+                          </button>
+                        );
+                      })()}
                       <button onClick={() => openEditInvoice(inv)} title={t("編輯發票")} style={{ fontSize: 12, background: "#fff8e1", color: "#f59e0b", border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700 }}>
                         ✏️
                       </button>
@@ -5525,6 +5734,146 @@ export default function App() {
               </div>
             </div>
           </div>
+        );
+      })()}
+
+      {/* ─── 物流發貨 modal ─── */}
+      {shippingInvoice && (
+        <div onClick={() => !shippingBusy && setShippingInvoice(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 24, width: 460, maxWidth: "90vw" }}>
+            <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 4 }}>{t("發貨")}</div>
+            <div style={{ fontSize: 13, color: "#888", marginBottom: 20 }}>{t("發票")} #{fmtInvNum(shippingInvoice)} · {getCustomer(shippingInvoice.customer_id)?.name || "—"}</div>
+
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, color: "#666", marginBottom: 8, fontWeight: 600 }}>{t("發貨方式")}</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {[
+                  { k: "sf",          label: t("順豐快遞") },
+                  { k: "self_pickup", label: t("店面自提") },
+                ].map(opt => {
+                  const active = shippingMethod === opt.k;
+                  return (
+                    <button key={opt.k} onClick={() => setShippingMethod(opt.k)}
+                      style={{ flex: 1, padding: "10px 12px", border: active ? "2px solid #6382ff" : "1px solid #d0d0d0", background: active ? "#eef2ff" : "#fff", color: active ? "#6382ff" : "#666", borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: active ? 700 : 500 }}>
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {shippingMethod === "sf" ? (
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 12, color: "#666", marginBottom: 6, fontWeight: 600 }}>{t("順豐單號")}</div>
+                <input
+                  autoFocus
+                  value={shippingNumber}
+                  onChange={e => setShippingNumber(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter" && !shippingBusy) submitShipping(); }}
+                  placeholder={t("例如 SF1234567890")}
+                  style={{ width: "100%", padding: "10px 14px", border: "1px solid #d0d0d0", borderRadius: 8, fontSize: 15, outline: "none", boxSizing: "border-box", letterSpacing: 1 }}
+                />
+                <div style={{ fontSize: 11, color: "#aaa", marginTop: 6 }}>{t("保存後系統每 6 小時自動拉取軌跡更新狀態")}</div>
+              </div>
+            ) : (
+              <div style={{ marginBottom: 20, padding: "14px 14px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8 }}>
+                <div style={{ fontSize: 12, color: "#666" }}>{t("客人當場取貨，保存後直接標為「已簽收」")}</div>
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setShippingInvoice(null)} disabled={shippingBusy} style={{ flex: 1, padding: 11, background: "#f5f5f5", color: "#666", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: shippingBusy ? "not-allowed" : "pointer" }}>{t("取消")}</button>
+              <button onClick={submitShipping} disabled={shippingBusy || (shippingMethod === "sf" && !shippingNumber.trim())} style={{ flex: 2, padding: 11, background: shippingBusy ? "#a8b8e8" : "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: (shippingBusy || (shippingMethod === "sf" && !shippingNumber.trim())) ? "not-allowed" : "pointer" }}>
+                {shippingBusy ? t("保存中...") : (shippingMethod === "self_pickup" ? t("確認自提") : t("確認發貨"))}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── 物流軌跡查看 modal ─── */}
+      {trackingInvoice && (() => {
+        const isSelfPickup = trackingInvoice.carrier === "self_pickup";
+        return (
+        <div onClick={() => setTrackingInvoice(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 24, width: 560, maxWidth: "92vw", maxHeight: "85vh", display: "flex", flexDirection: "column" }}>
+            <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 4 }}>{isSelfPickup ? t("店面自提") : t("物流軌跡")}</div>
+            <div style={{ fontSize: 13, color: "#888", marginBottom: 18 }}>{t("發票")} #{fmtInvNum(trackingInvoice)} · {getCustomer(trackingInvoice.customer_id)?.name || "—"}</div>
+
+            {isSelfPickup ? (
+              <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "16px 18px", marginBottom: 14 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#16a34a", marginBottom: 6 }}>{t("客人已當場簽收")}</div>
+                {trackingInvoice.delivered_at && (
+                  <div style={{ fontSize: 12, color: "#666" }}>{t("簽收時間")}：{new Date(trackingInvoice.delivered_at).toLocaleString()}</div>
+                )}
+              </div>
+            ) : (
+              <div style={{ background: "#f7f8fc", borderRadius: 10, padding: "12px 14px", marginBottom: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                  <div style={{ fontSize: 13, color: "#666" }}>{t("香港順豐")}</div>
+                  <div style={{ fontSize: 12, color: "#888" }}>
+                    {trackingInvoice.shipping_last_synced_at ? `${t("上次同步")}：${new Date(trackingInvoice.shipping_last_synced_at).toLocaleString()}` : t("尚未同步")}
+                  </div>
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 700, fontFamily: "monospace", letterSpacing: 1, display: "flex", alignItems: "center", gap: 8 }}>
+                  {trackingInvoice.tracking_number}
+                  <button onClick={() => navigator.clipboard.writeText(trackingInvoice.tracking_number)} style={{ background: "none", border: "1px solid #d0d0d0", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontSize: 11, color: "#666" }}>{t("複製")}</button>
+                  <a href={`https://htm.sf-express.com/hk/tc/dynamic_function/waybill/#search/bill-number/${trackingInvoice.tracking_number}`} target="_blank" rel="noopener noreferrer" style={{ background: "none", border: "1px solid #d0d0d0", borderRadius: 6, padding: "2px 8px", textDecoration: "none", fontSize: 11, color: "#666" }}>{t("順豐網站")}</a>
+                </div>
+                <div style={{ marginTop: 8, fontSize: 13, fontWeight: 700 }}>{t("狀態")}：{t(deriveShippingStatus(trackingInvoice))}</div>
+              </div>
+            )}
+
+            {!isSelfPickup && (
+              <div style={{ flex: 1, overflowY: "auto", borderTop: "1px solid #f0f0f0", paddingTop: 12 }}>
+                {trackingEvents.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: 30, color: "#999", fontSize: 13 }}>
+                    {t("暫無軌跡，順豐 API 還未配置或單號剛填寫，6 小時內自動拉取")}
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {trackingEvents.map((ev, idx) => (
+                      <div key={ev.id} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                        <div style={{ flexShrink: 0, marginTop: 4 }}>
+                          <div style={{ width: 10, height: 10, borderRadius: "50%", background: idx === 0 ? "#22c55e" : "#d0d0d0" }} />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: idx === 0 ? "#16a34a" : "#333" }}>{ev.description}</div>
+                          <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>{ev.location || "—"}</div>
+                          <div style={{ fontSize: 11, color: "#aaa", marginTop: 1 }}>{new Date(ev.event_at).toLocaleString()}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 10, marginTop: 16, paddingTop: 12, borderTop: "1px solid #f0f0f0" }}>
+              <button onClick={() => setTrackingInvoice(null)} style={{ flex: 1, padding: 11, background: "#f5f5f5", color: "#666", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>{t("關閉")}</button>
+              {canShip && !isSelfPickup && (
+                <>
+                  <button onClick={handleMarkShippingException} style={{ padding: "11px 14px", background: "#fff0f0", color: "#d14343", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                    {t("標為異常")}
+                  </button>
+                  <button onClick={() => { openShippingModal(trackingInvoice); setTrackingInvoice(null); }} style={{ padding: "11px 14px", background: "#fff8e1", color: "#f59e0b", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                    {t("修改單號")}
+                  </button>
+                </>
+              )}
+              {canShip && isSelfPickup && (
+                <button onClick={() => { openShippingModal(trackingInvoice); setTrackingInvoice(null); }} style={{ padding: "11px 14px", background: "#fff8e1", color: "#f59e0b", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                  {t("改為快遞發貨")}
+                </button>
+              )}
+              {!isSelfPickup && (
+                <button onClick={refreshTracking} disabled={trackingRefreshing} style={{ flex: 1, padding: 11, background: trackingRefreshing ? "#a8b8e8" : "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: trackingRefreshing ? "not-allowed" : "pointer" }}>
+                  {trackingRefreshing ? t("刷新中...") : t("立即刷新")}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
         );
       })()}
     </div>
