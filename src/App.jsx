@@ -3558,16 +3558,18 @@ export default function App() {
                         {isBfAdmin && <button onClick={() => handleDeleteEmployee(emp)} style={{ background: "#fce4ec", border: "none", color: "#e53935", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{t("刪除員工")}</button>}
                       </div>
                     </div>
-                    {/* 子 tab：任務看板 / 更新日誌 */}
-                    <div style={{ display: "flex", gap: 4, marginBottom: 14, borderBottom: "1px solid #eef0fa" }}>
-                      {[["tasks", t("任務看板")], ["logs", t("更新日誌")]].map(([k, label]) => {
-                        const on = empSubTab === k;
-                        return (
-                          <button key={k} onClick={() => setEmpSubTab(k)} style={{ padding: "8px 16px", background: "transparent", border: "none", borderBottom: on ? "2px solid #6382ff" : "2px solid transparent", color: on ? "#3b58d4" : "#888", fontSize: 13, fontWeight: 700, cursor: "pointer", marginBottom: -1 }}>{label}</button>
-                        );
-                      })}
-                    </div>
-                    {empSubTab === "tasks" && (<>
+                    {/* 子 tab：任務看板 / 更新日誌（更新日誌僅對 show_update_log=true 的員工顯示） */}
+                    {emp.show_update_log === true && (
+                      <div style={{ display: "flex", gap: 4, marginBottom: 14, borderBottom: "1px solid #eef0fa" }}>
+                        {[["tasks", t("任務看板")], ["logs", t("更新日誌")]].map(([k, label]) => {
+                          const on = empSubTab === k;
+                          return (
+                            <button key={k} onClick={() => setEmpSubTab(k)} style={{ padding: "8px 16px", background: "transparent", border: "none", borderBottom: on ? "2px solid #6382ff" : "2px solid transparent", color: on ? "#3b58d4" : "#888", fontSize: 13, fontWeight: 700, cursor: "pointer", marginBottom: -1 }}>{label}</button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {(empSubTab === "tasks" || emp.show_update_log !== true) && (<>
                     {/* 3 列 × 2 行網格：高 中 | 添加（跨2行）| 反饋 低 */}
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gridTemplateRows: "auto auto", gap: 14, marginBottom: 20 }}>
                       <div style={{ gridColumn: 1, gridRow: 1 }}>{colBox(t("高優先級"), "#ef4444", cols.high.length, cols.high)}</div>
@@ -3647,7 +3649,7 @@ export default function App() {
                       </div>
                     )}
                     </>)}
-                    {empSubTab === "logs" && (() => {
+                    {empSubTab === "logs" && emp.show_update_log === true && (() => {
                       const allMyLogs = updateLogs.filter(l => l.employee_id === emp.id);
                       const myLogs = allMyLogs.slice(0, logsVisibleCount);
                       const hasMore = allMyLogs.length > myLogs.length;
