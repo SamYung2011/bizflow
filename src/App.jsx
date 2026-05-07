@@ -347,6 +347,7 @@ export default function App() {
   const [productsSubTab, setProductsSubTab] = useState("list"); // "list" | "aliases"
   const [editingAlias, setEditingAlias] = useState(null); // { id?, alias_name, skip, products: [{product_id, qty}], note } 創建時無 id
   const [aliasSaving, setAliasSaving] = useState(false);
+  const [expandedAliasGroups, setExpandedAliasGroups] = useState(() => new Set());
   const [empSubTab, setEmpSubTab] = useState("tasks"); // "tasks" | "logs"
   const [newLogDraft, setNewLogDraft] = useState({ summary: "", detail: "" });
   const [editingLogId, setEditingLogId] = useState(null);
@@ -2588,36 +2589,73 @@ export default function App() {
                     <div style={{ fontSize: 14, fontWeight: 700 }}>{t("已配映射")} <span style={{ color: "#888", fontWeight: 400 }}>{lineItemAliases.length}</span></div>
                     <button onClick={() => setEditingAlias({ alias_name: "", skip: false, products: [{ product_id: "", qty: 1 }], note: "" })} style={{ padding: "6px 14px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>+ {t("新增映射")}</button>
                   </div>
-                  <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, overflow: "hidden" }}>
+                  <div>
                     {lineItemAliases.length === 0 ? (
-                      <div style={{ padding: 40, textAlign: "center", color: "#aaa", fontSize: 13 }}>{t("暫無映射，從上方未匹配列表點「配映射」開始")}</div>
-                    ) : (
-                      <div>
-                        <div style={{ display: "grid", gridTemplateColumns: "2fr 60px 2.5fr 1fr 100px", gap: 12, padding: "10px 16px", background: "#fafbfc", borderBottom: "1px solid #f0f0f0", fontSize: 12, fontWeight: 700, color: "#666" }}>
-                          <div>{t("alias_name")}</div>
-                          <div>{t("狀態")}</div>
-                          <div>{t("映射到")}</div>
-                          <div>{t("備註")}</div>
-                          <div></div>
+                      <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, padding: 40, textAlign: "center", color: "#aaa", fontSize: 13 }}>{t("暫無映射，從上方未匹配列表點「配映射」開始")}</div>
+                    ) : (() => {
+                      // 按 映射目標 分組：單品產品 / 套裝 / 不扣 / 未配產品
+                      const productGroups = new Map(); // pid → { label, items, productId }
+                      const bundleGroup = { key: "__bundle__", label: t("套裝"), items: [], color: "#6382ff", bg: "#eef2ff" };
+                      const skipGroup = { key: "__skip__", label: t("不扣（押金 / 運費 / Final Payment / 租務 等）"), items: [], color: "#991b1b", bg: "#fee2e2" };
+                      const noProdGroup = { key: "__noprod__", label: t("未配產品（需處理）"), items: [], color: "#b45309", bg: "#fef3c7" };
+                      for (const a of lineItemAliases) {
+                        if (a.skip === true) { skipGroup.items.push(a); continue; }
+                        const ps = Array.isArray(a.products) ? a.products : [];
+                        if (ps.length === 0) { noProdGroup.items.push(a); continue; }
+                        if (ps.length >= 2) { bundleGroup.items.push(a); continue; }
+                        const pid = ps[0].product_id;
+                        const prod = productById.get(pid);
+                        if (!productGroups.has(pid)) productGroups.set(pid, { key: pid, label: prod?.name || t("已刪除產品"), items: [], productId: pid, color: "#047857", bg: "#d1fae5" });
+                        productGroups.get(pid).items.push(a);
+                      }
+                      const allGroups = [
+                        ...[...productGroups.values()].sort((x, y) => y.items.length - x.items.length || x.label.localeCompare(y.label)),
+                        ...(bundleGroup.items.length > 0 ? [bundleGroup] : []),
+                        ...(skipGroup.items.length > 0 ? [skipGroup] : []),
+                        ...(noProdGroup.items.length > 0 ? [noProdGroup] : []),
+                      ];
+                      const toggleGroup = (k) => setExpandedAliasGroups(prev => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+                      return (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          {allGroups.map(g => {
+                            const expanded = expandedAliasGroups.has(g.key);
+                            const aiCount = g.items.filter(a => /AI 推測|待校對/.test(a.note || "")).length;
+                            return (
+                              <div key={g.key} style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, overflow: "hidden" }}>
+                                <div onClick={() => toggleGroup(g.key)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", background: g.bg, cursor: "pointer", borderBottom: expanded ? "1px solid " + g.bg : "none" }}>
+                                  <span style={{ fontSize: 11, color: g.color }}>{expanded ? "▼" : "▶"}</span>
+                                  <span style={{ fontSize: 14, fontWeight: 700, color: g.color, flex: 1 }}>{g.label}</span>
+                                  {aiCount > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: "#b45309", background: "#fef3c7", padding: "2px 8px", borderRadius: 6 }}>⚠ {aiCount} {t("待校對")}</span>}
+                                  <span style={{ fontSize: 12, color: g.color, fontWeight: 600 }}>{g.items.length} {t("條")}</span>
+                                </div>
+                                {expanded && (
+                                  <div>
+                                    {[...g.items].sort((a, b) => (a.alias_name || "").localeCompare(b.alias_name || "")).map(a => {
+                                      const isAi = /AI 推測|待校對/.test(a.note || "");
+                                      return (
+                                        <div key={a.id} style={{ display: "grid", gridTemplateColumns: "2fr 1.5fr 80px", gap: 12, padding: "10px 16px", borderBottom: "1px solid #f5f5f5", alignItems: "center", fontSize: 13 }}>
+                                          <div>
+                                            <div style={{ fontWeight: 600 }}>{a.alias_name}</div>
+                                            {a.skip !== true && Array.isArray(a.products) && a.products.length >= 2 && (
+                                              <div style={{ fontSize: 11, color: "#666", marginTop: 3 }}>→ {a.products.map(p => `${productLabel(p.product_id)}×${p.qty || 1}`).join(" + ")}</div>
+                                            )}
+                                          </div>
+                                          <div style={{ fontSize: 11, color: isAi ? "#b45309" : "#888" }}>{a.note || ""}</div>
+                                          <div style={{ display: "flex", gap: 6 }}>
+                                            <button onClick={() => setEditingAlias({ id: a.id, alias_name: a.alias_name, skip: a.skip, products: Array.isArray(a.products) && a.products.length > 0 ? a.products : [{ product_id: "", qty: 1 }], note: a.note || "" })} style={{ padding: "4px 10px", background: "#eef2ff", color: "#3b58d4", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>✏️</button>
+                                            <button onClick={() => handleDeleteAlias(a.id)} style={{ padding: "4px 10px", background: "#fce4ec", color: "#e53935", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>×</button>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
-                        {[...lineItemAliases].sort((a, b) => (a.alias_name || "").localeCompare(b.alias_name || "")).map(a => (
-                          <div key={a.id} style={{ display: "grid", gridTemplateColumns: "2fr 60px 2.5fr 1fr 100px", gap: 12, padding: "10px 16px", borderBottom: "1px solid #f5f5f5", alignItems: "center", fontSize: 13 }}>
-                            <div style={{ fontWeight: 600 }}>{a.alias_name}</div>
-                            <div>
-                              {a.skip ? <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, background: "#fee2e2", color: "#991b1b" }}>{t("不扣")}</span> : <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, background: "#d1fae5", color: "#047857" }}>{t("扣減")}</span>}
-                            </div>
-                            <div style={{ fontSize: 12, color: "#555" }}>
-                              {a.skip ? <span style={{ color: "#aaa" }}>—</span> : (Array.isArray(a.products) && a.products.length > 0 ? a.products.map(p => `${productLabel(p.product_id)}×${p.qty || 1}`).join(", ") : <span style={{ color: "#ef4444" }}>{t("未配產品")}</span>)}
-                            </div>
-                            <div style={{ fontSize: 11, color: "#888" }}>{a.note || ""}</div>
-                            <div style={{ display: "flex", gap: 6 }}>
-                              <button onClick={() => setEditingAlias({ id: a.id, alias_name: a.alias_name, skip: a.skip, products: Array.isArray(a.products) && a.products.length > 0 ? a.products : [{ product_id: "", qty: 1 }], note: a.note || "" })} style={{ padding: "4px 10px", background: "#eef2ff", color: "#3b58d4", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>✏️</button>
-                              <button onClick={() => handleDeleteAlias(a.id)} style={{ padding: "4px 10px", background: "#fce4ec", color: "#e53935", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>×</button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 </div>
               );
