@@ -2753,8 +2753,28 @@ export default function App() {
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
                 <button onClick={() => { setSelectedProduct(null); setProductOrgDraft(null); }} style={{ background: "#f5f5f5", border: "none", borderRadius: 10, padding: "10px 14px", cursor: "pointer", fontSize: 14 }}>{t("← 返回")}</button>
                 <div style={{ flex: 1 }}>
-                  <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{p.name}</h1>
-                  <div style={{ fontFamily: "monospace", fontSize: 12, color: "#aaa", marginTop: 4 }}>{p.internal_code}</div>
+                  {isBfAdmin ? (
+                    <input
+                      defaultValue={p.name || ""}
+                      key={p.id}
+                      onBlur={async (e) => {
+                        const v = (e.target.value || "").trim();
+                        if (!v || v === p.name) return;
+                        const { error } = await supabase.from("products").update({ name: v }).eq("id", p.id);
+                        if (error) { alert(`${t("保存失敗")}：${error.message}`); e.target.value = p.name; return; }
+                        setProducts(prev => prev.map(x => x.id === p.id ? { ...x, name: v } : x));
+                        setSelectedProduct(prev => ({ ...prev, name: v }));
+                        queryClient.setQueryData(["bf", "products"], (old) => Array.isArray(old) ? old.map(x => x.id === p.id ? { ...x, name: v } : x) : old);
+                      }}
+                      style={{ fontSize: 24, fontWeight: 800, border: "1px solid transparent", outline: "none", background: "transparent", padding: "2px 6px", borderRadius: 6, fontFamily: "inherit", width: "100%", boxSizing: "border-box" }}
+                      onFocus={e => { e.target.style.border = "1px solid #6382ff"; e.target.style.background = "#fff"; }}
+                      onBlurCapture={e => { e.target.style.border = "1px solid transparent"; e.target.style.background = "transparent"; }}
+                      title={t("點擊編輯產品名稱")}
+                    />
+                  ) : (
+                    <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{p.name}</h1>
+                  )}
+                  <div style={{ fontFamily: "monospace", fontSize: 12, color: "#aaa", marginTop: 4, paddingLeft: isBfAdmin ? 6 : 0 }}>{p.internal_code}</div>
                 </div>
                 <button onClick={toggleVirtual} title={t("虛擬產品（押金/手續費等不入庫存預警）")} style={{ background: isVirtual ? "#e0e7ff" : "#f5f5f5", color: isVirtual ? "#3b58d4" : "#666", border: "none", borderRadius: 10, padding: "10px 16px", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>
                   {isVirtual ? `✓ ${t("虛擬")}` : t("標為虛擬")}
