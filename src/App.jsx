@@ -340,6 +340,18 @@ export default function App() {
   const [newEmployee, setNewEmployee] = useState({ name: "", role: "", phone: "", email: "", note: "" });
   const [editingTask, setEditingTask] = useState(null); // 任務詳情 modal 當前任務
   const [newTaskDraft, setNewTaskDraft] = useState({ title: "", priority: "low", note: "" });
+  // 員工更新日誌 state
+  const [updateLogs, setUpdateLogs] = useState([]);
+  const [logComments, setLogComments] = useState([]);
+  const [empSubTab, setEmpSubTab] = useState("tasks"); // "tasks" | "logs"
+  const [newLogDraft, setNewLogDraft] = useState({ summary: "", detail: "" });
+  const [editingLogId, setEditingLogId] = useState(null);
+  const [editingLogDraft, setEditingLogDraft] = useState({ summary: "", detail: "" });
+  const [expandedLogIds, setExpandedLogIds] = useState(() => new Set());
+  const [newLogCommentDraft, setNewLogCommentDraft] = useState({}); // { [logId|"reply:logId:parentId"]: text }
+  const [replyingToLogComment, setReplyingToLogComment] = useState(null); // { logId, parentId }
+  const [editingLogComment, setEditingLogComment] = useState(null); // { id, body }
+  const [logsVisibleCount, setLogsVisibleCount] = useState(20); // 時間軸懶加載：當前可見條數
   // WhatsApp tab state
   const [waSettings, setWaSettings] = useState(null);
   const [waWhitelist, setWaWhitelist] = useState([]);
@@ -1166,6 +1178,8 @@ export default function App() {
   const qEmployees = useQuery({ queryKey: ["bf", "employees"], queryFn: () => fetchAllTable("employees", "created_at"), enabled: !!userId });
   const qTasks = useQuery({ queryKey: ["bf", "employee_tasks"], queryFn: () => fetchAllTable("employee_tasks", "created_at"), enabled: !!userId });
   const qFeedbacks = useQuery({ queryKey: ["bf", "employee_task_feedbacks"], queryFn: () => fetchAllTable("employee_task_feedbacks", "created_at"), enabled: !!userId });
+  const qUpdateLogs = useQuery({ queryKey: ["bf", "employee_update_logs"], queryFn: () => fetchAllTable("employee_update_logs", "created_at", false), enabled: !!userId });
+  const qLogComments = useQuery({ queryKey: ["bf", "employee_update_log_comments"], queryFn: () => fetchAllTable("employee_update_log_comments", "created_at"), enabled: !!userId });
   const qWaSettings = useQuery({ queryKey: ["bf", "wa_settings"], queryFn: async () => { const { data } = await supabase.from("wa_settings").select("*").eq("id", 1).maybeSingle(); return data; }, enabled: !!userId, refetchInterval: 30000 });
   const qWaWhitelist = useQuery({ queryKey: ["bf", "wa_whitelist"], queryFn: () => fetchAllTable("wa_whitelist", "created_at"), enabled: !!userId, refetchInterval: 30000 });
   const qWaMessages = useQuery({ queryKey: ["bf", "wa_messages"], queryFn: async () => { const { data } = await supabase.from("wa_messages").select("*").order("created_at", { ascending: false }).limit(1000); return data || []; }, enabled: !!userId, refetchInterval: 15000 });
@@ -1185,6 +1199,10 @@ export default function App() {
   useEffect(() => { if (qEmployees.data) setEmployees(qEmployees.data); }, [qEmployees.data]);
   useEffect(() => { if (qTasks.data) setTasks(qTasks.data); }, [qTasks.data]);
   useEffect(() => { if (qFeedbacks.data) setFeedbacks(qFeedbacks.data); }, [qFeedbacks.data]);
+  useEffect(() => { if (qUpdateLogs.data) setUpdateLogs(qUpdateLogs.data); }, [qUpdateLogs.data]);
+  useEffect(() => { if (qLogComments.data) setLogComments(qLogComments.data); }, [qLogComments.data]);
+  // 切員工 / 切回更新日誌 tab 時重置懶加載計數
+  useEffect(() => { setLogsVisibleCount(20); }, [selectedEmployee?.id, empSubTab]);
   useEffect(() => { if (qWaSettings.data) setWaSettings(qWaSettings.data); }, [qWaSettings.data]);
   useEffect(() => { if (qWaWhitelist.data) setWaWhitelist(qWaWhitelist.data); }, [qWaWhitelist.data]);
   useEffect(() => { if (qWaMessages.data) setWaMessages(qWaMessages.data); }, [qWaMessages.data]);
@@ -1251,18 +1269,18 @@ export default function App() {
     return () => { supabase.removeChannel(channel); };
   }, [userId]);
 
-  // 每次 app 載入清理超過 7 天的已完成 / 已放棄 任務
+  // 每次 app 載入清理超過 180 天的已完成 / 已放棄 任務
   useEffect(() => {
     if (!userId) return;
     (async () => {
-      const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const cutoff = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString();
       const { data, error } = await supabase
         .from("employee_tasks")
         .delete()
         .in("status", ["done", "abandoned"])
         .lt("completed_at", cutoff)
         .select("id");
-      if (error) { console.error("任務 7 天清理失敗", error); return; }
+      if (error) { console.error("任務 180 天清理失敗", error); return; }
       if (data && data.length > 0) {
         const ids = new Set(data.map(r => r.id));
         setTasks(prev => prev.filter(t => !ids.has(t.id)));
@@ -1937,6 +1955,70 @@ export default function App() {
     const { error } = await supabase.from("employee_task_feedbacks").delete().eq("id", fbId);
     if (error) { alert(`${t("刪除失敗")}：${error.message}`); return; }
     setFeedbacks(prev => prev.filter(f => f.id !== fbId));
+  }
+
+  // ====== 員工更新日誌 handlers ======
+  async function handleAddUpdateLog(employeeId, summary, detail) {
+    if (!summary || !summary.trim()) return;
+    const { data, error } = await supabase.from("employee_update_logs").insert({
+      employee_id: employeeId,
+      summary: summary.trim(),
+      detail: (detail || "").trim() || null,
+    }).select().single();
+    if (error) { alert(`${t("新增失敗")}：${error.message}`); return; }
+    setUpdateLogs(prev => [data, ...prev]);
+    queryClient.setQueryData(["bf", "employee_update_logs"], (old) => Array.isArray(old) ? [data, ...old] : [data]);
+    return data;
+  }
+
+  async function handleUpdateUpdateLog(logId, patch) {
+    const finalPatch = { ...patch, updated_at: new Date().toISOString() };
+    const { data, error } = await supabase.from("employee_update_logs").update(finalPatch).eq("id", logId).select().single();
+    if (error) { alert(`${t("保存失敗")}：${error.message}`); return; }
+    setUpdateLogs(prev => prev.map(l => l.id === logId ? data : l));
+    queryClient.setQueryData(["bf", "employee_update_logs"], (old) => Array.isArray(old) ? old.map(l => l.id === logId ? data : l) : old);
+  }
+
+  async function handleDeleteUpdateLog(logId) {
+    if (!window.confirm(t("確定刪除此更新及所有評論？"))) return;
+    const { error } = await supabase.from("employee_update_logs").delete().eq("id", logId);
+    if (error) { alert(`${t("刪除失敗")}：${error.message}`); return; }
+    setUpdateLogs(prev => prev.filter(l => l.id !== logId));
+    setLogComments(prev => prev.filter(c => c.update_log_id !== logId));
+    queryClient.setQueryData(["bf", "employee_update_logs"], (old) => Array.isArray(old) ? old.filter(l => l.id !== logId) : old);
+    queryClient.setQueryData(["bf", "employee_update_log_comments"], (old) => Array.isArray(old) ? old.filter(c => c.update_log_id !== logId) : old);
+  }
+
+  async function handleAddLogComment(updateLogId, body, parentCommentId = null) {
+    if (!body || !body.trim() || !userId) return;
+    const authorName = currentEmployee?.name || (session?.user?.email ? session.user.email.split("@")[0] : "user");
+    const { data, error } = await supabase.from("employee_update_log_comments").insert({
+      update_log_id: updateLogId,
+      author_user_id: userId,
+      author_name: authorName,
+      body: body.trim(),
+      parent_comment_id: parentCommentId,
+    }).select().single();
+    if (error) { alert(`${t("發送失敗")}：${error.message}`); return; }
+    setLogComments(prev => [...prev, data]);
+    queryClient.setQueryData(["bf", "employee_update_log_comments"], (old) => Array.isArray(old) ? [...old, data] : [data]);
+    return data;
+  }
+
+  async function handleUpdateLogComment(commentId, body) {
+    if (!body || !body.trim()) return;
+    const { data, error } = await supabase.from("employee_update_log_comments").update({ body: body.trim(), updated_at: new Date().toISOString() }).eq("id", commentId).select().single();
+    if (error) { alert(`${t("保存失敗")}：${error.message}`); return; }
+    setLogComments(prev => prev.map(c => c.id === commentId ? data : c));
+    queryClient.setQueryData(["bf", "employee_update_log_comments"], (old) => Array.isArray(old) ? old.map(c => c.id === commentId ? data : c) : old);
+  }
+
+  async function handleDeleteLogComment(commentId) {
+    if (!window.confirm(t("確定刪除此評論？"))) return;
+    const { error } = await supabase.from("employee_update_log_comments").delete().eq("id", commentId);
+    if (error) { alert(`${t("刪除失敗")}：${error.message}`); return; }
+    setLogComments(prev => prev.filter(c => c.id !== commentId));
+    queryClient.setQueryData(["bf", "employee_update_log_comments"], (old) => Array.isArray(old) ? old.filter(c => c.id !== commentId) : old);
   }
 
   // 認證載入中（Supabase 正在讀 session）
@@ -3310,17 +3392,17 @@ export default function App() {
           const canEditEmp = (e) => isBfAdmin || (currentEmployee && e && e.id === currentEmployee.id);
           const canEditCurrent = canEditEmp(emp);
           const topTasks = emp ? tasks.filter(t => t.employee_id === emp.id && !t.parent_task_id) : [];
-          const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-          const within7Days = (t) => {
+          const oneEightyDaysAgo = Date.now() - 180 * 24 * 60 * 60 * 1000;
+          const within180Days = (t) => {
             const ts = t.completed_at ? new Date(t.completed_at).getTime() : new Date(t.created_at).getTime();
-            return ts >= sevenDaysAgo;
+            return ts >= oneEightyDaysAgo;
           };
           const cols = emp ? {
             high: topTasks.filter(t => t.priority === "high" && t.status === "open"),
             mid:  topTasks.filter(t => t.priority === "mid"  && t.status === "open"),
             low:  topTasks.filter(t => (t.priority === "low" || t.priority === "none" || !t.priority) && t.status === "open"),
-            abandoned: topTasks.filter(t => t.status === "abandoned" && within7Days(t)),
-            done: topTasks.filter(t => t.status === "done" && within7Days(t)),
+            abandoned: topTasks.filter(t => t.status === "abandoned" && within180Days(t)),
+            done: topTasks.filter(t => t.status === "done" && within180Days(t)),
           } : null;
           // 该员工所有 task 的最新反馈（每个 task 取最近一条 comment 作摘要展示）
           const empTaskIds = emp ? new Set(tasks.filter(t => t.employee_id === emp.id).map(t => t.id)) : new Set();
@@ -3476,6 +3558,16 @@ export default function App() {
                         {isBfAdmin && <button onClick={() => handleDeleteEmployee(emp)} style={{ background: "#fce4ec", border: "none", color: "#e53935", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{t("刪除員工")}</button>}
                       </div>
                     </div>
+                    {/* 子 tab：任務看板 / 更新日誌 */}
+                    <div style={{ display: "flex", gap: 4, marginBottom: 14, borderBottom: "1px solid #eef0fa" }}>
+                      {[["tasks", t("任務看板")], ["logs", t("更新日誌")]].map(([k, label]) => {
+                        const on = empSubTab === k;
+                        return (
+                          <button key={k} onClick={() => setEmpSubTab(k)} style={{ padding: "8px 16px", background: "transparent", border: "none", borderBottom: on ? "2px solid #6382ff" : "2px solid transparent", color: on ? "#3b58d4" : "#888", fontSize: 13, fontWeight: 700, cursor: "pointer", marginBottom: -1 }}>{label}</button>
+                        );
+                      })}
+                    </div>
+                    {empSubTab === "tasks" && (<>
                     {/* 3 列 × 2 行網格：高 中 | 添加（跨2行）| 反饋 低 */}
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gridTemplateRows: "auto auto", gap: 14, marginBottom: 20 }}>
                       <div style={{ gridColumn: 1, gridRow: 1 }}>{colBox(t("高優先級"), "#ef4444", cols.high.length, cols.high)}</div>
@@ -3554,6 +3646,167 @@ export default function App() {
                         )}
                       </div>
                     )}
+                    </>)}
+                    {empSubTab === "logs" && (() => {
+                      const allMyLogs = updateLogs.filter(l => l.employee_id === emp.id);
+                      const myLogs = allMyLogs.slice(0, logsVisibleCount);
+                      const hasMore = allMyLogs.length > myLogs.length;
+                      const fmtFull = (iso) => {
+                        const d = new Date(iso);
+                        const yyyy = d.getFullYear();
+                        const mm = String(d.getMonth() + 1).padStart(2, "0");
+                        const dd = String(d.getDate()).padStart(2, "0");
+                        let h = d.getHours();
+                        const min = String(d.getMinutes()).padStart(2, "0");
+                        const ampm = h >= 12 ? "PM" : "AM";
+                        h = h % 12; if (h === 0) h = 12;
+                        return `${yyyy}/${mm}/${dd} ${String(h).padStart(2, "0")}:${min} ${ampm}`;
+                      };
+                      const renderCommentTree = (logId, parentId, depth) => {
+                        const list = logComments.filter(c => c.update_log_id === logId && (c.parent_comment_id || null) === parentId);
+                        return list.map(c => {
+                          const isOwn = c.author_user_id === userId;
+                          const canEditCmt = isOwn || isBfAdmin;
+                          const isEditing = editingLogComment && editingLogComment.id === c.id;
+                          const isReplyingHere = replyingToLogComment && replyingToLogComment.parentId === c.id;
+                          return (
+                            <div key={c.id} style={{ marginLeft: depth * 20, marginTop: 8, paddingLeft: depth > 0 ? 10 : 0, borderLeft: depth > 0 ? "2px solid #eef2ff" : "none" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+                                <div style={{ fontSize: 11, color: "#888" }}>
+                                  <strong style={{ color: "#3b58d4" }}>{c.author_name || t("未知")}</strong>
+                                  <span style={{ marginLeft: 6 }}>{new Date(c.created_at).toLocaleString("zh-HK", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                                  {c.updated_at && c.updated_at !== c.created_at && <span style={{ marginLeft: 4, color: "#bbb" }}>·{t("已編輯")}</span>}
+                                </div>
+                                <div style={{ display: "flex", gap: 6 }}>
+                                  <button onClick={() => setReplyingToLogComment(isReplyingHere ? null : { logId, parentId: c.id })} style={{ background: "none", border: "none", color: "#6382ff", fontSize: 11, cursor: "pointer", padding: 0 }}>{isReplyingHere ? t("取消") : `↩ ${t("回復")}`}</button>
+                                  {canEditCmt && !isEditing && <button onClick={() => setEditingLogComment({ id: c.id, body: c.body })} style={{ background: "none", border: "none", color: "#888", fontSize: 11, cursor: "pointer", padding: 0 }}>✏</button>}
+                                  {canEditCmt && <button onClick={() => handleDeleteLogComment(c.id)} style={{ background: "none", border: "none", color: "#e53935", fontSize: 11, cursor: "pointer", padding: 0 }}>×</button>}
+                                </div>
+                              </div>
+                              {isEditing ? (
+                                <div>
+                                  <textarea value={editingLogComment.body} onChange={e => setEditingLogComment({ ...editingLogComment, body: e.target.value })} style={{ width: "100%", minHeight: 50, padding: "6px 8px", borderRadius: 6, border: "1px solid #6382ff", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", resize: "vertical" }} />
+                                  <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                                    <button onClick={async () => { await handleUpdateLogComment(c.id, editingLogComment.body); setEditingLogComment(null); }} style={{ padding: "4px 10px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>{t("保存")}</button>
+                                    <button onClick={() => setEditingLogComment(null)} style={{ padding: "4px 10px", background: "#fff", color: "#888", border: "1px solid #e0e0e0", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>{t("取消")}</button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div style={{ fontSize: 12, color: "#333", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{c.body}</div>
+                              )}
+                              {isReplyingHere && (
+                                <div style={{ marginTop: 6 }}>
+                                  <textarea
+                                    value={newLogCommentDraft[`reply:${logId}:${c.id}`] || ""}
+                                    onChange={e => setNewLogCommentDraft({ ...newLogCommentDraft, [`reply:${logId}:${c.id}`]: e.target.value })}
+                                    placeholder={t("回復")}
+                                    style={{ width: "100%", minHeight: 40, padding: "6px 8px", borderRadius: 6, border: "1px solid #6382ff", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", resize: "vertical" }}
+                                  />
+                                  <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                                    <button onClick={async () => { const k = `reply:${logId}:${c.id}`; await handleAddLogComment(logId, newLogCommentDraft[k] || "", c.id); setNewLogCommentDraft({ ...newLogCommentDraft, [k]: "" }); setReplyingToLogComment(null); }} style={{ padding: "4px 10px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>{t("發送")}</button>
+                                  </div>
+                                </div>
+                              )}
+                              {renderCommentTree(logId, c.id, depth + 1)}
+                            </div>
+                          );
+                        });
+                      };
+                      return (
+                        <div>
+                          {/* 新增更新區（僅本人，admin 在別人頁面也不能寫） */}
+                          {currentEmployee && emp.id === currentEmployee.id && (
+                            <div style={{ background: "#fafbff", border: "1px solid #eef0fa", borderRadius: 12, padding: 16, marginBottom: 20 }}>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: "#3b58d4", marginBottom: 10 }}>＋ {t("新增更新")}</div>
+                              <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{t("簡略（必填）")}</div>
+                              <input value={newLogDraft.summary} onChange={e => setNewLogDraft({ ...newLogDraft, summary: e.target.value })} placeholder={t("一句話概括今天做了什麼...")} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", marginBottom: 10, boxSizing: "border-box" }} />
+                              <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{t("詳細（可選，展開後顯示）")}</div>
+                              <textarea value={newLogDraft.detail} onChange={e => setNewLogDraft({ ...newLogDraft, detail: e.target.value })} placeholder={t("詳細描述...")} style={{ width: "100%", minHeight: 100, padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 12, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit", marginBottom: 10 }} />
+                              <button onClick={async () => { if (!newLogDraft.summary.trim()) return; await handleAddUpdateLog(emp.id, newLogDraft.summary, newLogDraft.detail); setNewLogDraft({ summary: "", detail: "" }); }} disabled={!newLogDraft.summary.trim()} style={{ padding: "8px 18px", background: newLogDraft.summary.trim() ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: newLogDraft.summary.trim() ? "pointer" : "not-allowed" }}>{t("保存")}</button>
+                            </div>
+                          )}
+                          {/* 時間軸 */}
+                          {allMyLogs.length === 0 ? (
+                            <div style={{ background: "#fff", border: "1px dashed #e0e0e0", borderRadius: 12, padding: 60, textAlign: "center", color: "#aaa", fontSize: 13 }}>{t("暫無更新記錄")}</div>
+                          ) : (<>
+                            <div style={{ position: "relative", paddingLeft: 24 }}>
+                              <div style={{ position: "absolute", left: 7, top: 6, bottom: 6, width: 2, background: "#eef2ff" }} />
+                              {myLogs.map(log => {
+                                const isExpanded = expandedLogIds.has(log.id);
+                                const isEditingThis = editingLogId === log.id;
+                                const cmtCount = logComments.filter(c => c.update_log_id === log.id).length;
+                                const isReplyingTopHere = replyingToLogComment && replyingToLogComment.logId === log.id && replyingToLogComment.parentId === null;
+                                return (
+                                  <div key={log.id} style={{ position: "relative", marginBottom: 18 }}>
+                                    <div style={{ position: "absolute", left: -22, top: 8, width: 12, height: 12, borderRadius: "50%", background: "#6382ff", border: "2px solid #fff", boxShadow: "0 0 0 2px #6382ff" }} />
+                                    <div style={{ background: "#fff", border: "1px solid #eef0fa", borderRadius: 10, padding: "12px 14px" }}>
+                                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                                        <div style={{ fontSize: 11, color: "#888", fontWeight: 600 }}>{fmtFull(log.created_at)}{log.updated_at && log.updated_at !== log.created_at && <span style={{ marginLeft: 6, color: "#bbb", fontWeight: 400 }}>·{t("已編輯")} {fmtFull(log.updated_at)}</span>}</div>
+                                        {canEditCurrent && !isEditingThis && (
+                                          <div style={{ display: "flex", gap: 6 }}>
+                                            <button onClick={() => { setEditingLogId(log.id); setEditingLogDraft({ summary: log.summary || "", detail: log.detail || "" }); }} style={{ background: "none", border: "none", color: "#888", fontSize: 12, cursor: "pointer", padding: 0 }}>✏ {t("編輯")}</button>
+                                            <button onClick={() => handleDeleteUpdateLog(log.id)} style={{ background: "none", border: "none", color: "#e53935", fontSize: 12, cursor: "pointer", padding: 0 }}>× {t("刪除")}</button>
+                                          </div>
+                                        )}
+                                      </div>
+                                      {isEditingThis ? (
+                                        <div>
+                                          <input value={editingLogDraft.summary} onChange={e => setEditingLogDraft({ ...editingLogDraft, summary: e.target.value })} placeholder={t("簡略")} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #6382ff", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box" }} />
+                                          <textarea value={editingLogDraft.detail} onChange={e => setEditingLogDraft({ ...editingLogDraft, detail: e.target.value })} placeholder={t("詳細")} style={{ width: "100%", minHeight: 100, padding: "8px 10px", borderRadius: 6, border: "1px solid #6382ff", fontSize: 12, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit", marginBottom: 8 }} />
+                                          <div style={{ display: "flex", gap: 6 }}>
+                                            <button onClick={async () => { if (!editingLogDraft.summary.trim()) return; await handleUpdateUpdateLog(log.id, { summary: editingLogDraft.summary.trim(), detail: editingLogDraft.detail.trim() || null }); setEditingLogId(null); }} style={{ padding: "5px 12px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>{t("保存")}</button>
+                                            <button onClick={() => setEditingLogId(null)} style={{ padding: "5px 12px", background: "#fff", color: "#888", border: "1px solid #e0e0e0", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>{t("取消")}</button>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <>
+                                          <div onClick={() => { setExpandedLogIds(prev => { const n = new Set(prev); if (n.has(log.id)) n.delete(log.id); else n.add(log.id); return n; }); }} style={{ fontSize: 14, color: "#222", lineHeight: 1.5, cursor: "pointer", display: "flex", alignItems: "flex-start", gap: 8 }}>
+                                            <span style={{ color: "#6382ff", fontSize: 11, marginTop: 3 }}>{isExpanded ? "▼" : "▶"}</span>
+                                            <span style={{ flex: 1, whiteSpace: "pre-wrap" }}>{log.summary}</span>
+                                          </div>
+                                          {isExpanded && log.detail && (
+                                            <div style={{ marginTop: 10, padding: "10px 12px", background: "#fafbff", borderRadius: 8, fontSize: 12, color: "#444", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{log.detail}</div>
+                                          )}
+                                        </>
+                                      )}
+                                      {/* 評論區 */}
+                                      <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px dashed #eef0fa" }}>
+                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                          <div style={{ fontSize: 11, color: "#888" }}>💬 {t("評論")} <span style={{ color: "#aaa" }}>{cmtCount}</span></div>
+                                          {!isReplyingTopHere && <button onClick={() => setReplyingToLogComment({ logId: log.id, parentId: null })} style={{ background: "none", border: "none", color: "#6382ff", fontSize: 11, cursor: "pointer", padding: 0 }}>+ {t("評論")}</button>}
+                                        </div>
+                                        {isReplyingTopHere && (
+                                          <div style={{ marginTop: 6 }}>
+                                            <textarea
+                                              value={newLogCommentDraft[`reply:${log.id}:null`] || ""}
+                                              onChange={e => setNewLogCommentDraft({ ...newLogCommentDraft, [`reply:${log.id}:null`]: e.target.value })}
+                                              placeholder={t("發表評論...")}
+                                              style={{ width: "100%", minHeight: 50, padding: "6px 8px", borderRadius: 6, border: "1px solid #6382ff", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", resize: "vertical" }}
+                                            />
+                                            <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                                              <button onClick={async () => { const k = `reply:${log.id}:null`; await handleAddLogComment(log.id, newLogCommentDraft[k] || ""); setNewLogCommentDraft({ ...newLogCommentDraft, [k]: "" }); setReplyingToLogComment(null); }} style={{ padding: "4px 10px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>{t("發送")}</button>
+                                              <button onClick={() => setReplyingToLogComment(null)} style={{ padding: "4px 10px", background: "#fff", color: "#888", border: "1px solid #e0e0e0", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>{t("取消")}</button>
+                                            </div>
+                                          </div>
+                                        )}
+                                        <div>{renderCommentTree(log.id, null, 0)}</div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            {hasMore && (
+                              <div style={{ textAlign: "center", marginTop: 14 }}>
+                                <button onClick={() => setLogsVisibleCount(c => c + 20)} style={{ padding: "8px 20px", background: "#fff", border: "1px solid #6382ff", color: "#6382ff", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                  {t("加載更多")}（{t("剩餘")} {allMyLogs.length - myLogs.length}）
+                                </button>
+                              </div>
+                            )}
+                          </>)}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
