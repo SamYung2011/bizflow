@@ -2097,6 +2097,7 @@ export default function App() {
         skip: draft.skip === true,
         products: draft.skip === true ? [] : (Array.isArray(draft.products) ? draft.products.filter(p => p.product_id && Number(p.qty) > 0) : []),
         note: (draft.note || "").trim() || null,
+        verified: true,  // 用戶手動保存 = 視為已校對
         updated_at: new Date().toISOString(),
       };
       if (draft.id) {
@@ -2124,6 +2125,13 @@ export default function App() {
     if (error) { alert(`${t("刪除失敗")}：${error.message}`); return; }
     setLineItemAliases(prev => prev.filter(a => a.id !== aliasId));
     queryClient.setQueryData(["bf", "line_item_aliases"], (old) => Array.isArray(old) ? old.filter(a => a.id !== aliasId) : old);
+  }
+
+  async function handleVerifyAlias(aliasId) {
+    const { data, error } = await supabase.from("line_item_aliases").update({ verified: true, updated_at: new Date().toISOString() }).eq("id", aliasId).select().single();
+    if (error) { alert(`${t("確認失敗")}：${error.message}`); return; }
+    setLineItemAliases(prev => prev.map(a => a.id === aliasId ? data : a));
+    queryClient.setQueryData(["bf", "line_item_aliases"], (old) => Array.isArray(old) ? old.map(a => a.id === aliasId ? data : a) : old);
   }
 
   // 認證載入中（Supabase 正在讀 session）
@@ -2619,31 +2627,35 @@ export default function App() {
                         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                           {allGroups.map(g => {
                             const expanded = expandedAliasGroups.has(g.key);
-                            const aiCount = g.items.filter(a => /AI 推測|待校對/.test(a.note || "")).length;
+                            const unverifiedCount = g.items.filter(a => a.verified !== true).length;
                             return (
                               <div key={g.key} style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, overflow: "hidden" }}>
                                 <div onClick={() => toggleGroup(g.key)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", background: g.bg, cursor: "pointer", borderBottom: expanded ? "1px solid " + g.bg : "none" }}>
                                   <span style={{ fontSize: 11, color: g.color }}>{expanded ? "▼" : "▶"}</span>
                                   <span style={{ fontSize: 14, fontWeight: 700, color: g.color, flex: 1 }}>{g.label}</span>
-                                  {aiCount > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: "#b45309", background: "#fef3c7", padding: "2px 8px", borderRadius: 6 }}>⚠ {aiCount} {t("待校對")}</span>}
+                                  {unverifiedCount > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: "#b45309", background: "#fef3c7", padding: "2px 8px", borderRadius: 6 }}>⚠ {unverifiedCount} {t("待校對")}</span>}
                                   <span style={{ fontSize: 12, color: g.color, fontWeight: 600 }}>{g.items.length} {t("條")}</span>
                                 </div>
                                 {expanded && (
                                   <div>
-                                    {[...g.items].sort((a, b) => (a.alias_name || "").localeCompare(b.alias_name || "")).map(a => {
-                                      const isAi = /AI 推測|待校對/.test(a.note || "");
+                                    {[...g.items].sort((a, b) => (a.verified === b.verified ? (a.alias_name || "").localeCompare(b.alias_name || "") : (a.verified ? 1 : -1))).map(a => {
+                                      const isUnverified = a.verified !== true;
                                       return (
-                                        <div key={a.id} style={{ display: "grid", gridTemplateColumns: "2fr 1.5fr 80px", gap: 12, padding: "10px 16px", borderBottom: "1px solid #f5f5f5", alignItems: "center", fontSize: 13 }}>
+                                        <div key={a.id} style={{ display: "grid", gridTemplateColumns: "2fr 1.5fr 140px", gap: 12, padding: "10px 16px", borderBottom: "1px solid #f5f5f5", alignItems: "center", fontSize: 13, background: isUnverified ? "#fffbeb" : "transparent" }}>
                                           <div>
-                                            <div style={{ fontWeight: 600 }}>{a.alias_name}</div>
+                                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                              <span style={{ fontWeight: 600 }}>{a.alias_name}</span>
+                                              {isUnverified && <span style={{ fontSize: 9, fontWeight: 700, color: "#b45309", background: "#fef3c7", padding: "1px 6px", borderRadius: 4 }}>⚠ {t("待校對")}</span>}
+                                            </div>
                                             {a.skip !== true && Array.isArray(a.products) && a.products.length >= 2 && (
                                               <div style={{ fontSize: 11, color: "#666", marginTop: 3 }}>→ {a.products.map(p => `${productLabel(p.product_id)}×${p.qty || 1}`).join(" + ")}</div>
                                             )}
                                           </div>
-                                          <div style={{ fontSize: 11, color: isAi ? "#b45309" : "#888" }}>{a.note || ""}</div>
-                                          <div style={{ display: "flex", gap: 6 }}>
-                                            <button onClick={() => setEditingAlias({ id: a.id, alias_name: a.alias_name, skip: a.skip, products: Array.isArray(a.products) && a.products.length > 0 ? a.products : [{ product_id: "", qty: 1 }], note: a.note || "" })} style={{ padding: "4px 10px", background: "#eef2ff", color: "#3b58d4", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>✏️</button>
-                                            <button onClick={() => handleDeleteAlias(a.id)} style={{ padding: "4px 10px", background: "#fce4ec", color: "#e53935", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>×</button>
+                                          <div style={{ fontSize: 11, color: "#888" }}>{a.note || ""}</div>
+                                          <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                                            {isUnverified && <button onClick={() => handleVerifyAlias(a.id)} title={t("一鍵確認此映射正確")} style={{ padding: "4px 8px", background: "#d1fae5", color: "#047857", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer", fontWeight: 700 }}>✓ {t("確認")}</button>}
+                                            <button onClick={() => setEditingAlias({ id: a.id, alias_name: a.alias_name, skip: a.skip, products: Array.isArray(a.products) && a.products.length > 0 ? a.products : [{ product_id: "", qty: 1 }], note: a.note || "" })} style={{ padding: "4px 8px", background: "#eef2ff", color: "#3b58d4", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>✏️</button>
+                                            <button onClick={() => handleDeleteAlias(a.id)} style={{ padding: "4px 8px", background: "#fce4ec", color: "#e53935", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>×</button>
                                           </div>
                                         </div>
                                       );
