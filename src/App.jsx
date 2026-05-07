@@ -830,6 +830,7 @@ export default function App() {
     image_file: null, image_preview: "",
     has_variants: false,
     variants: [],
+    is_virtual: false,
   });
   const [newProductOpen, setNewProductOpen] = useState(false);
   const [newProduct, setNewProduct] = useState(emptyNewProduct());
@@ -1377,7 +1378,7 @@ export default function App() {
     });
   }, [invoices, products, customers]);
 
-  // 庫存不足 SKU（活 SKU + 非父 + 所有倉庫合計 <= 0）
+  // 庫存不足 SKU（活 SKU + 非父 + 非停售 + 非虛擬 + 所有倉庫合計 <= 0）
   const outOfStockSkus = useMemo(() => {
     if (!products.length) return [];
     const parentIds = new Set(products.filter(x => x.parent_product_id).map(x => x.parent_product_id));
@@ -1388,8 +1389,28 @@ export default function App() {
     return products.filter(p => {
       if (p.category === '_archived') return false;
       if (parentIds.has(p.id)) return false;
+      if ((p.status || 'active') === 'discontinued') return false;
+      if (p.is_virtual === true) return false;
       return (byProd.get(p.id) || 0) <= 0;
     });
+  }, [products, stocks]);
+
+  // 庫存預警 SKU（活 SKU + 非父 + 非停售 + 非虛擬 + 合計 < 50）
+  const LOW_STOCK_THRESHOLD = 50;
+  const lowStockSkus = useMemo(() => {
+    if (!products.length) return [];
+    const parentIds = new Set(products.filter(x => x.parent_product_id).map(x => x.parent_product_id));
+    const byProd = new Map();
+    for (const s of stocks) {
+      byProd.set(s.product_id, (byProd.get(s.product_id) || 0) + (s.qty || 0));
+    }
+    return products.filter(p => {
+      if (p.category === '_archived') return false;
+      if (parentIds.has(p.id)) return false;
+      if ((p.status || 'active') === 'discontinued') return false;
+      if (p.is_virtual === true) return false;
+      return (byProd.get(p.id) || 0) < LOW_STOCK_THRESHOLD;
+    }).map(p => ({ ...p, _stockQty: byProd.get(p.id) || 0 }));
   }, [products, stocks]);
 
   // 全量保修條目：涵蓋過期 30 天內 + 未來 365 天內，用於獨立「保修」tab
@@ -2150,7 +2171,7 @@ export default function App() {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 16 }}>
               <StatCard label={t("本月營收")} value={`HKD$${monthlyRevenue.toLocaleString()}`} sub={lang === "en" ? `${now.toLocaleString("en", { month: "long", year: "numeric" })}` : `${now.getFullYear()}年${now.getMonth() + 1}月`} accent="#6382ff" icon={<Icon name="trend_up" size={20} />} onClick={() => setTab("revenue")} />
-              <StatCard label={t("庫存數量")} value={inStock} sub={`${t("共")} ${stockSummary.totalQty} ${t("件")}`} accent="#22c55e" icon={<Icon name="inventory" size={20} />} onClick={() => setTab("products")} />
+              <StatCard label={t("庫存數量")} value={inStock} sub={lowStockSkus.length > 0 ? `${t("共")} ${stockSummary.totalQty} ${t("件")} · ⚠ ${lowStockSkus.length} ${t("件低庫存")}` : `${t("共")} ${stockSummary.totalQty} ${t("件")}`} accent={lowStockSkus.length > 0 ? "#f59e0b" : "#22c55e"} icon={<Icon name="inventory" size={20} />} onClick={() => setTab("products")} />
               <StatCard label={t("客戶數")} value={customerGroups.virtualCustomers.filter(c => c.allEmails.length > 0 || c.allPhones.length > 0).length} sub={t("累計")} accent="#f59e0b" icon={<Icon name="customer" size={20} />} onClick={() => { setTab("customers"); setSelectedCustomer(null); }} />
               <StatCard label={t("保修提醒")} value={warrantyAlerts.length} sub={t("需跟進")} accent="#ef4444" icon={<Icon name="warning" size={20} />} onClick={() => setTab("warranty")} />
             </div>
@@ -2389,10 +2410,18 @@ export default function App() {
                       <div style={{ fontSize: 14, fontWeight: 600, color: "#1a1a1a" }}>{p.name}</div>
                       <div style={{ fontFamily: "monospace", fontSize: 10, color: "#aaa", marginTop: 2 }}>{p.internal_code || p.code || p.id.slice(0, 8)}</div>
                     </div>
-                    <div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                       <span style={{ padding: "3px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600, background: status === "draft" ? "#e5e7eb" : status === "discontinued" ? "#fee2e2" : "#d1fae5", color: status === "draft" ? "#6b7280" : status === "discontinued" ? "#991b1b" : "#047857" }}>
                         {status === "draft" ? t("草稿") : status === "discontinued" ? t("停售") : t("啟用")}
                       </span>
+                      {p.is_virtual === true && (
+                        <span style={{ padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, background: "#e0e7ff", color: "#3b58d4" }}>{t("虛擬")}</span>
+                      )}
+                      {p.is_virtual !== true && status !== "discontinued" && (() => {
+                        const targetIds = hasChildren ? children.map(c => c.id) : [p.id];
+                        const isLow = lowStockSkus.some(x => targetIds.includes(x.id));
+                        return isLow ? <span style={{ padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700, background: "#fef3c7", color: "#92400e" }}>⚠ {t("低庫存")}</span> : null;
+                      })()}
                     </div>
                     <div onClick={hasChildren ? undefined : (e) => { e.stopPropagation(); setEditingProduct(p); }} style={{ cursor: hasChildren ? "default" : "pointer" }}>
                       {hasChildren && <div style={{ fontSize: 11, color: "#888", marginBottom: 2 }}>{t("共")} {children.length} {t("個子類")} · {t("共")} {totalStock} {t("件")}</div>}
@@ -2459,6 +2488,7 @@ export default function App() {
           const collectionOpts = [...new Set(products.flatMap(x => x.collections || []))].filter(Boolean);
           const tagOpts = [...new Set(products.flatMap(x => x.tags || []))].filter(Boolean);
           const isDiscontinued = (p.status || "active") === "discontinued";
+          const isVirtual = p.is_virtual === true;
           const toggleStatus = async () => {
             const next = isDiscontinued ? "active" : "discontinued";
             const ids = [p.id, ...children.map(c => c.id)];
@@ -2466,6 +2496,14 @@ export default function App() {
             if (error) { alert((isDiscontinued ? t("啟用失敗") : t("停售失敗")) + "：" + error.message); return; }
             setProducts(prev => prev.map(x => ids.includes(x.id) ? { ...x, status: next } : x));
             setSelectedProduct(prev => ({ ...prev, status: next }));
+          };
+          const toggleVirtual = async () => {
+            const next = !isVirtual;
+            const ids = [p.id, ...children.map(c => c.id)];
+            const { error } = await supabase.from("products").update({ is_virtual: next }).in("id", ids);
+            if (error) { alert(t("儲存失敗：") + error.message); return; }
+            setProducts(prev => prev.map(x => ids.includes(x.id) ? { ...x, is_virtual: next } : x));
+            setSelectedProduct(prev => ({ ...prev, is_virtual: next }));
           };
           const deleteProduct = async () => {
             const childCount = children.length;
@@ -2490,6 +2528,9 @@ export default function App() {
                   <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{p.name}</h1>
                   <div style={{ fontFamily: "monospace", fontSize: 12, color: "#aaa", marginTop: 4 }}>{p.internal_code}</div>
                 </div>
+                <button onClick={toggleVirtual} title={t("虛擬產品（押金/手續費等不入庫存預警）")} style={{ background: isVirtual ? "#e0e7ff" : "#f5f5f5", color: isVirtual ? "#3b58d4" : "#666", border: "none", borderRadius: 10, padding: "10px 16px", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>
+                  {isVirtual ? `✓ ${t("虛擬")}` : t("標為虛擬")}
+                </button>
                 <button onClick={toggleStatus} style={{ background: isDiscontinued ? "#d1fae5" : "#fef3c7", color: isDiscontinued ? "#047857" : "#92400e", border: "none", borderRadius: 10, padding: "10px 16px", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>
                   {isDiscontinued ? t("啟用") : t("停售")}
                 </button>
@@ -5858,6 +5899,7 @@ export default function App() {
               specs: np.specs.trim() || null,
               image_url: imageUrl,
               status: 'active',
+              is_virtual: np.is_virtual === true,
             };
             const { data: inserted, error: insErr } = await supabase.from('products').insert(parentRow).select().single();
             if (insErr) throw new Error(t("建立產品失敗") + "：" + insErr.message);
@@ -5874,6 +5916,7 @@ export default function App() {
                 specs: v.specs.trim() || null,
                 image_url: imageUrl,
                 status: 'active',
+                is_virtual: np.is_virtual === true,
                 parent_product_id: inserted.id,
               }));
               const { data: childInserted, error: childErr } = await supabase.from('products').insert(childRows).select();
@@ -5927,6 +5970,10 @@ export default function App() {
                     <datalist id="np-cat-list">
                       {existingCats.map(c => <option key={c} value={c} />)}
                     </datalist>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 12, color: "#666", cursor: "pointer" }}>
+                      <input type="checkbox" checked={np.is_virtual === true} onChange={e => setNp({ is_virtual: e.target.checked })} style={{ cursor: "pointer" }} />
+                      {t("虛擬產品（押金/手續費等不入庫存預警）")}
+                    </label>
                   </div>
                   <div>
                     <label style={labelStyle}>{t("內部編號")} <span style={{ color: "#aaa", fontWeight: 400 }}>· {t("自動生成")}</span></label>
