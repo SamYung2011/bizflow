@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@supabase/supabase-js";
 import { INVOICE_SHELL_HEAD, INVOICE_PAGE, INVOICE_SHELL_TAIL } from "./invoiceTemplate.js";
@@ -343,6 +343,10 @@ export default function App() {
   // 員工更新日誌 state
   const [updateLogs, setUpdateLogs] = useState([]);
   const [logComments, setLogComments] = useState([]);
+  const [lineItemAliases, setLineItemAliases] = useState([]); // 發票 line item → bizflow products 映射
+  const [productsSubTab, setProductsSubTab] = useState("list"); // "list" | "aliases"
+  const [editingAlias, setEditingAlias] = useState(null); // { id?, alias_name, skip, products: [{product_id, qty}], note } 創建時無 id
+  const [aliasSaving, setAliasSaving] = useState(false);
   const [empSubTab, setEmpSubTab] = useState("tasks"); // "tasks" | "logs"
   const [newLogDraft, setNewLogDraft] = useState({ summary: "", detail: "" });
   const [editingLogId, setEditingLogId] = useState(null);
@@ -1181,6 +1185,7 @@ export default function App() {
   const qFeedbacks = useQuery({ queryKey: ["bf", "employee_task_feedbacks"], queryFn: () => fetchAllTable("employee_task_feedbacks", "created_at"), enabled: !!userId });
   const qUpdateLogs = useQuery({ queryKey: ["bf", "employee_update_logs"], queryFn: () => fetchAllTable("employee_update_logs", "created_at", false), enabled: !!userId });
   const qLogComments = useQuery({ queryKey: ["bf", "employee_update_log_comments"], queryFn: () => fetchAllTable("employee_update_log_comments", "created_at"), enabled: !!userId });
+  const qLineItemAliases = useQuery({ queryKey: ["bf", "line_item_aliases"], queryFn: () => fetchAllTable("line_item_aliases", "alias_name"), enabled: !!userId });
   const qWaSettings = useQuery({ queryKey: ["bf", "wa_settings"], queryFn: async () => { const { data } = await supabase.from("wa_settings").select("*").eq("id", 1).maybeSingle(); return data; }, enabled: !!userId, refetchInterval: 30000 });
   const qWaWhitelist = useQuery({ queryKey: ["bf", "wa_whitelist"], queryFn: () => fetchAllTable("wa_whitelist", "created_at"), enabled: !!userId, refetchInterval: 30000 });
   const qWaMessages = useQuery({ queryKey: ["bf", "wa_messages"], queryFn: async () => { const { data } = await supabase.from("wa_messages").select("*").order("created_at", { ascending: false }).limit(1000); return data || []; }, enabled: !!userId, refetchInterval: 15000 });
@@ -1202,6 +1207,7 @@ export default function App() {
   useEffect(() => { if (qFeedbacks.data) setFeedbacks(qFeedbacks.data); }, [qFeedbacks.data]);
   useEffect(() => { if (qUpdateLogs.data) setUpdateLogs(qUpdateLogs.data); }, [qUpdateLogs.data]);
   useEffect(() => { if (qLogComments.data) setLogComments(qLogComments.data); }, [qLogComments.data]);
+  useEffect(() => { if (qLineItemAliases.data) setLineItemAliases(qLineItemAliases.data); }, [qLineItemAliases.data]);
   // 切員工 / 切回更新日誌 tab 時重置懶加載計數
   useEffect(() => { setLogsVisibleCount(20); }, [selectedEmployee?.id, empSubTab]);
   useEffect(() => { if (qWaSettings.data) setWaSettings(qWaSettings.data); }, [qWaSettings.data]);
@@ -1328,6 +1334,11 @@ export default function App() {
       return { label: "Shopify", color: "#16a34a", bg: "#dcfce7" };
     }
     return { label: t("手動"), color: "#888", bg: "#f5f5f5" };
+  };
+  // 從 notes 抽 __POSSIBLE_DUP__:{id} 標記（forms-buy 寫的，可能跟現有 Shopify 訂單重複）
+  const getPossibleDupId = (inv) => {
+    const m = (inv?.notes || "").match(/__POSSIBLE_DUP__:([\w-]+)/);
+    return m ? m[1] : "";
   };
   // 月營收（當月）
   const now = new Date();
@@ -1639,27 +1650,60 @@ export default function App() {
 
   function handleMarkPaid(inv) {
     if ((inv.status || "").trim().toLowerCase() === "paid") return;
+    const dupId = getPossibleDupId(inv);
+    if (dupId) {
+      const ok = window.confirm(`${t("此發票疑似與發票")} ${dupId} ${t("重複（2 天內 / 同 email / 同 phone / 同產品）")}\n\n${t("確認標 Paid 並扣庫存？")}\n${t("（如果確認重複請改用編輯刪除此單，避免重複扣庫存）")}`);
+      if (!ok) return;
+    }
     setMarkPaidCtx({ inv, defaultWh: warehouses[0]?.id || null });
   }
 
-  // 解析發票 items 成扣減計劃（item + product + warehouse_id + 當前庫存 + 扣後庫存）
+  // 解析發票 items 成扣減計劃（走 line_item_aliases 映射，支持單品/套裝/skip）
+  // legacy_skip_deduct=true 的發票直接返回空計劃（歷史單一律不扣）
   function buildDeductionPlan(inv, defaultWh) {
+    if (inv.legacy_skip_deduct === true) return [{ name: t("歷史發票"), qty: 0, skip: true, reason: t("已標記為歷史，不扣庫存") }];
     let itemsArr = inv.items;
     if (typeof itemsArr === "string") { try { itemsArr = JSON.parse(itemsArr); } catch { itemsArr = []; } }
     if (!Array.isArray(itemsArr)) itemsArr = [];
     const parentIds = new Set(products.filter(x => x.parent_product_id).map(x => x.parent_product_id));
+    const norm = (s) => (s || "").toLowerCase().trim();
+    const aliasByName = new Map(lineItemAliases.map(a => [norm(a.alias_name), a]));
     const plan = [];
     for (const it of itemsArr) {
-      const prod = products.find(p => p.name === it.name);
-      if (!prod) { plan.push({ name: it.name, qty: Number(it.qty) || 0, skip: true, reason: t("產品未匹配") }); continue; }
-      if (prod.category === '_archived') { plan.push({ name: it.name, qty: Number(it.qty) || 0, skip: true, reason: t("已歸檔老產品") }); continue; }
-      if (parentIds.has(prod.id)) { plan.push({ name: it.name, qty: Number(it.qty) || 0, skip: true, reason: t("父 SKU 不扣") }); continue; }
-      const wid = it.warehouse_id || defaultWh;
-      if (!wid) { plan.push({ name: it.name, qty: Number(it.qty) || 0, skip: true, reason: t("無倉庫") }); continue; }
-      const stock = stocks.find(s => s.product_id === prod.id && s.warehouse_id === wid);
-      const current = stock?.qty || 0;
-      const deduct = Number(it.qty) || 0;
-      plan.push({ product_id: prod.id, warehouse_id: wid, name: it.name, qty: deduct, current, after: current - deduct });
+      const itemQty = Number(it.qty) || 0;
+      const alias = aliasByName.get(norm(it.name));
+      // 沒有 alias 映射 → 退回到「products.name 直接匹配」（兼容手動發票）
+      if (!alias) {
+        const prod = products.find(p => p.name === it.name);
+        if (!prod) { plan.push({ name: it.name, qty: itemQty, skip: true, reason: t("未配 line item 映射") }); continue; }
+        if (prod.is_virtual === true) { plan.push({ name: it.name, qty: itemQty, skip: true, reason: t("虛擬產品") }); continue; }
+        if (prod.category === '_archived') { plan.push({ name: it.name, qty: itemQty, skip: true, reason: t("已歸檔老產品") }); continue; }
+        if (parentIds.has(prod.id)) { plan.push({ name: it.name, qty: itemQty, skip: true, reason: t("父 SKU 不扣") }); continue; }
+        const wid = it.warehouse_id || defaultWh;
+        if (!wid) { plan.push({ name: it.name, qty: itemQty, skip: true, reason: t("無倉庫") }); continue; }
+        const stock = stocks.find(s => s.product_id === prod.id && s.warehouse_id === wid);
+        const current = stock?.qty || 0;
+        plan.push({ product_id: prod.id, warehouse_id: wid, name: it.name, qty: itemQty, current, after: current - itemQty });
+        continue;
+      }
+      // alias.skip=true → 押金/運費/Final Payment/租務，不扣
+      if (alias.skip === true) { plan.push({ name: it.name, qty: itemQty, skip: true, reason: alias.note || t("alias 標記為不扣") }); continue; }
+      // alias.products 是 [{product_id, qty}] 數組，套裝的話多條
+      const aliasProducts = Array.isArray(alias.products) ? alias.products : [];
+      if (aliasProducts.length === 0) { plan.push({ name: it.name, qty: itemQty, skip: true, reason: t("alias 未配產品") }); continue; }
+      for (const ap of aliasProducts) {
+        const prod = products.find(p => p.id === ap.product_id);
+        if (!prod) { plan.push({ name: `${it.name} → ?`, qty: 0, skip: true, reason: t("alias 引用的產品已刪除") }); continue; }
+        if (prod.category === '_archived') { plan.push({ name: `${it.name} → ${prod.name}`, qty: 0, skip: true, reason: t("已歸檔老產品") }); continue; }
+        if (parentIds.has(prod.id)) { plan.push({ name: `${it.name} → ${prod.name}`, qty: 0, skip: true, reason: t("父 SKU 不扣") }); continue; }
+        const wid = it.warehouse_id || defaultWh;
+        if (!wid) { plan.push({ name: `${it.name} → ${prod.name}`, qty: 0, skip: true, reason: t("無倉庫") }); continue; }
+        const perUnitQty = Number(ap.qty) || 1;
+        const totalDeduct = perUnitQty * itemQty;
+        const stock = stocks.find(s => s.product_id === prod.id && s.warehouse_id === wid);
+        const current = stock?.qty || 0;
+        plan.push({ product_id: prod.id, warehouse_id: wid, name: `${it.name} → ${prod.name}`, qty: totalDeduct, current, after: current - totalDeduct });
+      }
     }
     return plan;
   }
@@ -2042,6 +2086,45 @@ export default function App() {
     queryClient.setQueryData(["bf", "employee_update_log_comments"], (old) => Array.isArray(old) ? old.filter(c => c.id !== commentId) : old);
   }
 
+  // ====== Line Item Alias handlers ======
+  async function handleSaveAlias(draft) {
+    if (!draft.alias_name || !draft.alias_name.trim()) { alert(t("alias_name 不能為空")); return; }
+    setAliasSaving(true);
+    try {
+      const payload = {
+        alias_name: draft.alias_name.trim(),
+        skip: draft.skip === true,
+        products: draft.skip === true ? [] : (Array.isArray(draft.products) ? draft.products.filter(p => p.product_id && Number(p.qty) > 0) : []),
+        note: (draft.note || "").trim() || null,
+        updated_at: new Date().toISOString(),
+      };
+      if (draft.id) {
+        const { data, error } = await supabase.from("line_item_aliases").update(payload).eq("id", draft.id).select().single();
+        if (error) throw error;
+        setLineItemAliases(prev => prev.map(a => a.id === draft.id ? data : a));
+        queryClient.setQueryData(["bf", "line_item_aliases"], (old) => Array.isArray(old) ? old.map(a => a.id === draft.id ? data : a) : old);
+      } else {
+        const { data, error } = await supabase.from("line_item_aliases").insert(payload).select().single();
+        if (error) throw error;
+        setLineItemAliases(prev => [...prev, data]);
+        queryClient.setQueryData(["bf", "line_item_aliases"], (old) => Array.isArray(old) ? [...old, data] : [data]);
+      }
+      setEditingAlias(null);
+    } catch (e) {
+      alert(`${t("保存失敗")}：${e.message}`);
+    } finally {
+      setAliasSaving(false);
+    }
+  }
+
+  async function handleDeleteAlias(aliasId) {
+    if (!window.confirm(t("確定刪除此映射？"))) return;
+    const { error } = await supabase.from("line_item_aliases").delete().eq("id", aliasId);
+    if (error) { alert(`${t("刪除失敗")}：${error.message}`); return; }
+    setLineItemAliases(prev => prev.filter(a => a.id !== aliasId));
+    queryClient.setQueryData(["bf", "line_item_aliases"], (old) => Array.isArray(old) ? old.filter(a => a.id !== aliasId) : old);
+  }
+
   // 認證載入中（Supabase 正在讀 session）
   if (authLoading) return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#f7f8fc" }}>
@@ -2345,6 +2428,16 @@ export default function App() {
                 <span style={{ fontSize: 18, lineHeight: 1 }}>+</span> {t("新增產品")}
               </button>
             </div>
+            {/* 子 tab：產品列表 / Line Item 映射 */}
+            <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: "1px solid #eef0fa" }}>
+              {[["list", t("產品列表")], ["aliases", t("Line Item 映射")]].map(([k, label]) => {
+                const on = productsSubTab === k;
+                return (
+                  <button key={k} onClick={() => setProductsSubTab(k)} style={{ padding: "8px 16px", background: "transparent", border: "none", borderBottom: on ? "2px solid #6382ff" : "2px solid transparent", color: on ? "#3b58d4" : "#888", fontSize: 13, fontWeight: 700, cursor: "pointer", marginBottom: -1 }}>{label}</button>
+                );
+              })}
+            </div>
+            {productsSubTab === "list" && (<>
             <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
               <Icon name="search" size={15} />
               <input placeholder={t("搜尋和篩選...")} value={search} onChange={e => setSearch(e.target.value)} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
@@ -2444,6 +2537,91 @@ export default function App() {
                 <div style={{ padding: 40, textAlign: "center", color: "#aaa" }}>{t("暫無產品")}</div>
               )}
             </div>
+            </>)}
+            {productsSubTab === "aliases" && (() => {
+              // 從所有非 legacy 發票（將來扣庫存的）+ 所有發票一起掃 unmatched line items
+              // 但 legacy=true 的單子不會扣庫存，所以也不需要 mapping，這裡只看 legacy=false 的
+              const known = new Set(lineItemAliases.map(a => (a.alias_name || "").toLowerCase().trim()));
+              const productNames = new Set(products.map(p => (p.name || "").toLowerCase().trim()));
+              const unmatched = new Map(); // name → count
+              for (const inv of invoices) {
+                if (inv.legacy_skip_deduct === true) continue;
+                let arr = inv.items;
+                if (typeof arr === "string") { try { arr = JSON.parse(arr); } catch { arr = []; } }
+                if (!Array.isArray(arr)) continue;
+                for (const it of arr) {
+                  const nm = (it.name || "").trim();
+                  const k = nm.toLowerCase();
+                  if (!nm) continue;
+                  if (known.has(k)) continue;
+                  if (productNames.has(k)) continue; // products.name 直接匹配的不算 unmatched
+                  unmatched.set(nm, (unmatched.get(nm) || 0) + 1);
+                }
+              }
+              const unmatchedSorted = [...unmatched.entries()].sort((a, b) => b[1] - a[1]);
+              const productById = new Map(products.map(p => [p.id, p]));
+              const productLabel = (id) => productById.get(id)?.name || "?";
+              return (
+                <div>
+                  {/* 未匹配 items */}
+                  <div style={{ background: "#fff8e1", border: "1px solid #ffe082", borderRadius: 12, padding: 16, marginBottom: 20 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#8a6900", marginBottom: 10 }}>
+                      ⚠ {t("未匹配的 line item")} <span style={{ fontSize: 12, color: "#b88a00", marginLeft: 6 }}>{unmatchedSorted.length}</span>
+                    </div>
+                    {unmatchedSorted.length === 0 ? (
+                      <div style={{ fontSize: 12, color: "#b8a76a", fontStyle: "italic" }}>{t("全部 line item 都已配映射 ✓")}</div>
+                    ) : (
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 60px 100px", gap: 8, alignItems: "center" }}>
+                        {unmatchedSorted.slice(0, 50).map(([nm, cnt]) => (
+                          <React.Fragment key={nm}>
+                            <div style={{ fontSize: 13, color: "#333" }}>{nm}</div>
+                            <div style={{ fontSize: 11, color: "#888", textAlign: "right" }}>{cnt} {t("次")}</div>
+                            <button onClick={() => setEditingAlias({ alias_name: nm, skip: false, products: [{ product_id: "", qty: 1 }], note: "" })} style={{ padding: "4px 10px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>+ {t("配映射")}</button>
+                          </React.Fragment>
+                        ))}
+                        {unmatchedSorted.length > 50 && <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#888", textAlign: "center", paddingTop: 6 }}>{t("還有")} {unmatchedSorted.length - 50} {t("條未顯示")}</div>}
+                      </div>
+                    )}
+                  </div>
+                  {/* 已建 aliases 列表 */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>{t("已配映射")} <span style={{ color: "#888", fontWeight: 400 }}>{lineItemAliases.length}</span></div>
+                    <button onClick={() => setEditingAlias({ alias_name: "", skip: false, products: [{ product_id: "", qty: 1 }], note: "" })} style={{ padding: "6px 14px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>+ {t("新增映射")}</button>
+                  </div>
+                  <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, overflow: "hidden" }}>
+                    {lineItemAliases.length === 0 ? (
+                      <div style={{ padding: 40, textAlign: "center", color: "#aaa", fontSize: 13 }}>{t("暫無映射，從上方未匹配列表點「配映射」開始")}</div>
+                    ) : (
+                      <div>
+                        <div style={{ display: "grid", gridTemplateColumns: "2fr 60px 2.5fr 1fr 100px", gap: 12, padding: "10px 16px", background: "#fafbfc", borderBottom: "1px solid #f0f0f0", fontSize: 12, fontWeight: 700, color: "#666" }}>
+                          <div>{t("alias_name")}</div>
+                          <div>{t("狀態")}</div>
+                          <div>{t("映射到")}</div>
+                          <div>{t("備註")}</div>
+                          <div></div>
+                        </div>
+                        {[...lineItemAliases].sort((a, b) => (a.alias_name || "").localeCompare(b.alias_name || "")).map(a => (
+                          <div key={a.id} style={{ display: "grid", gridTemplateColumns: "2fr 60px 2.5fr 1fr 100px", gap: 12, padding: "10px 16px", borderBottom: "1px solid #f5f5f5", alignItems: "center", fontSize: 13 }}>
+                            <div style={{ fontWeight: 600 }}>{a.alias_name}</div>
+                            <div>
+                              {a.skip ? <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, background: "#fee2e2", color: "#991b1b" }}>{t("不扣")}</span> : <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, background: "#d1fae5", color: "#047857" }}>{t("扣減")}</span>}
+                            </div>
+                            <div style={{ fontSize: 12, color: "#555" }}>
+                              {a.skip ? <span style={{ color: "#aaa" }}>—</span> : (Array.isArray(a.products) && a.products.length > 0 ? a.products.map(p => `${productLabel(p.product_id)}×${p.qty || 1}`).join(", ") : <span style={{ color: "#ef4444" }}>{t("未配產品")}</span>)}
+                            </div>
+                            <div style={{ fontSize: 11, color: "#888" }}>{a.note || ""}</div>
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <button onClick={() => setEditingAlias({ id: a.id, alias_name: a.alias_name, skip: a.skip, products: Array.isArray(a.products) && a.products.length > 0 ? a.products : [{ product_id: "", qty: 1 }], note: a.note || "" })} style={{ padding: "4px 10px", background: "#eef2ff", color: "#3b58d4", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>✏️</button>
+                              <button onClick={() => handleDeleteAlias(a.id)} style={{ padding: "4px 10px", background: "#fce4ec", color: "#e53935", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>×</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -3066,9 +3244,12 @@ export default function App() {
                 return (
                   <div key={inv.id} style={{ background: "#fff", borderRadius: 14, padding: "18px 22px", border: "1px solid #f0f0f0", boxShadow: "0 2px 8px rgba(0,0,0,0.03)", display: "flex", alignItems: "center", gap: 18 }}>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 800, fontSize: 15, display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ fontWeight: 800, fontSize: 15, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         {fmtInvNum(inv)}
                         {(() => { const s = invoiceSource(inv); return <span style={{ fontSize: 10, fontWeight: 700, color: s.color, background: s.bg, padding: "2px 7px", borderRadius: 6 }}>{s.label}</span>; })()}
+                        {getPossibleDupId(inv) && (
+                          <span title={t("此發票疑似與另一張發票重複（2 天內 / 同 email / 同 phone / 同產品），標 Paid 前請核對")} style={{ fontSize: 10, fontWeight: 700, color: "#b91c1c", background: "#fee2e2", padding: "2px 7px", borderRadius: 6 }}>⚠ {t("疑似重複")}</span>
+                        )}
                       </div>
                       <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>{(c?.phone || c?.phone_mainland) ? `${c.phone || c.phone_mainland} · ` : ""}{c?.name || "—"} · {inv.date || t("日期未知")} · {formatNotes(inv.notes)}</div>
                       {Array.isArray(inv.items) && inv.items.slice(0, 2).map((item, i) => (
@@ -5758,6 +5939,66 @@ export default function App() {
       )}
 
       {/* EDIT PRODUCT STOCK MODAL (分倉) */}
+      {/* LINE ITEM ALIAS EDIT MODAL */}
+      {editingAlias && (() => {
+        const draft = editingAlias;
+        const isNew = !draft.id;
+        const setDraft = (patch) => setEditingAlias(prev => ({ ...prev, ...patch }));
+        const setProduct = (idx, patch) => setEditingAlias(prev => ({ ...prev, products: prev.products.map((p, i) => i === idx ? { ...p, ...patch } : p) }));
+        const addRow = () => setEditingAlias(prev => ({ ...prev, products: [...prev.products, { product_id: "", qty: 1 }] }));
+        const removeRow = (idx) => setEditingAlias(prev => ({ ...prev, products: prev.products.filter((_, i) => i !== idx) }));
+        const selectableProducts = products.filter(p => p.category !== '_archived').sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 }}>
+            <div style={{ background: "#fff", borderRadius: 16, width: 560, maxWidth: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 22px", borderBottom: "1px solid #f0f0f0" }}>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>{isNew ? t("新增 Line Item 映射") : t("編輯映射")}</h2>
+                <button onClick={() => setEditingAlias(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}>×</button>
+              </div>
+              <div style={{ padding: 22, overflowY: "auto", flex: 1 }}>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: "#555", display: "block", marginBottom: 6 }}>alias_name <span style={{ color: "#ef4444" }}>*</span></label>
+                  <input value={draft.alias_name} onChange={e => setDraft({ alias_name: e.target.value })} disabled={!isNew} placeholder={t("發票 items 裡的原始名字")} style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", boxSizing: "border-box", background: isNew ? "#fff" : "#f5f5f5", color: isNew ? "#222" : "#888" }} />
+                  {!isNew && <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>{t("已存在的 alias 不可改名（避免破壞已建關聯）")}</div>}
+                </div>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+                    <input type="checkbox" checked={draft.skip === true} onChange={e => setDraft({ skip: e.target.checked })} />
+                    {t("此 alias 不扣庫存（押金 / 運費 / Final Payment / 租務 等）")}
+                  </label>
+                </div>
+                {draft.skip !== true && (
+                  <div style={{ marginBottom: 14 }}>
+                    <label style={{ fontSize: 12, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>{t("映射到產品")} <span style={{ fontSize: 11, color: "#888", fontWeight: 400 }}>· {t("套裝可加多行")}</span></label>
+                    {draft.products.map((row, idx) => (
+                      <div key={idx} style={{ display: "grid", gridTemplateColumns: "1fr 70px 30px", gap: 8, marginBottom: 6 }}>
+                        <select value={row.product_id} onChange={e => setProduct(idx, { product_id: e.target.value })} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", background: "#fff" }}>
+                          <option value="">{t("選擇產品...")}</option>
+                          {selectableProducts.map(p => (
+                            <option key={p.id} value={p.id}>{p.name}{p.parent_product_id ? "" : ""}</option>
+                          ))}
+                        </select>
+                        <input type="number" min="1" value={row.qty} onChange={e => setProduct(idx, { qty: Number(e.target.value) || 1 })} placeholder="qty" style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", textAlign: "center" }} />
+                        <button onClick={() => removeRow(idx)} disabled={draft.products.length === 1} style={{ background: draft.products.length === 1 ? "#f5f5f5" : "#fce4ec", color: draft.products.length === 1 ? "#ccc" : "#e53935", border: "none", borderRadius: 8, fontSize: 14, cursor: draft.products.length === 1 ? "not-allowed" : "pointer" }}>×</button>
+                      </div>
+                    ))}
+                    <button onClick={addRow} style={{ padding: "6px 12px", background: "#fafbff", border: "1px dashed #c6d3ff", color: "#6382ff", borderRadius: 8, fontSize: 12, cursor: "pointer", marginTop: 4 }}>+ {t("加一行")}</button>
+                  </div>
+                )}
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: "#555", display: "block", marginBottom: 6 }}>{t("備註（可選）")}</label>
+                  <input value={draft.note || ""} onChange={e => setDraft({ note: e.target.value })} placeholder={t("例如：DC 二代首付 / Final Payment / 套裝")} style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 10, padding: "14px 22px", borderTop: "1px solid #f0f0f0" }}>
+                <button onClick={() => setEditingAlias(null)} style={{ flex: 1, padding: 10, background: "#f5f5f5", color: "#666", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>{t("取消")}</button>
+                <button onClick={() => handleSaveAlias(draft)} disabled={aliasSaving} style={{ flex: 2, padding: 10, background: aliasSaving ? "#a0aec0" : "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 800, cursor: aliasSaving ? "not-allowed" : "pointer" }}>{aliasSaving ? t("保存中...") : t("保存")}</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {editingProduct && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
           <div style={{ background: "#fff", borderRadius: 20, padding: 32, width: 440, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
