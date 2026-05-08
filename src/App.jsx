@@ -1123,6 +1123,10 @@ export default function App() {
     if (inv.shipping_status) return inv.shipping_status;
     return inv.tracking_number ? '已發貨' : '待發貨';
   };
+  // 物流追蹤啟用日期：之前的歷史發票太多（4500+ 張 NULL status），不納入「待發貨」統計/列表
+  // 老單若需補追蹤，編輯時填單號照樣會走 trigger + Edge Function
+  const SHIPPING_TRACKING_SINCE = '2026-05-05';
+  const isShippingTrackable = (inv) => (inv?.date || '') >= SHIPPING_TRACKING_SINCE;
   const filteredInvoices = useMemo(() => {
     const q = search.toLowerCase();
     let base = !q ? invoices : invoices.filter(inv => {
@@ -1135,7 +1139,8 @@ export default function App() {
     if (shippingFilter !== "all") {
       base = base.filter(inv => {
         const ss = deriveShippingStatus(inv);
-        if (shippingFilter === "pending")    return ss === '待發貨';
+        // pending 列表只顯示啟用日期之後的，老單不算
+        if (shippingFilter === "pending")    return ss === '待發貨' && isShippingTrackable(inv);
         if (shippingFilter === "in_transit") return ['已發貨','在途','派送中'].includes(ss);
         if (shippingFilter === "exception")  return ss === '異常';
         if (shippingFilter === "delivered")  return ss === '已簽收';
@@ -2284,7 +2289,8 @@ export default function App() {
             {/* 物流 3 卡（dashboard 第二行） */}
             {(() => {
               const paidInvoices = invoices.filter(i => (i.status || "").trim().toLowerCase() === "paid");
-              const pending = paidInvoices.filter(i => deriveShippingStatus(i) === '待發貨').length;
+              // 待發貨 dashboard 卡：跟列表 filter 對齊，只算啟用日期之後的（避免 4500+ 張歷史 NULL 全進來）
+              const pending = paidInvoices.filter(i => deriveShippingStatus(i) === '待發貨' && isShippingTrackable(i)).length;
               const inTransit = paidInvoices.filter(i => ['已發貨','在途','派送中'].includes(deriveShippingStatus(i))).length;
               const fourteenDaysAgo = Date.now() - 14 * 24 * 60 * 60 * 1000;
               const overdue = paidInvoices.filter(i => {
