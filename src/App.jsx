@@ -1326,9 +1326,10 @@ export default function App() {
     const formatted = /^\d+$/.test(stripped) ? stripped.padStart(5, "0") : stripped;
     return `DC${formatted}`;
   };
-  // 推斷發票來源（Shopify 直接訂單 / Framer 表單 / 手動）
+  // 推斷發票來源（Shopify 直接訂單 / Framer 表單 / 百老匯 / 手動）
   const invoiceSource = (inv) => {
     const notes = inv?.notes || "";
+    if (notes.includes("__BROADWAY__")) return { label: t("百老匯"), color: "#dc2626", bg: "#fee2e2" };
     if (notes.includes("__FORMS_BUY__")) return { label: "Framer", color: "#6382ff", bg: "#eef2ff" };
     // notes 空 + invoice_number 純數字 → 大概率 Shopify 同步進來的
     if (inv?.invoice_number && /^\d+$/.test(String(inv.invoice_number))) {
@@ -1656,13 +1657,16 @@ export default function App() {
       const ok = window.confirm(`${t("此發票疑似與發票")} ${dupId} ${t("重複（2 天內 / 同 email / 同 phone / 同產品）")}\n\n${t("確認標 Paid 並扣庫存？")}\n${t("（如果確認重複請改用編輯刪除此單，避免重複扣庫存）")}`);
       if (!ok) return;
     }
-    setMarkPaidCtx({ inv, defaultWh: warehouses[0]?.id || null });
+    // channel: 'self' = 自有（默認，扣庫存）/ 'broadway' = 百老匯渠道（不扣庫存）
+    const presetChannel = (inv.notes || "").includes("__BROADWAY__") ? "broadway" : "self";
+    setMarkPaidCtx({ inv, defaultWh: warehouses[0]?.id || null, channel: presetChannel });
   }
 
   // 解析發票 items 成扣減計劃（走 line_item_aliases 映射，支持單品/套裝/skip）
-  // legacy_skip_deduct=true 的發票直接返回空計劃（歷史單一律不扣）
+  // legacy_skip_deduct=true 或 notes 含 __BROADWAY__ 的發票直接返回空計劃（不扣庫存）
   function buildDeductionPlan(inv, defaultWh) {
     if (inv.legacy_skip_deduct === true) return [{ name: t("歷史發票"), qty: 0, skip: true, reason: t("已標記為歷史，不扣庫存") }];
+    if ((inv.notes || "").includes("__BROADWAY__")) return [{ name: t("百老匯渠道"), qty: 0, skip: true, reason: t("百老匯渠道：不扣本地庫存") }];
     let itemsArr = inv.items;
     if (typeof itemsArr === "string") { try { itemsArr = JSON.parse(itemsArr); } catch { itemsArr = []; } }
     if (!Array.isArray(itemsArr)) itemsArr = [];
@@ -1711,10 +1715,18 @@ export default function App() {
 
   async function executeMarkPaid() {
     if (!markPaidCtx) return;
-    const { inv, defaultWh } = markPaidCtx;
-    const plan = buildDeductionPlan(inv, defaultWh);
+    const { inv, defaultWh, channel } = markPaidCtx;
+    const isBroadway = channel === "broadway";
+
+    // 百老匯渠道：notes 加 __BROADWAY__ 標記（防重複追加）+ 跳過所有扣減
+    let nextNotes = inv.notes || "";
+    if (isBroadway && !nextNotes.includes("__BROADWAY__")) {
+      nextNotes = nextNotes ? `${nextNotes}\n__BROADWAY__` : "__BROADWAY__";
+    }
+
+    const plan = isBroadway ? [] : buildDeductionPlan(inv, defaultWh);
     const deductions = plan.filter(p => !p.skip && p.qty > 0);
-    // 扣減 + 流水
+    // 扣減 + 流水（百老匯渠道走不到這裡，deductions 為空）
     for (const d of deductions) {
       await supabase.from("inventory_stock").upsert({
         product_id: d.product_id,
@@ -1731,9 +1743,11 @@ export default function App() {
         invoice_id: inv.id,
       });
     }
-    const { error } = await supabase.from("invoices").update({ status: "Paid" }).eq("id", inv.id);
+    const updates = isBroadway ? { status: "Paid", notes: nextNotes } : { status: "Paid" };
+    const { error } = await supabase.from("invoices").update(updates).eq("id", inv.id);
     if (error) { alert(`${t("標記失敗")}：${error.message}`); return; }
-    setInvoices(prev => prev.map(i => i.id === inv.id ? { ...i, status: "Paid" } : i));
+    setInvoices(prev => prev.map(i => i.id === inv.id ? { ...i, ...updates } : i));
+    queryClient.setQueryData(["bf", "invoices"], (old) => Array.isArray(old) ? old.map(i => i.id === inv.id ? { ...i, ...updates } : i) : old);
     setStocks(prev => {
       const map = new Map(prev.map(s => [`${s.product_id}|${s.warehouse_id}`, s]));
       for (const d of deductions) {
@@ -5404,19 +5418,38 @@ export default function App() {
 
       {/* MARK PAID CONFIRM MODAL */}
       {markPaidCtx && (() => {
-        const { inv, defaultWh } = markPaidCtx;
-        const plan = buildDeductionPlan(inv, defaultWh);
+        const { inv, defaultWh, channel } = markPaidCtx;
+        const isBroadway = channel === "broadway";
+        const plan = isBroadway ? [] : buildDeductionPlan(inv, defaultWh);
         let itemsArr = inv.items;
         if (typeof itemsArr === "string") { try { itemsArr = JSON.parse(itemsArr); } catch { itemsArr = []; } }
         if (!Array.isArray(itemsArr)) itemsArr = [];
-        const anyMissing = itemsArr.some(it => !it.warehouse_id);
+        const anyMissing = !isBroadway && itemsArr.some(it => !it.warehouse_id);
         const insufficient = plan.filter(p => !p.skip && p.after < 0);
         return (
           <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }}>
             <div style={{ background: "#fff", borderRadius: 16, padding: 24, width: 520, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
               <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 4 }}>{t("標記已付款")}</div>
-              <div style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>#{inv.invoice_number || inv.id} · {t("將從庫存扣除對應數量")}</div>
-              {anyMissing && (
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>#{inv.invoice_number || inv.id} · {isBroadway ? t("百老匯渠道：不扣本地庫存") : t("將從庫存扣除對應數量")}</div>
+
+              {/* 渠道選擇：自有 / 百老匯 */}
+              <div style={{ marginBottom: 14, padding: "10px 12px", background: "#fafbff", borderRadius: 10, border: "1px solid #eef0fa" }}>
+                <div style={{ fontSize: 11, color: "#888", marginBottom: 8, fontWeight: 700 }}>{t("渠道")}</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {[
+                    { k: "self", label: t("自有") },
+                    { k: "broadway", label: t("百老匯") },
+                  ].map(opt => (
+                    <button key={opt.k} onClick={() => setMarkPaidCtx({ ...markPaidCtx, channel: opt.k })}
+                      style={{ flex: 1, padding: "9px 12px", borderRadius: 8, border: channel === opt.k ? `2px solid ${opt.k === "broadway" ? "#dc2626" : "#6382ff"}` : "1px solid #e0e0e0", background: channel === opt.k ? (opt.k === "broadway" ? "#fee2e2" : "#eef2ff") : "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer", color: channel === opt.k ? (opt.k === "broadway" ? "#b91c1c" : "#3b58d4") : "#555" }}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 自有渠道才顯示倉庫 picker + 扣減 plan */}
+              {!isBroadway && anyMissing && (
                 <div style={{ marginBottom: 14, padding: "12px 14px", background: "#fff8e1", borderRadius: 10, border: "1px solid #f4dca4" }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: "#8a6900", marginBottom: 8 }}>{t("此發票有商品未指定倉庫，統一扣：")}</div>
                   <div style={{ display: "flex", gap: 8 }}>
@@ -5429,25 +5462,27 @@ export default function App() {
                   </div>
                 </div>
               )}
-              <div style={{ border: "1px solid #eef0fa", borderRadius: 10, overflow: "hidden", marginBottom: 14 }}>
-                <div style={{ background: "#fafbff", padding: "8px 12px", fontSize: 11, color: "#888", display: "grid", gridTemplateColumns: "1fr 48px 60px 72px", gap: 6 }}>
-                  <div>{t("產品")}</div><div style={{ textAlign: "center" }}>{t("數量")}</div><div>{t("倉庫")}</div><div style={{ textAlign: "right" }}>{t("扣後")}</div>
-                </div>
-                {plan.map((p, i) => {
-                  const wh = warehouses.find(w => w.id === p.warehouse_id);
-                  return (
-                    <div key={i} style={{ padding: "9px 12px", fontSize: 12, borderTop: "1px solid #f5f5f5", display: "grid", gridTemplateColumns: "1fr 48px 60px 72px", gap: 6, alignItems: "center", background: p.skip ? "#fafafa" : (p.after < 0 ? "#fff5f5" : "#fff") }}>
-                      <div style={{ color: p.skip ? "#999" : "#222", fontStyle: p.skip ? "italic" : "normal" }}>{p.name || t("(空)")}</div>
-                      <div style={{ textAlign: "center", color: "#555" }}>{p.qty}</div>
-                      <div style={{ color: "#666", fontSize: 11 }}>{p.skip ? "—" : (wh ? wh.name.replace("分部", "") : t("？"))}</div>
-                      <div style={{ textAlign: "right", fontWeight: 700, color: p.skip ? "#999" : (p.after < 0 ? "#e53935" : "#22c55e") }}>
-                        {p.skip ? p.reason : `${p.current} → ${p.after}`}
+              {!isBroadway && (
+                <div style={{ border: "1px solid #eef0fa", borderRadius: 10, overflow: "hidden", marginBottom: 14 }}>
+                  <div style={{ background: "#fafbff", padding: "8px 12px", fontSize: 11, color: "#888", display: "grid", gridTemplateColumns: "1fr 48px 60px 72px", gap: 6 }}>
+                    <div>{t("產品")}</div><div style={{ textAlign: "center" }}>{t("數量")}</div><div>{t("倉庫")}</div><div style={{ textAlign: "right" }}>{t("扣後")}</div>
+                  </div>
+                  {plan.map((p, i) => {
+                    const wh = warehouses.find(w => w.id === p.warehouse_id);
+                    return (
+                      <div key={i} style={{ padding: "9px 12px", fontSize: 12, borderTop: "1px solid #f5f5f5", display: "grid", gridTemplateColumns: "1fr 48px 60px 72px", gap: 6, alignItems: "center", background: p.skip ? "#fafafa" : (p.after < 0 ? "#fff5f5" : "#fff") }}>
+                        <div style={{ color: p.skip ? "#999" : "#222", fontStyle: p.skip ? "italic" : "normal" }}>{p.name || t("(空)")}</div>
+                        <div style={{ textAlign: "center", color: "#555" }}>{p.qty}</div>
+                        <div style={{ color: "#666", fontSize: 11 }}>{p.skip ? "—" : (wh ? wh.name.replace("分部", "") : t("？"))}</div>
+                        <div style={{ textAlign: "right", fontWeight: 700, color: p.skip ? "#999" : (p.after < 0 ? "#e53935" : "#22c55e") }}>
+                          {p.skip ? p.reason : `${p.current} → ${p.after}`}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-              {insufficient.length > 0 && (
+                    );
+                  })}
+                </div>
+              )}
+              {!isBroadway && insufficient.length > 0 && (
                 <div style={{ marginBottom: 14, padding: "10px 14px", background: "#fff5f5", borderRadius: 10, border: "1px solid #f4c4c4", fontSize: 12, color: "#c53030" }}>
                   ⚠ {t("以下商品庫存不足，確認後將扣成負數：")}
                   <div style={{ marginTop: 4, fontSize: 11 }}>
@@ -5455,9 +5490,14 @@ export default function App() {
                   </div>
                 </div>
               )}
+              {isBroadway && (
+                <div style={{ marginBottom: 14, padding: "12px 14px", background: "#fee2e2", borderRadius: 10, border: "1px solid #fca5a5", fontSize: 12, color: "#991b1b" }}>
+                  {t("百老匯渠道：不扣本地庫存")}
+                </div>
+              )}
               <div style={{ display: "flex", gap: 10 }}>
                 <button onClick={() => setMarkPaidCtx(null)} style={{ flex: 1, padding: 10, background: "#f5f5f5", color: "#555", border: "none", borderRadius: 10, fontWeight: 700, cursor: "pointer" }}>{t("取消")}</button>
-                <button onClick={executeMarkPaid} disabled={anyMissing && !defaultWh} style={{ flex: 2, padding: 10, background: (anyMissing && !defaultWh) ? "#e0e0e0" : "#22c55e", color: "#fff", border: "none", borderRadius: 10, fontWeight: 800, cursor: (anyMissing && !defaultWh) ? "not-allowed" : "pointer" }}>{t("確認付款並扣庫存")}</button>
+                <button onClick={executeMarkPaid} disabled={anyMissing && !defaultWh} style={{ flex: 2, padding: 10, background: (anyMissing && !defaultWh) ? "#e0e0e0" : (isBroadway ? "#dc2626" : "#22c55e"), color: "#fff", border: "none", borderRadius: 10, fontWeight: 800, cursor: (anyMissing && !defaultWh) ? "not-allowed" : "pointer" }}>{isBroadway ? t("確認付款") : t("確認付款並扣庫存")}</button>
               </div>
             </div>
           </div>
