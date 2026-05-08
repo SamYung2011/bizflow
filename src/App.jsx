@@ -2731,28 +2731,110 @@ export default function App() {
           const hasChildren = children.length > 0;
           const pids = hasChildren ? children.map(c => c.id) : [p.id];
           const allPids = [p.id, ...children.map(c => c.id)];
-          // 90 天销售额
-          const since = new Date(); since.setDate(since.getDate() - 90);
-          let soldQty = 0, soldTotal = 0;
+          // 12 月每月聚合 + 90 天總覽 + 趨勢預測
+          // 走 line_item_aliases 映射查產品 UUID。alias/mapping 改了實時生效（每次 render 重算）
+          const today = new Date();
+          const targetPidSet = new Set(allPids);
+          const normName = (s) => (s || "").toLowerCase().trim();
+          const aliasByName = new Map(lineItemAliases.map(a => [normName(a.alias_name), a]));
+          const productByName = new Map(products.map(pp => [pp.name, pp]));
+          // 過去 12 個月（以本月為最後一格）
+          const monthlyStats = []; // [{ym, qty, revenue}]
+          for (let i = 11; i >= 0; i--) {
+            const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+            const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            monthlyStats.push({ ym, label: `${d.getMonth() + 1}月`, qty: 0, revenue: 0 });
+          }
+          const monthByYm = new Map(monthlyStats.map(m => [m.ym, m]));
           const buyers = new Set();
+          let soldQty = 0, soldTotal = 0;
+          const since90 = new Date(today); since90.setDate(since90.getDate() - 90);
           for (const inv of invoices) {
             if (!Array.isArray(inv.items) || !inv.date) continue;
-            if (new Date(inv.date) < since) continue;
-            const paid = (inv.status || "").toLowerCase() === "paid";
-            if (!paid) continue;
+            if ((inv.status || "").toLowerCase() !== "paid") continue;
+            const invDate = new Date(inv.date);
+            const ym = (inv.date || "").slice(0, 7);
+            const monthBucket = monthByYm.get(ym);
+            const within90 = invDate >= since90;
+            if (!monthBucket && !within90) continue;
+            let invMatched = false;
             for (const it of inv.items) {
               if (!it || !it.name) continue;
-              const matched = allPids.some(id => {
-                const prod = products.find(pp => pp.id === id);
-                return prod && prod.name === it.name;
-              });
-              if (matched) {
-                soldQty += (it.qty || 1);
-                soldTotal += (it.price || 0) * (it.qty || 1);
-                if (inv.customer_id) buyers.add(inv.customer_id);
+              const itemQty = Number(it.qty) || 1;
+              const itemPrice = Number(it.price) || 0;
+              const lineValue = itemPrice * itemQty;
+              const alias = aliasByName.get(normName(it.name));
+              let matchedQty = 0;
+              let matchedShare = 0;
+              if (alias && alias.skip !== true && Array.isArray(alias.products) && alias.products.length > 0) {
+                const totalMult = alias.products.reduce((s, x) => s + (Number(x.qty) || 1), 0);
+                for (const ap of alias.products) {
+                  if (targetPidSet.has(ap.product_id)) {
+                    const m = Number(ap.qty) || 1;
+                    matchedQty += m * itemQty;
+                    matchedShare += m / totalMult;
+                  }
+                }
+              } else if (!alias) {
+                const directProd = productByName.get(it.name);
+                if (directProd && targetPidSet.has(directProd.id)) {
+                  matchedQty += itemQty;
+                  matchedShare = 1;
+                }
+              }
+              if (matchedQty > 0) {
+                if (monthBucket) {
+                  monthBucket.qty += matchedQty;
+                  monthBucket.revenue += lineValue * matchedShare;
+                }
+                if (within90) {
+                  soldQty += matchedQty;
+                  soldTotal += lineValue * matchedShare;
+                  invMatched = true;
+                }
               }
             }
+            if (invMatched && inv.customer_id) buyers.add(inv.customer_id);
           }
+          // 三檔均量：跳過當月（partial month，會稀釋均值），只用完整月份
+          // 例如今天 2026-05-08：完整月份 = ... 2026-04，最近 6 月 = [2025-11..2026-04]
+          // 預測基礎用 6 月均（穩定，不被單一波動月帶偏），趨勢比 = 最近 6 月 vs 前 6 月
+          const sumQ = (arr) => arr.reduce((s, m) => s + m.qty, 0);
+          const sumR = (arr) => arr.reduce((s, m) => s + m.revenue, 0);
+          const completeMonths = monthlyStats.slice(0, -1); // 砍掉當月（最後一格 partial）
+          const last3  = completeMonths.slice(-3);           // 最近 3 個完整月（僅作展示）
+          const last6  = completeMonths.slice(-6);           // 最近 6 個完整月（baseline）
+          const prev6  = completeMonths.slice(-12, -6);      // 6-12 月前 6 個月（用作趨勢對比）
+          const last12 = completeMonths.slice(-12);          // 最近 12 個完整月
+          const avg3Qty  = last3.length  > 0 ? sumQ(last3)  / last3.length  : 0;
+          const avg6Qty  = last6.length  > 0 ? sumQ(last6)  / last6.length  : 0;
+          const avg12Qty = last12.length > 0 ? sumQ(last12) / last12.length : 0;
+          const avg6Rev  = last6.length  > 0 ? sumR(last6)  / last6.length  : 0;
+          const prev6Qty = prev6.length  > 0 ? sumQ(prev6)  / prev6.length  : 0;
+          const prev6Rev = prev6.length  > 0 ? sumR(prev6)  / prev6.length  : 0;
+          // 趨勢：最近 6 月均 vs 前 6 月均（6-12 月前）— 比 3 月窗口穩定
+          const growthQty = prev6Qty > 0 ? (avg6Qty - prev6Qty) / prev6Qty : (avg6Qty > 0 ? 1 : 0);
+          const growthRev = prev6Rev > 0 ? (avg6Rev - prev6Rev) / prev6Rev : (avg6Rev > 0 ? 1 : 0);
+          // 趨勢標識
+          const labelTrend = (g) => {
+            if (g >= 0.2)   return { icon: '↑', text: '上升', color: '#22c55e', bg: '#dcfce7' };
+            if (g >= 0.05)  return { icon: '↗', text: '略升', color: '#84cc16', bg: '#ecfccb' };
+            if (g <= -0.2)  return { icon: '↓', text: '下滑', color: '#ef4444', bg: '#fee2e2' };
+            if (g <= -0.05) return { icon: '↘', text: '略降', color: '#f59e0b', bg: '#fef3c7' };
+            return { icon: '→', text: '持平', color: '#888',   bg: '#f5f5f5' };
+          };
+          const trendQty = labelTrend(growthQty);
+          // 下月預測：最近 6 月均 + 半權重趨勢外推（baseline 改 6 月，更穩定）
+          const forecastQty = Math.max(0, avg6Qty * (1 + growthQty * 0.5));
+          const forecastRev = Math.max(0, avg6Rev * (1 + growthRev * 0.5));
+          // 信心度：用最近 6 完整月波動係數（標準差/均值）粗判
+          const recent6Qtys = last6.map(m => m.qty);
+          const meanQ = recent6Qtys.reduce((s, q) => s + q, 0) / Math.max(1, recent6Qtys.length);
+          const variance = recent6Qtys.reduce((s, q) => s + (q - meanQ) ** 2, 0) / Math.max(1, recent6Qtys.length);
+          const stdQ = Math.sqrt(variance);
+          const cv = meanQ > 0 ? stdQ / meanQ : 0; // coefficient of variation
+          const confidence = cv < 0.3 ? '高' : cv < 0.6 ? '中' : '低';
+          const maxMonthQty = Math.max(1, ...monthlyStats.map(m => m.qty));
           // 組織分類编辑
           const draft = productOrgDraft || { product_type: p.product_type || "", collections: p.collections || [], tags: p.tags || [] };
           const saveDraft = async () => {
@@ -3020,13 +3102,59 @@ export default function App() {
                 </div>
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                  {/* 90 天销售额 */}
+                  {/* 銷量趨勢 + 下月預測 */}
                   <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: 20 }}>
-                    <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 12 }}>{t("過去 90 天的銷售額")}</div>
-                    <div style={{ fontSize: 13, color: "#555", lineHeight: 1.8 }}>
-                      <div>• {t("售出")} <b>{soldQty}</b> {t("件")}</div>
-                      <div>• <b>{buyers.size}</b> {t("位買家")}</div>
-                      <div>• {t("銷貨淨額")} <b>HK$ {soldTotal.toLocaleString()}</b></div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                      <div style={{ fontSize: 14, fontWeight: 800 }}>{t("銷量趨勢")}</div>
+                      <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 12, background: trendQty.bg, color: trendQty.color, fontWeight: 700 }}>
+                        {trendQty.icon} {t(trendQty.text)} {growthQty !== 0 && `${growthQty > 0 ? '+' : ''}${Math.round(growthQty * 100)}%`}
+                      </span>
+                    </div>
+                    {/* 12 月每月迷你 bar chart */}
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 60, marginBottom: 8 }}>
+                      {monthlyStats.map((m) => (
+                        <div key={m.ym} title={`${m.ym}: ${Math.round(m.qty)} 件 · HK$${Math.round(m.revenue).toLocaleString()}`}
+                          style={{ flex: 1, height: `${(m.qty / maxMonthQty) * 100}%`, minHeight: m.qty > 0 ? 2 : 0, background: "linear-gradient(180deg, #6382ff, #a78bfa)", borderRadius: "3px 3px 0 0", opacity: m.qty > 0 ? 1 : 0.15 }} />
+                      ))}
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#aaa", marginBottom: 14 }}>
+                      <span>{monthlyStats[0]?.label}</span>
+                      <span>{monthlyStats[monthlyStats.length - 1]?.label}</span>
+                    </div>
+                    {/* 三檔均量 */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12, fontSize: 11 }}>
+                      <div style={{ textAlign: "center", padding: "6px 4px", background: "#f8f9ff", borderRadius: 6 }}>
+                        <div style={{ color: "#888", marginBottom: 2 }}>{t("12 月均")}</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#333" }}>{Math.round(avg12Qty)} {t("件")}</div>
+                      </div>
+                      <div style={{ textAlign: "center", padding: "6px 4px", background: "#eef2ff", borderRadius: 6, border: "1px solid #d0dafe" }}>
+                        <div style={{ color: "#3b58d4", marginBottom: 2, fontWeight: 700 }}>{t("6 月均")}</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#3b58d4" }}>{Math.round(avg6Qty)} {t("件")}</div>
+                      </div>
+                      <div style={{ textAlign: "center", padding: "6px 4px", background: "#f8f9ff", borderRadius: 6 }}>
+                        <div style={{ color: "#888", marginBottom: 2 }}>{t("3 月均")}</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#333" }}>{Math.round(avg3Qty)} {t("件")}</div>
+                      </div>
+                    </div>
+                    {/* 下月預測 */}
+                    {avg3Qty > 0 && (
+                      <div style={{ background: "#fff8e1", borderRadius: 8, padding: "10px 12px", marginBottom: 12, border: "1px solid #f4dca4" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                          <div style={{ fontSize: 11, color: "#8a6900", fontWeight: 700 }}>{t("下月預測")}</div>
+                          <div style={{ fontSize: 9, color: "#888" }}>{t("信心度")}：<b style={{ color: confidence === '高' ? '#22c55e' : confidence === '中' ? '#f59e0b' : '#ef4444' }}>{t(confidence)}</b></div>
+                        </div>
+                        <div style={{ fontSize: 13, color: "#333" }}>
+                          <b style={{ fontSize: 16, color: "#b87500" }}>{Math.round(forecastQty)}</b> {t("件")}
+                          <span style={{ color: "#888", marginLeft: 8 }}>· HK${Math.round(forecastRev).toLocaleString()}</span>
+                        </div>
+                        <div style={{ fontSize: 9, color: "#a89060", marginTop: 4 }}>{t("基於最近 6 月趨勢外推")}</div>
+                      </div>
+                    )}
+                    {/* 過去 90 天總覽（保留摘要） */}
+                    <div style={{ borderTop: "1px dashed #eee", paddingTop: 10, fontSize: 12, color: "#888", lineHeight: 1.7 }}>
+                      <div style={{ fontWeight: 700, color: "#555", marginBottom: 4 }}>{t("過去 90 天")}</div>
+                      <div>• {t("售出")} <b style={{ color: "#555" }}>{Math.round(soldQty)}</b> {t("件")} · <b style={{ color: "#555" }}>{buyers.size}</b> {t("位買家")}</div>
+                      <div>• {t("銷貨淨額")} <b style={{ color: "#555" }}>HK$ {Math.round(soldTotal).toLocaleString()}</b></div>
                     </div>
                   </div>
                   {/* 商品組織分類 */}
@@ -3551,16 +3679,57 @@ export default function App() {
           });
           const monthKeys = Object.keys(monthMap).sort();
           const maxMonth = Math.max(1, ...Object.values(monthMap));
-          // 產品 Top 10（按銷售金額）
+          // 產品銷售聚合：走 line_item_aliases 映射歸到 product UUID（套裝按 qty multiplier 比例分配營收）
+          // 之後 Top 10 / 餅圖 / 銷售趨勢表 共用這份數據
+          const normN = (s) => (s || "").toLowerCase().trim();
+          const trendAliasByName = new Map(lineItemAliases.map(a => [normN(a.alias_name), a]));
+          const productByName = new Map(products.map(pp => [pp.name, pp]));
+          const productSalesMap = new Map(); // product_id → {qty, revenue}
+          for (const inv of inRange) {
+            if (!Array.isArray(inv.items)) continue;
+            for (const it of inv.items) {
+              if (!it || !it.name) continue;
+              const itemQty = Number(it.qty) || 0;
+              if (itemQty <= 0) continue;
+              const itemPrice = Number(it.price) || 0;
+              const lineValue = itemPrice * itemQty;
+              const alias = trendAliasByName.get(normN(it.name));
+              let resolved = []; // [{product_id, qty, share}]
+              if (alias && alias.skip !== true && Array.isArray(alias.products) && alias.products.length > 0) {
+                const totalMult = alias.products.reduce((s, ap) => s + (Number(ap.qty) || 1), 0);
+                for (const ap of alias.products) {
+                  const m = Number(ap.qty) || 1;
+                  resolved.push({ product_id: ap.product_id, qty: m * itemQty, share: m / totalMult });
+                }
+              } else if (!alias) {
+                const directProd = productByName.get(it.name);
+                if (directProd) resolved.push({ product_id: directProd.id, qty: itemQty, share: 1 });
+              }
+              for (const r of resolved) {
+                const cur = productSalesMap.get(r.product_id) || { qty: 0, revenue: 0 };
+                cur.qty += r.qty;
+                cur.revenue += lineValue * r.share;
+                productSalesMap.set(r.product_id, cur);
+              }
+            }
+          }
+          // 按產品名合併同名 UUID（products 表存在多條同名 product，名字 string 一致就合一條）
+          // 不過濾 _archived（Honnmono 現役產品因老遷移殘留全標 _archived，過濾會清空主力數據）
+          // 過濾 is_virtual=true（押金/手續費等虛擬條目）
+          const namedSalesMap = new Map(); // name → {qty, revenue}
+          for (const [pid, v] of productSalesMap) {
+            const p = products.find(x => x.id === pid);
+            if (!p) continue;
+            if (p.is_virtual === true) continue;
+            const name = p.name || `(${t("未命名")})`;
+            const cur = namedSalesMap.get(name) || { qty: 0, revenue: 0 };
+            cur.qty += v.qty;
+            cur.revenue += v.revenue;
+            namedSalesMap.set(name, cur);
+          }
+          // 派生 prodMap (name→revenue) 給 Top 10 / 餅圖用
           const prodMap = {};
-          inRange.forEach(i => {
-            if (!Array.isArray(i.items)) return;
-            i.items.forEach(it => {
-              const name = it.name || t("未命名");
-              const amt = (Number(it.price) || 0) * (Number(it.qty) || 0);
-              prodMap[name] = (prodMap[name] || 0) + amt;
-            });
-          });
+          for (const [name, v] of namedSalesMap) prodMap[name] = v.revenue;
           const prodTop = Object.entries(prodMap).sort((a, b) => b[1] - a[1]).slice(0, 10);
           const maxProd = Math.max(1, ...prodTop.map(p => p[1]));
           // 客戶 Top 10：依 customerGroups（4 欄位命中 3+ 視為同一人）合併。無名堆一條
