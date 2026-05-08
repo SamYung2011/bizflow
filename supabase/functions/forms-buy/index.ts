@@ -172,12 +172,12 @@ Deno.serve(async (req) => {
     if (best) pendingMergeCid = String(best.id);
   }
 
-  // —— 2. 按產品名查 products 表回填價格（小寫 + 去空格/橫線模糊匹配） ——
-  type Item = { name: string; qty: number; price: number };
+  // —— 2. 按產品名查 products 表回填價格 + warranty_months snapshot（小寫 + 去空格/橫線模糊匹配） ——
+  type Item = { name: string; qty: number; price: number; warranty_months?: number };
   let items: Item[] = [];
   if (productNames.length > 0) {
     // 拉全 products 表（30-50 條，量很小）
-    const { data: products } = await sb.from("products").select("name, price");
+    const { data: products } = await sb.from("products").select("name, price, warranty_months");
     const normalize = (s: string) => (s || "").toLowerCase().replace(/[\s\-]+/g, "");
     items = productNames.map((pname) => {
       const target = normalize(pname);
@@ -187,11 +187,14 @@ Deno.serve(async (req) => {
         // 同名多条时优先 "推廣"/"限時" 促銷版
         p = matches.find((x: { name: string }) => /推廣|限時|優惠/.test(x.name)) || matches[0];
       }
-      return {
+      const item: Item = {
         name: pname,
         qty: 1,
         price: p?.price ? Number(p.price) : 0,
       };
+      // 下單時凍結保修月數，未來改產品 warranty_months 不追溯此單
+      if (p?.warranty_months) item.warranty_months = Number(p.warranty_months);
+      return item;
     });
   }
   const total = items.reduce((s, i) => s + i.price * i.qty, 0);

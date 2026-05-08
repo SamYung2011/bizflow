@@ -827,6 +827,8 @@ export default function App() {
   const [editingProduct, setEditingProduct] = useState(null);
   const [editStock, setEditStock] = useState(0);
   const [editStocks, setEditStocks] = useState({});
+  const [editProductPrice, setEditProductPrice] = useState("");
+  const [editProductWarranty, setEditProductWarranty] = useState("");
 
   // 新增產品 modal
   const emptyNewProduct = () => ({
@@ -1235,15 +1237,22 @@ export default function App() {
     setPendingAttachments([]);
   }, [editingTask?.id, userId]);
 
-  // 打開編輯庫存弹窗時從 stocks 載入各倉庫當前 qty
+  // 打開編輯產品彈窗時從 stocks/products 載入當前值
   useEffect(() => {
-    if (!editingProduct) { setEditStocks({}); return; }
+    if (!editingProduct) {
+      setEditStocks({});
+      setEditProductPrice("");
+      setEditProductWarranty("");
+      return;
+    }
     const init = {};
     for (const w of warehouses) {
       const row = stocks.find(s => s.product_id === editingProduct.id && s.warehouse_id === w.id);
       init[w.id] = row ? row.qty : 0;
     }
     setEditStocks(init);
+    setEditProductPrice(editingProduct.price != null ? String(editingProduct.price) : "");
+    setEditProductWarranty(editingProduct.warranty_months != null ? String(editingProduct.warranty_months) : "");
   }, [editingProduct, warehouses, stocks]);
 
   // 最快一張到位就解 spinner
@@ -1371,6 +1380,11 @@ export default function App() {
     return /運費|郵費|shipping|freight|防水盒|防水袋|押金|手續費/i.test(n);
   };
 
+  // 保修月數讀取優先級：item snapshot > 當前 product（snapshot 防止改產品時追溯歷史單）
+  const itemWarrantyMonths = (item, prod) => {
+    if (item?.warranty_months != null) return Number(item.warranty_months) || 0;
+    return prod?.warranty_months || 0;
+  };
   // 保修提醒：從發票 + 產品 warranty_months 推算
   const warrantyItems = useMemo(() => {
     const today = new Date();
@@ -1382,9 +1396,10 @@ export default function App() {
       for (const item of inv.items) {
         if (isNonWarrantyItem(item.name)) continue;
         const prod = products.find(p => p.name === item.name);
-        if (!prod || !prod.warranty_months) continue;
+        const months = itemWarrantyMonths(item, prod);
+        if (!months) continue;
         const wEnd = new Date(inv.date);
-        wEnd.setMonth(wEnd.getMonth() + prod.warranty_months);
+        wEnd.setMonth(wEnd.getMonth() + months);
         if (wEnd >= today && wEnd <= in30) {
           results.push({ customer: cust, customerName: cust?.name || "—", productName: item.name, invoiceNum: fmtInvNum(inv), invoiceDate: inv.date, warrantyEnd: wEnd.toISOString().slice(0, 10), daysLeft: Math.ceil((wEnd - today) / (1000 * 60 * 60 * 24)) });
         }
@@ -1445,9 +1460,10 @@ export default function App() {
       for (const item of inv.items) {
         if (isNonWarrantyItem(item.name)) continue;
         const prod = products.find(p => p.name === item.name);
-        if (!prod || !prod.warranty_months) continue;
+        const months = itemWarrantyMonths(item, prod);
+        if (!months) continue;
         const wEnd = new Date(inv.date);
-        wEnd.setMonth(wEnd.getMonth() + prod.warranty_months);
+        wEnd.setMonth(wEnd.getMonth() + months);
         if (wEnd >= expiredCutoff && wEnd <= upcomingCutoff) {
           const daysLeft = Math.ceil((wEnd - today) / (1000 * 60 * 60 * 24));
           let bucket;
@@ -1536,10 +1552,23 @@ export default function App() {
     setSaving(false);
   }
 
+  // 寫 invoice items 前把當前 product.warranty_months 快照進每條 item
+  // （已有 snapshot 的不覆蓋；item.name 對不上 product 的不寫）
+  function attachWarrantySnapshot(items) {
+    return items.map(it => {
+      if (it == null) return it;
+      if (it.warranty_months != null) return it;
+      if (isNonWarrantyItem(it.name)) return it;
+      const prod = products.find(p => p.name === it.name);
+      if (!prod || !prod.warranty_months) return it;
+      return { ...it, warranty_months: Number(prod.warranty_months) };
+    });
+  }
+
   async function handleGenerateInvoice() {
     setSaving(true);
     const invNumber = `${Date.now()}`.slice(-6);
-    const finalItems = [...newInvoice.items];
+    const finalItems = attachWarrantySnapshot([...newInvoice.items]);
     if (newInvoice.deposit?.enabled && Number(newInvoice.deposit.amount)) {
       finalItems.push({ id: mkItem().id, name: "押金", qty: 1, price: Number(newInvoice.deposit.amount) });
     }
@@ -1635,8 +1664,8 @@ export default function App() {
   }
   async function handleSaveInvoice() {
     if (!editingInvoice) return;
-    // 組裝最終 items：普通明細 + 勾選的 extras 作為 line item
-    const cleanItems = editInvItems.filter(it => it.name || it.qty || it.price);
+    // 組裝最終 items：普通明細 + 勾選的 extras 作為 line item（順手 snapshot 保修月數）
+    const cleanItems = attachWarrantySnapshot(editInvItems.filter(it => it.name || it.qty || it.price));
     const finalItems = [...cleanItems];
     if (editInvExtras.deposit?.enabled && Number(editInvExtras.deposit.amount)) {
       finalItems.push({ id: mkItem().id, name: "押金", qty: 1, price: Number(editInvExtras.deposit.amount) });
@@ -2985,7 +3014,7 @@ export default function App() {
                           </div>
                         );
                       })}
-                      <button onClick={() => setEditingProduct(p)} style={{ marginTop: 12, background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>{t("修改庫存")}</button>
+                      <button onClick={() => setEditingProduct(p)} style={{ marginTop: 12, background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>{t("修改產品")}</button>
                     </div>
                   )}
                 </div>
@@ -6119,11 +6148,27 @@ export default function App() {
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
           <div style={{ background: "#fff", borderRadius: 20, padding: 32, width: 440, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{t("修改庫存")}</h2>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{t("修改產品")}</h2>
               <button onClick={() => setEditingProduct(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
             </div>
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{editingProduct.name}</div>
             <div style={{ fontFamily: "monospace", fontSize: 11, color: "#aaa", marginBottom: 20 }}>{editingProduct.internal_code}</div>
+            {/* 價格 */}
+            <div style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 12 }}>
+              <label style={{ fontSize: 13, fontWeight: 700, color: "#555", minWidth: 80 }}>{t("價格")} HK$</label>
+              <input type="number" min="0" step="0.01" value={editProductPrice}
+                onChange={e => setEditProductPrice(e.target.value)}
+                style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 16, fontWeight: 700, outline: "none", textAlign: "center" }} />
+            </div>
+            {/* 保修月數 */}
+            <div style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 12 }}>
+              <label style={{ fontSize: 13, fontWeight: 700, color: "#555", minWidth: 80 }}>{t("保修")}（{t("月")}）</label>
+              <input type="number" min="0" value={editProductWarranty}
+                onChange={e => setEditProductWarranty(e.target.value)}
+                style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 16, fontWeight: 700, outline: "none", textAlign: "center" }} />
+            </div>
+            {/* 倉庫 */}
+            <div style={{ fontSize: 11, color: "#888", marginBottom: 8, marginTop: 8, fontWeight: 700 }}>{t("各倉庫存")}</div>
             {warehouses.map(w => (
               <div key={w.id} style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 12 }}>
                 <label style={{ fontSize: 13, fontWeight: 700, color: "#555", minWidth: 80 }}>{w.name}</label>
@@ -6135,6 +6180,47 @@ export default function App() {
             <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
               <button onClick={() => setEditingProduct(null)} style={{ flex: 1, padding: 12, background: "#f5f5f5", color: "#666", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>{t("取消")}</button>
               <button onClick={async () => {
+                // 1. 產品字段（價格 / 保修）有改動才更新
+                const newPrice = editProductPrice === "" ? null : Number(editProductPrice);
+                const newWarranty = editProductWarranty === "" ? null : parseInt(editProductWarranty, 10);
+                const productPatch = {};
+                const oldWarranty = editingProduct.warranty_months ?? null;
+                if (Number(editingProduct.price ?? 0) !== Number(newPrice ?? 0)) productPatch.price = newPrice;
+                if (oldWarranty !== newWarranty) productPatch.warranty_months = newWarranty;
+                // 1.5 保修月數有變 → 把該產品所有現存發票裡未 snapshot 的 line item 用「舊值」凍結
+                //     這樣老訂單保修期保持不變，只有改之日後新訂單才走新值
+                if ('warranty_months' in productPatch && oldWarranty != null) {
+                  const targetName = editingProduct.name;
+                  const dirtyInvoices = [];
+                  for (const inv of invoices) {
+                    if (!Array.isArray(inv.items)) continue;
+                    let dirty = false;
+                    const newItems = inv.items.map(it => {
+                      if (it?.name === targetName && it?.warranty_months == null && !isNonWarrantyItem(it.name)) {
+                        dirty = true;
+                        return { ...it, warranty_months: oldWarranty };
+                      }
+                      return it;
+                    });
+                    if (dirty) dirtyInvoices.push({ id: inv.id, items: newItems });
+                  }
+                  for (const u of dirtyInvoices) {
+                    const { error: invErr } = await supabase.from("invoices").update({ items: u.items }).eq("id", u.id);
+                    if (invErr) { alert(`${t("凍結舊訂單保修失敗")}：${invErr.message}`); return; }
+                  }
+                  if (dirtyInvoices.length > 0) {
+                    const idMap = new Map(dirtyInvoices.map(u => [u.id, u.items]));
+                    setInvoices(prev => prev.map(i => idMap.has(i.id) ? { ...i, items: idMap.get(i.id) } : i));
+                    queryClient.setQueryData(["bf", "invoices"], (old) => Array.isArray(old) ? old.map(i => idMap.has(i.id) ? { ...i, items: idMap.get(i.id) } : i) : old);
+                  }
+                }
+                if (Object.keys(productPatch).length > 0) {
+                  const { error: pErr } = await supabase.from("products").update(productPatch).eq("id", editingProduct.id);
+                  if (pErr) { alert(`${t("產品儲存失敗")}：${pErr.message}`); return; }
+                  setProducts(prev => prev.map(x => x.id === editingProduct.id ? { ...x, ...productPatch } : x));
+                  queryClient.setQueryData(["bf", "products"], (old) => Array.isArray(old) ? old.map(x => x.id === editingProduct.id ? { ...x, ...productPatch } : x) : old);
+                }
+                // 2. 庫存差異
                 const upserts = [];
                 const movements = [];
                 for (const w of warehouses) {
@@ -6145,22 +6231,20 @@ export default function App() {
                   upserts.push({ product_id: editingProduct.id, warehouse_id: w.id, qty: newQty, updated_at: new Date().toISOString() });
                   movements.push({ product_id: editingProduct.id, warehouse_id: w.id, delta: newQty - oldQty, type: "adjust", reason: "手動調整" });
                 }
-                if (upserts.length === 0) { setEditingProduct(null); return; }
-                const { error: upErr } = await supabase.from("inventory_stock").upsert(upserts, { onConflict: "product_id,warehouse_id" });
-                if (upErr) { alert(`${t("庫存儲存失敗")}：${upErr.message}`); return; }
-                if (movements.length > 0) {
-                  await supabase.from("inventory_movements").insert(movements);
+                if (upserts.length > 0) {
+                  const { error: upErr } = await supabase.from("inventory_stock").upsert(upserts, { onConflict: "product_id,warehouse_id" });
+                  if (upErr) { alert(`${t("庫存儲存失敗")}：${upErr.message}`); return; }
+                  if (movements.length > 0) await supabase.from("inventory_movements").insert(movements);
+                  setStocks(prev => {
+                    const map = new Map(prev.map(s => [`${s.product_id}_${s.warehouse_id}`, s]));
+                    for (const u of upserts) {
+                      const k = `${u.product_id}_${u.warehouse_id}`;
+                      const old = map.get(k);
+                      map.set(k, { ...(old || { id: crypto.randomUUID() }), ...u });
+                    }
+                    return [...map.values()];
+                  });
                 }
-                // 本地同步 stocks
-                setStocks(prev => {
-                  const map = new Map(prev.map(s => [`${s.product_id}_${s.warehouse_id}`, s]));
-                  for (const u of upserts) {
-                    const k = `${u.product_id}_${u.warehouse_id}`;
-                    const old = map.get(k);
-                    map.set(k, { ...(old || { id: crypto.randomUUID() }), ...u });
-                  }
-                  return [...map.values()];
-                });
                 setEditingProduct(null);
               }} style={{ flex: 1, padding: 12, background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>{t("儲存")}</button>
             </div>
