@@ -3733,19 +3733,26 @@ export default function App() {
           const canEditEmp = (e) => isBfAdmin || (currentEmployee && e && e.id === currentEmployee.id);
           const canEditCurrent = canEditEmp(emp);
           const topTasks = emp ? tasks.filter(t => t.employee_id === emp.id && !t.parent_task_id) : [];
-          // done/abandoned 面板包含所有任務（含子任務），方便回顧；高/中/低（open）僅顯示頂層
+          // done/abandoned 面板包含子任務，但父任務已 done/abandoned 時子不再單獨顯示（隨父隱含）
           const allEmpTasks = emp ? tasks.filter(t => t.employee_id === emp.id) : [];
           const oneEightyDaysAgo = Date.now() - 180 * 24 * 60 * 60 * 1000;
           const within180Days = (t) => {
             const ts = t.completed_at ? new Date(t.completed_at).getTime() : new Date(t.created_at).getTime();
             return ts >= oneEightyDaysAgo;
           };
+          // 子任務僅當父任務還 open 時才在已完成/已放棄欄目單獨顯示
+          const showInTerminalCol = (t) => {
+            if (!t.parent_task_id) return true;
+            const parent = allEmpTasks.find(p => p.id === t.parent_task_id);
+            if (!parent) return true;
+            return parent.status === "open";
+          };
           const cols = emp ? {
             high: topTasks.filter(t => t.priority === "high" && t.status === "open"),
             mid:  topTasks.filter(t => t.priority === "mid"  && t.status === "open"),
             low:  topTasks.filter(t => (t.priority === "low" || t.priority === "none" || !t.priority) && t.status === "open"),
-            abandoned: allEmpTasks.filter(t => t.status === "abandoned" && within180Days(t)),
-            done: allEmpTasks.filter(t => t.status === "done" && within180Days(t)),
+            abandoned: allEmpTasks.filter(t => t.status === "abandoned" && within180Days(t) && showInTerminalCol(t)),
+            done: allEmpTasks.filter(t => t.status === "done" && within180Days(t) && showInTerminalCol(t)),
           } : null;
           // 该员工所有 task 的最新反馈（每个 task 取最近一条 comment 作摘要展示）
           const empTaskIds = emp ? new Set(tasks.filter(t => t.employee_id === emp.id).map(t => t.id)) : new Set();
