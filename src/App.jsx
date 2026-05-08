@@ -299,6 +299,14 @@ function printInvoice(inv, customer, items, products = [], mode = { invoice: tru
   setTimeout(() => w.print(), 500);
 }
 
+// ── 銷售佣金規則（hardcoded） ──────────────────────────────────────────────────
+// 每件 HKD，product.category 命中才算。改規則需改這裡 + 部署
+const COMMISSION_RULES = {
+  '轉插': 600,
+};
+// 此日期之前的發票不算佣金（歷史不追溯）
+const COMMISSION_CUTOFF = '2026-05-09';
+
 // ── MAIN APP ───────────────────────────────────────────────────────────────────
 export default function App() {
   const { t, lang, setLang } = useT();
@@ -815,6 +823,7 @@ export default function App() {
   const [markPaidCtx, setMarkPaidCtx] = useState(null); // { inv, defaultWh } —— 標記已付款彈窗
   const [stockToast, setStockToast] = useState(null); // { items: [name] } —— 右下角庫存不足 toast
   const [editInvItems, setEditInvItems] = useState([]);
+  const [editInvSalespersonId, setEditInvSalespersonId] = useState(""); // 編輯發票的銷售人
   const [editInvTotalOverride, setEditInvTotalOverride] = useState(""); // 空字串 = 跟隨明細合計；非空 = 手動覆蓋
   const [editInvExtras, setEditInvExtras] = useState({
     deposit: { enabled: false, amount: 0 },
@@ -850,7 +859,7 @@ export default function App() {
   });
 
   const [newInvoice, setNewInvoice] = useState({
-    customerId: "", items: [mkItem()], notes: "", warranty: false,
+    customerId: "", salespersonId: "", items: [mkItem()], notes: "", warranty: false,
     deposit: { enabled: false, amount: 0 },
     discount: { enabled: false, amount: 0 },
     surcharge: { enabled: false, amount: 0 },
@@ -865,7 +874,7 @@ export default function App() {
   function closeNewInvoice() {
     setShowNewInvoice(false);
     setNewInvoice({
-      customerId: "", items: [mkItem()], notes: "", warranty: false,
+      customerId: "", salespersonId: "", items: [mkItem()], notes: "", warranty: false,
       deposit: { enabled: false, amount: 0 },
       discount: { enabled: false, amount: 0 },
       surcharge: { enabled: false, amount: 0 },
@@ -1552,6 +1561,43 @@ export default function App() {
     setSaving(false);
   }
 
+  // 計算發票佣金（snapshot at Paid time）
+  // 規則：date >= COMMISSION_CUTOFF + 有 salesperson_id + 非百老匯，按 line items 走 alias 解析到 product，
+  //       product.category 命中 COMMISSION_RULES 則 per_unit × qty 累加
+  function computeCommissionFor(inv, salespersonId) {
+    if (!salespersonId) return 0;
+    if (!inv.date || inv.date < COMMISSION_CUTOFF) return 0;
+    if ((inv.notes || '').includes('__BROADWAY__')) return 0;
+    let itemsArr = inv.items;
+    if (typeof itemsArr === 'string') { try { itemsArr = JSON.parse(itemsArr); } catch { itemsArr = []; } }
+    if (!Array.isArray(itemsArr)) return 0;
+    const norm = (s) => (s || '').toLowerCase().trim();
+    const aliasByName = new Map(lineItemAliases.map(a => [norm(a.alias_name), a]));
+    let total = 0;
+    for (const it of itemsArr) {
+      const itemQty = Number(it.qty) || 0;
+      if (itemQty <= 0) continue;
+      const alias = aliasByName.get(norm(it.name));
+      let resolved = []; // [{product_id, qty}]
+      if (alias && alias.skip !== true && Array.isArray(alias.products)) {
+        for (const ap of alias.products) {
+          resolved.push({ product_id: ap.product_id, qty: (Number(ap.qty) || 1) * itemQty });
+        }
+      } else if (!alias) {
+        const directProd = products.find(p => p.name === it.name);
+        if (directProd) resolved.push({ product_id: directProd.id, qty: itemQty });
+      }
+      for (const r of resolved) {
+        const p = products.find(x => x.id === r.product_id);
+        if (!p) continue;
+        const rate = COMMISSION_RULES[p.category];
+        if (!rate) continue;
+        total += rate * r.qty;
+      }
+    }
+    return total;
+  }
+
   // 寫 invoice items 前把當前 product.warranty_months 快照進每條 item
   // （已有 snapshot 的不覆蓋；item.name 對不上 product 的不寫）
   function attachWarrantySnapshot(items) {
@@ -1581,6 +1627,7 @@ export default function App() {
     const { data, error } = await supabase.from("invoices").insert([{
       invoice_number: invNumber,
       customer_id: newInvoice.customerId || null,
+      salesperson_id: newInvoice.salespersonId || null,
       date: new Date().toISOString().slice(0, 10),
       items: finalItems,
       total: invoiceTotal,
@@ -1655,10 +1702,12 @@ export default function App() {
     setEditInvItems(normalItems.length > 0 ? normalItems : [mkItem()]);
     setEditInvExtras(extras);
     setEditInvTotalOverride("");
+    setEditInvSalespersonId(inv.salesperson_id || "");
   }
   function closeEditInvoice() {
     setEditingInvoice(null);
     setEditInvItems([]);
+    setEditInvSalespersonId("");
     setEditInvTotalOverride("");
     setEditInvExtras({ deposit: { enabled: false, amount: 0 }, discount: { enabled: false, amount: 0 }, surcharge: { enabled: false, amount: 0 } });
   }
@@ -1678,9 +1727,17 @@ export default function App() {
     }
     const itemsSum = finalItems.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 0), 0);
     const finalTotal = editInvTotalOverride === "" ? itemsSum : (Number(editInvTotalOverride) || 0);
-    const { error } = await supabase.from("invoices").update({ items: finalItems, total: finalTotal }).eq("id", editingInvoice.id);
+    const newSalespersonId = editInvSalespersonId || null;
+    const updates = { items: finalItems, total: finalTotal, salesperson_id: newSalespersonId };
+    // 如果發票已 Paid 且銷售人變更 → 重算佣金 snapshot（規則：當前規則 + 新銷售人）
+    const isPaid = (editingInvoice.status || '').trim().toLowerCase() === 'paid';
+    if (isPaid && (editingInvoice.salesperson_id || null) !== newSalespersonId) {
+      updates.commission_amount = computeCommissionFor({ ...editingInvoice, items: finalItems, salesperson_id: newSalespersonId }, newSalespersonId);
+    }
+    const { error } = await supabase.from("invoices").update(updates).eq("id", editingInvoice.id);
     if (error) { alert(`${t("儲存失敗")}：${error.message}`); return; }
-    setInvoices(prev => prev.map(i => i.id === editingInvoice.id ? { ...i, items: finalItems, total: finalTotal } : i));
+    setInvoices(prev => prev.map(i => i.id === editingInvoice.id ? { ...i, ...updates } : i));
+    queryClient.setQueryData(["bf", "invoices"], (old) => Array.isArray(old) ? old.map(i => i.id === editingInvoice.id ? { ...i, ...updates } : i) : old);
     closeEditInvoice();
   }
 
@@ -1777,7 +1834,10 @@ export default function App() {
         invoice_id: inv.id,
       });
     }
-    const updates = isBroadway ? { status: "Paid", notes: nextNotes } : { status: "Paid" };
+    // 佣金 snapshot：標 Paid 時按當前規則 + 銷售人 算一次寫入。後續改規則不追溯
+    const commissionAmount = computeCommissionFor(isBroadway ? { ...inv, notes: nextNotes } : inv, inv.salesperson_id);
+    const baseUpdates = { status: "Paid", commission_amount: commissionAmount };
+    const updates = isBroadway ? { ...baseUpdates, notes: nextNotes } : baseUpdates;
     const { error } = await supabase.from("invoices").update(updates).eq("id", inv.id);
     if (error) { alert(`${t("標記失敗")}：${error.message}`); return; }
     setInvoices(prev => prev.map(i => i.id === inv.id ? { ...i, ...updates } : i));
@@ -3494,6 +3554,11 @@ export default function App() {
                       <div style={{ fontWeight: 800, fontSize: 15, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         {fmtInvNum(inv)}
                         {(() => { const s = invoiceSource(inv); return <span style={{ fontSize: 10, fontWeight: 700, color: s.color, background: s.bg, padding: "2px 7px", borderRadius: 6 }}>{s.label}</span>; })()}
+                        {inv.salesperson_id && (() => {
+                          const sp = employees.find(e => e.id === inv.salesperson_id);
+                          if (!sp) return null;
+                          return <span title={t("負責銷售")} style={{ fontSize: 10, fontWeight: 700, color: "#7c3aed", background: "#ede9fe", padding: "2px 7px", borderRadius: 6 }}>{t("銷售")}: {sp.name}</span>;
+                        })()}
                         {getPossibleDupId(inv) && (
                           <span title={t("此發票疑似與另一張發票重複（2 天內 / 同 email / 同 phone / 同產品），標 Paid 前請核對")} style={{ fontSize: 10, fontWeight: 700, color: "#b91c1c", background: "#fee2e2", padding: "2px 7px", borderRadius: 6 }}>⚠ {t("疑似重複")}</span>
                         )}
@@ -3891,6 +3956,57 @@ export default function App() {
                   ))}
                 </div>
               </div>
+              {/* 銷售佣金月結（admin only）— 跨銷售人按月聚合，含已扣回標識 */}
+              {isBfAdmin && (() => {
+                const commInvoices = invoices.filter(i => i.salesperson_id && Number(i.commission_amount || 0) > 0);
+                if (commInvoices.length === 0) return null;
+                // 月份 → salesperson → {earned, reversed, count}
+                const monthlyMap = new Map();
+                for (const inv of commInvoices) {
+                  const ym = (inv.date || '').slice(0, 7);
+                  if (!ym) continue;
+                  if (!monthlyMap.has(ym)) monthlyMap.set(ym, new Map());
+                  const spMap = monthlyMap.get(ym);
+                  const sid = inv.salesperson_id;
+                  if (!spMap.has(sid)) spMap.set(sid, { earned: 0, reversed: 0, count: 0 });
+                  const cur = spMap.get(sid);
+                  const amt = Number(inv.commission_amount || 0);
+                  if (inv.commission_reversed) cur.reversed += amt;
+                  else cur.earned += amt;
+                  cur.count += 1;
+                }
+                const sortedYms = [...monthlyMap.keys()].sort().reverse();
+                return (
+                  <div style={{ background: "#fff", borderRadius: 14, padding: 24, border: "1px solid #f0f0f0", marginTop: 16 }}>
+                    <h3 style={{ margin: "0 0 16px", fontSize: 15, fontWeight: 700 }}>{t("銷售佣金月結")}</h3>
+                    {sortedYms.map(ym => {
+                      const spMap = monthlyMap.get(ym);
+                      const monthEarned = [...spMap.values()].reduce((s, v) => s + v.earned, 0);
+                      return (
+                        <div key={ym} style={{ marginBottom: 14, border: "1px solid #f0f0f0", borderRadius: 10 }}>
+                          <div style={{ padding: "10px 14px", borderBottom: "1px solid #f0f0f0", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#fafbff" }}>
+                            <div style={{ fontWeight: 700, fontSize: 14 }}>{ym}</div>
+                            <div style={{ fontSize: 12, color: "#16a34a", fontWeight: 700 }}>HK$ {Math.round(monthEarned).toLocaleString()}</div>
+                          </div>
+                          {[...spMap.entries()].map(([sid, v]) => {
+                            const sp = employees.find(e => e.id === sid);
+                            return (
+                              <div key={sid} style={{ display: "grid", gridTemplateColumns: "1fr 60px 110px 110px", gap: 10, padding: "8px 14px", borderTop: "1px solid #f8f8f8", alignItems: "center", fontSize: 12 }}>
+                                <div style={{ fontWeight: 600 }}>{sp?.name || t("(已刪除)")}</div>
+                                <div style={{ textAlign: "right", color: "#888" }}>{v.count} {t("張")}</div>
+                                <div style={{ textAlign: "right", fontWeight: 700, color: "#16a34a" }}>HK$ {Math.round(v.earned).toLocaleString()}</div>
+                                <div style={{ textAlign: "right", color: v.reversed > 0 ? "#b45309" : "#aaa" }}>
+                                  {v.reversed > 0 ? `${t("扣回")} HK${Math.round(v.reversed).toLocaleString()}` : "—"}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div>
           );
         })()}
@@ -3901,6 +4017,10 @@ export default function App() {
           const emp = selectedEmployee ? (employees.find(e => e.id === selectedEmployee.id) || selectedEmployee) : null;
           const canEditEmp = (e) => isBfAdmin || (currentEmployee && e && e.id === currentEmployee.id);
           const canEditCurrent = canEditEmp(emp);
+          // 子 tab 可見性：更新日誌（看員工字段）+ 佣金（員工是銷售 + 觀看者是 admin 或本人）
+          const showLogTab = emp?.show_update_log === true;
+          const showCommissionTab = emp?.role === '銷售' && (isBfAdmin || (currentEmployee && currentEmployee.id === emp.id));
+          const showAnyOptTab = showLogTab || showCommissionTab;
           const topTasks = emp ? tasks.filter(t => t.employee_id === emp.id && !t.parent_task_id) : [];
           // done/abandoned 面板包含子任務，但父任務已 done/abandoned 時子不再單獨顯示（隨父隱含）
           const allEmpTasks = emp ? tasks.filter(t => t.employee_id === emp.id) : [];
@@ -4082,10 +4202,14 @@ export default function App() {
                         {isBfAdmin && <button onClick={() => handleDeleteEmployee(emp)} style={{ background: "#fce4ec", border: "none", color: "#e53935", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{t("刪除員工")}</button>}
                       </div>
                     </div>
-                    {/* 子 tab：任務看板 / 更新日誌（更新日誌僅對 show_update_log=true 的員工顯示） */}
-                    {emp.show_update_log === true && (
+                    {/* 子 tab：任務看板 / 更新日誌 / 佣金（後兩個按條件顯示） */}
+                    {showAnyOptTab && (
                       <div style={{ display: "flex", gap: 4, marginBottom: 14, borderBottom: "1px solid #eef0fa" }}>
-                        {[["tasks", t("任務看板")], ["logs", t("更新日誌")]].map(([k, label]) => {
+                        {[
+                          ["tasks", t("任務看板")],
+                          ...(showLogTab ? [["logs", t("更新日誌")]] : []),
+                          ...(showCommissionTab ? [["commission", t("佣金")]] : []),
+                        ].map(([k, label]) => {
                           const on = empSubTab === k;
                           return (
                             <button key={k} onClick={() => setEmpSubTab(k)} style={{ padding: "8px 16px", background: "transparent", border: "none", borderBottom: on ? "2px solid #6382ff" : "2px solid transparent", color: on ? "#3b58d4" : "#888", fontSize: 13, fontWeight: 700, cursor: "pointer", marginBottom: -1 }}>{label}</button>
@@ -4093,7 +4217,7 @@ export default function App() {
                         })}
                       </div>
                     )}
-                    {(empSubTab === "tasks" || emp.show_update_log !== true) && (<>
+                    {(empSubTab === "tasks" || !showAnyOptTab) && (<>
                     {/* 3 列 × 2 行網格：高 中 | 添加（跨2行）| 反饋 低 */}
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gridTemplateRows: "auto auto", gap: 14, marginBottom: 20 }}>
                       <div style={{ gridColumn: 1, gridRow: 1 }}>{colBox(t("高優先級"), "#ef4444", cols.high.length, cols.high)}</div>
@@ -4330,6 +4454,82 @@ export default function App() {
                               </div>
                             )}
                           </>)}
+                        </div>
+                      );
+                    })()}
+                    {empSubTab === "commission" && showCommissionTab && (() => {
+                      // 此員工的佣金發票（按月分組 + 月合計，admin 可勾選 commission_reversed）
+                      const myInvoices = invoices.filter(i => i.salesperson_id === emp.id && (i.commission_amount || 0) > 0);
+                      // 按 YYYY-MM 分組
+                      const byMonth = new Map();
+                      for (const inv of myInvoices) {
+                        const ym = (inv.date || '').slice(0, 7);
+                        if (!ym) continue;
+                        if (!byMonth.has(ym)) byMonth.set(ym, []);
+                        byMonth.get(ym).push(inv);
+                      }
+                      const sortedYms = [...byMonth.keys()].sort().reverse();
+                      const totalEarned = myInvoices.filter(i => !i.commission_reversed).reduce((s, i) => s + Number(i.commission_amount || 0), 0);
+                      const totalReversed = myInvoices.filter(i => i.commission_reversed).reduce((s, i) => s + Number(i.commission_amount || 0), 0);
+                      const handleToggleReversed = async (inv) => {
+                        if (!isBfAdmin) return;
+                        const next = !inv.commission_reversed;
+                        const { error } = await supabase.from('invoices').update({ commission_reversed: next }).eq('id', inv.id);
+                        if (error) { alert(`${t("更新失敗")}：${error.message}`); return; }
+                        setInvoices(prev => prev.map(i => i.id === inv.id ? { ...i, commission_reversed: next } : i));
+                        queryClient.setQueryData(["bf", "invoices"], (old) => Array.isArray(old) ? old.map(i => i.id === inv.id ? { ...i, commission_reversed: next } : i) : old);
+                      };
+                      return (
+                        <div>
+                          {/* 摘要卡 */}
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+                            <div style={{ background: "#f0fdf4", border: "1px solid #c8e6c9", borderRadius: 10, padding: "12px 16px" }}>
+                              <div style={{ fontSize: 11, color: "#15803d", fontWeight: 700, marginBottom: 4 }}>{t("累計佣金（已生效）")}</div>
+                              <div style={{ fontSize: 22, fontWeight: 800, color: "#16a34a" }}>HK$ {Math.round(totalEarned).toLocaleString()}</div>
+                            </div>
+                            <div style={{ background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 16px" }}>
+                              <div style={{ fontSize: 11, color: "#92400e", fontWeight: 700, marginBottom: 4 }}>{t("已扣回")}</div>
+                              <div style={{ fontSize: 22, fontWeight: 800, color: "#b45309" }}>HK$ {Math.round(totalReversed).toLocaleString()}</div>
+                            </div>
+                          </div>
+                          {sortedYms.length === 0 ? (
+                            <div style={{ color: "#aaa", fontSize: 13, padding: "20px 0", textAlign: "center" }}>{t("尚無佣金記錄")}</div>
+                          ) : sortedYms.map(ym => {
+                            const list = byMonth.get(ym);
+                            const monthEarned = list.filter(i => !i.commission_reversed).reduce((s, i) => s + Number(i.commission_amount || 0), 0);
+                            const monthReversed = list.filter(i => i.commission_reversed).reduce((s, i) => s + Number(i.commission_amount || 0), 0);
+                            return (
+                              <div key={ym} style={{ marginBottom: 16, background: "#fff", borderRadius: 10, border: "1px solid #f0f0f0" }}>
+                                <div style={{ padding: "10px 14px", borderBottom: "1px solid #f0f0f0", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#fafbff" }}>
+                                  <div style={{ fontWeight: 700, fontSize: 14 }}>{ym}</div>
+                                  <div style={{ fontSize: 12, color: "#666" }}>
+                                    {t("月合計")}：<b style={{ color: "#16a34a" }}>HK$ {Math.round(monthEarned).toLocaleString()}</b>
+                                    {monthReversed > 0 && <span style={{ color: "#b45309", marginLeft: 8 }}>({t("扣回")} HK${Math.round(monthReversed).toLocaleString()})</span>}
+                                  </div>
+                                </div>
+                                {list.sort((a, b) => (b.date || '').localeCompare(a.date || '')).map(inv => {
+                                  const c = customers.find(x => x.id === inv.customer_id);
+                                  return (
+                                    <div key={inv.id} style={{ display: "grid", gridTemplateColumns: "auto 1fr 100px 100px", gap: 10, padding: "10px 14px", borderTop: "1px solid #f8f8f8", alignItems: "center", fontSize: 12, opacity: inv.commission_reversed ? 0.5 : 1 }}>
+                                      <div style={{ fontWeight: 700, color: "#666" }}>{fmtInvNum(inv)}</div>
+                                      <div style={{ color: "#555", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c?.name || '—'} · {inv.date}</div>
+                                      <div style={{ textAlign: "right", fontWeight: 700, color: inv.commission_reversed ? "#999" : "#16a34a", textDecoration: inv.commission_reversed ? "line-through" : "none" }}>HK$ {Math.round(Number(inv.commission_amount || 0)).toLocaleString()}</div>
+                                      <div style={{ textAlign: "right" }}>
+                                        {isBfAdmin ? (
+                                          <label style={{ fontSize: 11, color: "#888", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                            <input type="checkbox" checked={!!inv.commission_reversed} onChange={() => handleToggleReversed(inv)} />
+                                            {t("扣回")}
+                                          </label>
+                                        ) : inv.commission_reversed ? (
+                                          <span style={{ fontSize: 11, color: "#b45309", fontWeight: 700 }}>{t("已扣回")}</span>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })}
                         </div>
                       );
                     })()}
@@ -5571,6 +5771,20 @@ export default function App() {
                 </div>
                 <button onClick={closeEditInvoice} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
               </div>
+              {/* 負責銷售下拉 */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 5 }}>{t("負責銷售")}</label>
+                <select value={editInvSalespersonId} onChange={e => setEditInvSalespersonId(e.target.value)}
+                  style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", background: "#fff", boxSizing: "border-box" }}>
+                  <option value="">{t("（無）")}</option>
+                  {employees.filter(e => e.role === '銷售' && e.active !== false).map(e => (
+                    <option key={e.id} value={e.id}>{e.name}</option>
+                  ))}
+                </select>
+                {(editingInvoice.status || '').trim().toLowerCase() === 'paid' && (editingInvoice.salesperson_id || '') !== editInvSalespersonId && (
+                  <div style={{ fontSize: 11, color: "#b87500", marginTop: 4 }}>{t("已 Paid 發票改銷售人 → 佣金將按當前規則重算")}</div>
+                )}
+              </div>
               <div style={{ marginBottom: 14 }}>
                 <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>{t("明細")}</label>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 56px 90px 72px 36px", gap: 6, fontSize: 11, color: "#888", marginBottom: 6, paddingLeft: 4 }}>
@@ -6103,6 +6317,17 @@ export default function App() {
                       );
                     })()}
                   </div>
+                </div>
+                {/* 負責銷售下拉（可空 = 無歸屬不算佣金） */}
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 5 }}>{t("負責銷售")}</label>
+                  <select value={newInvoice.salespersonId || ""} onChange={e => setNewInvoice({ ...newInvoice, salespersonId: e.target.value })}
+                    style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", background: "#fff", boxSizing: "border-box" }}>
+                    <option value="">{t("（無）")}</option>
+                    {employees.filter(e => e.role === '銷售' && e.active !== false).map(e => (
+                      <option key={e.id} value={e.id}>{e.name}</option>
+                    ))}
+                  </select>
                 </div>
                 {newInvoice.customerId && (() => {
                   const gid = customerGroups.idToGroup.get(newInvoice.customerId);
