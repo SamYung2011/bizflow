@@ -16,6 +16,9 @@ const CORS_HEADERS = {
 const REPLY_DELAY_SECONDS_DEFAULT = 60;
 const MAX_HISTORY_DEFAULT = 20;
 const MAX_PROCESS_PER_RUN = 10;
+// 跟 wa-message 的 MERGE_WINDOW_MS 保持一致：客戶連發消息合併窗口 7s
+// 抢答倒計時從合併窗口結束才開始算，所以實際處理時機 = received_at + MERGE_WINDOW + reply_delay_base
+const MERGE_WINDOW_SECONDS = 7;
 
 const SYSTEM_PROMPT_HEAD = "你是一个专业的AI客服助手。请用友好、专业的语气回复客户的问题。回复要简洁明了。";
 
@@ -215,10 +218,12 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: "openai not configured" }), { status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
   }
 
-  // 2. 掃 pending（過了真人搶答倒計時還沒被取消的）
+  // 2. 掃 pending（合併窗口結束 + 過了真人搶答倒計時還沒被取消的）
+  // 流程：客戶發第一條消息 → 7s 合併窗口開放收容後續消息 → 窗口關閉 → reply_delay_base 秒抢答倒計時 → 處理
   // reply_delay_base 從 wa_settings 讀，bizflow 上改了立即生效，無需 redeploy
   const replyDelaySec = (settings.reply_delay_base as number) || REPLY_DELAY_SECONDS_DEFAULT;
-  const cutoff = new Date(Date.now() - replyDelaySec * 1000).toISOString();
+  const totalWaitSec = MERGE_WINDOW_SECONDS + replyDelaySec;
+  const cutoff = new Date(Date.now() - totalWaitSec * 1000).toISOString();
   const pendingRes = await sb.from("wa_pending_replies")
     .select("*")
     .eq("status", "pending")
