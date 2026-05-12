@@ -13,6 +13,13 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+interface LocationPayload {
+  lat: number;
+  lng: number;
+  placeName?: string;
+  address?: string;
+}
+
 interface MessagePayload {
   msg_id: string;              // 扩展生成的唯一 ID（去重用）
   customer_id: string;         // 私聊：手機號 / 群聊：chatId
@@ -22,7 +29,10 @@ interface MessagePayload {
   content: string;
   visible_context?: unknown[]; // 群聊用：可見的最近對話
   is_staff?: boolean;          // true = 真人客服在發消息（觸發冷卻）
+  location?: LocationPayload | null; // 位置消息：lat/lng/地點名（給 wa-ai-trigger 查 EPD 用）
 }
+
+const MERGE_WINDOW_MS = 5000; // 同 customer 5 秒內已有 pending 就合併，避免連發問題各自獨立調用 AI
 
 // 同步寫 wa_logs，跟本地 server.js 用同一張表 + 同一套 category 名（dashboard 共享顏色）。
 // 加 [云] 前綴方便 dashboard 一眼分辨來源。失敗吞掉，不阻擋主流程。
@@ -64,6 +74,9 @@ Deno.serve(async (req) => {
 
   // 收到日誌（content 截 50 字，避免敏感原話 + 日誌過長）
   cloudLog(sb, "收到", `${chatLabel}${senderLabel} → ${body.content.slice(0, 50)}${body.content.length > 50 ? "…" : ""}`);
+  if (body.location) {
+    cloudLog(sb, "收到", `${chatLabel} 位置消息 lat=${body.location.lat.toFixed(5)}, lng=${body.location.lng.toFixed(5)}${body.location.placeName ? " (" + body.location.placeName + ")" : ""}`);
+  }
 
   // 2. 寫對話記錄（即使是 staff / 冷卻中也寫，保留完整對話）
   await sb.from("wa_messages").insert({
@@ -99,7 +112,39 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ ok: true, in_cooldown: true, cooled_until: cd.data.cooled_until }), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
   }
 
-  // 5. 寫 wa_pending_replies 排隊等 60s 抢答
+  // 5a. 合併窗口：同 customer 5 秒內已有 pending → append content 到既有 pending
+  //     避免客戶連發 N 條問題 → AI 各自獨立調用 N 次 + 觸發 rate_limit cancel
+  const mergeSince = new Date(Date.now() - MERGE_WINDOW_MS).toISOString();
+  const existing = await sb.from("wa_pending_replies")
+    .select("id, content, location")
+    .eq("customer_id", body.customer_id)
+    .eq("status", "pending")
+    .gte("received_at", mergeSince)
+    .order("received_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existing.data) {
+    // 群聊合併時加 sender 前綴避免 AI 混淆誰說的
+    const prefix = body.is_group && body.sender ? `[${body.sender}] ` : "";
+    const newContent = `${existing.data.content}\n${prefix}${body.content}`;
+    // 新消息帶 location 而舊的沒 → 補上；都有就保留舊的（最早的位置上下文）
+    const newLocation = existing.data.location || body.location || null;
+    const upd = await sb.from("wa_pending_replies")
+      .update({ content: newContent, location: newLocation })
+      .eq("id", existing.data.id);
+    if (upd.error) {
+      cloudLog(sb, "错误", `合併 pending#${existing.data.id} 失敗：${upd.error.message}`);
+    } else {
+      const segs = newContent.split("\n").length;
+      cloudLog(sb, "回复入队", `pending#${existing.data.id} 合併（共 ${segs} 條）${chatLabel}`);
+    }
+    return new Response(JSON.stringify({ ok: true, merged_into: existing.data.id }), {
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    });
+  }
+
+  // 5b. 否則正常 INSERT 新 pending（等 60s 抢答）
   const ins = await sb.from("wa_pending_replies").insert({
     customer_id: body.customer_id,
     chat_name: body.chat_name || null,
@@ -107,6 +152,7 @@ Deno.serve(async (req) => {
     sender: body.sender || null,
     content: body.content,
     visible_context: body.visible_context ? JSON.stringify(body.visible_context) : null,
+    location: body.location || null,
     status: "pending",
   }).select("id").single();
 
