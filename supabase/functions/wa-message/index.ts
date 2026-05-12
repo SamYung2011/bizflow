@@ -34,6 +34,29 @@ interface MessagePayload {
 
 const MERGE_WINDOW_MS = 5000; // 同 customer 5 秒內已有 pending 就合併，避免連發問題各自獨立調用 AI
 
+// 從文本中嘗試解析 Google Maps 鏈接抠 lat/lng（兜底 content.js 不識別「粘貼的鏈接」場景）
+// content.js parseLocationFromEl 只認 WhatsApp 原生位置卡片的 DOM 結構（staticmap?markers=...）
+// 但客戶常複製 Google Maps 鏈接過來（普通文字消息）→ location=null → EPD 查不到
+function parseLocationFromText(content: string): LocationPayload | null {
+  if (!content) return null;
+  // 三種常見格式：?q=lat,lng / @lat,lng / /lat,lng
+  const patterns = [
+    /maps\.google\.[^\s]*[?&]q=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/i,
+    /maps\.google\.[^\s]*@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/i,
+    /maps\.google\.[^\s]*\/(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)(?:[,\/]|$)/i,
+  ];
+  for (const re of patterns) {
+    const m = content.match(re);
+    if (m) {
+      const lat = parseFloat(m[1]), lng = parseFloat(m[2]);
+      if (!isNaN(lat) && !isNaN(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && (lat !== 0 || lng !== 0)) {
+        return { lat, lng };
+      }
+    }
+  }
+  return null;
+}
+
 // 同步寫 wa_logs，跟本地 server.js 用同一張表 + 同一套 category 名（dashboard 共享顏色）。
 // 加 [云] 前綴方便 dashboard 一眼分辨來源。失敗吞掉，不阻擋主流程。
 async function cloudLog(
@@ -74,7 +97,15 @@ Deno.serve(async (req) => {
 
   // 收到日誌（content 截 50 字，避免敏感原話 + 日誌過長）
   cloudLog(sb, "收到", `${chatLabel}${senderLabel} → ${body.content.slice(0, 50)}${body.content.length > 50 ? "…" : ""}`);
-  if (body.location) {
+
+  // 客戶端未傳 location（v1.2 只認 WhatsApp 原生位置卡片）→ 從文本兜底解析 Google Maps 鏈接
+  if (!body.location) {
+    const parsed = parseLocationFromText(body.content);
+    if (parsed) {
+      body.location = parsed;
+      cloudLog(sb, "收到", `${chatLabel} 從文本解析位置 lat=${parsed.lat.toFixed(5)}, lng=${parsed.lng.toFixed(5)}（粘貼的 Maps 鏈接）`);
+    }
+  } else {
     cloudLog(sb, "收到", `${chatLabel} 位置消息 lat=${body.location.lat.toFixed(5)}, lng=${body.location.lng.toFixed(5)}${body.location.placeName ? " (" + body.location.placeName + ")" : ""}`);
   }
 
