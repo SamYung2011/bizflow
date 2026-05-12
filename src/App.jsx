@@ -1210,7 +1210,7 @@ export default function App() {
   const qWaReports = useQuery({ queryKey: ["bf", "wa_daily_reports"], queryFn: () => fetchAllTable("wa_daily_reports", "report_date", false), enabled: !!userId, refetchInterval: 60000 });
   const qWaHeartbeat = useQuery({ queryKey: ["bf", "wa_heartbeat"], queryFn: async () => { const { data } = await supabase.from("wa_heartbeat").select("*").eq("id", 1).maybeSingle(); return data; }, enabled: !!userId, refetchInterval: 15000 });
   const qWaLogs = useQuery({ queryKey: ["bf", "wa_logs"], queryFn: async () => { const { data } = await supabase.from("wa_logs").select("*").order("created_at", { ascending: false }).limit(500); return data || []; }, enabled: !!userId, refetchInterval: 5000 });
-  const qWaClients = useQuery({ queryKey: ["bf", "wa_clients"], queryFn: async () => { const { data } = await supabase.from("wa_clients").select("*").order("last_seen", { ascending: false }); return data || []; }, enabled: !!userId, refetchInterval: 5000 });
+  const qWaClients = useQuery({ queryKey: ["bf", "wa_clients"], queryFn: async () => { const { data } = await supabase.from("wa_clients").select("*").order("last_seen", { ascending: false }); return data || []; }, enabled: !!userId, refetchInterval: 2000 });
 
   // query data 同步到現有 useState，現存的 mutation 代碼（setCustomers 等）照舊工作
   useEffect(() => { if (qProducts.data) setProducts(qProducts.data); }, [qProducts.data]);
