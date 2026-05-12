@@ -32,7 +32,7 @@ interface MessagePayload {
   location?: LocationPayload | null; // 位置消息：lat/lng/地點名（給 wa-ai-trigger 查 EPD 用）
 }
 
-const MERGE_WINDOW_MS = 5000; // 同 customer 5 秒內已有 pending 就合併，避免連發問題各自獨立調用 AI
+const MERGE_WINDOW_MS = 7000; // 同 customer 7 秒內已有 pending 就合併，避免連發問題各自獨立調用 AI
 
 // 從文本中嘗試解析 Google Maps 鏈接抠 lat/lng（兜底 content.js 不識別「粘貼的鏈接」場景）
 // content.js parseLocationFromEl 只認 WhatsApp 原生位置卡片的 DOM 結構（staticmap?markers=...）

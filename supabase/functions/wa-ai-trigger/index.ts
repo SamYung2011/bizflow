@@ -13,7 +13,7 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
 
-const REPLY_DELAY_SECONDS = 60;
+const REPLY_DELAY_SECONDS_DEFAULT = 60;
 const MAX_HISTORY = 20;
 const MAX_PROCESS_PER_RUN = 10;
 
@@ -195,8 +195,10 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: "openai not configured" }), { status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
   }
 
-  // 2. 掃 pending（過了 60s 還沒被取消的）
-  const cutoff = new Date(Date.now() - REPLY_DELAY_SECONDS * 1000).toISOString();
+  // 2. 掃 pending（過了真人搶答倒計時還沒被取消的）
+  // reply_delay_base 從 wa_settings 讀，bizflow 上改了立即生效，無需 redeploy
+  const replyDelaySec = (settings.reply_delay_base as number) || REPLY_DELAY_SECONDS_DEFAULT;
+  const cutoff = new Date(Date.now() - replyDelaySec * 1000).toISOString();
   const pendingRes = await sb.from("wa_pending_replies")
     .select("*")
     .eq("status", "pending")
