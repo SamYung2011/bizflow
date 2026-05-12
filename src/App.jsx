@@ -2319,7 +2319,7 @@ export default function App() {
   // 扩展更新 toast 計算（全局浮動，任何 tab 都可見）
   const _latestExtVer = qWaSettings.data?.latest_ext_version || LATEST_EXT_VERSION_FALLBACK;
   const _outdatedClients = (waClients || [])
-    .filter(c => Date.now() - new Date(c.last_seen).getTime() < 15000)
+    .filter(c => Date.now() - new Date(c.last_seen).getTime() < 25000)
     .filter(c => c.version && c.version !== _latestExtVer);
   const _showUpdateToast = _outdatedClients.length > 0 && extUpdateToastDismissedFor !== _latestExtVer;
 
@@ -4728,7 +4728,7 @@ export default function App() {
                     <div style={{ fontSize: 11, color: "#888", lineHeight: 1.6 }}>{t("CLI / API 模式需本地開著 server.js。")}<b>{t("API 雲端")}</b>{t("模式由 Supabase Edge Function + pg_cron 接管，使用者只需安裝 Chrome 雲端版插件。")}</div>
                     {(s.claude_mode === "api_cloud") && (() => {
                       const LATEST_EXT_VERSION = qWaSettings.data?.latest_ext_version || LATEST_EXT_VERSION_FALLBACK;
-                      const liveClients = waClients.filter(c => Date.now() - new Date(c.last_seen).getTime() < 15000);
+                      const liveClients = waClients.filter(c => Date.now() - new Date(c.last_seen).getTime() < 25000);
                       const outdated = liveClients.filter(c => c.version && c.version !== LATEST_EXT_VERSION);
                       return (
                         <div style={{ marginTop: 12, padding: "12px 16px", background: "#fff8e1", border: "1px solid #f4dca4", borderRadius: 8, fontSize: 12, color: "#8a6900", lineHeight: 1.7 }}>
