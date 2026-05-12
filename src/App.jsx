@@ -4565,6 +4565,12 @@ export default function App() {
             if (error) { alert(`${t("保存失敗")}：${error.message}`); return; }
             setWaSettings(newVals);
             queryClient.setQueryData(["bf", "wa_settings"], newVals);
+            // fire-and-forget 触发一次 wa-ai-trigger：讓「已超抢答倒計時但還沒等到 cron」的 pending 立即用新 settings 處理
+            // 没 pending 就是空操作（操作數 0），不影响计费 / 性能
+            fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/wa-ai-trigger`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
+            }).catch(() => { /* silent */ });
           };
           const addWhitelist = async (kind, value, note) => {
             if (!guardAdmin()) return;
