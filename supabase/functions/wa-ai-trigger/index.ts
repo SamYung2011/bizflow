@@ -284,12 +284,14 @@ Deno.serve(async (req) => {
       if (p.location && typeof p.location === "object" && (p.location as any).lat) {
         location = p.location as any;
       } else {
+        // 只查當前 pending 之前的 location，避免拉到「之後才發來的位置」造成多個 pending 都注入同一個 location 答重複充電樁
         const locCutoff = new Date(Date.now() - LOCATION_TTL_MIN * 60 * 1000).toISOString();
         const locRow = await sb.from("wa_pending_replies")
           .select("location")
           .eq("customer_id", p.customer_id)
           .not("location", "is", null)
           .gte("received_at", locCutoff)
+          .lte("received_at", p.received_at)
           .order("received_at", { ascending: false })
           .limit(1)
           .maybeSingle();
