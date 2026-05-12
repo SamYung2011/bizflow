@@ -10,8 +10,9 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
-// Chrome 雲端版扩展最新版本（發版時跟 chrome-extension-cloud/manifest.json 的 version 同步改）
-const LATEST_EXT_VERSION = "1.3.1";
+// Chrome 雲端版扩展最新版本 fallback（實際讀 wa_settings.latest_ext_version，發版只改 DB 不用改前端）
+// 扩展啟動 + 每 30 分鐘自己也拉一次 wa_settings.latest_ext_version 比對，發現舊版本就在 WhatsApp 頁面彈 banner 提示
+const LATEST_EXT_VERSION_FALLBACK = "1.3.1";
 
 // 全量拉取指定表（HEAD 先取 count，再並行分頁拉所有資料）
 async function fetchAllTable(table, orderCol, ascending = true) {
@@ -4696,6 +4697,7 @@ export default function App() {
                     </div>
                     <div style={{ fontSize: 11, color: "#888", lineHeight: 1.6 }}>{t("CLI / API 模式需本地開著 server.js。")}<b>{t("API 雲端")}</b>{t("模式由 Supabase Edge Function + pg_cron 接管，使用者只需安裝 Chrome 雲端版插件。")}</div>
                     {(s.claude_mode === "api_cloud") && (() => {
+                      const LATEST_EXT_VERSION = qWaSettings.data?.latest_ext_version || LATEST_EXT_VERSION_FALLBACK;
                       const liveClients = waClients.filter(c => Date.now() - new Date(c.last_seen).getTime() < 15000);
                       const outdated = liveClients.filter(c => c.version && c.version !== LATEST_EXT_VERSION);
                       return (
