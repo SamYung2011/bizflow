@@ -375,10 +375,8 @@ export default function App() {
   const [waLogs, setWaLogs] = useState([]);
   const [waClients, setWaClients] = useState([]);
   const [showInstallTutorial, setShowInstallTutorial] = useState(false);
-  // 扩展更新 toast：本 session 內被 × 關掉的版本記在 sessionStorage 避免重複彈
-  const [extUpdateToastDismissedFor, setExtUpdateToastDismissedFor] = useState(() => {
-    try { return sessionStorage.getItem("ext_update_toast_dismissed") || ""; } catch { return ""; }
-  });
+  // 扩展更新 toast：純內存 state，× 關掉只在本次頁面 session 內生效。刷新頁面就重新彈（提醒及時感）
+  const [extUpdateToastDismissedFor, setExtUpdateToastDismissedFor] = useState("");
   const [waSubTab, setWaSubTab] = useState("settings"); // settings | knowledge | prompt | whitelist | messages | unresolved | reports | logs
   const [waSelectedCustomer, setWaSelectedCustomer] = useState(null);
   const [waHeartbeat, setWaHeartbeat] = useState(null);
@@ -2342,10 +2340,7 @@ export default function App() {
               <div style={{ fontSize: 11, color: "#888", marginTop: 6 }}>{t("請通知對方到「設置/模式」tab 重新下載")}</div>
             </div>
             <button
-              onClick={() => {
-                try { sessionStorage.setItem("ext_update_toast_dismissed", _latestExtVer); } catch {}
-                setExtUpdateToastDismissedFor(_latestExtVer);
-              }}
+              onClick={() => setExtUpdateToastDismissedFor(_latestExtVer)}
               style={{ background: "transparent", border: "none", color: "#999", fontSize: 18, cursor: "pointer", padding: 0, lineHeight: 1 }}
             >×</button>
           </div>
