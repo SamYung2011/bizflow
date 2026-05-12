@@ -952,6 +952,13 @@ const DICT_EN = {
   "個在線客戶端使用舊版（": " online client(s) on old version (",
   "），最新": "), latest ",
   "請通知對方到「設置/模式」tab 重新下載": "Please notify them to re-download from the Settings / Mode tab",
+  // ── line item alias mapping（早期遺漏翻譯，2026-05-12 補齊）──
+  "加一行": "Add row",
+  "描述 / 備註": "Description / Note",
+  "新增映射": "Add Mapping",
+  "配映射": "Map It",
+  "確定一鍵合併全部": "Merge all in one click?",
+  "瀏覽器阻擋了彈出窗口，請允許本網站彈窗後再試一次。\n發票已生成，可以從發票列表再次點選列印。": "The browser blocked the popup. Please allow popups for this site and try again.\nThe invoice has been generated; you can reprint it from the invoice list.",
 };
 
 const DICT_FR = {
@@ -1902,6 +1909,13 @@ const DICT_FR = {
   "個在線客戶端使用舊版（": " client(s) en ligne sur ancienne version (",
   "），最新": "), dernière ",
   "請通知對方到「設置/模式」tab 重新下載": "Demandez-leur de retélécharger depuis l'onglet Paramètres / Mode",
+  // ── line item alias mapping（早期遺漏翻譯，2026-05-12 補齊）──
+  "加一行": "Ajouter une ligne",
+  "描述 / 備註": "Description / Remarque",
+  "新增映射": "Ajouter un mappage",
+  "配映射": "Mapper",
+  "確定一鍵合併全部": "Tout fusionner en un clic ?",
+  "瀏覽器阻擋了彈出窗口，請允許本網站彈窗後再試一次。\n發票已生成，可以從發票列表再次點選列印。": "Le navigateur a bloqué la fenêtre contextuelle. Autorisez les pop-ups sur ce site puis réessayez.\nLa facture est générée ; vous pouvez la réimprimer depuis la liste des factures.",
 };
 
 const I18nContext = createContext({ lang: "zh", setLang: () => {}, t: (s) => s });
