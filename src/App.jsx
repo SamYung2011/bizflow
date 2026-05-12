@@ -375,6 +375,10 @@ export default function App() {
   const [waLogs, setWaLogs] = useState([]);
   const [waClients, setWaClients] = useState([]);
   const [showInstallTutorial, setShowInstallTutorial] = useState(false);
+  // 扩展更新 toast：本 session 內被 × 關掉的版本記在 sessionStorage 避免重複彈
+  const [extUpdateToastDismissedFor, setExtUpdateToastDismissedFor] = useState(() => {
+    try { return sessionStorage.getItem("ext_update_toast_dismissed") || ""; } catch { return ""; }
+  });
   const [waSubTab, setWaSubTab] = useState("settings"); // settings | knowledge | prompt | whitelist | messages | unresolved | reports | logs
   const [waSelectedCustomer, setWaSelectedCustomer] = useState(null);
   const [waHeartbeat, setWaHeartbeat] = useState(null);
@@ -2314,8 +2318,39 @@ export default function App() {
     </div>
   );
 
+  // 扩展更新 toast 計算（全局浮動，任何 tab 都可見）
+  const _latestExtVer = qWaSettings.data?.latest_ext_version || LATEST_EXT_VERSION_FALLBACK;
+  const _outdatedClients = (waClients || [])
+    .filter(c => Date.now() - new Date(c.last_seen).getTime() < 15000)
+    .filter(c => c.version && c.version !== _latestExtVer);
+  const _showUpdateToast = _outdatedClients.length > 0 && extUpdateToastDismissedFor !== _latestExtVer;
+
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "'DM Sans','Helvetica Neue',sans-serif", background: "#f7f8fc", color: "#1a1a2e" }}>
+
+      {/* 扩展更新 toast — 全局右下角浮動 */}
+      {_showUpdateToast && (
+        <div style={{ position: "fixed", bottom: 20, right: 20, zIndex: 9999, background: "#fff", border: "2px solid #ef4444", borderRadius: 12, padding: "14px 18px", maxWidth: 340, fontSize: 13, lineHeight: 1.6, boxShadow: "0 8px 24px rgba(239,68,68,0.25)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+            <div>
+              <div style={{ fontWeight: 700, color: "#c0392b", marginBottom: 6 }}>⚠️ {t("扩展有新版本")}</div>
+              <div style={{ color: "#333" }}>
+                {_outdatedClients.length} {t("個在線客戶端使用舊版（")}
+                {[...new Set(_outdatedClients.map(c => c.version))].map(v => `v${v}`).join(", ")}
+                {t("），最新")} <b style={{ color: "#c0392b" }}>v{_latestExtVer}</b>
+              </div>
+              <div style={{ fontSize: 11, color: "#888", marginTop: 6 }}>{t("請通知對方到「設置/模式」tab 重新下載")}</div>
+            </div>
+            <button
+              onClick={() => {
+                try { sessionStorage.setItem("ext_update_toast_dismissed", _latestExtVer); } catch {}
+                setExtUpdateToastDismissedFor(_latestExtVer);
+              }}
+              style={{ background: "transparent", border: "none", color: "#999", fontSize: 18, cursor: "pointer", padding: 0, lineHeight: 1 }}
+            >×</button>
+          </div>
+        </div>
+      )}
 
       {/* SIDEBAR */}
       <aside style={{ width: 220, background: "#1a1a2e", display: "flex", flexDirection: "column", flexShrink: 0 }}>
