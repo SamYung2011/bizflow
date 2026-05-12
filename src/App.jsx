@@ -4546,6 +4546,7 @@ export default function App() {
           const subNav = [
             { id: "settings",   label: t("設置 / 模式") },
             { id: "knowledge",  label: t("知識庫") },
+            { id: "chargers",   label: t("充電樁 Prompt") },
             { id: "prompt",     label: "Boss Prompt" },
             { id: "whitelist",  label: t("白名單") },
             { id: "messages",   label: t("對話歷史") },
@@ -4814,6 +4815,63 @@ export default function App() {
                     </div>
                     <textarea value={localKb} onChange={e => setWaSettings({ ...s, knowledge: e.target.value })} placeholder={t("# 產品線 1 ...")} style={{ width: "100%", minHeight: "60vh", padding: 16, borderRadius: 10, border: "1px solid " + (dirty ? "#f59e0b" : "#e0e0e0"), fontSize: 13, outline: "none", fontFamily: "ui-monospace, monospace", resize: "vertical", boxSizing: "border-box" }} />
                     <div style={{ fontSize: 11, color: "#aaa", marginTop: 8 }}>{localKb.length} {t("字符")}{dirty ? t("（與雲端不同，點「儲存知識庫」才生效）") : " · " + t("已同步")}</div>
+                  </div>
+                );
+              })()}
+
+              {/* 充電樁 PROMPT（雲端模式 EPD 查詢相關 prompt，bizflow 改了即時生效，無需 redeploy edge function） */}
+              {waSubTab === "chargers" && (() => {
+                const serverCp = qWaSettings.data?.chargers_prompt || "";
+                const localCp = s.chargers_prompt || "";
+                const cpDirty = localCp !== serverCp;
+                const serverLh = qWaSettings.data?.location_hint_prompt || "";
+                const localLh = s.location_hint_prompt || "";
+                const lhDirty = localLh !== serverLh;
+                return (
+                  <div style={{ display: "grid", gap: 24 }}>
+                    <div style={{ fontSize: 13, color: "#888", lineHeight: 1.6 }}>
+                      {t("這裡是雲端 AI 客服處理充電樁查詢相關的兩段 prompt。安全規則仍是硬編碼不可改。")}
+                    </div>
+
+                    {/* 充電樁服務說明 */}
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: "#333" }}>{t("充電樁服務說明")}</div>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                          {cpDirty && <span style={{ fontSize: 11, color: "#f59e0b", fontWeight: 600 }}>● {t("未儲存")}</span>}
+                          <button disabled={!cpDirty} onClick={() => saveSettings({ chargers_prompt: localCp })} style={{ padding: "6px 14px", background: cpDirty ? "#22c55e" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: cpDirty ? "pointer" : "not-allowed" }}>{t("儲存")}</button>
+                          {cpDirty && <button onClick={() => setWaSettings({ ...s, chargers_prompt: serverCp })} style={{ padding: "6px 12px", background: "#f5f5f5", color: "#666", border: "none", borderRadius: 8, fontSize: 12, cursor: "pointer" }}>{t("取消")}</button>}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>{t("AI 系統提示詞末尾追加的充電樁服務介紹。客戶咨詢充電站時 AI 用這裡的話術引導。")}</div>
+                      <textarea value={localCp} onChange={e => setWaSettings({ ...s, chargers_prompt: e.target.value })} style={{ width: "100%", minHeight: 200, padding: 14, borderRadius: 10, border: "1px solid " + (cpDirty ? "#f59e0b" : "#e0e0e0"), fontSize: 12, outline: "none", fontFamily: "ui-monospace, monospace", resize: "vertical", boxSizing: "border-box" }} />
+                      <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>{localCp.length} {t("字符")}</div>
+                    </div>
+
+                    {/* 位置注入模板 */}
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: "#333" }}>{t("位置注入模板")}</div>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                          {lhDirty && <span style={{ fontSize: 11, color: "#f59e0b", fontWeight: 600 }}>● {t("未儲存")}</span>}
+                          <button disabled={!lhDirty} onClick={() => saveSettings({ location_hint_prompt: localLh })} style={{ padding: "6px 14px", background: lhDirty ? "#22c55e" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: lhDirty ? "pointer" : "not-allowed" }}>{t("儲存")}</button>
+                          {lhDirty && <button onClick={() => setWaSettings({ ...s, location_hint_prompt: serverLh })} style={{ padding: "6px 12px", background: "#f5f5f5", color: "#666", border: "none", borderRadius: 8, fontSize: 12, cursor: "pointer" }}>{t("取消")}</button>}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 11, color: "#888", marginBottom: 6, lineHeight: 1.6 }}>
+                        {t("客戶發位置消息時，系統查 EPD 後注入給 AI 的參考資料模板。必須含兩個占位符：")}
+                        <code style={{ background: "#fff8e1", padding: "1px 5px", borderRadius: 3 }}>{"{LOCATION_DESC}"}</code>
+                        {t(" 和 ")}
+                        <code style={{ background: "#fff8e1", padding: "1px 5px", borderRadius: 3 }}>{"{STATIONS_OR_EMPTY}"}</code>
+                        {t("（保存時會檢查，缺一個就用默認模板兜底）")}
+                      </div>
+                      <textarea value={localLh} onChange={e => setWaSettings({ ...s, location_hint_prompt: e.target.value })} style={{ width: "100%", minHeight: 280, padding: 14, borderRadius: 10, border: "1px solid " + (lhDirty ? "#f59e0b" : "#e0e0e0"), fontSize: 12, outline: "none", fontFamily: "ui-monospace, monospace", resize: "vertical", boxSizing: "border-box" }} />
+                      <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>
+                        {localLh.length} {t("字符")} ·
+                        {localLh.includes("{LOCATION_DESC}") ? <span style={{ color: "#22c55e", marginLeft: 6 }}>✓ {"{LOCATION_DESC}"}</span> : <span style={{ color: "#c0392b", marginLeft: 6 }}>✗ {t("缺")} {"{LOCATION_DESC}"}</span>}
+                        {localLh.includes("{STATIONS_OR_EMPTY}") ? <span style={{ color: "#22c55e", marginLeft: 6 }}>✓ {"{STATIONS_OR_EMPTY}"}</span> : <span style={{ color: "#c0392b", marginLeft: 6 }}>✗ {t("缺")} {"{STATIONS_OR_EMPTY}"}</span>}
+                      </div>
+                    </div>
                   </div>
                 );
               })()}

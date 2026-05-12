@@ -19,7 +19,8 @@ const MAX_PROCESS_PER_RUN = 10;
 
 const SYSTEM_PROMPT_HEAD = "你是一个专业的AI客服助手。请用友好、专业的语气回复客户的问题。回复要简洁明了。";
 
-const SYSTEM_PROMPT_CHARGERS = `
+// 充電樁服務說明默認值（fallback）。實際從 wa_settings.chargers_prompt 讀，bizflow UI 可改即時生效。
+const SYSTEM_PROMPT_CHARGERS_DEFAULT = `
 
 充电桩查询服务（你可以主动提供给客户使用）：
 - Honnmono 提供香港全港 800+ 个公共充电桩的实时空位查询服务，数据源自香港政府环保署 EV-Charging Easy（实时更新）。
@@ -29,6 +30,7 @@ const SYSTEM_PROMPT_CHARGERS = `
   · 客户在咨询其他事情（配送、上门安装、产品询价等）→ **不要主动甩充电桩列表**，按其原问题回复，把位置当作配送/安装地址处理。
   · 客户冷启动只发了位置没说话 → 简短确认收到，温和询问需要查充电桩还是有其他需求。`;
 
+// SYSTEM_PROMPT_RULES 是安全規則，不對外暴露，保持硬編碼
 const SYSTEM_PROMPT_RULES = `
 
 重要规则：
@@ -47,7 +49,8 @@ function buildSystemPrompt(settings: Record<string, unknown>): string {
   const head = (settings.system_prompt as string) || SYSTEM_PROMPT_HEAD;
   const botName = settings.bot_name ? `\n\n你的名字叫 ${settings.bot_name}，當客戶喊你這個名字就是在叫你。` : "";
   const knowledge = settings.knowledge ? `\n\n以下是公司知识库：\n${settings.knowledge}` : "";
-  return head + botName + knowledge + SYSTEM_PROMPT_CHARGERS + SYSTEM_PROMPT_RULES;
+  const chargers = (settings.chargers_prompt as string) || SYSTEM_PROMPT_CHARGERS_DEFAULT;
+  return head + botName + knowledge + chargers + SYSTEM_PROMPT_RULES;
 }
 
 // ─── EPD 香港充電樁實時查詢模塊（拷貝自 whatsapp_api/server.js）────────
@@ -92,41 +95,58 @@ function findNearestStations(lat: number, lng: number, stations: any[], n = 5): 
     .slice(0, n);
 }
 
-function buildLocationContextHint(location: { lat: number; lng: number; placeName?: string }, chargers: any[]): string {
-  const guard = `⚠️ 最高優先級實時數據（剛剛通過 EPD 香港政府實時 API 查詢）⚠️
+// 默認模板（fallback）。實際從 wa_settings.location_hint_prompt 讀。
+// 模板含 2 個占位符：{LOCATION_DESC} 和 {STATIONS_OR_EMPTY}，代碼運行時替換為動態數據。
+const LOCATION_HINT_TEMPLATE_DEFAULT = `⚠️ 最高優先級實時數據（剛剛通過 EPD 香港政府實時 API 查詢）⚠️
 **重要：如果你在對話歷史中對該客戶說過「Honnmono 暫時未有資料庫」、「未能查詢」、「建議用 Google Maps」之類的話，那是錯誤回答。請以下面數據為準，不要再說「沒有」「未能查詢」之類的話。**
 
-`;
-  if (!chargers.length) {
-    return `\n\n${guard}【系统参考资料：客户发了位置 lat=${location.lat.toFixed(5)}, lng=${location.lng.toFixed(5)}${location.placeName ? "（" + location.placeName + "）" : ""}。已查询 EPD 实时数据，附近暂时找不到有空位的充电桩。如果客户是在询问充电桩，请告知这个情况；如果客户在咨询其他事情（如配送、上门服务），请按其问题回复。】\n`;
-  }
-  const lines = chargers.map((s, i) => {
-    const name = s.carParkCName || s.carParkEName || "未知";
-    const av = s.availableCharger || 0;
-    const total = s.numOfCharger || s.sizeOfCharger || 0;
-    const op = (s.chargerOperatorAll || "").split(";")[0] || "";
-    const free = isStationFree(s) ? "（免費）" : "（收費）";
-    const fcs = s.numOfAvailableFcsCharger || 0;
-    const pcs = s.numOfAvailablePcsCharger || 0;
-    const fcis = s.numOfAvailableFcisCharger || 0;
-    const breakdown = [
-      fcs > 0 ? "快充" + fcs : "",
-      pcs > 0 ? "中充" + pcs : "",
-      fcis > 0 ? "慢充" + fcis : "",
-    ].filter(Boolean).join("/") || "空位 " + av;
-    const mapUrl = `https://maps.google.com/maps?daddr=${s.location.lat},${s.location.lng}`;
-    const addr = s.carParkCAddress || s.carParkEAddress || "";
-    return `[${i + 1}] ${name}${free}\n  距離 ${s.dist.toFixed(2)} km · ${op}\n  空位：${breakdown}（總 ${av}/${total}）\n  ${addr}\n  ${mapUrl}`;
-  }).join("\n\n");
-
-  return `\n\n${guard}【系统参考资料：客户发送了位置 lat=${location.lat.toFixed(5)}, lng=${location.lng.toFixed(5)}${location.placeName ? "（" + location.placeName + "）" : ""}。我已查询 EPD 实时数据，距离最近且有空位的充电桩如下，供你判断如何回复：
-
-${lines}
+【系统参考资料：{LOCATION_DESC}。我已查询 EPD 实时数据，{STATIONS_OR_EMPTY}
 
 判断准则：
 - 如果客户在咨询充电相关问题（找充电站、问哪里能充电、问续航）→ 推荐上面 5 个站，严格按上面给出的格式输出（用 [1] [2] [3] 方括号编号，描述行缩进两个空格），**不要改成 1. 2. 3. 这种行首数字加点的格式**（WhatsApp 会把它当 markdown 列表自动重新编号导致显示混乱）。导航链接（https://maps.google.com/maps?daddr=...）必须完整保留每一条，让客户能直接点击跳转 Google Maps 导航。
 - 如果客户在咨询其他事情（配送、上门安装、产品、价格等）→ **不要主动甩充电桩列表**，按其原问题回复即可
-- 如果客户只是冷启动发了位置没说话 → 简短确认收到位置，温和提问客户需要查充电桩还是问其他事情】\n`;
+- 如果客户只是冷启动发了位置没说话 → 简短确认收到位置，温和提问客户需要查充电桩还是问其他事情】`;
+
+function buildLocationContextHint(
+  location: { lat: number; lng: number; placeName?: string },
+  chargers: any[],
+  template: string,
+): string {
+  const locationDesc = `客户发送了位置 lat=${location.lat.toFixed(5)}, lng=${location.lng.toFixed(5)}${location.placeName ? "（" + location.placeName + "）" : ""}`;
+
+  let stationsBlock: string;
+  if (!chargers.length) {
+    stationsBlock = "附近暂时找不到有空位的充电桩。如果客户是在询问充电桩，请告知这个情况；如果客户在咨询其他事情（如配送、上门服务），请按其问题回复。";
+  } else {
+    const lines = chargers.map((s, i) => {
+      const name = s.carParkCName || s.carParkEName || "未知";
+      const av = s.availableCharger || 0;
+      const total = s.numOfCharger || s.sizeOfCharger || 0;
+      const op = (s.chargerOperatorAll || "").split(";")[0] || "";
+      const free = isStationFree(s) ? "（免費）" : "（收費）";
+      const fcs = s.numOfAvailableFcsCharger || 0;
+      const pcs = s.numOfAvailablePcsCharger || 0;
+      const fcis = s.numOfAvailableFcisCharger || 0;
+      const breakdown = [
+        fcs > 0 ? "快充" + fcs : "",
+        pcs > 0 ? "中充" + pcs : "",
+        fcis > 0 ? "慢充" + fcis : "",
+      ].filter(Boolean).join("/") || "空位 " + av;
+      const mapUrl = `https://maps.google.com/maps?daddr=${s.location.lat},${s.location.lng}`;
+      const addr = s.carParkCAddress || s.carParkEAddress || "";
+      return `[${i + 1}] ${name}${free}\n  距離 ${s.dist.toFixed(2)} km · ${op}\n  空位：${breakdown}（總 ${av}/${total}）\n  ${addr}\n  ${mapUrl}`;
+    }).join("\n\n");
+    stationsBlock = `距离最近且有空位的充电桩如下，供你判断如何回复：\n\n${lines}`;
+  }
+
+  // 用戶在 bizflow 編輯後可能不小心删除模板，這裡兜底
+  const effectiveTemplate = template && template.includes("{LOCATION_DESC}") && template.includes("{STATIONS_OR_EMPTY}")
+    ? template
+    : LOCATION_HINT_TEMPLATE_DEFAULT;
+
+  return "\n\n" + effectiveTemplate
+    .replace("{LOCATION_DESC}", locationDesc)
+    .replace("{STATIONS_OR_EMPTY}", stationsBlock) + "\n";
 }
 
 const LOCATION_TTL_MIN = 5;
@@ -282,7 +302,8 @@ Deno.serve(async (req) => {
       if (location) {
         const stations = await getEpdStations();
         const nearby = findNearestStations(location.lat, location.lng, stations, 5);
-        locationHint = buildLocationContextHint(location, nearby);
+        const tmpl = (settings.location_hint_prompt as string) || LOCATION_HINT_TEMPLATE_DEFAULT;
+        locationHint = buildLocationContextHint(location, nearby, tmpl);
         cloudLog(sb, "位置-注入", `pending#${p.id} ${chatLabel} 注入 ${nearby.length} 個附近站（EPD 總 ${stations.length}）`);
       }
 
