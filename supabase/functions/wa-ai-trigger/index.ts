@@ -14,7 +14,7 @@ const CORS_HEADERS = {
 };
 
 const REPLY_DELAY_SECONDS_DEFAULT = 60;
-const MAX_HISTORY = 20;
+const MAX_HISTORY_DEFAULT = 20;
 const MAX_PROCESS_PER_RUN = 10;
 
 const SYSTEM_PROMPT_HEAD = "你是一个专业的AI客服助手。请用友好、专业的语气回复客户的问题。回复要简洁明了。";
@@ -249,12 +249,13 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // 拉最近 N 條對話
+      // 拉最近 N 條對話（max_history 從 wa_settings 讀，bizflow 改了立即生效）
+      const maxHist = (settings.max_history as number) || MAX_HISTORY_DEFAULT;
       const histRes = await sb.from("wa_messages")
         .select("role,content")
         .eq("customer_id", p.customer_id)
         .order("created_at", { ascending: false })
-        .limit(MAX_HISTORY);
+        .limit(maxHist);
       const history = (histRes.data || []).reverse();
 
       // ─── EPD 充電樁注入 ───

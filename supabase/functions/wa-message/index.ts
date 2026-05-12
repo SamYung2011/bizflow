@@ -120,7 +120,10 @@ Deno.serve(async (req) => {
 
   // 3. 真人接手 → 寫冷卻 + 取消同 chat 的 pending
   if (body.is_staff) {
-    const cooledUntil = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 min
+    // cooldown 時長從 wa_settings 讀，bizflow 上改了立即生效
+    const settingsRow = await sb.from("wa_settings").select("cooldown_minutes").eq("id", 1).maybeSingle();
+    const cooldownMin = (settingsRow.data?.cooldown_minutes as number) || 30;
+    const cooledUntil = new Date(Date.now() + cooldownMin * 60 * 1000).toISOString();
     await sb.from("wa_cooldowns").upsert({
       chat_id: chatId,
       is_group: !!body.is_group,
