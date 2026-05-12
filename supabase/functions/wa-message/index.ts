@@ -34,6 +34,24 @@ interface MessagePayload {
 
 const MERGE_WINDOW_MS = 7000; // 同 customer 7 秒內已有 pending 就合併，避免連發問題各自獨立調用 AI
 
+// WhatsApp 系統消息文本特徵（端到端加密通知、群成員變動等），匹配就跳過不入隊
+// 扩展 content.js 沒從源頭過濾（系統消息也有 [data-id]），這裡兜底
+const SYSTEM_MESSAGE_PATTERNS: RegExp[] = [
+  /消息和通话已进行端到端加密/,
+  /訊息和通話均經端對端加密/,
+  /消息與通話均經端對端加密/,
+  /Messages and calls are end-to-end encrypted/i,
+  /You created this group|加入了群組|加入了群组|joined the group|joined using this group|left the group|離開了群組|离开了群组|removed|移除了|被移除|改了群組|changed the group|changed the subject/i,
+  /This message was deleted|您刪除了這條訊息|此消息已删除|此訊息已刪除/i,
+  /You're now an admin|你現在是群組管理員|你现在是群组管理员/i,
+  /Missed (voice|video) call|未接(语音|視訊|视频)(电话|通話)/i,
+];
+
+function isSystemMessage(content: string): boolean {
+  if (!content) return true;
+  return SYSTEM_MESSAGE_PATTERNS.some(re => re.test(content));
+}
+
 // 從文本中嘗試解析 Google Maps 鏈接抠 lat/lng（兜底 content.js 不識別「粘貼的鏈接」場景）
 // content.js parseLocationFromEl 只認 WhatsApp 原生位置卡片的 DOM 結構（staticmap?markers=...）
 // 但客戶常複製 Google Maps 鏈接過來（普通文字消息）→ location=null → EPD 查不到
@@ -86,6 +104,12 @@ Deno.serve(async (req) => {
 
   const chatLabel = body.is_group ? `群:${body.chat_name || body.customer_id}` : `客戶:${body.customer_id}`;
   const senderLabel = body.sender ? ` (${body.sender})` : "";
+
+  // 0. 系統消息過濾（WhatsApp 端到端加密提示、群成員變動等）→ 直接跳過，不入隊
+  if (isSystemMessage(body.content)) {
+    cloudLog(sb, "跳过", `系統消息 ${chatLabel} → ${body.content.slice(0, 40)}`);
+    return new Response(JSON.stringify({ ok: true, system_skipped: true }), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+  }
 
   // 1. 幂等去重
   const dup = await sb.from("wa_processed_messages").select("msg_id").eq("msg_id", body.msg_id).maybeSingle();
