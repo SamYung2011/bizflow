@@ -937,6 +937,21 @@ const DICT_EN = {
   "客人已當場簽收": "Customer signed on the spot",
   "簽收時間": "Signed at",
   "改為快遞發貨": "Switch to SF shipping",
+  // ── WhatsApp 充電樁 Prompt 子 tab ──
+  "充電樁 Prompt": "Chargers Prompt",
+  "這裡是雲端 AI 客服處理充電樁查詢相關的兩段 prompt。安全規則仍是硬編碼不可改。": "These two prompts handle EV charger queries in cloud mode. Safety rules remain hard-coded.",
+  "充電樁服務說明": "Charger Service Description",
+  "AI 系統提示詞末尾追加的充電樁服務介紹。客戶咨詢充電站時 AI 用這裡的話術引導。": "Appended to the AI system prompt. AI uses this wording to guide customers asking about charging stations.",
+  "位置注入模板": "Location Injection Template",
+  "客戶發位置消息時，系統查 EPD 後注入給 AI 的參考資料模板。必須含兩個占位符：": "When the customer sends a location, the system queries EPD and injects this template as reference. Must contain two placeholders: ",
+  " 和 ": " and ",
+  "（保存時會檢查，缺一個就用默認模板兜底）": " (validated on save; falls back to default template if either is missing)",
+  "缺": "missing",
+  // ── 扩展更新 toast ──
+  "扩展有新版本": "Extension update available",
+  "個在線客戶端使用舊版（": " online client(s) on old version (",
+  "），最新": "), latest ",
+  "請通知對方到「設置/模式」tab 重新下載": "Please notify them to re-download from the Settings / Mode tab",
 };
 
 const DICT_FR = {
@@ -1872,6 +1887,21 @@ const DICT_FR = {
   "客人已當場簽收": "Client a signé sur place",
   "簽收時間": "Heure de retrait",
   "改為快遞發貨": "Passer à l'expédition SF",
+  // ── WhatsApp 充電樁 Prompt 子 tab ──
+  "充電樁 Prompt": "Prompt des bornes",
+  "這裡是雲端 AI 客服處理充電樁查詢相關的兩段 prompt。安全規則仍是硬編碼不可改。": "Ces deux invites gèrent les requêtes de bornes EV en mode cloud. Les règles de sécurité restent codées en dur.",
+  "充電樁服務說明": "Description du service de bornes",
+  "AI 系統提示詞末尾追加的充電樁服務介紹。客戶咨詢充電站時 AI 用這裡的話術引導。": "Ajouté à la fin de l'invite système. L'IA utilise ce texte pour guider les clients qui demandent des bornes.",
+  "位置注入模板": "Modèle d'injection de position",
+  "客戶發位置消息時，系統查 EPD 後注入給 AI 的參考資料模板。必須含兩個占位符：": "Quand le client envoie une position, le système interroge EPD et injecte ce modèle comme référence. Doit contenir deux espaces réservés : ",
+  " 和 ": " et ",
+  "（保存時會檢查，缺一個就用默認模板兜底）": " (vérifié à l'enregistrement ; revient au modèle par défaut s'il en manque un)",
+  "缺": "manquant",
+  // ── 扩展更新 toast ──
+  "扩展有新版本": "Mise à jour de l'extension disponible",
+  "個在線客戶端使用舊版（": " client(s) en ligne sur ancienne version (",
+  "），最新": "), dernière ",
+  "請通知對方到「設置/模式」tab 重新下載": "Demandez-leur de retélécharger depuis l'onglet Paramètres / Mode",
 };
 
 const I18nContext = createContext({ lang: "zh", setLang: () => {}, t: (s) => s });
