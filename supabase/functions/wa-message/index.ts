@@ -24,6 +24,16 @@ interface MessagePayload {
   is_staff?: boolean;          // true = 真人客服在發消息（觸發冷卻）
 }
 
+// 同步寫 wa_logs，跟本地 server.js 用同一張表 + 同一套 category 名（dashboard 共享顏色）。
+// 加 [云] 前綴方便 dashboard 一眼分辨來源。失敗吞掉，不阻擋主流程。
+async function cloudLog(
+  sb: ReturnType<typeof createClient>,
+  category: string,
+  message: string,
+) {
+  try { await sb.from("wa_logs").insert({ category, message: "[云] " + message }); } catch (_) { /* swallow */ }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS_HEADERS });
   if (req.method !== "POST") {
@@ -41,12 +51,19 @@ Deno.serve(async (req) => {
 
   const sb = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 
+  const chatLabel = body.is_group ? `群:${body.chat_name || body.customer_id}` : `客戶:${body.customer_id}`;
+  const senderLabel = body.sender ? ` (${body.sender})` : "";
+
   // 1. 幂等去重
   const dup = await sb.from("wa_processed_messages").select("msg_id").eq("msg_id", body.msg_id).maybeSingle();
   if (dup.data) {
+    cloudLog(sb, "跳过", `重複 msg_id=${body.msg_id.slice(-10)} ${chatLabel}`);
     return new Response(JSON.stringify({ ok: true, duplicate: true }), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
   }
   await sb.from("wa_processed_messages").insert({ msg_id: body.msg_id, customer_id: body.customer_id });
+
+  // 收到日誌（content 截 50 字，避免敏感原話 + 日誌過長）
+  cloudLog(sb, "收到", `${chatLabel}${senderLabel} → ${body.content.slice(0, 50)}${body.content.length > 50 ? "…" : ""}`);
 
   // 2. 寫對話記錄（即使是 staff / 冷卻中也寫，保留完整對話）
   await sb.from("wa_messages").insert({
@@ -71,12 +88,14 @@ Deno.serve(async (req) => {
     const cancelKey = body.is_group ? "chat_name" : "customer_id";
     await sb.from("wa_pending_replies").update({ status: "cancelled", cancelled_reason: "staff_took_over" })
       .eq(cancelKey, chatId).eq("status", "pending");
+    cloudLog(sb, "跳过", `真人接手 ${chatLabel}${senderLabel}，已取消同 chat pending + 30min 冷卻`);
     return new Response(JSON.stringify({ ok: true, staff_took_over: true }), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
   }
 
   // 4. 檢查是否冷卻中
   const cd = await sb.from("wa_cooldowns").select("cooled_until").eq("chat_id", chatId).maybeSingle();
   if (cd.data && new Date(cd.data.cooled_until) > new Date()) {
+    cloudLog(sb, "跳过", `冷卻中 ${chatLabel} until ${new Date(cd.data.cooled_until).toLocaleTimeString("zh-HK", { hour12: false })}`);
     return new Response(JSON.stringify({ ok: true, in_cooldown: true, cooled_until: cd.data.cooled_until }), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
   }
 
@@ -90,6 +109,12 @@ Deno.serve(async (req) => {
     visible_context: body.visible_context ? JSON.stringify(body.visible_context) : null,
     status: "pending",
   }).select("id").single();
+
+  if (ins.error) {
+    cloudLog(sb, "错误", `wa-message pending insert 失敗：${ins.error.message}`);
+  } else {
+    cloudLog(sb, "回复入队", `pending#${ins.data?.id} ${chatLabel}（等 60s 真人搶答）`);
+  }
 
   return new Response(JSON.stringify({ ok: true, pending_id: ins.data?.id, error: ins.error?.message }), {
     headers: { ...CORS_HEADERS, "Content-Type": "application/json" },

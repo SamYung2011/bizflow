@@ -57,6 +57,16 @@ function splitSegments(text: string): { type: string; content: string }[] {
   return parts.map(p => ({ type: "text", content: p }));
 }
 
+// 同步寫 wa_logs，跟本地 server.js 用同一張表 + 同一套 category 名（dashboard 共享顏色）。
+// 加 [云] 前綴方便 dashboard 一眼分辨來源。失敗吞掉，不阻擋主流程。
+async function cloudLog(
+  sb: ReturnType<typeof createClient>,
+  category: string,
+  message: string,
+) {
+  try { await sb.from("wa_logs").insert({ category, message: "[云] " + message }); } catch (_) { /* swallow */ }
+}
+
 async function callOpenAI(opts: {
   baseUrl: string;
   apiKey: string;
@@ -111,6 +121,7 @@ Deno.serve(async (req) => {
   const results: unknown[] = [];
 
   for (const p of pending) {
+    const chatLabel = p.is_group ? `群:${p.chat_name || p.customer_id}` : `客戶:${p.customer_id}`;
     try {
       // 標 processing 防止重複處理
       const claim = await sb.from("wa_pending_replies")
@@ -125,6 +136,7 @@ Deno.serve(async (req) => {
       const cd = await sb.from("wa_cooldowns").select("cooled_until").eq("chat_id", chatId).maybeSingle();
       if (cd.data && new Date(cd.data.cooled_until) > new Date()) {
         await sb.from("wa_pending_replies").update({ status: "cancelled", cancelled_reason: "cooldown" }).eq("id", p.id);
+        cloudLog(sb, "跳过", `pending#${p.id} ${chatLabel} 冷卻期內，取消`);
         results.push({ id: p.id, action: "cancelled_cooldown" });
         continue;
       }
@@ -138,6 +150,7 @@ Deno.serve(async (req) => {
         .gte("created_at", sinceMin);
       if ((recentCount.count || 0) >= rateLimit) {
         await sb.from("wa_pending_replies").update({ status: "cancelled", cancelled_reason: "rate_limit" }).eq("id", p.id);
+        cloudLog(sb, "限流", `pending#${p.id} ${chatLabel}（60s 內已 ${recentCount.count}/${rateLimit} 條）`);
         results.push({ id: p.id, action: "rate_limited" });
         continue;
       }
@@ -155,6 +168,8 @@ Deno.serve(async (req) => {
         { role: "system", content: systemPrompt },
         ...history.map((h: Record<string, unknown>) => ({ role: h.role as string, content: h.content as string })),
       ];
+
+      cloudLog(sb, "生成", `pending#${p.id} ${chatLabel}，history=${history.length} 條`);
 
       // 調 OpenAI
       const reply = await callOpenAI({
@@ -195,6 +210,9 @@ Deno.serve(async (req) => {
         reply_id: replyIns.data?.id,
       }).eq("id", p.id);
 
+      const unresolvedMark = reply.includes("[UNRESOLVED]") ? " [UNRESOLVED]" : "";
+      cloudLog(sb, "回复", `pending#${p.id} ${chatLabel} → ${segments.length} 段，${reply.length} 字${unresolvedMark}`);
+
       results.push({ id: p.id, action: "replied", reply_id: replyIns.data?.id });
     } catch (err) {
       const errMsg = (err as Error).message || String(err);
@@ -203,6 +221,7 @@ Deno.serve(async (req) => {
         replied_at: new Date().toISOString(),
         error: errMsg,
       }).eq("id", p.id);
+      cloudLog(sb, "错误", `wa-ai-trigger pending#${p.id} ${chatLabel}：${errMsg.slice(0, 200)}`);
       results.push({ id: p.id, action: "error", error: errMsg.slice(0, 200) });
     }
   }
