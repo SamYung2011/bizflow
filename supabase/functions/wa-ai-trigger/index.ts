@@ -93,8 +93,12 @@ function findNearestStations(lat: number, lng: number, stations: any[], n = 5): 
 }
 
 function buildLocationContextHint(location: { lat: number; lng: number; placeName?: string }, chargers: any[]): string {
+  const guard = `⚠️ 最高優先級實時數據（剛剛通過 EPD 香港政府實時 API 查詢）⚠️
+**重要：如果你在對話歷史中對該客戶說過「Honnmono 暫時未有資料庫」、「未能查詢」、「建議用 Google Maps」之類的話，那是錯誤回答。請以下面數據為準，不要再說「沒有」「未能查詢」之類的話。**
+
+`;
   if (!chargers.length) {
-    return `\n\n【系统参考资料：客户发了位置 lat=${location.lat.toFixed(5)}, lng=${location.lng.toFixed(5)}${location.placeName ? "（" + location.placeName + "）" : ""}。已查询 EPD 实时数据，附近暂时找不到有空位的充电桩。如果客户是在询问充电桩，请告知这个情况；如果客户在咨询其他事情（如配送、上门服务），请按其问题回复。】\n`;
+    return `\n\n${guard}【系统参考资料：客户发了位置 lat=${location.lat.toFixed(5)}, lng=${location.lng.toFixed(5)}${location.placeName ? "（" + location.placeName + "）" : ""}。已查询 EPD 实时数据，附近暂时找不到有空位的充电桩。如果客户是在询问充电桩，请告知这个情况；如果客户在咨询其他事情（如配送、上门服务），请按其问题回复。】\n`;
   }
   const lines = chargers.map((s, i) => {
     const name = s.carParkCName || s.carParkEName || "未知";
@@ -115,7 +119,7 @@ function buildLocationContextHint(location: { lat: number; lng: number; placeNam
     return `[${i + 1}] ${name}${free}\n  距離 ${s.dist.toFixed(2)} km · ${op}\n  空位：${breakdown}（總 ${av}/${total}）\n  ${addr}\n  ${mapUrl}`;
   }).join("\n\n");
 
-  return `\n\n【系统参考资料：客户发送了位置 lat=${location.lat.toFixed(5)}, lng=${location.lng.toFixed(5)}${location.placeName ? "（" + location.placeName + "）" : ""}。我已查询 EPD 实时数据，距离最近且有空位的充电桩如下，供你判断如何回复：
+  return `\n\n${guard}【系统参考资料：客户发送了位置 lat=${location.lat.toFixed(5)}, lng=${location.lng.toFixed(5)}${location.placeName ? "（" + location.placeName + "）" : ""}。我已查询 EPD 实时数据，距离最近且有空位的充电桩如下，供你判断如何回复：
 
 ${lines}
 
@@ -280,10 +284,15 @@ Deno.serve(async (req) => {
       }
 
       // 構造 messages
-      const messages = [
-        { role: "system", content: systemPrompt + locationHint },
+      // locationHint 放在 history 之後作為獨立 system 消息（注意力靠後最強），覆蓋 history 中
+      // 任何「Honnmono 沒有資料庫」之類的舊錯誤回答
+      const messages: { role: string; content: string }[] = [
+        { role: "system", content: systemPrompt },
         ...history.map((h: Record<string, unknown>) => ({ role: h.role as string, content: h.content as string })),
       ];
+      if (locationHint) {
+        messages.push({ role: "system", content: locationHint });
+      }
 
       cloudLog(sb, "生成", `pending#${p.id} ${chatLabel}，history=${history.length} 條${location ? "（含位置）" : ""}`);
 
