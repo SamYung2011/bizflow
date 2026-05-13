@@ -4,6 +4,46 @@ import { createClient } from "@supabase/supabase-js";
 import { INVOICE_SHELL_HEAD, INVOICE_PAGE, INVOICE_SHELL_TAIL } from "./invoiceTemplate.js";
 import { RECEIPT_FRAGMENT } from "./receiptTemplate.js";
 import { useT } from "./i18n.jsx";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkBreaks from "remark-breaks";
+
+// 個人偏好：是否啟用 markdown 渲染輸出（部分使用者偏好富文本格式）
+// 後續可改為 employees / users 表 prefs.markdown_enabled 字段
+const MARKDOWN_LOG_AUTHORS = new Set(["1267481a-503f-4154-829e-bc97788b4567"]);
+const MARKDOWN_COMMENT_AUTHORS = new Set(["2f88a573-c4db-4b93-aadc-2a56106c5f9c"]);
+// 小型 markdown 渲染組件（限縮 className 範圍 + 樣式），給更新日誌用
+function MarkdownText({ text, fontSize = 14 }) {
+  if (!text) return null;
+  return (
+    <div className="md" style={{ fontSize, lineHeight: 1.6 }}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkBreaks]}
+        components={{
+          a: (props) => <a {...props} target="_blank" rel="noopener noreferrer" style={{ color: "#6382ff" }} />,
+          code: ({ className, children, ...props }) => {
+            // react-markdown v10：block code 帶 className="language-xxx"，inline code 沒 className
+            const isBlock = /language-/.test(className || "");
+            return isBlock
+              ? <code {...props} className={className} style={{ fontFamily: "Menlo,Monaco,monospace", fontSize: "0.9em" }}>{children}</code>
+              : <code {...props} style={{ background: "#f0f0f0", padding: "1px 5px", borderRadius: 4, fontSize: "0.9em", fontFamily: "Menlo,Monaco,monospace" }}>{children}</code>;
+          },
+          pre: (props) => <pre {...props} style={{ background: "#f5f5f5", padding: 10, borderRadius: 6, overflow: "auto", margin: "8px 0" }} />,
+          blockquote: (props) => <blockquote {...props} style={{ borderLeft: "3px solid #c6d3ff", margin: "8px 0", padding: "2px 10px", color: "#666" }} />,
+          ul: (props) => <ul {...props} style={{ paddingLeft: 22, margin: "6px 0" }} />,
+          ol: (props) => <ol {...props} style={{ paddingLeft: 22, margin: "6px 0" }} />,
+          li: (props) => <li {...props} style={{ marginBottom: 2 }} />,
+          h1: (props) => <h1 {...props} style={{ fontSize: "1.4em", margin: "8px 0", fontWeight: 800 }} />,
+          h2: (props) => <h2 {...props} style={{ fontSize: "1.25em", margin: "8px 0", fontWeight: 800 }} />,
+          h3: (props) => <h3 {...props} style={{ fontSize: "1.1em", margin: "6px 0", fontWeight: 700 }} />,
+          table: (props) => <table {...props} style={{ borderCollapse: "collapse", margin: "8px 0" }} />,
+          th: (props) => <th {...props} style={{ border: "1px solid #e0e0e0", padding: "4px 8px", background: "#fafbff", fontWeight: 700 }} />,
+          td: (props) => <td {...props} style={{ border: "1px solid #e0e0e0", padding: "4px 8px" }} />,
+        }}
+      >{text}</ReactMarkdown>
+    </div>
+  );
+}
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
@@ -4850,7 +4890,9 @@ export default function App() {
                                 <div style={{ fontSize: 10, color: "#b88a00", marginBottom: 3 }}>
                                   {fb.author_name || t("未知")} · {new Date(fb.created_at).toLocaleString("zh-HK", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
                                 </div>
-                                <div style={{ fontSize: 11, color: "#8a6900", lineHeight: 1.5, whiteSpace: "pre-wrap", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{fb.body}</div>
+                                <div style={{ fontSize: 11, color: "#8a6900", lineHeight: 1.5, whiteSpace: MARKDOWN_COMMENT_AUTHORS.has(fb.author_user_id) ? "normal" : "pre-wrap", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                                  {MARKDOWN_COMMENT_AUTHORS.has(fb.author_user_id) ? <MarkdownText text={fb.body} fontSize={11} /> : fb.body}
+                                </div>
                               </div>
                             );
                           })}
@@ -4920,7 +4962,9 @@ export default function App() {
                                   </div>
                                 </div>
                               ) : (
-                                <div style={{ fontSize: 12, color: "#333", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{c.body}</div>
+                                <div style={{ fontSize: 12, color: "#333", lineHeight: 1.5, whiteSpace: MARKDOWN_COMMENT_AUTHORS.has(c.author_user_id) ? "normal" : "pre-wrap" }}>
+                                  {MARKDOWN_COMMENT_AUTHORS.has(c.author_user_id) ? <MarkdownText text={c.body} fontSize={12} /> : c.body}
+                                </div>
                               )}
                               {isReplyingHere && (
                                 <div style={{ marginTop: 6 }}>
@@ -4947,7 +4991,7 @@ export default function App() {
                             <div style={{ background: "#fafbff", border: "1px solid #eef0fa", borderRadius: 12, padding: 16, marginBottom: 20 }}>
                               <div style={{ fontSize: 13, fontWeight: 700, color: "#3b58d4", marginBottom: 10 }}>＋ {t("新增更新")}</div>
                               <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{t("簡略（必填）")}</div>
-                              <input value={newLogDraft.summary} onChange={e => setNewLogDraft({ ...newLogDraft, summary: e.target.value })} placeholder={t("一句話概括今天做了什麼...")} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", marginBottom: 10, boxSizing: "border-box" }} />
+                              <textarea value={newLogDraft.summary} onChange={e => setNewLogDraft({ ...newLogDraft, summary: e.target.value })} placeholder={t("一句話概括今天做了什麼...")} rows={2} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", marginBottom: 10, boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" }} />
                               <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{t("詳細（可選，展開後顯示）")}</div>
                               <textarea value={newLogDraft.detail} onChange={e => setNewLogDraft({ ...newLogDraft, detail: e.target.value })} placeholder={t("詳細描述...")} style={{ width: "100%", minHeight: 100, padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 12, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit", marginBottom: 10 }} />
                               <button onClick={async () => { if (!newLogDraft.summary.trim()) return; await handleAddUpdateLog(emp.id, newLogDraft.summary, newLogDraft.detail); setNewLogDraft({ summary: "", detail: "" }); }} disabled={!newLogDraft.summary.trim()} style={{ padding: "8px 18px", background: newLogDraft.summary.trim() ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: newLogDraft.summary.trim() ? "pointer" : "not-allowed" }}>{t("保存")}</button>
@@ -4979,7 +5023,7 @@ export default function App() {
                                       </div>
                                       {isEditingThis ? (
                                         <div>
-                                          <input value={editingLogDraft.summary} onChange={e => setEditingLogDraft({ ...editingLogDraft, summary: e.target.value })} placeholder={t("簡略")} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #6382ff", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box" }} />
+                                          <textarea value={editingLogDraft.summary} onChange={e => setEditingLogDraft({ ...editingLogDraft, summary: e.target.value })} placeholder={t("簡略")} rows={2} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #6382ff", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" }} />
                                           <textarea value={editingLogDraft.detail} onChange={e => setEditingLogDraft({ ...editingLogDraft, detail: e.target.value })} placeholder={t("詳細")} style={{ width: "100%", minHeight: 100, padding: "8px 10px", borderRadius: 6, border: "1px solid #6382ff", fontSize: 12, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit", marginBottom: 8 }} />
                                           <div style={{ display: "flex", gap: 6 }}>
                                             <button onClick={async () => { if (!editingLogDraft.summary.trim()) return; await handleUpdateUpdateLog(log.id, { summary: editingLogDraft.summary.trim(), detail: editingLogDraft.detail.trim() || null }); setEditingLogId(null); }} style={{ padding: "5px 12px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>{t("保存")}</button>
@@ -4990,10 +5034,14 @@ export default function App() {
                                         <>
                                           <div onClick={() => { setExpandedLogIds(prev => { const n = new Set(prev); if (n.has(log.id)) n.delete(log.id); else n.add(log.id); return n; }); }} style={{ fontSize: 14, color: "#222", lineHeight: 1.5, cursor: "pointer", display: "flex", alignItems: "flex-start", gap: 8 }}>
                                             <span style={{ color: "#6382ff", fontSize: 11, marginTop: 3 }}>{isExpanded ? "▼" : "▶"}</span>
-                                            <span style={{ flex: 1, whiteSpace: "pre-wrap" }}>{log.summary}</span>
+                                            <span style={{ flex: 1, whiteSpace: MARKDOWN_LOG_AUTHORS.has(log.employee_id) ? "normal" : "pre-wrap" }}>
+                                              {MARKDOWN_LOG_AUTHORS.has(log.employee_id) ? <MarkdownText text={log.summary} fontSize={14} /> : log.summary}
+                                            </span>
                                           </div>
                                           {isExpanded && log.detail && (
-                                            <div style={{ marginTop: 10, padding: "10px 12px", background: "#fafbff", borderRadius: 8, fontSize: 12, color: "#444", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{log.detail}</div>
+                                            <div style={{ marginTop: 10, padding: "10px 12px", background: "#fafbff", borderRadius: 8, fontSize: 12, color: "#444", lineHeight: 1.6, whiteSpace: MARKDOWN_LOG_AUTHORS.has(log.employee_id) ? "normal" : "pre-wrap" }}>
+                                              {MARKDOWN_LOG_AUTHORS.has(log.employee_id) ? <MarkdownText text={log.detail} fontSize={12} /> : log.detail}
+                                            </div>
                                           )}
                                         </>
                                       )}
@@ -6904,7 +6952,9 @@ export default function App() {
                             {canDelete && <button onClick={() => handleDeleteFeedback(fb.id)} title={t("刪除")} style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 14, padding: 0 }}>×</button>}
                           </div>
                         </div>
-                        <div style={{ fontSize: 12, color: "#333", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{fb.body}</div>
+                        <div style={{ fontSize: 12, color: "#333", lineHeight: 1.5, whiteSpace: MARKDOWN_COMMENT_AUTHORS.has(fb.author_user_id) ? "normal" : "pre-wrap", wordBreak: "break-word" }}>
+                          {MARKDOWN_COMMENT_AUTHORS.has(fb.author_user_id) ? <MarkdownText text={fb.body} fontSize={12} /> : fb.body}
+                        </div>
                         {Array.isArray(fb.attachments) && fb.attachments.length > 0 && (
                           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
                             {fb.attachments.map((a, i) => {
@@ -6946,10 +6996,8 @@ export default function App() {
               )}
               {/* @ 提醒：輸入 @ 觸發下拉，選員工後插入「@姓名 」+ 記錄 user_id */}
               {(() => {
-                const relevantIds = new Set();
-                (assigneesByTask.get(tk.id) || []).forEach(a => relevantIds.add(a.employee_id));
-                if (tk.creator_employee_id) relevantIds.add(tk.creator_employee_id);
-                const mentionables = employees.filter(e => relevantIds.has(e.id) && e.user_id && e.id !== currentEmployee?.id);
+                // 所有綁了帳號的活躍員工都能 @（排除自己）
+                const mentionables = employees.filter(e => e.active !== false && e.user_id && e.id !== currentEmployee?.id);
                 const filtered = mentionPopup.open ? mentionables.filter(e => !mentionPopup.query || (e.name || "").toLowerCase().includes(mentionPopup.query.toLowerCase())) : [];
 
                 const handleChange = (e) => {
@@ -6993,14 +7041,22 @@ export default function App() {
                         📎
                         <input type="file" multiple style={{ display: "none" }} onChange={e => { const files = Array.from(e.target.files || []); setPendingAttachments(prev => [...prev, ...files]); e.target.value = ""; }} />
                       </label>
-                      <input
+                      <textarea
                         name="fb"
                         value={fbInputValue}
                         onChange={handleChange}
-                        onKeyDown={e => { if (e.key === 'Escape') setMentionPopup({ open: false, query: "", atIdx: -1 }); }}
-                        placeholder={t("追加反饋... 輸入 @ 提醒某人")}
+                        onKeyDown={e => {
+                          if (e.key === 'Escape') setMentionPopup({ open: false, query: "", atIdx: -1 });
+                          // Cmd/Ctrl + Enter 提交（避免 Enter 換行被吃掉）
+                          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                            e.preventDefault();
+                            e.currentTarget.form?.requestSubmit();
+                          }
+                        }}
+                        placeholder={t("追加反饋... 輸入 @ 提醒某人；Cmd+Enter 發送")}
                         autoComplete="off"
-                        style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #f4dca4", fontSize: 12, outline: "none", boxSizing: "border-box", background: "#fff" }}
+                        rows={2}
+                        style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #f4dca4", fontSize: 12, outline: "none", boxSizing: "border-box", background: "#fff", resize: "vertical", fontFamily: "inherit" }}
                       />
                       <button type="submit" style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{t("發送")}</button>
                       {mentionPopup.open && filtered.length > 0 && (
