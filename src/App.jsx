@@ -370,6 +370,8 @@ export default function App() {
   const [aliasSaving, setAliasSaving] = useState(false);
   const [expandedAliasGroups, setExpandedAliasGroups] = useState(() => new Set());
   const [empSubTab, setEmpSubTab] = useState("tasks"); // "tasks" | "logs"
+  const [empPageMode, setEmpPageMode] = useState("list"); // "list" | "overview"
+  const [overviewExpanded, setOverviewExpanded] = useState(new Set()); // 總覽展開的員工 id
   const [newLogDraft, setNewLogDraft] = useState({ summary: "", detail: "" });
   const [editingLogId, setEditingLogId] = useState(null);
   const [editingLogDraft, setEditingLogDraft] = useState({ summary: "", detail: "" });
@@ -4509,6 +4511,12 @@ export default function App() {
                   </button>
                 </div>
                 <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
+                  {/* 總覽入口：所有員工的任務全景 */}
+                  <div onClick={() => { setEmpPageMode("overview"); setSelectedEmployee(null); }}
+                       style={{ background: empPageMode === "overview" ? "#eef2ff" : "#fafbfc", border: "1px solid " + (empPageMode === "overview" ? "#6382ff" : "#f0f0f0"), borderRadius: 10, padding: "12px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#f59e0b,#ef4444)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 700, flexShrink: 0 }}>📊</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: empPageMode === "overview" ? "#3b58d4" : "#222" }}>{t("總覽")}</div>
+                  </div>
                   {employees.length === 0 ? (
                     <div style={{ textAlign: "center", padding: 24, color: "#aaa", fontSize: 12, border: "1px dashed #e0e0e0", borderRadius: 10 }}>{t("尚無員工")}</div>
                   ) : employees.map(e => {
@@ -4516,7 +4524,7 @@ export default function App() {
                     const doneCount = tasks.filter(t => isTaskAssignedTo(t, e.id) && !t.parent_task_id && empIsDoneFor(t, e.id)).length;
                     const active = emp && emp.id === e.id;
                     return (
-                      <div key={e.id} onClick={() => setSelectedEmployee(e)} style={{ background: active ? "#eef2ff" : "#fafbfc", border: "1px solid " + (active ? "#6382ff" : "#f0f0f0"), borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
+                      <div key={e.id} onClick={() => { setSelectedEmployee(e); setEmpPageMode("list"); }} style={{ background: active && empPageMode === "list" ? "#eef2ff" : "#fafbfc", border: "1px solid " + (active && empPageMode === "list" ? "#6382ff" : "#f0f0f0"), borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                           <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#7c9dff,#a78bfa)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, flexShrink: 0 }}>{(e.name || "?").slice(0, 1)}</div>
                           <div style={{ flex: 1, minWidth: 0 }}>
@@ -4538,9 +4546,82 @@ export default function App() {
                   })}
                 </div>
               </div>
-              {/* 右欄：任務看板（未選員工顯示占位） */}
+              {/* 右欄：總覽 / 任務看板 / 未選員工占位 */}
               <div>
-                {!emp ? (
+                {empPageMode === "overview" ? (() => {
+                  // 總覽：所有員工列表，點擊展開顯示任務
+                  const priColor = { high: "#ef4444", mid: "#f59e0b", low: "#22c55e", none: "#22c55e" };
+                  const priLabel = { high: t("高優"), mid: t("中優"), low: t("低優"), none: t("低優") };
+                  const renderMiniTask = (task, isDone) => (
+                    <div key={task.id} onClick={() => setEditingTask(task)} style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 8, padding: "8px 10px", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, opacity: isDone ? 0.65 : 1 }}>
+                      <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: isDone ? "#888" : "#222", textDecoration: isDone ? "line-through" : "none" }}>{task.title}</span>
+                      {task.due_date && !isDone && (() => {
+                        const days = Math.ceil((new Date(task.due_date) - new Date()) / (1000 * 60 * 60 * 24));
+                        if (days < 0) return <span style={{ fontSize: 10, color: "#ef4444", fontWeight: 700 }}>⚠ {Math.abs(days)}d</span>;
+                        if (days <= 3) return <span style={{ fontSize: 10, color: "#f59e0b", fontWeight: 700 }}>⏰ {days}d</span>;
+                        return <span style={{ fontSize: 10, color: "#aaa" }}>{task.due_date}</span>;
+                      })()}
+                      {isDone && task.completed_at && <span style={{ fontSize: 10, color: "#22c55e" }}>✓ {new Date(task.completed_at).toLocaleDateString("zh-HK", { month: "2-digit", day: "2-digit" })}</span>}
+                    </div>
+                  );
+                  return (
+                    <div>
+                      <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 16 }}>📊 {t("任務總覽")}</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                        {employees.filter(e2 => e2.active !== false).map(e2 => {
+                          const isExpanded = overviewExpanded.has(e2.id);
+                          const ownsTask = (tk) => isTaskAssignedTo(tk, e2.id) || e2.id === tk.creator_employee_id;
+                          const empOpenTasks = tasks.filter(tk =>
+                            ownsTask(tk) && !tk.parent_task_id && tk.status === "open" && !empIsDoneFor(tk, e2.id) && !empIsAbandonedFor(tk, e2.id)
+                          );
+                          const empDoneTasks = tasks.filter(tk =>
+                            ownsTask(tk) && !tk.parent_task_id && empIsDoneFor(tk, e2.id)
+                          ).sort((a, b) => {
+                            const aList = assigneesByTask.get(a.id) || [];
+                            const aRow = aList.find(x => x.employee_id === e2.id);
+                            const bList = assigneesByTask.get(b.id) || [];
+                            const bRow = bList.find(x => x.employee_id === e2.id);
+                            const aTs = aRow?.completed_at || a.completed_at || a.created_at;
+                            const bTs = bRow?.completed_at || b.completed_at || b.created_at;
+                            return new Date(bTs) - new Date(aTs);
+                          }).slice(0, 5);
+                          const high = empOpenTasks.filter(tk => tk.priority === "high");
+                          const mid = empOpenTasks.filter(tk => tk.priority === "mid");
+                          const low = empOpenTasks.filter(tk => tk.priority === "low" || tk.priority === "none" || !tk.priority);
+                          return (
+                            <div key={e2.id} style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12 }}>
+                              <div onClick={() => setOverviewExpanded(prev => { const next = new Set(prev); if (next.has(e2.id)) next.delete(e2.id); else next.add(e2.id); return next; })}
+                                   style={{ padding: "14px 18px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12 }}>
+                                <span style={{ fontSize: 14, color: "#888", width: 12 }}>{isExpanded ? "▼" : "▶"}</span>
+                                <div style={{ width: 32, height: 32, borderRadius: "50%", background: "linear-gradient(135deg,#7c9dff,#a78bfa)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700 }}>{(e2.name || "?").slice(0, 1)}</div>
+                                <div style={{ flex: 1, fontSize: 15, fontWeight: 700, color: "#222" }}>{e2.name}</div>
+                                <span style={{ fontSize: 12, color: "#6382ff", fontWeight: 700 }}>{empOpenTasks.length} {t("進行")}</span>
+                                <span style={{ fontSize: 12, color: "#22c55e", fontWeight: 700 }}>{empDoneTasks.length} {t("完成")}</span>
+                              </div>
+                              {isExpanded && (
+                                <div style={{ padding: "0 18px 16px", borderTop: "1px solid #f5f5f5" }}>
+                                  {[{ key: "high", list: high }, { key: "mid", list: mid }, { key: "low", list: low }].map(group => group.list.length > 0 && (
+                                    <div key={group.key} style={{ marginTop: 12 }}>
+                                      <div style={{ fontSize: 12, fontWeight: 700, color: priColor[group.key], marginBottom: 6 }}>{priLabel[group.key]} <span style={{ color: "#aaa", fontWeight: 400 }}>· {group.list.length}</span></div>
+                                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{group.list.map(tk => renderMiniTask(tk, false))}</div>
+                                    </div>
+                                  ))}
+                                  {empOpenTasks.length === 0 && <div style={{ marginTop: 12, fontSize: 12, color: "#aaa", fontStyle: "italic" }}>{t("沒有未完成任務")}</div>}
+                                  {empDoneTasks.length > 0 && (
+                                    <div style={{ marginTop: 14 }}>
+                                      <div style={{ fontSize: 12, fontWeight: 700, color: "#888", marginBottom: 6 }}>{t("最近完成")} <span style={{ color: "#aaa", fontWeight: 400 }}>· {empDoneTasks.length}</span></div>
+                                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{empDoneTasks.map(tk => renderMiniTask(tk, true))}</div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })() : !emp ? (
                   <div style={{ background: "#fff", borderRadius: 14, padding: 80, textAlign: "center", color: "#aaa", border: "1px dashed #e0e0e0", minHeight: 400, display: "flex", alignItems: "center", justifyContent: "center" }}>
                     {t("← 從左側選擇員工查看任務看板")}
                   </div>

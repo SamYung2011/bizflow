@@ -996,6 +996,9 @@ const DICT_EN = {
   "過期": "overdue",
   "棄": "abandoned",
   "新": "new",
+  "任務總覽": "Task Overview",
+  "沒有未完成任務": "No pending tasks",
+  "最近完成": "Recently completed",
 };
 
 const DICT_FR = {
@@ -1990,6 +1993,9 @@ const DICT_FR = {
   "過期": "en retard",
   "棄": "abandonné",
   "新": "nouveau",
+  "任務總覽": "Vue d'ensemble des tâches",
+  "沒有未完成任務": "Aucune tâche en attente",
+  "最近完成": "Récemment terminées",
 };
 
 const I18nContext = createContext({ lang: "zh", setLang: () => {}, t: (s) => s });
