@@ -1298,7 +1298,7 @@ export default function App() {
   useEffect(() => { if (qTaskAssignees.data) setTaskAssignees(qTaskAssignees.data); }, [qTaskAssignees.data]);
   // 任務提醒：tasks/assignees/feedbacks 加載完一次後計算所有類型 → 堆疊顯示
   useEffect(() => {
-    if (!currentEmployee || !userId || !qTasks.data || !qTaskAssignees.data || !qFeedbacks.data) return;
+    if (!currentEmployee || !userId) return;
     const notices = [];
     // 1. 反饋 @ 我（持久 dismiss）
     if (!dismissedNoticeTypes.has('feedback')) {
@@ -1340,7 +1340,7 @@ export default function App() {
       if (pending.length > 0) notices.push({ type: 'new', count: pending.length, ids: pending.map(t => t.id) });
     }
     setTaskNotices(notices);
-  }, [qTasks.data, qTaskAssignees.data, qFeedbacks.data, currentEmployee?.id, userId, dismissedNoticeTypes]);
+  }, [tasks, taskAssignees, feedbacks, currentEmployee?.id, userId, dismissedNoticeTypes]);
   useEffect(() => { if (qFeedbacks.data) setFeedbacks(qFeedbacks.data); }, [qFeedbacks.data]);
   useEffect(() => { if (qUpdateLogs.data) setUpdateLogs(qUpdateLogs.data); }, [qUpdateLogs.data]);
   useEffect(() => { if (qLogComments.data) setLogComments(qLogComments.data); }, [qLogComments.data]);
