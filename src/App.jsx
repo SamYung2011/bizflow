@@ -4514,8 +4514,10 @@ export default function App() {
                   {/* 總覽入口：所有員工的任務全景 */}
                   <div onClick={() => { setEmpPageMode("overview"); setSelectedEmployee(null); }}
                        style={{ background: empPageMode === "overview" ? "#eef2ff" : "#fafbfc", border: "1px solid " + (empPageMode === "overview" ? "#6382ff" : "#f0f0f0"), borderRadius: 10, padding: "12px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#f59e0b,#ef4444)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 700, flexShrink: 0 }}>📊</div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: empPageMode === "overview" ? "#3b58d4" : "#222" }}>{t("總覽")}</div>
+                    <div style={{ width: 36, height: 36, borderRadius: 8, background: empPageMode === "overview" ? "#dbe4ff" : "#eef2ff", color: "#6382ff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <Icon name="dashboard" size={18} />
+                    </div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: empPageMode === "overview" ? "#3b58d4" : "#222" }}>{t("任務總覽")}</div>
                   </div>
                   {employees.length === 0 ? (
                     <div style={{ textAlign: "center", padding: 24, color: "#aaa", fontSize: 12, border: "1px dashed #e0e0e0", borderRadius: 10 }}>{t("尚無員工")}</div>
@@ -4566,7 +4568,7 @@ export default function App() {
                   );
                   return (
                     <div>
-                      <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 16 }}>📊 {t("任務總覽")}</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 16 }}>{t("任務總覽")}</div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                         {employees.filter(e2 => e2.active !== false).map(e2 => {
                           const isExpanded = overviewExpanded.has(e2.id);
