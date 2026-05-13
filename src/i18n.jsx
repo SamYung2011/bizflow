@@ -999,6 +999,7 @@ const DICT_EN = {
   "任務總覽": "Task Overview",
   "沒有未完成任務": "No pending tasks",
   "最近完成": "Recently completed",
+  "官網表格": "Website Form",
 };
 
 const DICT_FR = {
@@ -1996,6 +1997,7 @@ const DICT_FR = {
   "任務總覽": "Vue d'ensemble des tâches",
   "沒有未完成任務": "Aucune tâche en attente",
   "最近完成": "Récemment terminées",
+  "官網表格": "Formulaire web",
 };
 
 const I18nContext = createContext({ lang: "zh", setLang: () => {}, t: (s) => s });

@@ -850,6 +850,7 @@ export default function App() {
   const [customerSort, setCustomerSort] = useState("created");
   const [customerSortDir, setCustomerSortDir] = useState("desc");
   const [customerTimeRange, setCustomerTimeRange] = useState("all");
+  const [customerSourceFilter, setCustomerSourceFilter] = useState("all"); // all / shopify / framer / other
   const [editingProduct, setEditingProduct] = useState(null);
   const [editStock, setEditStock] = useState(0);
   const [editStocks, setEditStocks] = useState({});
@@ -1104,6 +1105,33 @@ export default function App() {
     }
   }, [customerGroups]);
 
+  // 每個 customer 的來源（按最早 invoice 推斷）→ shopify / framer / other
+  const customerSourceMap = useMemo(() => {
+    const inferSource = (inv) => {
+      const notes = inv?.notes || "";
+      if (notes.includes("__FORMS_BUY__")) return "framer";
+      if (notes.includes("__BROADWAY__")) return "other";
+      if (inv?.invoice_number && /^\d+$/.test(String(inv.invoice_number))) return "shopify";
+      return "other";
+    };
+    const invoicesByGroup = new Map();
+    for (const inv of invoices) {
+      if (!inv.customer_id) continue;
+      const gid = customerGroups.idToGroup?.get?.(inv.customer_id);
+      if (!gid) continue;
+      if (!invoicesByGroup.has(gid)) invoicesByGroup.set(gid, []);
+      invoicesByGroup.get(gid).push(inv);
+    }
+    const map = new Map();
+    for (const c of customerGroups.virtualCustomers) {
+      const list = invoicesByGroup.get(c.id);
+      if (!list || list.length === 0) { map.set(c.id, "other"); continue; }
+      const earliest = [...list].sort((a, b) => new Date(a.date) - new Date(b.date))[0];
+      map.set(c.id, inferSource(earliest));
+    }
+    return map;
+  }, [customerGroups, invoices]);
+
   const filteredCustomers = useMemo(() => {
     const cutoff = customerTimeRange === "all" ? null : new Date(Date.now() - parseInt(customerTimeRange) * 86400000);
     // lastPurchaseMap 按 group id 聚合（group 內任一 cid 的最近購買）
@@ -1131,6 +1159,9 @@ export default function App() {
           || (c.car_model || "").toLowerCase().includes(q);
         if (!hit) return false;
       }
+      if (customerSourceFilter !== "all") {
+        if (customerSourceMap.get(c.id) !== customerSourceFilter) return false;
+      }
       if (!cutoff) return true;
       const dateStr = lastPurchaseMap[c.id];
       return dateStr && new Date(dateStr) >= cutoff;
@@ -1143,7 +1174,7 @@ export default function App() {
       if (!vb) return -1;
       return vb.localeCompare(va) * dir;
     });
-  }, [customerGroups, invoices, search, customerSort, customerSortDir, customerTimeRange]);
+  }, [customerGroups, invoices, search, customerSort, customerSortDir, customerTimeRange, customerSourceFilter, customerSourceMap]);
 
   // 發票頁過濾：按搜索關鍵字 (發票號 / 客戶名 / 備註)
   // 物流狀態的派生：沒填單號就是「待發貨」，否則用 shipping_status（保底）
@@ -3622,6 +3653,10 @@ export default function App() {
               {[["all", t("全部")], ["7", t("7天")], ["30", t("30天")], ["90", t("90天")]].map(([k, label]) => (
                 <button key={k} onClick={() => { setCustomerTimeRange(k); setVisibleCustomers(30); }} style={{ padding: "6px 14px", borderRadius: 20, border: customerTimeRange === k ? "1px solid #6382ff" : "1px solid #e0e0e0", background: customerTimeRange === k ? "#f0f4ff" : "#fff", color: customerTimeRange === k ? "#6382ff" : "#666", fontSize: 13, fontWeight: customerTimeRange === k ? 700 : 400, cursor: "pointer" }}>{label}</button>
               ))}
+              <span style={{ fontSize: 13, color: "#888", marginLeft: 12, marginRight: 4 }}>{t("來源")}：</span>
+              {[["all", t("全部")], ["shopify", "Shopify"], ["framer", t("官網表格")], ["other", t("其他")]].map(([k, label]) => (
+                <button key={k} onClick={() => { setCustomerSourceFilter(k); setVisibleCustomers(30); }} style={{ padding: "6px 14px", borderRadius: 20, border: customerSourceFilter === k ? "1px solid #6382ff" : "1px solid #e0e0e0", background: customerSourceFilter === k ? "#f0f4ff" : "#fff", color: customerSourceFilter === k ? "#6382ff" : "#666", fontSize: 13, fontWeight: customerSourceFilter === k ? 700 : 400, cursor: "pointer" }}>{label}</button>
+              ))}
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -3637,12 +3672,22 @@ export default function App() {
                           {(c.name || "?")[0]}
                         </div>
                         <div style={{ flex: 1 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 3 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 3, flexWrap: "wrap" }}>
                             <span style={{ fontSize: 16, fontWeight: 800 }}>{c.name}</span>
                             <Badge status={c.type || "Regular"} />
+                            {(() => {
+                              const srcKey = customerSourceMap.get(c.id);
+                              if (!srcKey || srcKey === "other") return null;
+                              const srcInfo = srcKey === "shopify"
+                                ? { label: "Shopify", color: "#16a34a", bg: "#dcfce7" }
+                                : { label: t("官網表格"), color: "#6382ff", bg: "#eef2ff" };
+                              return <span style={{ fontSize: 11, color: srcInfo.color, background: srcInfo.bg, padding: "2px 8px", borderRadius: 6, fontWeight: 700 }}>{srcInfo.label}</span>;
+                            })()}
                           </div>
-                          <div style={{ fontSize: 13, color: "#666" }}>{c.email} · {c.phone}</div>
-                          {c.car_make && <div style={{ fontSize: 12, color: "#aaa", marginTop: 2 }}>🚗 {c.car_make} {c.car_model}</div>}
+                          <div style={{ fontSize: 13, color: "#666" }}>
+                            {c.phone || "—"}
+                            {c.car_make && <span style={{ color: "#aaa", marginLeft: 8 }}>🚗 {c.car_make} {c.car_model}</span>}
+                          </div>
                         </div>
                         <div style={{ display: "flex", gap: 12, textAlign: "center" }}>
                           <div style={{ padding: "8px 14px", background: "#f0f4ff", borderRadius: 10 }}>
