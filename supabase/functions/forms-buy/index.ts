@@ -172,27 +172,48 @@ Deno.serve(async (req) => {
     if (best) pendingMergeCid = String(best.id);
   }
 
-  // —— 2. 按產品名查 products 表回填價格 + warranty_months snapshot（小寫 + 去空格/橫線模糊匹配） ——
+  // —— 2. 按產品名解析價格 + warranty_months snapshot ——
+  // 解析優先級：
+  //   2a. line_item_aliases 命中：用 alias.products[0].product_id 拉 active 產品（跟 Shopify sync 一致）
+  //   2b. fallback：products 表 normalize 模糊匹配 + 排除 _archived
+  //   2c. 多條同名 active：優先 "推廣/限時/優惠"，否則 matches[0]
   type Item = { name: string; qty: number; price: number; warranty_months?: number };
   let items: Item[] = [];
   if (productNames.length > 0) {
-    // 拉全 products 表（30-50 條，量很小）
-    const { data: products } = await sb.from("products").select("name, price, warranty_months");
+    const { data: products } = await sb.from("products").select("id, name, price, warranty_months, category");
+    const { data: aliases } = await sb.from("line_item_aliases").select("alias_name, skip, products");
+    const productById = new Map((products || []).map((p: any) => [p.id, p]));
     const normalize = (s: string) => (s || "").toLowerCase().replace(/[\s\-]+/g, "");
+    const aliasByNorm = new Map<string, any>();
+    for (const a of aliases || []) {
+      if (!a.alias_name) continue;
+      aliasByNorm.set(normalize(a.alias_name), a);
+    }
     items = productNames.map((pname) => {
       const target = normalize(pname);
-      const matches = (products || []).filter((x: { name: string }) => x.name && normalize(x.name) === target);
-      let p = matches[0];
-      if (matches.length > 1) {
-        // 同名多条时优先 "推廣"/"限時" 促銷版
-        p = matches.find((x: { name: string }) => /推廣|限時|優惠/.test(x.name)) || matches[0];
+      let p: any = null;
+
+      // 2a. alias 優先
+      const alias = aliasByNorm.get(target);
+      if (alias && !alias.skip && Array.isArray(alias.products) && alias.products.length > 0) {
+        const aliasMap = alias.products[0];
+        if (aliasMap?.product_id) p = productById.get(aliasMap.product_id);
       }
+
+      // 2b. fallback：products 表 normalize 匹配，排除 _archived
+      if (!p) {
+        const matches = (products || []).filter((x: any) =>
+          x.name && normalize(x.name) === target && x.category !== "_archived"
+        );
+        if (matches.length === 1) p = matches[0];
+        else if (matches.length > 1) p = matches.find((x: any) => /推廣|限時|優惠/.test(x.name)) || matches[0];
+      }
+
       const item: Item = {
         name: pname,
         qty: 1,
         price: p?.price ? Number(p.price) : 0,
       };
-      // 下單時凍結保修月數，未來改產品 warranty_months 不追溯此單
       if (p?.warranty_months) item.warranty_months = Number(p.warranty_months);
       return item;
     });
