@@ -3644,18 +3644,18 @@ export default function App() {
             <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
               <span style={{ fontSize: 13, color: "#888", marginRight: 4 }}>{t("排序")}：</span>
               {[["created", t("建立時間")], ["lastPurchase", t("最近購買")]].map(([k, label]) => (
-                <button key={k} onClick={() => { setCustomerSort(k); setVisibleCustomers(30); }} style={{ padding: "6px 14px", borderRadius: 20, border: customerSort === k ? "1px solid #6382ff" : "1px solid #e0e0e0", background: customerSort === k ? "#f0f4ff" : "#fff", color: customerSort === k ? "#6382ff" : "#666", fontSize: 13, fontWeight: customerSort === k ? 700 : 400, cursor: "pointer" }}>{label}</button>
+                <button key={k} onClick={() => { setCustomerSort(k); setVisibleCustomers(30); }} style={{ padding: "6px 14px", borderRadius: 20, lineHeight: "20px", border: customerSort === k ? "1px solid #6382ff" : "1px solid #e0e0e0", background: customerSort === k ? "#f0f4ff" : "#fff", color: customerSort === k ? "#6382ff" : "#666", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{label}</button>
               ))}
-              <button onClick={() => { setCustomerSortDir(d => d === "desc" ? "asc" : "desc"); setVisibleCustomers(30); }} title={customerSortDir === "desc" ? t("目前降序（新→舊），點擊切換為升序") : t("目前升序（舊→新），點擊切換為降序")} style={{ padding: "6px 14px", borderRadius: 20, border: "1px solid #6382ff", background: "#6382ff", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+              <button onClick={() => { setCustomerSortDir(d => d === "desc" ? "asc" : "desc"); setVisibleCustomers(30); }} title={customerSortDir === "desc" ? t("目前降序（新→舊），點擊切換為升序") : t("目前升序（舊→新），點擊切換為降序")} style={{ padding: "6px 14px", borderRadius: 20, lineHeight: "20px", border: "1px solid #6382ff", background: "#6382ff", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
                 {customerSortDir === "desc" ? t("↓ 降序") : t("↑ 升序")}
               </button>
               <span style={{ fontSize: 13, color: "#888", marginLeft: 12, marginRight: 4 }}>{t("時間")}：</span>
               {[["all", t("全部")], ["7", t("7天")], ["30", t("30天")], ["90", t("90天")]].map(([k, label]) => (
-                <button key={k} onClick={() => { setCustomerTimeRange(k); setVisibleCustomers(30); }} style={{ padding: "6px 14px", borderRadius: 20, border: customerTimeRange === k ? "1px solid #6382ff" : "1px solid #e0e0e0", background: customerTimeRange === k ? "#f0f4ff" : "#fff", color: customerTimeRange === k ? "#6382ff" : "#666", fontSize: 13, fontWeight: customerTimeRange === k ? 700 : 400, cursor: "pointer" }}>{label}</button>
+                <button key={k} onClick={() => { setCustomerTimeRange(k); setVisibleCustomers(30); }} style={{ padding: "6px 14px", borderRadius: 20, lineHeight: "20px", border: customerTimeRange === k ? "1px solid #6382ff" : "1px solid #e0e0e0", background: customerTimeRange === k ? "#f0f4ff" : "#fff", color: customerTimeRange === k ? "#6382ff" : "#666", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{label}</button>
               ))}
               <span style={{ fontSize: 13, color: "#888", marginLeft: 12, marginRight: 4 }}>{t("來源")}：</span>
               {[["all", t("全部")], ["shopify", "Shopify"], ["framer", t("官網表格")], ["other", t("其他")]].map(([k, label]) => (
-                <button key={k} onClick={() => { setCustomerSourceFilter(k); setVisibleCustomers(30); }} style={{ padding: "6px 14px", borderRadius: 20, border: customerSourceFilter === k ? "1px solid #6382ff" : "1px solid #e0e0e0", background: customerSourceFilter === k ? "#f0f4ff" : "#fff", color: customerSourceFilter === k ? "#6382ff" : "#666", fontSize: 13, fontWeight: customerSourceFilter === k ? 700 : 400, cursor: "pointer" }}>{label}</button>
+                <button key={k} onClick={() => { setCustomerSourceFilter(k); setVisibleCustomers(30); }} style={{ padding: "6px 14px", borderRadius: 20, lineHeight: "20px", border: customerSourceFilter === k ? "1px solid #6382ff" : "1px solid #e0e0e0", background: customerSourceFilter === k ? "#f0f4ff" : "#fff", color: customerSourceFilter === k ? "#6382ff" : "#666", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{label}</button>
               ))}
             </div>
 
