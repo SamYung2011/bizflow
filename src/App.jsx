@@ -10,8 +10,7 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
-// Chrome 雲端版扩展最新版本 fallback（實際讀 wa_settings.latest_ext_version，發版只改 DB 不用改前端）
-// 扩展啟動 + 每 30 分鐘自己也拉一次 wa_settings.latest_ext_version 比對，發現舊版本就在 WhatsApp 頁面彈 banner 提示
+// Chrome 雲端版扩展最新版本（發版時跟 chrome-extension-cloud/manifest.json 的 version 同步改）
 const LATEST_EXT_VERSION_FALLBACK = "1.3.1";
 
 // 全量拉取指定表（HEAD 先取 count，再並行分頁拉所有資料）
@@ -343,12 +342,25 @@ export default function App() {
   const [stocks, setStocks] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [tasks, setTasks] = useState([]);
+  const [taskAssignees, setTaskAssignees] = useState([]); // task_assignees (多對多分配 + 個人完成狀態)
   const [feedbacks, setFeedbacks] = useState([]); // employee_task_feedbacks (comments thread)
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [showAddEmployee, setShowAddEmployee] = useState(false);
   const [newEmployee, setNewEmployee] = useState({ name: "", role: "", phone: "", email: "", note: "" });
   const [editingTask, setEditingTask] = useState(null); // 任務詳情 modal 當前任務
-  const [newTaskDraft, setNewTaskDraft] = useState({ title: "", priority: "low", note: "" });
+  const [newTaskDraft, setNewTaskDraft] = useState({ title: "", priority: "low", note: "", assigneeIds: null, needsApproval: false });
+  const [newSubTaskDraft, setNewSubTaskDraft] = useState({ assigneeIds: null }); // 子任務分配，null = 繼承父；needsApproval 永遠跟父走
+  const [subTaskAssigneeInput, setSubTaskAssigneeInput] = useState("");
+  const [subTaskAssigneeOpen, setSubTaskAssigneeOpen] = useState(false);
+  const [taskNotices, setTaskNotices] = useState([]); // 堆疊通知：[{ type, count, ids, ... }]
+  const [dismissedNoticeTypes, setDismissedNoticeTypes] = useState(new Set()); // session 內 dismiss 過的 type 不再出現
+  const [pendingMentions, setPendingMentions] = useState([]); // 反饋輸入時 @ 的 auth.users.id 數組
+  const [fbInputValue, setFbInputValue] = useState(""); // 反饋輸入框文本（受控，用於 @ mention 識別）
+  const [mentionPopup, setMentionPopup] = useState({ open: false, query: "", atIdx: -1 }); // @ 自動補全下拉狀態
+  const [newTaskAssigneeInput, setNewTaskAssigneeInput] = useState(""); // 創建任務的分配輸入框
+  const [newTaskAssigneeOpen, setNewTaskAssigneeOpen] = useState(false);
+  const [editTaskAssigneeInput, setEditTaskAssigneeInput] = useState(""); // 編輯任務的分配輸入框
+  const [editTaskAssigneeOpen, setEditTaskAssigneeOpen] = useState(false);
   // 員工更新日誌 state
   const [updateLogs, setUpdateLogs] = useState([]);
   const [logComments, setLogComments] = useState([]);
@@ -1202,6 +1214,65 @@ export default function App() {
   const qStocks = useQuery({ queryKey: ["bf", "inventory_stock"], queryFn: () => fetchAllTable("inventory_stock", null), enabled: !!userId });
   const qEmployees = useQuery({ queryKey: ["bf", "employees"], queryFn: () => fetchAllTable("employees", "created_at"), enabled: !!userId });
   const qTasks = useQuery({ queryKey: ["bf", "employee_tasks"], queryFn: () => fetchAllTable("employee_tasks", "created_at"), enabled: !!userId });
+  const qTaskAssignees = useQuery({ queryKey: ["bf", "task_assignees"], queryFn: () => fetchAllTable("task_assignees", "created_at"), enabled: !!userId });
+
+  // task_assignees 按 task_id 分組（多處用，避免重複掃描）
+  // 兜底用 qTaskAssignees.data：state 同步比 tasks 慢一幀時避免 race（剛發布完任務刷新被分配員工那邊瞬間看不到）
+  const assigneesByTask = useMemo(() => {
+    const src = (taskAssignees && taskAssignees.length > 0) ? taskAssignees : (qTaskAssignees.data || []);
+    const m = new Map();
+    for (const a of src) {
+      const arr = m.get(a.task_id);
+      if (arr) arr.push(a); else m.set(a.task_id, [a]);
+    }
+    return m;
+  }, [taskAssignees, qTaskAssignees.data]);
+  // 判斷 task 是否分配給 empId（fallback：assignees 表沒記錄則看 employee_id 兼容舊數據）
+  const isTaskAssignedTo = (task, empId) => {
+    const list = assigneesByTask.get(task.id);
+    if (list && list.length > 0) return list.some(a => a.employee_id === empId);
+    return task.employee_id === empId;
+  };
+  // 任務是否處於「等待發布人核驗」狀態：勾了 needs_approval + task 未終結 + 全員都已個人結算（done/abandoned）
+  const isAwaitingApproval = (task) => {
+    if (!task || !task.needs_approval) return false;
+    if (task.status !== "open") return false;
+    const list = assigneesByTask.get(task.id) || [];
+    if (list.length === 0) return false;
+    return list.every(a => a.completed_at != null || a.abandoned_at != null);
+  };
+
+  // 刪除權限：admin / 發布人 全權；assignee 僅當「父任務 + 獨占 + 不需核驗」可自刪；其他人不行
+  const canDeleteTask = (task) => {
+    if (!task) return false;
+    if (isBfAdmin) return true;
+    if (!currentEmployee) return false;
+    if (task.creator_employee_id === currentEmployee.id) return true;
+    if (task.parent_task_id) return false;
+    if (task.needs_approval) return false;
+    const list = assigneesByTask.get(task.id) || [];
+    if (list.length !== 1) return false;
+    return list[0].employee_id === currentEmployee.id;
+  };
+
+  // 某員工對某 task 的個人完成狀態（看自己 task_assignees.completed_at；舊數據 fallback task.status）
+  const empIsDoneFor = (task, empId) => {
+    const list = assigneesByTask.get(task.id);
+    if (list && list.length > 0) {
+      const row = list.find(a => a.employee_id === empId);
+      return row ? row.completed_at != null : (task.status === "done");
+    }
+    return task.status === "done";
+  };
+  // 某員工對某 task 的個人放棄狀態（task_assignees.abandoned_at OR task 整體 abandoned 都算）
+  const empIsAbandonedFor = (task, empId) => {
+    const list = assigneesByTask.get(task.id);
+    if (list && list.length > 0) {
+      const row = list.find(a => a.employee_id === empId);
+      if (row && row.abandoned_at != null) return true;
+    }
+    return task.status === "abandoned";
+  };
   const qFeedbacks = useQuery({ queryKey: ["bf", "employee_task_feedbacks"], queryFn: () => fetchAllTable("employee_task_feedbacks", "created_at"), enabled: !!userId });
   const qUpdateLogs = useQuery({ queryKey: ["bf", "employee_update_logs"], queryFn: () => fetchAllTable("employee_update_logs", "created_at", false), enabled: !!userId });
   const qLogComments = useQuery({ queryKey: ["bf", "employee_update_log_comments"], queryFn: () => fetchAllTable("employee_update_log_comments", "created_at"), enabled: !!userId });
@@ -1224,6 +1295,52 @@ export default function App() {
   useEffect(() => { if (qStocks.data) setStocks(qStocks.data); }, [qStocks.data]);
   useEffect(() => { if (qEmployees.data) setEmployees(qEmployees.data); }, [qEmployees.data]);
   useEffect(() => { if (qTasks.data) setTasks(qTasks.data); }, [qTasks.data]);
+  useEffect(() => { if (qTaskAssignees.data) setTaskAssignees(qTaskAssignees.data); }, [qTaskAssignees.data]);
+  // 任務提醒：tasks/assignees/feedbacks 加載完一次後計算所有類型 → 堆疊顯示
+  useEffect(() => {
+    if (!currentEmployee || !userId || !qTasks.data || !qTaskAssignees.data || !qFeedbacks.data) return;
+    const notices = [];
+    // 1. 反饋 @ 我（持久 dismiss）
+    if (!dismissedNoticeTypes.has('feedback')) {
+      const seenFbKey = `bf_seen_fb_${userId}`;
+      let seenFb = new Set();
+      try { seenFb = new Set(JSON.parse(localStorage.getItem(seenFbKey) || '[]')); } catch {}
+      const myMentions = feedbacks.filter(f => {
+        const mentioned = Array.isArray(f.mentioned_user_ids) ? f.mentioned_user_ids : [];
+        return mentioned.includes(userId) && !seenFb.has(f.id) && f.author_user_id !== userId;
+      });
+      if (myMentions.length > 0) {
+        const byTask = new Map();
+        for (const f of myMentions) {
+          if (!byTask.has(f.task_id)) byTask.set(f.task_id, []);
+          byTask.get(f.task_id).push(f);
+        }
+        const taskTitles = [];
+        for (const [taskId, fbList] of byTask) {
+          const tk = tasks.find(t => t.id === taskId);
+          if (tk) taskTitles.push({ title: tk.title, count: fbList.length });
+        }
+        notices.push({ type: 'feedback', count: myMentions.length, ids: myMentions.map(f => f.id), tasks: taskTitles });
+      }
+    }
+    // 2. 待核驗（我是發布人）
+    if (!dismissedNoticeTypes.has('approval')) {
+      const awaiting = tasks.filter(t => t.creator_employee_id === currentEmployee.id && isAwaitingApproval(t));
+      if (awaiting.length > 0) notices.push({ type: 'approval', count: awaiting.length, ids: awaiting.map(t => t.id) });
+    }
+    // 3. 待處理任務（我是 assignee + 自己未結算）
+    if (!dismissedNoticeTypes.has('new')) {
+      const pending = tasks.filter(t =>
+        !t.parent_task_id &&
+        t.status === 'open' &&
+        isTaskAssignedTo(t, currentEmployee.id) &&
+        !empIsDoneFor(t, currentEmployee.id) &&
+        !empIsAbandonedFor(t, currentEmployee.id)
+      );
+      if (pending.length > 0) notices.push({ type: 'new', count: pending.length, ids: pending.map(t => t.id) });
+    }
+    setTaskNotices(notices);
+  }, [qTasks.data, qTaskAssignees.data, qFeedbacks.data, currentEmployee?.id, userId, dismissedNoticeTypes]);
   useEffect(() => { if (qFeedbacks.data) setFeedbacks(qFeedbacks.data); }, [qFeedbacks.data]);
   useEffect(() => { if (qUpdateLogs.data) setUpdateLogs(qUpdateLogs.data); }, [qUpdateLogs.data]);
   useEffect(() => { if (qLogComments.data) setLogComments(qLogComments.data); }, [qLogComments.data]);
@@ -2036,15 +2153,26 @@ export default function App() {
     if (!window.confirm(msg)) return;
     const { error } = await supabase.from("employees").delete().eq("id", emp.id);
     if (error) { alert(`${t("刪除失敗")}：${error.message}`); return; }
+    const deletedTaskIds = new Set(tasks.filter(t => t.employee_id === emp.id).map(t => t.id));
     setEmployees(prev => prev.filter(e => e.id !== emp.id));
     setTasks(prev => prev.filter(t => t.employee_id !== emp.id));
+    setTaskAssignees(prev => prev.filter(a => !deletedTaskIds.has(a.task_id) && a.employee_id !== emp.id));
     setSelectedEmployee(null);
   }
 
-  async function handleAddTask(employeeId, title, priority = "low", parentTaskId = null, note = null, files = []) {
+  async function handleAddTask(employeeId, title, priority = "low", parentTaskId = null, note = null, files = [], opts = {}) {
+    // opts: { assigneeIds?: string[], needsApproval?: boolean }
+    //   - assigneeIds: 多人分配（Phase 2 用），不傳則 fallback employeeId 單人
+    //   - needsApproval: 是否需要發布人核驗
     if (!title || !title.trim()) return;
+    const assigneeIds = (opts.assigneeIds && opts.assigneeIds.length > 0)
+      ? opts.assigneeIds
+      : (employeeId ? [employeeId] : []);
+    const primaryEmployeeId = assigneeIds[0] || employeeId || null;
     const { data, error } = await supabase.from("employee_tasks").insert({
-      employee_id: employeeId,
+      employee_id: primaryEmployeeId,             // 保留作主負責人（兼容舊邏輯）
+      creator_employee_id: currentEmployee?.id || primaryEmployeeId,
+      needs_approval: !!opts.needsApproval,
       title: title.trim(),
       priority,
       parent_task_id: parentTaskId,
@@ -2052,6 +2180,16 @@ export default function App() {
     }).select().single();
     if (error) { alert(`${t("新增任務失敗")}：${error.message}`); return; }
     let row = data;
+    // 同步寫 task_assignees（多人分配的真實來源）
+    if (assigneeIds.length > 0) {
+      const rows = assigneeIds.map(eid => ({ task_id: data.id, employee_id: eid }));
+      const { data: ad, error: ae } = await supabase.from("task_assignees").insert(rows).select();
+      if (ae) {
+        console.error("task_assignees insert failed", ae);
+      } else if (ad && ad.length > 0) {
+        setTaskAssignees(prev => [...prev, ...ad]);
+      }
+    }
     // 有附件就上傳到新建 task 下，再 UPDATE attachments 列
     if (files && files.length > 0) {
       try {
@@ -2065,6 +2203,31 @@ export default function App() {
     return row;
   }
 
+  // 重新設置 task 的 assignees（diff 增刪），同步 employee_tasks.employee_id 為主負責人（= 第一個 assignee，保留兼容老查詢）
+  async function handleSetTaskAssignees(taskId, newAssigneeIds) {
+    if (newAssigneeIds.length === 0) { alert(t("至少需要一個負責人")); return; }
+    const current = (assigneesByTask.get(taskId) || []).map(a => a.employee_id);
+    const toAdd = newAssigneeIds.filter(id => !current.includes(id));
+    const toRemove = current.filter(id => !newAssigneeIds.includes(id));
+    if (toAdd.length > 0) {
+      const rows = toAdd.map(eid => ({ task_id: taskId, employee_id: eid }));
+      const { data, error } = await supabase.from("task_assignees").insert(rows).select();
+      if (error) { alert(`${t("分配失敗")}：${error.message}`); return; }
+      if (data && data.length > 0) setTaskAssignees(prev => [...prev, ...data]);
+    }
+    if (toRemove.length > 0) {
+      const { error } = await supabase.from("task_assignees").delete().eq("task_id", taskId).in("employee_id", toRemove);
+      if (error) { alert(`${t("移除失敗")}：${error.message}`); return; }
+      setTaskAssignees(prev => prev.filter(a => !(a.task_id === taskId && toRemove.includes(a.employee_id))));
+    }
+    // 同步 employee_tasks.employee_id 為新主負責人（= 第一個 assignee）
+    const task = tasks.find(x => x.id === taskId);
+    const newPrimary = newAssigneeIds[0];
+    if (task && task.employee_id !== newPrimary) {
+      await handleUpdateTask(taskId, { employee_id: newPrimary });
+    }
+  }
+
   async function handleUpdateTask(taskId, patch) {
     const { error } = await supabase.from("employee_tasks").update(patch).eq("id", taskId);
     if (error) { alert(`${t("更新失敗")}：${error.message}`); return; }
@@ -2075,16 +2238,110 @@ export default function App() {
   }
 
   async function handleToggleTaskDone(task) {
+    // 兼容單人 / 舊數據：toggle task.status 並同步唯一 assignee 的 completed_at
     const next = task.status === "done" ? "open" : "done";
-    await handleUpdateTask(task.id, { status: next, completed_at: next === "done" ? new Date().toISOString() : null });
+    const ts = next === "done" ? new Date().toISOString() : null;
+    await handleUpdateTask(task.id, { status: next, completed_at: ts });
+    const list = assigneesByTask.get(task.id) || [];
+    if (list.length >= 1) {
+      // 全部 assignee 的 completed_at 跟 task 同步（單人就一條，多人也一致地全部跟齊）
+      await supabase.from("task_assignees").update({ completed_at: ts }).eq("task_id", task.id);
+      setTaskAssignees(prev => prev.map(a => a.task_id === task.id ? { ...a, completed_at: ts } : a));
+    }
+  }
+
+  // 發布人 / admin 核驗通過：根據 assignees 是否有人 done 決定最終 task.status (done / abandoned)
+  async function handleApproveTask(task) {
+    const list = assigneesByTask.get(task.id) || [];
+    const anyDone = list.some(a => a.completed_at != null);
+    const nextStatus = anyDone ? "done" : "abandoned";
+    const now = new Date().toISOString();
+    await handleUpdateTask(task.id, {
+      status: nextStatus,
+      completed_at: now,
+      approved_at: now,
+      approved_by: currentEmployee?.id || null,
+    });
+  }
+
+  // toggle 某員工對某 task 的個人放棄狀態
+  // 單人 + 不需核驗：直接 task.status='abandoned'
+  // 多人 / 需核驗：只設 abandoned_at，task.status 不變；不需核驗時全員結算後自動 set task.status
+  async function handleToggleAssigneeAbandoned(task, empId) {
+    const list = assigneesByTask.get(task.id) || [];
+    const myRow = list.find(a => a.employee_id === empId);
+    if (!myRow) {
+      // 沒 assignee 行 → fallback 改 task.status
+      const next = task.status === "abandoned" ? "open" : "abandoned";
+      const ts = next === "abandoned" ? new Date().toISOString() : null;
+      return handleUpdateTask(task.id, { status: next, completed_at: ts });
+    }
+    // 單人獨佔 + 不需核驗 → 整體 abandoned
+    if (list.length === 1 && !task.needs_approval) {
+      const next = task.status === "abandoned" ? "open" : "abandoned";
+      const ts = next === "abandoned" ? new Date().toISOString() : null;
+      await handleUpdateTask(task.id, { status: next, completed_at: ts });
+      await supabase.from("task_assignees").update({ abandoned_at: ts, completed_at: null }).eq("task_id", task.id).eq("employee_id", empId);
+      setTaskAssignees(prev => prev.map(a => (a.task_id === task.id && a.employee_id === empId) ? { ...a, abandoned_at: ts, completed_at: null } : a));
+      return;
+    }
+    // 多人 / 需核驗：toggle 個人 abandoned_at（同時清掉 completed_at 互斥）
+    const nextTs = myRow.abandoned_at ? null : new Date().toISOString();
+    const newCompletedAt = nextTs ? null : myRow.completed_at;
+    const { error } = await supabase.from("task_assignees").update({ abandoned_at: nextTs, completed_at: newCompletedAt }).eq("task_id", task.id).eq("employee_id", empId);
+    if (error) { alert(`${t("更新失敗")}：${error.message}`); return; }
+    setTaskAssignees(prev => prev.map(a => (a.task_id === task.id && a.employee_id === empId) ? { ...a, abandoned_at: nextTs, completed_at: newCompletedAt } : a));
+    // auto-status：不需核驗 + 全員結算 → 算 task 整體
+    if (!task.needs_approval) {
+      const updatedList = list.map(a => a.employee_id === empId ? { ...a, abandoned_at: nextTs, completed_at: newCompletedAt } : a);
+      const allSettled = updatedList.every(a => a.completed_at != null || a.abandoned_at != null);
+      if (allSettled) {
+        const anyDone = updatedList.some(a => a.completed_at != null);
+        if (anyDone && task.status !== "done") {
+          await handleUpdateTask(task.id, { status: "done", completed_at: new Date().toISOString() });
+        } else if (!anyDone && task.status !== "abandoned") {
+          await handleUpdateTask(task.id, { status: "abandoned", completed_at: new Date().toISOString() });
+        }
+      } else if (task.status !== "open") {
+        // 有人取消放棄 → 任務回到 open
+        await handleUpdateTask(task.id, { status: "open", completed_at: null });
+      }
+    }
+  }
+
+  // toggle 某員工對某 task 的個人完成狀態（用於多人任務）
+  async function handleToggleAssigneeDone(task, empId) {
+    const list = assigneesByTask.get(task.id) || [];
+    const myRow = list.find(a => a.employee_id === empId);
+    if (!myRow) {
+      // 任務沒有這個 emp 的 assignee 行（舊數據）→ fallback 改 task.status
+      return handleToggleTaskDone(task);
+    }
+    const nextTs = myRow.completed_at ? null : new Date().toISOString();
+    const { error } = await supabase.from("task_assignees").update({ completed_at: nextTs }).eq("task_id", task.id).eq("employee_id", empId);
+    if (error) { alert(`${t("更新失敗")}：${error.message}`); return; }
+    setTaskAssignees(prev => prev.map(a => (a.task_id === task.id && a.employee_id === empId) ? { ...a, completed_at: nextTs } : a));
+    // 全員完成 + 不需核驗 → auto-set task.status=done；任一未完成 + task.status=done → 回退到 open
+    const updatedList = list.map(a => a.employee_id === empId ? { ...a, completed_at: nextTs } : a);
+    const allDone = updatedList.every(a => a.completed_at != null);
+    if (allDone && !task.needs_approval && task.status !== "done") {
+      await handleUpdateTask(task.id, { status: "done", completed_at: new Date().toISOString() });
+    } else if (!allDone && task.status === "done") {
+      await handleUpdateTask(task.id, { status: "open", completed_at: null });
+    }
   }
 
   async function handleDeleteTask(taskId) {
+    const task = tasks.find(x => x.id === taskId);
+    if (!canDeleteTask(task)) { alert(t("無權刪除此任務（只有管理員、發布人、或單獨被分配且不需核驗的人能刪）")); return; }
     if (!window.confirm(t("確定刪除此任務及所有子任務？"))) return;
+    const subIds = tasks.filter(s => s.parent_task_id === taskId).map(s => s.id);
+    const allDeleted = new Set([taskId, ...subIds]);
     const { error } = await supabase.from("employee_tasks").delete().eq("id", taskId);
     if (error) { alert(`${t("刪除失敗")}：${error.message}`); return; }
-    setTasks(prev => prev.filter(t => t.id !== taskId && t.parent_task_id !== taskId));
-    setFeedbacks(prev => prev.filter(f => f.task_id !== taskId)); // CASCADE 在 db 自动删，本地也同步
+    setTasks(prev => prev.filter(t => !allDeleted.has(t.id)));
+    setFeedbacks(prev => prev.filter(f => !allDeleted.has(f.task_id))); // CASCADE 在 db 自动删，本地也同步
+    setTaskAssignees(prev => prev.filter(a => !allDeleted.has(a.task_id))); // 同步清理 assignees
     if (editingTask?.id === taskId) setEditingTask(null);
   }
 
@@ -2102,7 +2359,7 @@ export default function App() {
     return { url: pub.publicUrl, name: file.name, size: file.size, type: file.type || "application/octet-stream" };
   }
 
-  async function handleAddFeedback(taskId, body, files = [], parentFeedbackId = null) {
+  async function handleAddFeedback(taskId, body, files = [], parentFeedbackId = null, mentionedUserIds = []) {
     if ((!body || !body.trim()) && (!files || files.length === 0)) return;
     if (!userId) return;
     const authorName = currentEmployee?.name || (session?.user?.email ? session.user.email.split("@")[0] : "user");
@@ -2119,10 +2376,12 @@ export default function App() {
       body: (body || "").trim(),
       attachments,
       parent_feedback_id: parentFeedbackId,
+      mentioned_user_ids: mentionedUserIds && mentionedUserIds.length > 0 ? mentionedUserIds : [],
     }).select().single();
     if (error) { alert(`${t("發送失敗")}：${error.message}`); return; }
     setFeedbacks(prev => [...prev, data]);
     setPendingAttachments([]);
+    setPendingMentions([]);
     setReplyingToFb(null);
     return data;
   }
@@ -4052,13 +4311,18 @@ export default function App() {
           const showLogTab = emp?.show_update_log === true;
           const showCommissionTab = emp?.role === '銷售' && (isBfAdmin || (currentEmployee && currentEmployee.id === emp.id));
           const showAnyOptTab = showLogTab || showCommissionTab;
-          const topTasks = emp ? tasks.filter(t => t.employee_id === emp.id && !t.parent_task_id) : [];
+          // emp 是任務的 assignee 或發布人都應該看到（發布人需要跟蹤自己發布的任務）
+          const empOwnsTask = (t) => isTaskAssignedTo(t, emp.id) || emp.id === t.creator_employee_id;
+          const topTasks = emp ? tasks.filter(t => empOwnsTask(t) && !t.parent_task_id) : [];
           // done/abandoned 面板包含子任務，但父任務已 done/abandoned 時子不再單獨顯示（隨父隱含）
-          const allEmpTasks = emp ? tasks.filter(t => t.employee_id === emp.id) : [];
+          const allEmpTasks = emp ? tasks.filter(t => empOwnsTask(t)) : [];
           const oneEightyDaysAgo = Date.now() - 180 * 24 * 60 * 60 * 1000;
           const within180Days = (t) => {
-            const ts = t.completed_at ? new Date(t.completed_at).getTime() : new Date(t.created_at).getTime();
-            return ts >= oneEightyDaysAgo;
+            // 優先看 emp 個人完成時間（多人任務每人時間可能不同）；無則 task 整體；再無則 created_at
+            const list = assigneesByTask.get(t.id) || [];
+            const myRow = list.find(a => a.employee_id === emp.id);
+            const tsStr = myRow?.completed_at || t.completed_at || t.created_at;
+            return new Date(tsStr).getTime() >= oneEightyDaysAgo;
           };
           // 子任務僅當父任務還 open 時才在已完成/已放棄欄目單獨顯示
           const showInTerminalCol = (t) => {
@@ -4067,15 +4331,44 @@ export default function App() {
             if (!parent) return true;
             return parent.status === "open";
           };
+          // 個人 done / abandoned 狀態（多人任務看自己的 task_assignees；舊數據 fallback task.status）
+          const empDone = (t) => empIsDoneFor(t, emp.id);
+          const empAbandoned = (t) => empIsAbandonedFor(t, emp.id);
+          const empIsAssignee = (t) => isTaskAssignedTo(t, emp.id);
+          const empIsCreator = (t) => emp.id === t.creator_employee_id;
+          // 是否在 open 欄目顯示
+          const showInOpenCol = (t) => {
+            // 發布人視角 + 待核驗 → 留在 open 提醒去核驗
+            if (empIsCreator(t) && isAwaitingApproval(t)) return true;
+            // 任務整體已終結 → 不在 open
+            if (t.status !== "open") return false;
+            // 是 assignee → 自己未結算才顯示
+            if (empIsAssignee(t)) return !empDone(t) && !empAbandoned(t);
+            // 只是發布人 → 整體 open 就顯示（跟蹤進度）
+            return true;
+          };
+          // 是否在 done 欄目顯示
+          const showInDoneCol = (t) => {
+            // 發布人視角 + 待核驗 → 不在 done（要去 open 核驗）
+            if (empIsCreator(t) && isAwaitingApproval(t)) return false;
+            // 是 assignee → 自己完成且未放棄
+            if (empIsAssignee(t)) return empDone(t) && !empAbandoned(t);
+            // 只是發布人 → task 整體 done
+            return t.status === "done";
+          };
+          const showInAbandonedCol = (t) => {
+            if (empIsAssignee(t)) return empAbandoned(t) && !empDone(t);
+            return t.status === "abandoned";
+          };
           const cols = emp ? {
-            high: topTasks.filter(t => t.priority === "high" && t.status === "open"),
-            mid:  topTasks.filter(t => t.priority === "mid"  && t.status === "open"),
-            low:  topTasks.filter(t => (t.priority === "low" || t.priority === "none" || !t.priority) && t.status === "open"),
-            abandoned: allEmpTasks.filter(t => t.status === "abandoned" && within180Days(t) && showInTerminalCol(t)),
-            done: allEmpTasks.filter(t => t.status === "done" && within180Days(t) && showInTerminalCol(t)),
+            high: topTasks.filter(t => t.priority === "high" && showInOpenCol(t)),
+            mid:  topTasks.filter(t => t.priority === "mid"  && showInOpenCol(t)),
+            low:  topTasks.filter(t => (t.priority === "low" || t.priority === "none" || !t.priority) && showInOpenCol(t)),
+            abandoned: allEmpTasks.filter(t => showInAbandonedCol(t) && within180Days(t) && showInTerminalCol(t)),
+            done: allEmpTasks.filter(t => showInDoneCol(t) && within180Days(t) && showInTerminalCol(t)),
           } : null;
           // 该员工所有 task 的最新反馈（每个 task 取最近一条 comment 作摘要展示）
-          const empTaskIds = emp ? new Set(tasks.filter(t => t.employee_id === emp.id).map(t => t.id)) : new Set();
+          const empTaskIds = emp ? new Set(tasks.filter(t => isTaskAssignedTo(t, emp.id)).map(t => t.id)) : new Set();
           const empFeedbackTasksMap = new Map(); // task_id → latest feedback row
           for (const fb of feedbacks) {
             if (!empTaskIds.has(fb.task_id)) continue;
@@ -4096,13 +4389,20 @@ export default function App() {
           const renderTaskCard = (t, idx) => {
             const subtasks = tasks.filter(s => s.parent_task_id === t.id);
             const subDone = subtasks.filter(s => s.status === "done").length;
-            const isDone = t.status === "done";
-            const isAbandoned = t.status === "abandoned";
+            const myAssigneeRow = (assigneesByTask.get(t.id) || []).find(a => a.employee_id === emp.id);
+            const empIsAssigneeOfT = !!myAssigneeRow;
+            // emp 是 assignee → 個人狀態；只是 creator → task 整體狀態
+            const isDone = empIsAssigneeOfT ? empDone(t) : (t.status === "done");
+            const isAbandoned = empIsAssigneeOfT ? empAbandoned(t) : (t.status === "abandoned");
+            const myCompletedAt = myAssigneeRow?.completed_at || (t.status === "done" ? t.completed_at : null);
+            const myAbandonedAt = myAssigneeRow?.abandoned_at || (t.status === "abandoned" ? t.completed_at : null);
+            // checkbox：只有 emp 是 assignee 才能勾自己；只是 creator 看狀態不能勾
+            const canTickCheckbox = canEditCurrent && empIsAssigneeOfT;
             return (
               <div key={t.id} style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 10, padding: "10px 12px", marginBottom: 8, opacity: (isDone || isAbandoned) ? 0.6 : 1, cursor: "pointer" }}
                 onClick={(e) => { if (e.target.tagName !== "INPUT") setEditingTask(t); }}>
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                  <input type="checkbox" checked={isDone} disabled={!canEditCurrent} onChange={() => canEditCurrent && handleToggleTaskDone(t)} onClick={e => e.stopPropagation()} title={canEditCurrent ? "" : t("只能修改自己的任務")} style={{ width: 15, height: 15, marginTop: 2, cursor: canEditCurrent ? "pointer" : "not-allowed" }} />
+                  <input type="checkbox" checked={isDone} disabled={!canTickCheckbox} onChange={() => canTickCheckbox && handleToggleAssigneeDone(t, emp.id)} onClick={e => e.stopPropagation()} title={canTickCheckbox ? "" : (empIsAssigneeOfT ? "只能修改自己的任務" : "你是發布人，不是執行人")} style={{ width: 15, height: 15, marginTop: 2, cursor: canTickCheckbox ? "pointer" : "not-allowed" }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     {t.parent_task_id && (() => {
                       const parentT = tasks.find(p => p.id === t.parent_task_id);
@@ -4113,6 +4413,11 @@ export default function App() {
                       {idx != null && <span style={{ color: "#aaa", marginRight: 5 }}>{idx + 1}.</span>}{t.title}
                     </div>
                     <div style={{ fontSize: 10, color: "#aaa", marginTop: 4, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      {t.creator_employee_id && t.creator_employee_id !== emp.id && (() => {
+                        const cr = employees.find(e3 => e3.id === t.creator_employee_id);
+                        if (!cr) return null;
+                        return <span style={{ background: "#eef2ff", color: "#3b58d4", padding: "1px 6px", borderRadius: 4, fontWeight: 700 }}>{cr.name} 分配</span>;
+                      })()}
                       <span>📅 {fmtShortDate(t.created_at)}</span>
                       {t.due_date && (() => {
                         const days = Math.ceil((new Date(t.due_date) - new Date()) / (1000 * 60 * 60 * 24));
@@ -4121,9 +4426,36 @@ export default function App() {
                         if (days <= 3) return <span style={{ color: "#f59e0b", fontWeight: 700 }}>⏰ {t.due_date}（{days}d）</span>;
                         return <span style={{ color: "#888" }}>⏰ {t.due_date}</span>;
                       })()}
-                      {isDone && t.completed_at && <span style={{ color: "#22c55e" }}>✓ {fmtShortDate(t.completed_at)}</span>}
-                      {isAbandoned && t.completed_at && <span>✗ {fmtShortDate(t.completed_at)}</span>}
+                      {isDone && myCompletedAt && <span style={{ color: "#22c55e" }}>✓ {fmtShortDate(myCompletedAt)}</span>}
+                      {isAbandoned && myAbandonedAt && <span>✗ {fmtShortDate(myAbandonedAt)}</span>}
                       {subtasks.length > 0 && <span style={{ color: "#888" }}>☑ {subDone}/{subtasks.length}</span>}
+                      {(() => {
+                        const list = assigneesByTask.get(t.id);
+                        if (!list || list.length <= 1) return null;
+                        const doneCount = list.filter(a => a.completed_at != null).length;
+                        const abandonedCount = list.filter(a => a.abandoned_at != null).length;
+                        const settled = doneCount + abandonedCount;
+                        return (
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+                            <span style={{ color: settled === list.length ? "#22c55e" : "#888" }}>
+                              [{doneCount}/{list.length}{abandonedCount > 0 ? ` · ${abandonedCount}棄` : ""}]
+                            </span>
+                            {list.map((a, ai) => {
+                              const e3 = employees.find(e => e.id === a.employee_id);
+                              const nm = e3?.name || "?";
+                              const done = a.completed_at != null;
+                              const ab = a.abandoned_at != null;
+                              const color = done ? "#22c55e" : ab ? "#888" : "#3b58d4";
+                              const mark = done ? "✓" : ab ? "✗" : "";
+                              return (
+                                <span key={a.employee_id} style={{ color, fontWeight: 600, textDecoration: ab ? "line-through" : "none" }}>
+                                  {mark && <span style={{ marginRight: 1 }}>{mark}</span>}{nm}{ai < list.length - 1 && <span style={{ color: "#ccc", margin: "0 2px" }}>·</span>}
+                                </span>
+                              );
+                            })}
+                          </span>
+                        );
+                      })()}
                       {feedbacks.some(f => f.task_id === t.id) && (() => {
                         const list = feedbacks.filter(f => f.task_id === t.id);
                         const lastSeen = parseInt(localStorage.getItem(`bf_task_seen_${t.id}_${userId}`) || "0", 10);
@@ -4135,6 +4467,11 @@ export default function App() {
                         );
                       })()}
                       {Array.isArray(t.attachments) && t.attachments.length > 0 && <span style={{ color: "#6382ff" }}>📎 {t.attachments.length}</span>}
+                      {isAwaitingApproval(t) && (() => {
+                        const cr = employees.find(e3 => e3.id === t.creator_employee_id);
+                        const crName = cr?.name || "發布人";
+                        return <span style={{ background: "#fff4e0", color: "#b06a00", padding: "1px 6px", borderRadius: 4, fontWeight: 700, border: "1px solid #f4dca4" }}>等待 {crName} 核驗中</span>;
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -4167,8 +4504,8 @@ export default function App() {
                   {employees.length === 0 ? (
                     <div style={{ textAlign: "center", padding: 24, color: "#aaa", fontSize: 12, border: "1px dashed #e0e0e0", borderRadius: 10 }}>{t("尚無員工")}</div>
                   ) : employees.map(e => {
-                    const openCount = tasks.filter(t => t.employee_id === e.id && !t.parent_task_id && t.status === "open").length;
-                    const doneCount = tasks.filter(t => t.employee_id === e.id && !t.parent_task_id && t.status === "done").length;
+                    const openCount = tasks.filter(t => isTaskAssignedTo(t, e.id) && !t.parent_task_id && !empIsDoneFor(t, e.id) && !empIsAbandonedFor(t, e.id)).length;
+                    const doneCount = tasks.filter(t => isTaskAssignedTo(t, e.id) && !t.parent_task_id && empIsDoneFor(t, e.id)).length;
                     const active = emp && emp.id === e.id;
                     return (
                       <div key={e.id} onClick={() => setSelectedEmployee(e)} style={{ background: active ? "#eef2ff" : "#fafbfc", border: "1px solid " + (active ? "#6382ff" : "#f0f0f0"), borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
@@ -4267,6 +4604,54 @@ export default function App() {
                             );
                           })}
                         </div>
+                        {(() => {
+                          const effectiveAssignees = newTaskDraft.assigneeIds === null ? (emp ? [emp.id] : []) : newTaskDraft.assigneeIds;
+                          const activeEmps = employees.filter(e => e.active !== false);
+                          const q = newTaskAssigneeInput.replace(/^@/, '').toLowerCase();
+                          const candidates = activeEmps.filter(e2 => !effectiveAssignees.includes(e2.id) && (q === '' || (e2.name || '').toLowerCase().includes(q)));
+                          return (
+                            <>
+                              <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>{t("分配給")} <span style={{ color: "#bbb" }}>· {effectiveAssignees.length}</span></div>
+                              <div style={{ position: "relative", border: "1px solid #e0e0e0", borderRadius: 8, padding: "5px 6px", marginBottom: 10, display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center", background: "#fff", minHeight: 30 }}>
+                                {effectiveAssignees.map(id => {
+                                  const e2 = employees.find(x => x.id === id);
+                                  return (
+                                    <span key={id} style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 7px", background: "#eef2ff", color: "#3b58d4", borderRadius: 10, fontSize: 11, fontWeight: 700 }}>
+                                      @{e2?.name || "?"}
+                                      <button type="button" onClick={() => setNewTaskDraft(prev => ({ ...prev, assigneeIds: effectiveAssignees.filter(x => x !== id) }))} style={{ background: "none", border: "none", color: "#6382ff", cursor: "pointer", fontSize: 12, padding: 0, lineHeight: 1 }}>×</button>
+                                    </span>
+                                  );
+                                })}
+                                <input
+                                  value={newTaskAssigneeInput}
+                                  onChange={e => { setNewTaskAssigneeInput(e.target.value); setNewTaskAssigneeOpen(true); }}
+                                  onFocus={() => setNewTaskAssigneeOpen(true)}
+                                  onBlur={() => setTimeout(() => setNewTaskAssigneeOpen(false), 200)}
+                                  onKeyDown={e => { if (e.key === 'Escape') setNewTaskAssigneeOpen(false); }}
+                                  placeholder={effectiveAssignees.length === 0 ? "@ 添加成員" : ""}
+                                  style={{ flex: 1, minWidth: 80, padding: "3px 4px", border: "none", outline: "none", fontSize: 11, background: "transparent" }}
+                                />
+                                {newTaskAssigneeOpen && candidates.length > 0 && (
+                                  <div style={{ position: "absolute", top: "100%", left: 0, marginTop: 4, background: "#fff", border: "1px solid #d0d0d0", borderRadius: 8, boxShadow: "0 4px 14px rgba(0,0,0,0.1)", padding: 4, width: "100%", maxHeight: 200, overflowY: "auto", zIndex: 30 }}>
+                                    {candidates.map(e2 => (
+                                      <button key={e2.id} type="button" onMouseDown={ev => {
+                                        ev.preventDefault();
+                                        setNewTaskDraft(prev => ({ ...prev, assigneeIds: [...effectiveAssignees, e2.id] }));
+                                        setNewTaskAssigneeInput("");
+                                      }} style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 10px", background: "none", border: "none", fontSize: 12, color: "#333", cursor: "pointer", borderRadius: 4 }} onMouseOver={ev => ev.currentTarget.style.background = "#f5f5ff"} onMouseOut={ev => ev.currentTarget.style.background = "none"}>
+                                        {e2.name}{e2.role && <span style={{ color: "#aaa", marginLeft: 6, fontSize: 10 }}>{e2.role}</span>}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                              <label style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12, fontSize: 11, color: "#555", cursor: "pointer" }}>
+                                <input type="checkbox" checked={newTaskDraft.needsApproval} onChange={e => setNewTaskDraft(prev => ({ ...prev, needsApproval: e.target.checked }))} style={{ width: 13, height: 13, cursor: "pointer", margin: 0 }} />
+                                {t("完成後需我核驗")}
+                              </label>
+                            </>
+                          );
+                        })()}
                         <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>{t("標題")}</div>
                         <input value={newTaskDraft.title} onChange={e => setNewTaskDraft({ ...newTaskDraft, title: e.target.value })} placeholder={t("任務標題...")} style={{ width: "100%", padding: "9px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", marginBottom: 10, boxSizing: "border-box" }} />
                         <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>{t("描述 / 備註（可選）")}</div>
@@ -4284,7 +4669,21 @@ export default function App() {
                             </span>
                           ))}
                         </div>
-                        <button onClick={async () => { if (!newTaskDraft.title.trim() || !canEditCurrent) return; await handleAddTask(emp.id, newTaskDraft.title, newTaskDraft.priority, null, newTaskDraft.note, newTaskAttachments); setNewTaskDraft({ title: "", priority: "low", note: "" }); setNewTaskAttachments([]); }} disabled={!newTaskDraft.title.trim() || !canEditCurrent} style={{ width: "100%", padding: 10, background: (newTaskDraft.title.trim() && canEditCurrent) ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: (newTaskDraft.title.trim() && canEditCurrent) ? "pointer" : "not-allowed" }}>{t("新增任務")}</button>
+                        {(() => {
+                          const effectiveAssignees = newTaskDraft.assigneeIds === null ? (emp ? [emp.id] : []) : newTaskDraft.assigneeIds;
+                          const canSubmit = newTaskDraft.title.trim() && canEditCurrent && effectiveAssignees.length > 0;
+                          return (
+                            <button onClick={async () => {
+                              if (!canSubmit) return;
+                              await handleAddTask(emp.id, newTaskDraft.title, newTaskDraft.priority, null, newTaskDraft.note, newTaskAttachments, {
+                                assigneeIds: effectiveAssignees,
+                                needsApproval: newTaskDraft.needsApproval,
+                              });
+                              setNewTaskDraft({ title: "", priority: "low", note: "", assigneeIds: null, needsApproval: false });
+                              setNewTaskAttachments([]);
+                            }} disabled={!canSubmit} style={{ width: "100%", padding: 10, background: canSubmit ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: canSubmit ? "pointer" : "not-allowed" }}>{t("新增任務")}</button>
+                          );
+                        })()}
                       </div>
                       <div style={{ gridColumn: 1, gridRow: 2 }}>
                         <div style={{ background: "#fff9ec", border: "1px solid #f4dca4", borderRadius: 12, padding: 14, minHeight: 240 }}>
@@ -4597,7 +4996,6 @@ export default function App() {
             setWaSettings(newVals);
             queryClient.setQueryData(["bf", "wa_settings"], newVals);
             // fire-and-forget 触发一次 wa-ai-trigger：讓「已超抢答倒計時但還沒等到 cron」的 pending 立即用新 settings 處理
-            // 没 pending 就是空操作（操作數 0），不影响计费 / 性能
             fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/wa-ai-trigger`, {
               method: "POST",
               headers: { Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
@@ -6096,7 +6494,14 @@ export default function App() {
       {editingTask && (() => {
         const tk = editingTask;
         const subtasks = tasks.filter(s => s.parent_task_id === tk.id);
-        const canEditTk = isBfAdmin || (currentEmployee && tk.employee_id === currentEmployee.id);
+        const tkAssignees = assigneesByTask.get(tk.id) || [];
+        const isTkAssignee = currentEmployee && tkAssignees.some(a => a.employee_id === currentEmployee.id);
+        const isTkCreator = currentEmployee && tk.creator_employee_id === currentEmployee.id;
+        // 改任務字段（標題/描述/截止日/優先級/附件/子任務結構）：僅 admin / 發布人
+        // assignee 可以勾自己完成/放棄、加反饋（在下方分別 gate），但不能改任務內容
+        const canEditTk = isBfAdmin || isTkCreator;
+        // 改 assignees / needsApproval：同樣只 admin / 發布人
+        const canManageMeta = isBfAdmin || isTkCreator;
         const ro = !canEditTk;
         return (
           <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 110 }}>
@@ -6114,12 +6519,28 @@ export default function App() {
                       <button key={opt.v} disabled={ro} onClick={() => !ro && handleUpdateTask(tk.id, { priority: opt.v })} style={{ fontSize: 12, fontWeight: 700, padding: "5px 12px", borderRadius: 20, border: "1px solid " + (on ? opt.c : "#e0e0e0"), background: on ? opt.c + "18" : "#fff", color: on ? opt.c : "#888", cursor: ro ? "not-allowed" : "pointer", opacity: ro ? 0.6 : 1 }}>{opt.l}</button>
                     );
                   })}
-                  {tk.status !== "abandoned" && <button disabled={ro} onClick={() => !ro && handleUpdateTask(tk.id, { status: "abandoned", completed_at: new Date().toISOString() })} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 20, border: "1px solid #e0e0e0", background: "#fff", color: "#888", cursor: ro ? "not-allowed" : "pointer", opacity: ro ? 0.6 : 1 }}>{t("標記放棄")}</button>}
-                  {tk.status === "abandoned" && <button disabled={ro} onClick={() => !ro && handleUpdateTask(tk.id, { status: "open", completed_at: null })} style={{ fontSize: 12, padding: "5px 12px", borderRadius: 20, border: "1px solid #6382ff", background: "#eef2ff", color: "#6382ff", cursor: ro ? "not-allowed" : "pointer", opacity: ro ? 0.6 : 1 }}>{t("恢復進行")}</button>}
                 </div>
                 <button onClick={() => setEditingTask(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
               </div>
               <input value={tk.title} readOnly={ro} onChange={e => !ro && setEditingTask({ ...tk, title: e.target.value })} onBlur={() => !ro && handleUpdateTask(tk.id, { title: tk.title })} style={{ width: "100%", padding: "10px 0", fontSize: 22, fontWeight: 800, border: "none", outline: "none", marginBottom: 4, boxSizing: "border-box", background: "transparent", color: ro ? "#666" : "#222" }} />
+              {/* 待核驗 banner：全員結算 + 需核驗 + 還沒終結 → 對 creator/admin 顯示「核驗通過」操作；對其他人僅提示 */}
+              {isAwaitingApproval(tk) && (() => {
+                const cr = employees.find(e3 => e3.id === tk.creator_employee_id);
+                const crName = cr?.name || "發布人";
+                const canApprove = isBfAdmin || isTkCreator;
+                return (
+                  <div style={{ background: "#fff4e0", border: "1px solid #f4dca4", borderRadius: 8, padding: "10px 14px", marginTop: 8, marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                    <div style={{ fontSize: 13, color: "#8a6900", fontWeight: 600 }}>
+                      ⏳ {canApprove ? t("此任務全員已結算，等待你核驗") : t("等待") + " " + crName + " " + t("核驗中")}
+                    </div>
+                    {canApprove && (
+                      <button onClick={() => handleApproveTask(tk)} style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 8, padding: "7px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                        ✓ {t("核驗通過")}
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
               <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 8, marginBottom: 4 }}>
                 <div style={{ fontSize: 12, color: "#888" }}>{t("截止日期")}</div>
                 <input type="date" value={tk.due_date || ""} readOnly={ro} onChange={e => !ro && setEditingTask({ ...tk, due_date: e.target.value || null })} onBlur={() => !ro && handleUpdateTask(tk.id, { due_date: tk.due_date || null })} style={{ padding: "5px 8px", borderRadius: 6, border: "1px solid #e0e0e0", fontSize: 12, outline: "none", background: ro ? "#fafbfc" : "#fff" }} />
@@ -6130,7 +6551,71 @@ export default function App() {
                   return <span style={{ fontSize: 11, color: "#888" }}>{t("剩")} {days} {t("天")}</span>;
                 })()}
               </div>
-              <div style={{ fontSize: 12, color: "#888", marginBottom: 4, marginTop: 8 }}>{t("描述 / 備註")}</div>
+              {/* 分配給 + 需核驗（admin / 發布人可改，其他人只讀） */}
+              <div style={{ marginTop: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <div style={{ fontSize: 12, color: "#888" }}>{t("分配給")}</div>
+                  <span style={{ fontSize: 11, color: "#bbb" }}>· {tkAssignees.length}</span>
+                  {tk.creator_employee_id && (() => {
+                    const cr = employees.find(e3 => e3.id === tk.creator_employee_id);
+                    if (!cr) return null;
+                    return <span style={{ fontSize: 11, color: "#888", marginLeft: "auto" }}>{t("發布人")}: <span style={{ color: "#3b58d4", fontWeight: 600 }}>{cr.name}</span></span>;
+                  })()}
+                </div>
+                {(() => {
+                  const curIds = tkAssignees.map(a => a.employee_id);
+                  const q = editTaskAssigneeInput.replace(/^@/, '').toLowerCase();
+                  const candidates = employees.filter(e2 => e2.active !== false && !curIds.includes(e2.id) && (q === '' || (e2.name || '').toLowerCase().includes(q)));
+                  return (
+                    <div style={{ position: "relative", border: `1px solid ${canManageMeta ? "#e0e0e0" : "#f0f0f0"}`, borderRadius: 8, padding: "5px 6px", display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center", background: canManageMeta ? "#fff" : "#fafbfc", minHeight: 30 }}>
+                      {curIds.map(id => {
+                        const e2 = employees.find(x => x.id === id);
+                        return (
+                          <span key={id} style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 7px", background: "#eef2ff", color: "#3b58d4", borderRadius: 10, fontSize: 11, fontWeight: 700 }}>
+                            @{e2?.name || "?"}
+                            {canManageMeta && <button type="button" onClick={() => handleSetTaskAssignees(tk.id, curIds.filter(x => x !== id))} style={{ background: "none", border: "none", color: "#6382ff", cursor: "pointer", fontSize: 12, padding: 0, lineHeight: 1 }}>×</button>}
+                          </span>
+                        );
+                      })}
+                      {canManageMeta && (
+                        <input
+                          value={editTaskAssigneeInput}
+                          onChange={e => { setEditTaskAssigneeInput(e.target.value); setEditTaskAssigneeOpen(true); }}
+                          onFocus={() => setEditTaskAssigneeOpen(true)}
+                          onBlur={() => setTimeout(() => setEditTaskAssigneeOpen(false), 200)}
+                          onKeyDown={e => { if (e.key === 'Escape') setEditTaskAssigneeOpen(false); }}
+                          placeholder={curIds.length === 0 ? "@ 添加成員" : ""}
+                          style={{ flex: 1, minWidth: 80, padding: "3px 4px", border: "none", outline: "none", fontSize: 11, background: "transparent" }}
+                        />
+                      )}
+                      {canManageMeta && editTaskAssigneeOpen && candidates.length > 0 && (
+                        <div style={{ position: "absolute", top: "100%", left: 0, marginTop: 4, background: "#fff", border: "1px solid #d0d0d0", borderRadius: 8, boxShadow: "0 4px 14px rgba(0,0,0,0.1)", padding: 4, width: "100%", maxHeight: 200, overflowY: "auto", zIndex: 30 }}>
+                          {candidates.map(e2 => (
+                            <button key={e2.id} type="button" onMouseDown={ev => {
+                              ev.preventDefault();
+                              handleSetTaskAssignees(tk.id, [...curIds, e2.id]);
+                              setEditTaskAssigneeInput("");
+                            }} style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 10px", background: "none", border: "none", fontSize: 12, color: "#333", cursor: "pointer", borderRadius: 4 }} onMouseOver={ev => ev.currentTarget.style.background = "#f5f5ff"} onMouseOut={ev => ev.currentTarget.style.background = "none"}>
+                              {e2.name}{e2.role && <span style={{ color: "#aaa", marginLeft: 6, fontSize: 10 }}>{e2.role}</span>}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+                {canManageMeta ? (
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 12, color: "#555", cursor: "pointer" }}>
+                    <input type="checkbox" checked={!!tk.needs_approval} onChange={e => handleUpdateTask(tk.id, { needs_approval: e.target.checked })} style={{ width: 13, height: 13, margin: 0, cursor: "pointer" }} />
+                    {t("完成後需發布人核驗")}
+                  </label>
+                ) : tk.needs_approval ? (
+                  <div style={{ marginTop: 8, fontSize: 12, color: "#b06a00" }}>
+                    ⏳ {(() => { const cr = employees.find(e3 => e3.id === tk.creator_employee_id); return `${t("此任務完成後需")} ${cr?.name || t("發布人")} ${t("核驗")}`; })()}
+                  </div>
+                ) : null}
+              </div>
+              <div style={{ fontSize: 12, color: "#888", marginBottom: 4, marginTop: 12 }}>{t("描述 / 備註")}</div>
               <textarea value={tk.note || ""} readOnly={ro} onChange={e => !ro && setEditingTask({ ...tk, note: e.target.value })} onBlur={() => !ro && handleUpdateTask(tk.id, { note: tk.note || null })} placeholder={t("輸入描述...")} style={{ width: "100%", minHeight: 60, padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit", background: ro ? "#fafbfc" : "#fff" }} />
               {/* 任務級附件（task.attachments） */}
               {(Array.isArray(tk.attachments) && tk.attachments.length > 0 || true) && (
@@ -6178,17 +6663,74 @@ export default function App() {
                 const stHasAttach = Array.isArray(st.attachments) && st.attachments.length > 0;
                 return (
                 <div key={st.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid #f5f5f5" }}>
-                  <input type="checkbox" checked={st.status === "done"} disabled={ro} onChange={() => !ro && handleToggleTaskDone(st)} onClick={e => e.stopPropagation()} style={{ width: 15, height: 15, cursor: ro ? "not-allowed" : "pointer" }} />
+                  {(() => {
+                    const stIsMine = currentEmployee && (assigneesByTask.get(st.id) || []).some(a => a.employee_id === currentEmployee.id);
+                    const canTickSt = isBfAdmin || isTkCreator || stIsMine;
+                    return <input type="checkbox" checked={currentEmployee ? empIsDoneFor(st, currentEmployee.id) : st.status === "done"} disabled={!canTickSt} onChange={() => canTickSt && currentEmployee && handleToggleAssigneeDone(st, currentEmployee.id)} onClick={e => e.stopPropagation()} style={{ width: 15, height: 15, cursor: canTickSt ? "pointer" : "not-allowed" }} />;
+                  })()}
                   <span onClick={() => setEditingTask(st)} title={t("打開子任務詳情（含獨立反饋線程）")} style={{ flex: 1, fontSize: 13, textDecoration: st.status === "done" ? "line-through" : "none", color: st.status === "done" ? "#999" : "#333", cursor: "pointer" }}>{st.title}</span>
                   {stFbCount > 0 && <span style={{ fontSize: 10, color: "#f59e0b" }}>💬 {stFbCount}</span>}
                   {stHasAttach && <span style={{ fontSize: 10, color: "#6382ff" }}>📎 {st.attachments.length}</span>}
-                  {!ro && <button onClick={() => handleDeleteTask(st.id)} title={t("刪除")} style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 14 }}>×</button>}
+                  {canDeleteTask(st) && <button onClick={() => handleDeleteTask(st.id)} title={t("刪除")} style={{ background: "none", border: "none", color: "#ccc", cursor: "pointer", fontSize: 14 }}>×</button>}
                 </div>
                 );
               })}
-              {!ro && <form onSubmit={e => { e.preventDefault(); const v = e.target.elements.sub.value.trim(); if (v) { handleAddTask(tk.employee_id, v, "none", tk.id); e.target.reset(); } }} style={{ marginTop: 8 }}>
-                <input name="sub" placeholder={t("+ 添加子任務")} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px dashed #d0d0d0", fontSize: 13, outline: "none", background: "#fafbff", boxSizing: "border-box" }} />
-              </form>}
+              {!ro && (() => {
+                const parentAssigneeIds = tkAssignees.map(a => a.employee_id);
+                const subAssignees = newSubTaskDraft.assigneeIds === null ? parentAssigneeIds : newSubTaskDraft.assigneeIds;
+                const sq = subTaskAssigneeInput.replace(/^@/, '').toLowerCase();
+                const subCandidates = employees.filter(e2 => e2.active !== false && !subAssignees.includes(e2.id) && (sq === '' || (e2.name || '').toLowerCase().includes(sq)));
+                return (
+                  <div style={{ marginTop: 8, padding: "8px 10px", border: "1px dashed #d0d0d0", borderRadius: 8, background: "#fafbff" }}>
+                    <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{t("分配給")}</div>
+                    <div style={{ position: "relative", border: "1px solid #e0e0e0", borderRadius: 6, padding: "3px 5px", marginBottom: 6, display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center", background: "#fff", minHeight: 26 }}>
+                      {subAssignees.map(id => {
+                        const e2 = employees.find(x => x.id === id);
+                        return (
+                          <span key={id} style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "1px 6px", background: "#eef2ff", color: "#3b58d4", borderRadius: 9, fontSize: 10, fontWeight: 700 }}>
+                            @{e2?.name || "?"}
+                            <button type="button" onClick={() => setNewSubTaskDraft(prev => ({ ...prev, assigneeIds: subAssignees.filter(x => x !== id) }))} style={{ background: "none", border: "none", color: "#6382ff", cursor: "pointer", fontSize: 11, padding: 0, lineHeight: 1 }}>×</button>
+                          </span>
+                        );
+                      })}
+                      <input
+                        value={subTaskAssigneeInput}
+                        onChange={e => { setSubTaskAssigneeInput(e.target.value); setSubTaskAssigneeOpen(true); }}
+                        onFocus={() => setSubTaskAssigneeOpen(true)}
+                        onBlur={() => setTimeout(() => setSubTaskAssigneeOpen(false), 200)}
+                        onKeyDown={e => { if (e.key === 'Escape') setSubTaskAssigneeOpen(false); }}
+                        placeholder={subAssignees.length === 0 ? "@ 添加成員" : ""}
+                        style={{ flex: 1, minWidth: 70, padding: "2px 4px", border: "none", outline: "none", fontSize: 10, background: "transparent" }}
+                      />
+                      {subTaskAssigneeOpen && subCandidates.length > 0 && (
+                        <div style={{ position: "absolute", top: "100%", left: 0, marginTop: 3, background: "#fff", border: "1px solid #d0d0d0", borderRadius: 8, boxShadow: "0 4px 14px rgba(0,0,0,0.1)", padding: 4, width: "100%", maxHeight: 180, overflowY: "auto", zIndex: 30 }}>
+                          {subCandidates.map(e2 => (
+                            <button key={e2.id} type="button" onMouseDown={ev => {
+                              ev.preventDefault();
+                              setNewSubTaskDraft(prev => ({ ...prev, assigneeIds: [...subAssignees, e2.id] }));
+                              setSubTaskAssigneeInput("");
+                            }} style={{ display: "block", width: "100%", textAlign: "left", padding: "5px 9px", background: "none", border: "none", fontSize: 11, color: "#333", cursor: "pointer", borderRadius: 4 }} onMouseOver={ev => ev.currentTarget.style.background = "#f5f5ff"} onMouseOut={ev => ev.currentTarget.style.background = "none"}>
+                              {e2.name}{e2.role && <span style={{ color: "#aaa", marginLeft: 6, fontSize: 9 }}>{e2.role}</span>}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <form onSubmit={e => {
+                      e.preventDefault();
+                      const v = e.target.elements.sub.value.trim();
+                      if (!v) return;
+                      if (subAssignees.length === 0) { alert(t("請至少選擇一個負責人")); return; }
+                      // 核驗跟隨父任務
+                      handleAddTask(tk.employee_id, v, "none", tk.id, null, [], { assigneeIds: subAssignees, needsApproval: !!tk.needs_approval });
+                      e.target.reset();
+                      setNewSubTaskDraft({ assigneeIds: null });
+                    }}>
+                      <input name="sub" placeholder={t("+ 添加子任務（按 Enter 確認）")} style={{ width: "100%", padding: "7px 8px", borderRadius: 6, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", boxSizing: "border-box", background: "#fff" }} />
+                    </form>
+                  </div>
+                );
+              })()}
               <div style={{ fontSize: 12, color: "#f59e0b", fontWeight: 700, marginTop: 16, marginBottom: 6 }}>💬 {t("反饋記錄")} <span style={{ fontSize: 11, color: "#b88a00", marginLeft: 4 }}>{feedbacks.filter(f => f.task_id === tk.id).length}</span></div>
               <div style={{ background: "#fff9ec", border: "1px solid #f4dca4", borderRadius: 8, padding: 10, marginBottom: 8, maxHeight: 280, overflowY: "auto" }}>
                 {(() => {
@@ -6254,27 +6796,163 @@ export default function App() {
                   ))}
                 </div>
               )}
-              <form onSubmit={async e => { e.preventDefault(); const v = e.target.elements.fb.value; if ((v && v.trim()) || pendingAttachments.length > 0) { await handleAddFeedback(tk.id, v, pendingAttachments, replyingToFb); e.target.reset(); } }} style={{ display: "flex", gap: 6 }}>
-                <label style={{ display: "inline-flex", alignItems: "center", padding: "8px 10px", background: "#fff9ec", border: "1px solid #f4dca4", borderRadius: 8, fontSize: 14, cursor: "pointer" }} title={t("添加附件")}>
-                  📎
-                  <input type="file" multiple style={{ display: "none" }} onChange={e => { const files = Array.from(e.target.files || []); setPendingAttachments(prev => [...prev, ...files]); e.target.value = ""; }} />
-                </label>
-                <input name="fb" placeholder={t("追加反饋...")} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #f4dca4", fontSize: 12, outline: "none", boxSizing: "border-box", background: "#fff" }} />
-                <button type="submit" style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{t("發送")}</button>
-              </form>
+              {/* @ 提醒：輸入 @ 觸發下拉，選員工後插入「@姓名 」+ 記錄 user_id */}
+              {(() => {
+                const relevantIds = new Set();
+                (assigneesByTask.get(tk.id) || []).forEach(a => relevantIds.add(a.employee_id));
+                if (tk.creator_employee_id) relevantIds.add(tk.creator_employee_id);
+                const mentionables = employees.filter(e => relevantIds.has(e.id) && e.user_id && e.id !== currentEmployee?.id);
+                const filtered = mentionPopup.open ? mentionables.filter(e => !mentionPopup.query || (e.name || "").toLowerCase().includes(mentionPopup.query.toLowerCase())) : [];
+
+                const handleChange = (e) => {
+                  const val = e.target.value;
+                  const cursor = e.target.selectionStart;
+                  setFbInputValue(val);
+                  const before = val.slice(0, cursor);
+                  const atIdx = before.lastIndexOf('@');
+                  if (atIdx === -1) { setMentionPopup({ open: false, query: "", atIdx: -1 }); return; }
+                  const between = before.slice(atIdx + 1);
+                  if (/\s/.test(between)) { setMentionPopup({ open: false, query: "", atIdx: -1 }); return; }
+                  setMentionPopup({ open: true, query: between, atIdx });
+                };
+
+                const selectMention = (emp) => {
+                  const atIdx = mentionPopup.atIdx;
+                  const before = fbInputValue.slice(0, atIdx);
+                  // 找 @ 後到光標位置（query）的結束位置：找下一個空格或 end
+                  const afterAt = fbInputValue.slice(atIdx + 1);
+                  let queryEnd = afterAt.search(/\s/);
+                  if (queryEnd === -1) queryEnd = afterAt.length;
+                  const rest = afterAt.slice(queryEnd);
+                  const newVal = `${before}@${emp.name} ${rest.replace(/^\s+/, '')}`;
+                  setFbInputValue(newVal);
+                  setPendingMentions(prev => Array.from(new Set([...prev, emp.user_id])));
+                  setMentionPopup({ open: false, query: "", atIdx: -1 });
+                };
+
+                return (
+                  <>
+                    <form onSubmit={async e => {
+                      e.preventDefault();
+                      const v = fbInputValue;
+                      if ((v && v.trim()) || pendingAttachments.length > 0) {
+                        await handleAddFeedback(tk.id, v, pendingAttachments, replyingToFb, pendingMentions);
+                        setFbInputValue("");
+                        setMentionPopup({ open: false, query: "", atIdx: -1 });
+                      }
+                    }} style={{ display: "flex", gap: 6, position: "relative" }}>
+                      <label style={{ display: "inline-flex", alignItems: "center", padding: "8px 10px", background: "#fff9ec", border: "1px solid #f4dca4", borderRadius: 8, fontSize: 14, cursor: "pointer" }} title={t("添加附件")}>
+                        📎
+                        <input type="file" multiple style={{ display: "none" }} onChange={e => { const files = Array.from(e.target.files || []); setPendingAttachments(prev => [...prev, ...files]); e.target.value = ""; }} />
+                      </label>
+                      <input
+                        name="fb"
+                        value={fbInputValue}
+                        onChange={handleChange}
+                        onKeyDown={e => { if (e.key === 'Escape') setMentionPopup({ open: false, query: "", atIdx: -1 }); }}
+                        placeholder={t("追加反饋... 輸入 @ 提醒某人")}
+                        autoComplete="off"
+                        style={{ flex: 1, padding: "8px 10px", borderRadius: 8, border: "1px solid #f4dca4", fontSize: 12, outline: "none", boxSizing: "border-box", background: "#fff" }}
+                      />
+                      <button type="submit" style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{t("發送")}</button>
+                      {mentionPopup.open && filtered.length > 0 && (
+                        <div style={{ position: "absolute", bottom: "100%", left: 44, marginBottom: 4, background: "#fff", border: "1px solid #d0d0d0", borderRadius: 8, boxShadow: "0 4px 14px rgba(0,0,0,0.1)", padding: 4, minWidth: 180, maxHeight: 200, overflowY: "auto", zIndex: 50 }}>
+                          {filtered.map(emp => (
+                            <button key={emp.id} type="button" onMouseDown={ev => { ev.preventDefault(); selectMention(emp); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 10px", background: "none", border: "none", fontSize: 12, color: "#333", cursor: "pointer", borderRadius: 4 }} onMouseOver={ev => ev.currentTarget.style.background = "#f5f5ff"} onMouseOut={ev => ev.currentTarget.style.background = "none"}>
+                              {emp.name}{emp.role && <span style={{ color: "#aaa", marginLeft: 6, fontSize: 10 }}>{emp.role}</span>}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </form>
+                    {pendingMentions.length > 0 && (
+                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 5, alignItems: "center" }}>
+                        <span style={{ fontSize: 10, color: "#888" }}>{t("將提醒")}:</span>
+                        {pendingMentions.map(uid => {
+                          const emp = employees.find(e2 => e2.user_id === uid);
+                          if (!emp) return null;
+                          return (
+                            <span key={uid} style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 7px", background: "#fff4d6", color: "#8a6900", borderRadius: 10, fontSize: 10, fontWeight: 700, border: "1px solid #f4dca4" }}>
+                              @{emp.name}
+                              <button type="button" onClick={() => setPendingMentions(prev => prev.filter(id => id !== uid))} style={{ background: "none", border: "none", color: "#b88a00", cursor: "pointer", fontSize: 11, padding: 0 }}>×</button>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
               <div style={{ fontSize: 11, color: "#aaa", marginTop: 16, display: "flex", gap: 14, flexWrap: "wrap" }}>
                 <span>📅 {t("添加於")} {new Date(tk.created_at).toLocaleString("zh-HK", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
                 {tk.status === "done" && tk.completed_at && <span style={{ color: "#22c55e" }}>✓ {t("完成於")} {new Date(tk.completed_at).toLocaleString("zh-HK", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>}
                 {tk.status === "abandoned" && tk.completed_at && <span>✗ {t("放棄於")} {new Date(tk.completed_at).toLocaleString("zh-HK", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>}
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16, paddingTop: 16, borderTop: "1px solid #f0f0f0" }}>
-                {ro ? <span /> : <button onClick={() => handleDeleteTask(tk.id)} style={{ background: "none", border: "none", color: "#e53935", fontSize: 13, cursor: "pointer" }}>🗑 {t("刪除任務")}</button>}
+                <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                  {canDeleteTask(tk) && <button onClick={() => handleDeleteTask(tk.id)} style={{ background: "none", border: "none", color: "#e53935", fontSize: 13, cursor: "pointer" }}>🗑 {t("刪除任務")}</button>}
+                  {(() => {
+                    // 「我放棄」只給 assignee 用（admin/creator 不是執行人，不該用此按鈕；他們應改 task 整體狀態走別的入口）
+                    if (!isTkAssignee || !currentEmployee) return null;
+                    const myRow = (assigneesByTask.get(tk.id) || []).find(a => a.employee_id === currentEmployee.id);
+                    const myAbandoned = myRow?.abandoned_at != null || (!myRow && tk.status === "abandoned");
+                    const tkAssigneeIds = (assigneesByTask.get(tk.id) || []).map(a => a.employee_id);
+                    const isMulti = tkAssigneeIds.length > 1;
+                    const label = isMulti || tk.needs_approval ? (myAbandoned ? t("恢復我的進行") : t("我放棄此任務")) : (myAbandoned ? t("恢復進行") : t("放棄此任務"));
+                    return <button onClick={() => handleToggleAssigneeAbandoned(tk, currentEmployee.id)} style={{ background: "none", border: "none", color: myAbandoned ? "#6382ff" : "#888", fontSize: 13, cursor: "pointer" }}>✗ {label}</button>;
+                  })()}
+                </div>
                 <button onClick={() => setEditingTask(null)} style={{ background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, padding: "9px 20px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>{t("完成")}</button>
               </div>
             </div>
           </div>
         );
       })()}
+
+      {/* 任務提醒 toast 堆疊（iOS 通知風格，右下角從下往上堆） */}
+      {taskNotices.length > 0 && currentEmployee && (
+        <div style={{ position: 'fixed', bottom: 20, right: 20, display: 'flex', flexDirection: 'column-reverse', gap: 10, zIndex: 200, maxWidth: 360 }}>
+          {taskNotices.map(notice => {
+            const isApproval = notice.type === 'approval';
+            const isFeedback = notice.type === 'feedback';
+            const borderColor = isApproval ? '#f4dca4' : isFeedback ? '#fcd5b8' : '#c6d3ff';
+            const titleColor = isApproval ? '#b06a00' : isFeedback ? '#c2410c' : '#3b58d4';
+            const viewBtnColor = isApproval ? '#f59e0b' : isFeedback ? '#ea580c' : '#6382ff';
+            const dismiss = () => setDismissedNoticeTypes(prev => new Set([...prev, notice.type]));
+            const viewAndDismiss = () => {
+              setTab('employees');
+              setSelectedEmployee(currentEmployee);
+              if (isFeedback && notice.ids && notice.ids.length > 0 && userId) {
+                const seenFbKey = `bf_seen_fb_${userId}`;
+                let seen = [];
+                try { seen = JSON.parse(localStorage.getItem(seenFbKey) || '[]'); } catch {}
+                const merged = Array.from(new Set([...seen, ...notice.ids]));
+                localStorage.setItem(seenFbKey, JSON.stringify(merged));
+              }
+              dismiss();
+            };
+            let title;
+            if (isApproval) {
+              title = `⏳ ${t("你有")} ${notice.count} ${t("個任務待你核驗")}`;
+            } else if (isFeedback) {
+              const titles = (notice.tasks || []).slice(0, 2).map(x => `「${x.title}」`).join('、');
+              const more = (notice.tasks || []).length > 2 ? ` ${t("等")}` : '';
+              title = `💬 ${titles}${more} ${t("有新反饋")}`;
+            } else {
+              title = `📋 ${t("你有")} ${notice.count} ${t("個任務待處理")}`;
+            }
+            return (
+              <div key={notice.type} style={{ background: '#fff', border: `1px solid ${borderColor}`, borderRadius: 12, padding: 16, boxShadow: '0 8px 24px rgba(0,0,0,0.15)', minWidth: 280 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: titleColor, marginBottom: 10 }}>{title}</div>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                  <button onClick={dismiss} style={{ fontSize: 12, padding: '6px 14px', background: '#f0f0f0', border: 'none', borderRadius: 8, cursor: 'pointer', color: '#666' }}>{t("關閉")}</button>
+                  <button onClick={viewAndDismiss} style={{ fontSize: 12, padding: '6px 14px', background: viewBtnColor, color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 700 }}>{t("查看")}</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {showAddCustomer && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
