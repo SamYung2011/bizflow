@@ -2369,6 +2369,14 @@ export default function App() {
         attachments = await Promise.all(files.map(f => uploadAttachment(f, taskId)));
       }
     } catch (e) { alert(`${t("附件上傳失敗")}：${e.message}`); return; }
+    // 回復別人的反饋 → 自動 @ 原作者（除非是自己回自己）
+    let finalMentions = Array.isArray(mentionedUserIds) ? [...mentionedUserIds] : [];
+    if (parentFeedbackId) {
+      const parent = feedbacks.find(f => f.id === parentFeedbackId);
+      if (parent && parent.author_user_id && parent.author_user_id !== userId && !finalMentions.includes(parent.author_user_id)) {
+        finalMentions.push(parent.author_user_id);
+      }
+    }
     const { data, error } = await supabase.from("employee_task_feedbacks").insert({
       task_id: taskId,
       author_user_id: userId,
@@ -2376,7 +2384,7 @@ export default function App() {
       body: (body || "").trim(),
       attachments,
       parent_feedback_id: parentFeedbackId,
-      mentioned_user_ids: mentionedUserIds && mentionedUserIds.length > 0 ? mentionedUserIds : [],
+      mentioned_user_ids: finalMentions,
     }).select().single();
     if (error) { alert(`${t("發送失敗")}：${error.message}`); return; }
     setFeedbacks(prev => [...prev, data]);
