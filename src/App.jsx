@@ -23,14 +23,24 @@ async function fetchAllTable(table, orderCol, ascending = true) {
   for (let i = 0; i < totalPages; i++) {
     const from = i * size;
     let q = supabase.from(table).select("*").range(from, from + size - 1);
+    // primary order by 用戶指定欄位，secondary 用 id 保證穩定（避免同 created_at 跨頁重複）
     if (orderCol) q = q.order(orderCol, { ascending });
+    q = q.order("id", { ascending: true });
     pagePromises.push(q);
   }
   const results = await Promise.all(pagePromises);
+  const seen = new Set();
   const all = [];
   for (const r of results) {
     if (r.error) throw new Error(`${table}: ${r.error.message || r.error}`);
-    if (r.data) all.push(...r.data);
+    if (!r.data) continue;
+    for (const row of r.data) {
+      if (row?.id != null) {
+        if (seen.has(row.id)) continue;
+        seen.add(row.id);
+      }
+      all.push(row);
+    }
   }
   return all;
 }
@@ -946,16 +956,18 @@ export default function App() {
       const a = norm(ca[f.key]), b = norm(cb[f.key]);
       return !!a && a === b;
     };
+    // 兜底去重：state 異常時可能有重複 id（fetchAllTable 已修，這裡再保險）
+    const uniqueCustomers = Array.from(new Map(customers.map(c => [c.id, c])).values());
     const idToCustomer = new Map();
-    customers.forEach(c => idToCustomer.set(c.id, c));
+    uniqueCustomers.forEach(c => idToCustomer.set(c.id, c));
     const childrenByParent = new Map();
-    customers.forEach(c => {
+    uniqueCustomers.forEach(c => {
       if (c.parent_id) {
         if (!childrenByParent.has(c.parent_id)) childrenByParent.set(c.parent_id, []);
         childrenByParent.get(c.parent_id).push(c);
       }
     });
-    const independents = customers.filter(c => !c.parent_id);
+    const independents = uniqueCustomers.filter(c => !c.parent_id);
     // exact-match indexes：multi 字段每行一個 entry，single 字段整字段
     const indexes = fields.map(() => new Map());
     independents.forEach(c => {
@@ -1040,7 +1052,7 @@ export default function App() {
       idToGroup.set(c.id, rootToPrimary.get(root) || root);
     });
     // 子記錄 → 指向其 parent 所在的 group primary
-    customers.forEach(c => {
+    uniqueCustomers.forEach(c => {
       if (c.parent_id && !idToGroup.has(c.id)) {
         const mapped = idToGroup.get(c.parent_id);
         if (mapped) idToGroup.set(c.id, mapped);
