@@ -4394,51 +4394,51 @@ export default function App() {
             const day = String(d.getDate()).padStart(2, "0");
             return `${m}-${day}`;
           };
-          const renderTaskCard = (t, idx) => {
-            const subtasks = tasks.filter(s => s.parent_task_id === t.id);
+          const renderTaskCard = (task, idx) => {
+            const subtasks = tasks.filter(s => s.parent_task_id === task.id);
             const subDone = subtasks.filter(s => s.status === "done").length;
-            const myAssigneeRow = (assigneesByTask.get(t.id) || []).find(a => a.employee_id === emp.id);
+            const myAssigneeRow = (assigneesByTask.get(task.id) || []).find(a => a.employee_id === emp.id);
             const empIsAssigneeOfT = !!myAssigneeRow;
             // emp 是 assignee → 個人狀態；只是 creator → task 整體狀態
-            const isDone = empIsAssigneeOfT ? empDone(t) : (t.status === "done");
-            const isAbandoned = empIsAssigneeOfT ? empAbandoned(t) : (t.status === "abandoned");
-            const myCompletedAt = myAssigneeRow?.completed_at || (t.status === "done" ? t.completed_at : null);
-            const myAbandonedAt = myAssigneeRow?.abandoned_at || (t.status === "abandoned" ? t.completed_at : null);
+            const isDone = empIsAssigneeOfT ? empDone(task) : (task.status === "done");
+            const isAbandoned = empIsAssigneeOfT ? empAbandoned(task) : (task.status === "abandoned");
+            const myCompletedAt = myAssigneeRow?.completed_at || (task.status === "done" ? task.completed_at : null);
+            const myAbandonedAt = myAssigneeRow?.abandoned_at || (task.status === "abandoned" ? task.completed_at : null);
             // checkbox：只有 emp 是 assignee 才能勾自己；只是 creator 看狀態不能勾
             const canTickCheckbox = canEditCurrent && empIsAssigneeOfT;
             return (
-              <div key={t.id} style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 10, padding: "10px 12px", marginBottom: 8, opacity: (isDone || isAbandoned) ? 0.6 : 1, cursor: "pointer" }}
-                onClick={(e) => { if (e.target.tagName !== "INPUT") setEditingTask(t); }}>
+              <div key={task.id} style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 10, padding: "10px 12px", marginBottom: 8, opacity: (isDone || isAbandoned) ? 0.6 : 1, cursor: "pointer" }}
+                onClick={(e) => { if (e.target.tagName !== "INPUT") setEditingTask(task); }}>
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                  <input type="checkbox" checked={isDone} disabled={!canTickCheckbox} onChange={() => canTickCheckbox && handleToggleAssigneeDone(t, emp.id)} onClick={e => e.stopPropagation()} title={canTickCheckbox ? "" : (empIsAssigneeOfT ? "只能修改自己的任務" : "你是發布人，不是執行人")} style={{ width: 15, height: 15, marginTop: 2, cursor: canTickCheckbox ? "pointer" : "not-allowed" }} />
+                  <input type="checkbox" checked={isDone} disabled={!canTickCheckbox} onChange={() => canTickCheckbox && handleToggleAssigneeDone(task, emp.id)} onClick={e => e.stopPropagation()} title={canTickCheckbox ? "" : (empIsAssigneeOfT ? t("只能修改自己的任務") : t("你是發布人，不是執行人"))} style={{ width: 15, height: 15, marginTop: 2, cursor: canTickCheckbox ? "pointer" : "not-allowed" }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    {t.parent_task_id && (() => {
-                      const parentT = tasks.find(p => p.id === t.parent_task_id);
+                    {task.parent_task_id && (() => {
+                      const parentT = tasks.find(p => p.id === task.parent_task_id);
                       if (!parentT) return null;
                       return <div style={{ fontSize: 10, color: "#aaa", marginBottom: 2, fontWeight: 400 }}>↳ {parentT.title}</div>;
                     })()}
                     <div style={{ fontSize: 13, fontWeight: 600, textDecoration: isDone ? "line-through" : "none", color: (isDone || isAbandoned) ? "#999" : "#222", lineHeight: 1.4 }}>
-                      {idx != null && <span style={{ color: "#aaa", marginRight: 5 }}>{idx + 1}.</span>}{t.title}
+                      {idx != null && <span style={{ color: "#aaa", marginRight: 5 }}>{idx + 1}.</span>}{task.title}
                     </div>
                     <div style={{ fontSize: 10, color: "#aaa", marginTop: 4, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                      {t.creator_employee_id && t.creator_employee_id !== emp.id && (() => {
-                        const cr = employees.find(e3 => e3.id === t.creator_employee_id);
+                      {task.creator_employee_id && task.creator_employee_id !== emp.id && (() => {
+                        const cr = employees.find(e3 => e3.id === task.creator_employee_id);
                         if (!cr) return null;
-                        return <span style={{ background: "#eef2ff", color: "#3b58d4", padding: "1px 6px", borderRadius: 4, fontWeight: 700 }}>{cr.name} 分配</span>;
+                        return <span style={{ background: "#eef2ff", color: "#3b58d4", padding: "1px 6px", borderRadius: 4, fontWeight: 700 }}>{cr.name} {t("分配")}</span>;
                       })()}
-                      <span>📅 {fmtShortDate(t.created_at)}</span>
-                      {t.due_date && (() => {
-                        const days = Math.ceil((new Date(t.due_date) - new Date()) / (1000 * 60 * 60 * 24));
-                        if (isDone || isAbandoned) return <span style={{ color: "#888" }}>⏰ {t.due_date}</span>;
-                        if (days < 0) return <span style={{ color: "#ef4444", fontWeight: 700 }}>⚠ {t.due_date}（過期 {Math.abs(days)}d）</span>;
-                        if (days <= 3) return <span style={{ color: "#f59e0b", fontWeight: 700 }}>⏰ {t.due_date}（{days}d）</span>;
-                        return <span style={{ color: "#888" }}>⏰ {t.due_date}</span>;
+                      <span>📅 {fmtShortDate(task.created_at)}</span>
+                      {task.due_date && (() => {
+                        const days = Math.ceil((new Date(task.due_date) - new Date()) / (1000 * 60 * 60 * 24));
+                        if (isDone || isAbandoned) return <span style={{ color: "#888" }}>⏰ {task.due_date}</span>;
+                        if (days < 0) return <span style={{ color: "#ef4444", fontWeight: 700 }}>⚠ {task.due_date}（{t("過期")} {Math.abs(days)}d）</span>;
+                        if (days <= 3) return <span style={{ color: "#f59e0b", fontWeight: 700 }}>⏰ {task.due_date}（{days}d）</span>;
+                        return <span style={{ color: "#888" }}>⏰ {task.due_date}</span>;
                       })()}
                       {isDone && myCompletedAt && <span style={{ color: "#22c55e" }}>✓ {fmtShortDate(myCompletedAt)}</span>}
                       {isAbandoned && myAbandonedAt && <span>✗ {fmtShortDate(myAbandonedAt)}</span>}
                       {subtasks.length > 0 && <span style={{ color: "#888" }}>☑ {subDone}/{subtasks.length}</span>}
                       {(() => {
-                        const list = assigneesByTask.get(t.id);
+                        const list = assigneesByTask.get(task.id);
                         if (!list || list.length <= 1) return null;
                         const doneCount = list.filter(a => a.completed_at != null).length;
                         const abandonedCount = list.filter(a => a.abandoned_at != null).length;
@@ -4446,7 +4446,7 @@ export default function App() {
                         return (
                           <span style={{ display: "inline-flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
                             <span style={{ color: settled === list.length ? "#22c55e" : "#888" }}>
-                              [{doneCount}/{list.length}{abandonedCount > 0 ? ` · ${abandonedCount}棄` : ""}]
+                              [{doneCount}/{list.length}{abandonedCount > 0 ? ` · ${abandonedCount}${t("棄")}` : ""}]
                             </span>
                             {list.map((a, ai) => {
                               const e3 = employees.find(e => e.id === a.employee_id);
@@ -4464,21 +4464,21 @@ export default function App() {
                           </span>
                         );
                       })()}
-                      {feedbacks.some(f => f.task_id === t.id) && (() => {
-                        const list = feedbacks.filter(f => f.task_id === t.id);
-                        const lastSeen = parseInt(localStorage.getItem(`bf_task_seen_${t.id}_${userId}`) || "0", 10);
+                      {feedbacks.some(f => f.task_id === task.id) && (() => {
+                        const list = feedbacks.filter(f => f.task_id === task.id);
+                        const lastSeen = parseInt(localStorage.getItem(`bf_task_seen_${task.id}_${userId}`) || "0", 10);
                         const unread = list.filter(f => new Date(f.created_at).getTime() > lastSeen && f.author_user_id !== userId).length;
                         return (
                           <span style={{ color: unread > 0 ? "#ef4444" : "#f59e0b", fontWeight: unread > 0 ? 700 : 400 }}>
-                            💬 {list.length}{unread > 0 && <span style={{ background: "#ef4444", color: "#fff", borderRadius: 8, padding: "0 5px", marginLeft: 3, fontSize: 9 }}>{unread} 新</span>}
+                            💬 {list.length}{unread > 0 && <span style={{ background: "#ef4444", color: "#fff", borderRadius: 8, padding: "0 5px", marginLeft: 3, fontSize: 9 }}>{unread} {t("新")}</span>}
                           </span>
                         );
                       })()}
-                      {Array.isArray(t.attachments) && t.attachments.length > 0 && <span style={{ color: "#6382ff" }}>📎 {t.attachments.length}</span>}
-                      {isAwaitingApproval(t) && (() => {
-                        const cr = employees.find(e3 => e3.id === t.creator_employee_id);
-                        const crName = cr?.name || "發布人";
-                        return <span style={{ background: "#fff4e0", color: "#b06a00", padding: "1px 6px", borderRadius: 4, fontWeight: 700, border: "1px solid #f4dca4" }}>等待 {crName} 核驗中</span>;
+                      {Array.isArray(task.attachments) && task.attachments.length > 0 && <span style={{ color: "#6382ff" }}>📎 {task.attachments.length}</span>}
+                      {isAwaitingApproval(task) && (() => {
+                        const cr = employees.find(e3 => e3.id === task.creator_employee_id);
+                        const crName = cr?.name || t("發布人");
+                        return <span style={{ background: "#fff4e0", color: "#b06a00", padding: "1px 6px", borderRadius: 4, fontWeight: 700, border: "1px solid #f4dca4" }}>{t("等待")} {crName} {t("核驗中")}</span>;
                       })()}
                     </div>
                   </div>
