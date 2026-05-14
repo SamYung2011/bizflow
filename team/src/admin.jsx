@@ -1408,7 +1408,7 @@ function NewEmployeeModal({ companies, onClose, onSaved }) {
   )
 }
 
-// ====================  PROFILE (個人資料 modal，所有角色用)  ====================
+// ====================  PROFILE (個人資料 + 修改密碼 modal，所有角色用)  ====================
 //   RLS employees_self_update 允許本人改：name/role/phone/email/note/show_update_log
 //   鎖：is_admin / company_id / kind / active / user_id（管理員管）
 function ProfileModal({ me, onClose }) {
@@ -1416,6 +1416,13 @@ function ProfileModal({ me, onClose }) {
   const [draft, setDraft] = useState(me)
   const [savingField, setSavingField] = useState(null)
   useEffect(() => setDraft(me), [me.id])
+
+  // 密碼
+  const [pw1, setPw1] = useState('')
+  const [pw2, setPw2] = useState('')
+  const [pwBusy, setPwBusy] = useState(false)
+  const [pwMsg, setPwMsg] = useState('')
+  const [pwOk, setPwOk] = useState(false)
 
   const save = async (field, value) => {
     const v = (value || '').trim() || null
@@ -1426,6 +1433,22 @@ function ProfileModal({ me, onClose }) {
     if (error) { alert('保存失敗：' + error.message); setDraft(prev => ({ ...prev, [field]: me[field] })); return }
     queryClient.invalidateQueries({ queryKey: ['team'] })
     queryClient.invalidateQueries({ queryKey: ['admin', 'employees'] })
+  }
+
+  const changePassword = async () => {
+    setPwMsg(''); setPwOk(false)
+    if (pw1.length < 6) return setPwMsg('密碼至少 6 位')
+    if (pw1 !== pw2) return setPwMsg('兩次輸入不一致')
+    setPwBusy(true)
+    const { error } = await supabase.auth.updateUser({ password: pw1 })
+    setPwBusy(false)
+    if (error) return setPwMsg('修改失敗：' + error.message)
+    setPw1(''); setPw2(''); setPwOk(true); setPwMsg('密碼已更新')
+    // 同時清掉 must_change_password 標記（若有）
+    if (me.must_change_password) {
+      await supabase.from('employees').update({ must_change_password: false }).eq('id', me.id)
+      queryClient.invalidateQueries({ queryKey: ['team'] })
+    }
   }
 
   const row = (label, field, type = 'text', placeholder = '') => (
@@ -1462,11 +1485,19 @@ function ProfileModal({ me, onClose }) {
             style={{ ...S.input, minHeight: 60, resize: 'vertical' }}
           />
         </Field>
-        <div style={{ fontSize: 10, color: c.textFaint, marginTop: 8, lineHeight: 1.5 }}>
-          公司 / 角色（admin/employee/task）/ 帳號等敏感欄位需管理員調整。<br />
-          要改密碼請去 bizflow 主端登入後處理。
+        <div style={{ fontSize: 10, color: c.textFaint, marginTop: 4, marginBottom: 14 }}>
+          公司 / 角色（admin/employee/task）/ 帳號類型等敏感欄位需管理員調整。
         </div>
-        <button onClick={onClose} style={{ ...S.btnPrimary, width: '100%', marginTop: 12 }}>完成</button>
+
+        <div style={{ borderTop: `1px dashed ${c.border}`, paddingTop: 14, marginBottom: 4 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>修改密碼</div>
+          <input type="password" value={pw1} onChange={e => { setPw1(e.target.value); setPwMsg(''); setPwOk(false) }} placeholder="新密碼（至少 6 位）" style={S.input} />
+          <input type="password" value={pw2} onChange={e => { setPw2(e.target.value); setPwMsg(''); setPwOk(false) }} placeholder="再次輸入" style={S.input} />
+          {pwMsg && <div style={{ fontSize: 12, color: pwOk ? c.green : c.red, marginBottom: 8 }}>{pwOk ? '✓ ' : ''}{pwMsg}</div>}
+          <button onClick={changePassword} disabled={pwBusy || !pw1 || !pw2} style={{ ...S.btnPrimary, width: '100%', opacity: (pwBusy || !pw1 || !pw2) ? 0.4 : 1 }}>{pwBusy ? '處理中…' : '更新密碼'}</button>
+        </div>
+
+        <button onClick={onClose} style={{ ...S.btnGhost, width: '100%', marginTop: 12 }}>完成</button>
       </div>
     </div>
   )
