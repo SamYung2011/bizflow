@@ -43,28 +43,38 @@ export default function AdminApp({ me, session, view, setView }) {
   const isMobile = useIsMobile()
   const data = useAdminData()
 
+  // view 按角色 fallback：非 admin 訪問 admin-only view 自動回 tasks
+  const isSales = me.role === '銷售'
+  const allowedViews = ['tasks', 'updatelog']
+  if (me.is_admin) allowedViews.push('employees', 'accountreview')
+  if (me.is_admin || isSales) allowedViews.push('commission')
+  const safeView = allowedViews.includes(view) ? view : 'tasks'
+
   return (
     <div style={{ minHeight: '100vh', background: c.bg, fontFamily: font.ui, color: c.text, WebkitFontSmoothing: 'antialiased' }}>
-      <AdminTopBar me={me} view={view} setView={setView} isMobile={isMobile} pendingCount={data.pendings.filter(p => p.approved == null).length} />
+      <AdminTopBar me={me} view={safeView} setView={setView} isMobile={isMobile} pendingCount={data.pendings.filter(p => p.approved == null).length} />
       <main style={{ maxWidth: 1500, margin: '0 auto', padding: isMobile ? '12px 12px' : '18px 24px' }}>
-        {view === 'tasks' && <TasksView data={data} me={me} session={session} isMobile={isMobile} />}
-        {view === 'employees' && <EmployeesView data={data} me={me} isMobile={isMobile} />}
-        {view === 'accountreview' && <AccountReviewView data={data} me={me} />}
-        {view === 'commission' && <CommissionView employees={data.employees} me={me} lockedEmpId={null} />}
-        {view === 'updatelog' && <UpdateLogView me={me} session={session} isMobile={isMobile} />}
+        {safeView === 'tasks' && <TasksView data={data} me={me} session={session} isMobile={isMobile} />}
+        {safeView === 'employees' && me.is_admin && <EmployeesView data={data} me={me} isMobile={isMobile} />}
+        {safeView === 'accountreview' && me.is_admin && <AccountReviewView data={data} me={me} />}
+        {safeView === 'commission' && (me.is_admin || isSales) && (
+          <CommissionView employees={me.is_admin ? data.employees : [me]} me={me} lockedEmpId={me.is_admin ? null : me.id} />
+        )}
+        {safeView === 'updatelog' && <UpdateLogView me={me} session={session} isMobile={isMobile} />}
       </main>
     </div>
   )
 }
 
 function AdminTopBar({ me, view, setView, isMobile, pendingCount }) {
+  const isSales = me.role === '銷售'
   const navs = [
-    ['tasks', '任務'],
-    ['employees', '員工管理'],
-    ['accountreview', '帳號審核'],
-    ['commission', '佣金'],
-    ['updatelog', '更新日誌'],
-  ]
+    ['tasks', '任務', true],
+    ['employees', '員工管理', me.is_admin],
+    ['accountreview', '帳號審核', me.is_admin],
+    ['commission', me.is_admin ? '佣金' : '我的佣金', me.is_admin || isSales],
+    ['updatelog', '更新日誌', true],
+  ].filter(([, , show]) => show)
   return (
     <header style={{ background: c.card, borderBottom: `1px solid ${c.border}`, padding: isMobile ? '10px 14px' : '12px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, position: 'sticky', top: 0, zIndex: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 12 : 28, overflowX: 'auto' }}>
@@ -121,17 +131,24 @@ function TasksView({ data, me, session, isMobile }) {
   const queryClient = useQueryClient()
   const userId = session.user.id
 
-  const [companyFilter, setCompanyFilter] = useState('all')
-  const [mode, setMode] = useState('overview') // 'overview' | 'list'
-  const [selectedEmpId, setSelectedEmpId] = useState(null)
+  // 非 admin 強制鎖定本公司；admin 可下拉切換
+  const [companyFilter, setCompanyFilter] = useState(me.is_admin ? 'all' : (me.company_id || 'all'))
+  // 普通員工進來預設選自己（empBoard 模式）；admin 預設 overview
+  const [mode, setMode] = useState(me.is_admin ? 'overview' : 'list')
+  const [selectedEmpId, setSelectedEmpId] = useState(me.is_admin ? null : me.id)
   const [editingTask, setEditingTask] = useState(null)
   const [overviewExpanded, setOverviewExpanded] = useState(new Set())
 
   const visibleEmployees = useMemo(() => {
     let list = employees.filter(e => e.active !== false)
-    if (companyFilter !== 'all') list = list.filter(e => e.company_id === companyFilter)
+    if (!me.is_admin) {
+      // 非 admin：只看本公司同事
+      list = list.filter(e => me.company_id && e.company_id === me.company_id)
+    } else if (companyFilter !== 'all') {
+      list = list.filter(e => e.company_id === companyFilter)
+    }
     return list
-  }, [employees, companyFilter])
+  }, [employees, companyFilter, me])
 
   const selectedEmp = selectedEmpId ? employees.find(e => e.id === selectedEmpId) : null
 
@@ -144,7 +161,7 @@ function TasksView({ data, me, session, isMobile }) {
             <TaskBoard emp={selectedEmp} data={data} me={me} userId={userId} setEditingTask={setEditingTask} compact />
           </div>
         ) : (
-          <EmpListMobile employees={visibleEmployees} companies={companies} companyFilter={companyFilter} setCompanyFilter={setCompanyFilter} tasks={tasks} assigneesByTask={assigneesByTask} onSelect={(e) => setSelectedEmpId(e.id)} />
+          <EmpListMobile employees={visibleEmployees} companies={companies} companyFilter={companyFilter} setCompanyFilter={setCompanyFilter} tasks={tasks} assigneesByTask={assigneesByTask} onSelect={(e) => setSelectedEmpId(e.id)} me={me} />
         )}
         {editingTask && <EditTaskModal task={editingTask} data={data} me={me} userId={userId} onClose={() => setEditingTask(null)} />}
       </div>
@@ -156,7 +173,7 @@ function TasksView({ data, me, session, isMobile }) {
       <EmpSidebar
         employees={visibleEmployees} companies={companies} companyFilter={companyFilter} setCompanyFilter={setCompanyFilter}
         mode={mode} setMode={setMode} selectedEmpId={selectedEmpId} setSelectedEmpId={setSelectedEmpId}
-        tasks={tasks} assigneesByTask={assigneesByTask}
+        tasks={tasks} assigneesByTask={assigneesByTask} me={me}
       />
       <div>
         {mode === 'overview' ? (
@@ -173,15 +190,17 @@ function TasksView({ data, me, session, isMobile }) {
 }
 
 // ====================  員工側欄  ====================
-function EmpSidebar({ employees, companies, companyFilter, setCompanyFilter, mode, setMode, selectedEmpId, setSelectedEmpId, tasks, assigneesByTask }) {
+function EmpSidebar({ employees, companies, companyFilter, setCompanyFilter, mode, setMode, selectedEmpId, setSelectedEmpId, tasks, assigneesByTask, me }) {
   return (
     <aside style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.lg, padding: 14, display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 100px)' }}>
       <div style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>員工 <span style={{ fontSize: 11, color: c.textFaint, fontWeight: 400 }}>{employees.length}</span></div>
-        <select value={companyFilter} onChange={e => setCompanyFilter(e.target.value)} style={{ ...S.input, marginBottom: 0, fontSize: 12, padding: '6px 8px' }}>
-          <option value="all">所有公司</option>
-          {companies.map(co => <option key={co.id} value={co.id}>{co.name}</option>)}
-        </select>
+        {me.is_admin && (
+          <select value={companyFilter} onChange={e => setCompanyFilter(e.target.value)} style={{ ...S.input, marginBottom: 0, fontSize: 12, padding: '6px 8px' }}>
+            <option value="all">所有公司</option>
+            {companies.map(co => <option key={co.id} value={co.id}>{co.name}</option>)}
+          </select>
+        )}
       </div>
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div onClick={() => { setMode('overview'); setSelectedEmpId(null) }} style={{ background: mode === 'overview' ? c.accentBg : c.bg, border: `1px solid ${mode === 'overview' ? c.accent : c.border}`, borderRadius: radius.md, padding: '10px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: mode === 'overview' ? c.accent : c.text }}>
@@ -215,13 +234,15 @@ function EmpSidebar({ employees, companies, companyFilter, setCompanyFilter, mod
   )
 }
 
-function EmpListMobile({ employees, companies, companyFilter, setCompanyFilter, tasks, assigneesByTask, onSelect }) {
+function EmpListMobile({ employees, companies, companyFilter, setCompanyFilter, tasks, assigneesByTask, onSelect, me }) {
   return (
     <div>
-      <select value={companyFilter} onChange={e => setCompanyFilter(e.target.value)} style={{ ...S.input, marginBottom: 10, fontSize: 12 }}>
-        <option value="all">所有公司</option>
-        {companies.map(co => <option key={co.id} value={co.id}>{co.name}</option>)}
-      </select>
+      {me?.is_admin && (
+        <select value={companyFilter} onChange={e => setCompanyFilter(e.target.value)} style={{ ...S.input, marginBottom: 10, fontSize: 12 }}>
+          <option value="all">所有公司</option>
+          {companies.map(co => <option key={co.id} value={co.id}>{co.name}</option>)}
+        </select>
+      )}
       {employees.map(e => {
         const openCount = tasks.filter(t => isTaskAssignedTo(t, e.id, assigneesByTask) && !t.parent_task_id && !empDoneFor(t, e.id, assigneesByTask) && !empAbandonedFor(t, e.id, assigneesByTask)).length
         return (
@@ -449,12 +470,18 @@ function TaskBoard({ emp, data, me, userId, setEditingTask, compact }) {
     </div>
   )
 
+  // 只有 admin / 本人 / 同公司同事可新增任務（普通員工給同事分配，沿用 bizflow 邏輯）
+  const canCreate = me.is_admin || emp.id === me.id || (me.company_id && emp.company_id === me.company_id)
+  const newTaskBlock = canCreate
+    ? <NewTaskForm emp={emp} me={me} employees={employees} />
+    : <div style={{ background: c.card, border: `1px dashed ${c.border}`, borderRadius: radius.lg, padding: 24, textAlign: 'center', color: c.textFaint, fontSize: 12 }}>非本公司同事，無法新增任務</div>
+
   return (
     <div>
       <EmpHeader emp={emp} me={me} />
       {compact ? (
         <div>
-          <NewTaskForm emp={emp} me={me} employees={employees} />
+          {newTaskBlock}
           {cols.high.length > 0 && colBox('高優先級', c.red, cols.high)}
           {cols.mid.length > 0 && colBox('中優先級', c.amber, cols.mid)}
           {cols.low.length > 0 && colBox('低優先級', c.green, cols.low)}
@@ -464,7 +491,7 @@ function TaskBoard({ emp, data, me, userId, setEditingTask, compact }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gridTemplateRows: 'auto auto', gap: 12, marginBottom: 16 }}>
           <div style={{ gridColumn: 1, gridRow: 1 }}>{colBox('高優先級', c.red, cols.high)}</div>
           <div style={{ gridColumn: 2, gridRow: 1 }}>{colBox('中優先級', c.amber, cols.mid)}</div>
-          <div style={{ gridColumn: 3, gridRow: '1 / 3' }}><NewTaskForm emp={emp} me={me} employees={employees} /></div>
+          <div style={{ gridColumn: 3, gridRow: '1 / 3' }}>{newTaskBlock}</div>
           <div style={{ gridColumn: 1, gridRow: 2 }}><FbPanel fbList={fbList} feedbacks={feedbacks} setEditingTask={setEditingTask} /></div>
           <div style={{ gridColumn: 2, gridRow: 2 }}>{colBox('低優先級', c.green, cols.low)}</div>
         </div>
@@ -539,9 +566,12 @@ function NewTaskForm({ emp, me, employees }) {
   const [assigneeOpen, setAssigneeOpen] = useState(false)
   const [files, setFiles] = useState([])
   const [busy, setBusy] = useState(false)
+  const [subtaskTitles, setSubtaskTitles] = useState([])  // 子任務標題列表，submit 時一起 INSERT，assignees 沿用父任務
 
   const effective = assigneeIds === null ? [emp.id] : assigneeIds
-  const activeEmps = employees.filter(e => e.active !== false)
+  // 候選限本公司（emp 所屬公司）；admin 跨公司請左側切員工
+  const sameCo = (e) => emp.company_id ? e.company_id === emp.company_id : true
+  const activeEmps = employees.filter(e => e.active !== false && sameCo(e))
   const q = assigneeInput.replace(/^@/, '').toLowerCase()
   const candidates = activeEmps.filter(e => !effective.includes(e.id) && (q === '' || (e.name || '').toLowerCase().includes(q)))
 
@@ -566,7 +596,21 @@ function NewTaskForm({ emp, me, employees }) {
         const attachments = await Promise.all(files.map(f => uploadAttachment(f, data.id)))
         await supabase.from('employee_tasks').update({ attachments }).eq('id', data.id)
       }
-      setTitle(''); setNote(''); setPriority('low'); setAssigneeIds(null); setNeedsApproval(false); setDueDate(''); setFiles([])
+      // 子任務（assignees 沿用父）
+      const cleanSubs = subtaskTitles.map(s => s.trim()).filter(Boolean)
+      for (const subTitle of cleanSubs) {
+        const { data: sub, error: se } = await supabase.from('employee_tasks').insert({
+          employee_id: effective[0],
+          creator_employee_id: me.id,
+          needs_approval: needsApproval,
+          title: subTitle,
+          priority: 'none',
+          parent_task_id: data.id,
+        }).select().single()
+        if (se) { console.error('子任務新增失敗', se); continue }
+        await supabase.from('task_assignees').insert(effective.map(eid => ({ task_id: sub.id, employee_id: eid })))
+      }
+      setTitle(''); setNote(''); setPriority('low'); setAssigneeIds(null); setNeedsApproval(false); setDueDate(''); setFiles([]); setSubtaskTitles([])
       queryClient.invalidateQueries({ queryKey: ['admin', 'employee_tasks'] })
       queryClient.invalidateQueries({ queryKey: ['admin', 'task_assignees'] })
     } catch (e) {
@@ -624,9 +668,39 @@ function NewTaskForm({ emp, me, employees }) {
           </span>
         ))}
       </div>
+
+      {/* 子任務（assignees 沿用父任務；要單獨改去 EditTaskModal） */}
+      <div style={{ marginBottom: 10, paddingTop: 8, borderTop: `1px dashed ${c.border}` }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <span style={{ fontSize: 11, color: c.textMuted }}>子任務（可選）{subtaskTitles.length > 0 && <span style={{ color: c.textFaint, marginLeft: 4 }}>· {subtaskTitles.length}</span>}</span>
+          <button type="button" onClick={() => setSubtaskTitles(prev => [...prev, ''])} style={{ background: c.bg, border: `1px dashed ${c.border}`, borderRadius: radius.sm, padding: '2px 8px', fontSize: 10, color: c.accent, cursor: 'pointer' }}>＋ 加子任務</button>
+        </div>
+        {subtaskTitles.map((stTitle, i) => (
+          <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center' }}>
+            <span style={{ fontSize: 9, color: c.textFaint, width: 14 }}>{i + 1}.</span>
+            <input value={stTitle} onChange={e => setSubtaskTitles(prev => prev.map((v, j) => j === i ? e.target.value : v))} placeholder={`子任務標題`} style={{ flex: 1, padding: '5px 8px', borderRadius: radius.sm, border: `1px solid ${c.border}`, fontSize: 11, outline: 'none', boxSizing: 'border-box' }} />
+            <button type="button" onClick={() => setSubtaskTitles(prev => prev.filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', color: c.textFaint, cursor: 'pointer', fontSize: 13 }}>×</button>
+          </div>
+        ))}
+      </div>
+
       <button onClick={submit} disabled={busy || !title.trim() || effective.length === 0} style={{ ...S.btnPrimary, width: '100%', opacity: (busy || !title.trim() || effective.length === 0) ? 0.4 : 1 }}>{busy ? '處理中…' : '新增任務'}</button>
     </div>
   )
+}
+
+// 算出任務所屬公司：取 assignees 中第一個有 company_id 的；fallback creator
+function getTaskCompanyId(task, assigneesByTask, employees) {
+  const list = assigneesByTask.get(task.id) || []
+  for (const a of list) {
+    const e = employees.find(x => x.id === a.employee_id)
+    if (e?.company_id) return e.company_id
+  }
+  if (task.creator_employee_id) {
+    const cr = employees.find(x => x.id === task.creator_employee_id)
+    if (cr?.company_id) return cr.company_id
+  }
+  return null
 }
 
 // 上傳附件到 supabase storage
@@ -655,6 +729,8 @@ function EditTaskModal({ task: initial, data, me, userId, onClose }) {
   const isCreator = tk.creator_employee_id === me.id
   const canEdit = me.is_admin || isCreator
   const ro = !canEdit
+  // 公司範圍：所有候選都限本任務所屬公司（admin 通過左側員工列表切換）
+  const scopeCompanyId = getTaskCompanyId(tk, assigneesByTask, employees)
 
   const subtasks = tasks.filter(s => s.parent_task_id === tk.id)
   const fbList = feedbacks.filter(f => f.task_id === tk.id).sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
@@ -751,7 +827,7 @@ function EditTaskModal({ task: initial, data, me, userId, onClose }) {
           <input type="date" value={tk.due_date || ''} readOnly={ro} onChange={e => setTk({ ...tk, due_date: e.target.value || null })} onBlur={() => updateField({ due_date: tk.due_date || null })} style={{ padding: '4px 8px', borderRadius: radius.sm, border: `1px solid ${c.border}`, fontSize: 12 }} />
         </div>
 
-        <AssigneeEditor tk={tk} tkList={tkList} employees={employees} canManage={canEdit} setAssignees={setAssignees} />
+        <AssigneeEditor tk={tk} tkList={tkList} employees={employees} canManage={canEdit} setAssignees={setAssignees} scopeCompanyId={scopeCompanyId} />
 
         {canEdit ? (
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 8, fontSize: 12, color: c.textMuted, cursor: 'pointer' }}>
@@ -766,9 +842,9 @@ function EditTaskModal({ task: initial, data, me, userId, onClose }) {
 
         <AttachmentList tk={tk} ro={ro} onUpdate={updateField} />
 
-        <SubtaskList tk={tk} subtasks={subtasks} employees={employees} feedbacks={feedbacks} assigneesByTask={assigneesByTask} me={me} canEdit={canEdit} />
+        <SubtaskList tk={tk} subtasks={subtasks} employees={employees} feedbacks={feedbacks} assigneesByTask={assigneesByTask} me={me} canEdit={canEdit} scopeCompanyId={scopeCompanyId} />
 
-        <FeedbackThread tk={tk} fbList={fbList} employees={employees} me={me} userId={userId} />
+        <FeedbackThread tk={tk} fbList={fbList} employees={employees} me={me} userId={userId} scopeCompanyId={scopeCompanyId} />
 
         <div style={{ fontSize: 10, color: c.textFaint, marginTop: 12, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <span>添加於 {fmtDateTime(tk.created_at)}</span>
@@ -793,12 +869,13 @@ function EditTaskModal({ task: initial, data, me, userId, onClose }) {
   )
 }
 
-function AssigneeEditor({ tk, tkList, employees, canManage, setAssignees }) {
+function AssigneeEditor({ tk, tkList, employees, canManage, setAssignees, scopeCompanyId }) {
   const [input, setInput] = useState('')
   const [open, setOpen] = useState(false)
   const cur = tkList.map(a => a.employee_id)
   const q = input.replace(/^@/, '').toLowerCase()
-  const cands = employees.filter(e => e.active !== false && !cur.includes(e.id) && (q === '' || (e.name || '').toLowerCase().includes(q)))
+  const sameCo = (e) => scopeCompanyId ? e.company_id === scopeCompanyId : true
+  const cands = employees.filter(e => e.active !== false && sameCo(e) && !cur.includes(e.id) && (q === '' || (e.name || '').toLowerCase().includes(q)))
   return (
     <div style={{ marginTop: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
@@ -875,7 +952,7 @@ function AttachmentList({ tk, ro, onUpdate }) {
   )
 }
 
-function SubtaskList({ tk, subtasks, employees, feedbacks, assigneesByTask, me, canEdit }) {
+function SubtaskList({ tk, subtasks, employees, feedbacks, assigneesByTask, me, canEdit, scopeCompanyId }) {
   const queryClient = useQueryClient()
   const [subTitle, setSubTitle] = useState('')
   const [subAssignees, setSubAssignees] = useState(null)
@@ -885,7 +962,8 @@ function SubtaskList({ tk, subtasks, employees, feedbacks, assigneesByTask, me, 
   const parentAssignees = (assigneesByTask.get(tk.id) || []).map(a => a.employee_id)
   const effectiveSub = subAssignees === null ? parentAssignees : subAssignees
   const sq = subInput.replace(/^@/, '').toLowerCase()
-  const subCands = employees.filter(e => e.active !== false && !effectiveSub.includes(e.id) && (sq === '' || (e.name || '').toLowerCase().includes(sq)))
+  const sameCo = (e) => scopeCompanyId ? e.company_id === scopeCompanyId : true
+  const subCands = employees.filter(e => e.active !== false && sameCo(e) && !effectiveSub.includes(e.id) && (sq === '' || (e.name || '').toLowerCase().includes(sq)))
 
   const addSub = async () => {
     const title = subTitle.trim()
@@ -966,7 +1044,7 @@ function SubtaskList({ tk, subtasks, employees, feedbacks, assigneesByTask, me, 
   )
 }
 
-function FeedbackThread({ tk, fbList, employees, me, userId }) {
+function FeedbackThread({ tk, fbList, employees, me, userId, scopeCompanyId }) {
   const queryClient = useQueryClient()
   const [body, setBody] = useState('')
   const [mentions, setMentions] = useState([])
@@ -974,7 +1052,8 @@ function FeedbackThread({ tk, fbList, employees, me, userId }) {
   const [mentionPop, setMentionPop] = useState({ open: false, query: '', atIdx: -1 })
   const [files, setFiles] = useState([])
 
-  const mentionables = employees.filter(e => e.active !== false && e.user_id && e.id !== me.id)
+  const sameCo = (e) => scopeCompanyId ? e.company_id === scopeCompanyId : true
+  const mentionables = employees.filter(e => e.active !== false && e.user_id && e.id !== me.id && sameCo(e))
   const filtered = mentionPop.open ? mentionables.filter(e => !mentionPop.query || (e.name || '').toLowerCase().includes(mentionPop.query.toLowerCase())) : []
 
   const handleChange = (e) => {
