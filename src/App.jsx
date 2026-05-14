@@ -1753,7 +1753,6 @@ export default function App() {
     { id: "gototeam", label: t("前往 team"), icon: "customer", external: "https://team.honnmono.top" },
     { id: "suppliers", label: t("供應商"), icon: "product" },
     { id: "whatsapp", label: t("WhatsApp"), icon: "invoice" },
-    ...(isBfAdmin ? [{ id: "accountreview", label: t("審核帳號"), icon: "customer" }] : []),
     { id: "updatelog", label: t("更新日誌"), icon: "trend_up" },
   ];
 
@@ -6130,97 +6129,7 @@ export default function App() {
           );
         })()}
 
-        {/* ACCOUNT REVIEW — 審核 task_pending 注冊申請（admin only） */}
-        {tab === "accountreview" && isBfAdmin && (() => {
-          const pending = qTaskPending.data || [];
-          const waiting = pending.filter(p => p.approved === null || p.approved === undefined);
-          const reviewed = pending.filter(p => p.approved !== null && p.approved !== undefined);
-          const companies = qCompanies.data || [];
-
-          const approveTask = async (row) => {
-            const companyName = window.prompt(`${t("確認/編輯公司名（將綁定到 companies 表）")}：`, row.company_name || "");
-            if (!companyName) return;
-            // 找已有公司 or upsert（避免快速批准兩條同名觸發 UNIQUE 冲突）
-            let company = companies.find(c => c.name === companyName.trim());
-            if (!company) {
-              const ins = await supabase.from("companies")
-                .upsert({ name: companyName.trim() }, { onConflict: "name" })
-                .select().single();
-              if (ins.error) { alert(`${t("新增公司失敗")}：${ins.error.message}`); return; }
-              company = ins.data;
-              queryClient.invalidateQueries({ queryKey: ["bf", "companies"] });
-            }
-            // 創建 employees 行（kind='task'）
-            const empIns = await supabase.from("employees").insert({
-              name: row.name,
-              email: row.email,
-              user_id: row.user_id,
-              kind: "task",
-              company_id: company.id,
-              active: true,
-              note: row.note || null,
-            }).select().single();
-            if (empIns.error) { alert(`${t("創建員工失敗")}：${empIns.error.message}`); return; }
-            queryClient.invalidateQueries({ queryKey: ["bf", "employees"] });
-            // 標記 pending 已批准
-            await supabase.from("task_pending").update({
-              approved: true,
-              reviewed_at: new Date().toISOString(),
-              reviewed_by: userId,
-            }).eq("id", row.id);
-            queryClient.invalidateQueries({ queryKey: ["bf", "task_pending"] });
-            alert(`${t("已批准")}：${row.name} (${companyName})`);
-          };
-
-          const rejectTask = async (row) => {
-            const reason = window.prompt(t("拒絕理由（可選）："), "");
-            if (reason === null) return;
-            await supabase.from("task_pending").update({
-              approved: false,
-              reviewed_at: new Date().toISOString(),
-              reviewed_by: userId,
-              reject_reason: reason || null,
-            }).eq("id", row.id);
-            queryClient.invalidateQueries({ queryKey: ["bf", "task_pending"] });
-          };
-
-          return (
-            <div>
-              <h1 style={{ fontSize: 24, marginBottom: 8 }}>{t("審核帳號")}</h1>
-              <div style={{ fontSize: 13, color: "#888", marginBottom: 20 }}>{t("待審 task 用戶註冊申請（team.honnmono.top 注冊進來）")} · {t("待審")} {waiting.length} · {t("已處理")} {reviewed.length}</div>
-
-              <h2 style={{ fontSize: 16, marginTop: 24, marginBottom: 12, color: "#3b58d4" }}>{t("待審")}（{waiting.length}）</h2>
-              {waiting.length === 0 ? (
-                <div style={{ background: "#fff", borderRadius: 10, padding: 40, textAlign: "center", color: "#aaa", border: "1px dashed #e0e0e0" }}>{t("暫無待審申請")}</div>
-              ) : waiting.map(p => (
-                <div key={p.id} style={{ background: "#fff", border: "1px solid #fce4ec", borderRadius: 10, padding: "14px 18px", marginBottom: 10, display: "flex", gap: 14, alignItems: "center" }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#222" }}>{p.name} <span style={{ fontSize: 11, color: "#888", fontWeight: 400, marginLeft: 8 }}>{p.email}</span></div>
-                    <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>{t("申請公司")}：<strong style={{ color: "#3b58d4" }}>{p.company_name}</strong></div>
-                    {p.note && <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>{t("備註")}：{p.note}</div>}
-                    <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>{t("申請時間")}：{new Date(p.requested_at).toLocaleString("zh-HK")}</div>
-                  </div>
-                  <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                    <button onClick={() => approveTask(p)} style={{ background: "#e8f5e9", color: "#22c55e", border: "none", borderRadius: 8, padding: "8px 16px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>✓ {t("批准")}</button>
-                    <button onClick={() => rejectTask(p)} style={{ background: "#fce4ec", color: "#c0392b", border: "none", borderRadius: 8, padding: "8px 16px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>× {t("拒絕")}</button>
-                  </div>
-                </div>
-              ))}
-
-              {reviewed.length > 0 && (
-                <>
-                  <h2 style={{ fontSize: 16, marginTop: 32, marginBottom: 12, color: "#888" }}>{t("已處理")}（{reviewed.length}）</h2>
-                  {reviewed.slice(0, 30).map(p => (
-                    <div key={p.id} style={{ background: "#fafbff", border: "1px solid #eef0fa", borderRadius: 10, padding: "10px 16px", marginBottom: 6, display: "flex", justifyContent: "space-between", alignItems: "center", color: "#999", fontSize: 12 }}>
-                      <span>{p.name} · {p.email} · {p.company_name} · {p.approved ? <strong style={{ color: "#22c55e" }}>✓ {t("已批准")}</strong> : <strong style={{ color: "#c0392b" }}>× {t("已拒絕")}</strong>}{p.reject_reason && ` (${p.reject_reason})`}</span>
-                      <span style={{ fontSize: 11, color: "#aaa" }}>{p.reviewed_at && new Date(p.reviewed_at).toLocaleString("zh-HK", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
-                    </div>
-                  ))}
-                </>
-              )}
-            </div>
-          );
-        })()}
+        {/* 帳號審核已移至 team 子應用：https://team.honnmono.top */}
       </main>
 
       {/* INSTALL TUTORIAL MODAL */}
@@ -7583,8 +7492,7 @@ export default function App() {
             const viewBtnColor = isApproval ? '#f59e0b' : isFeedback ? '#ea580c' : '#6382ff';
             const dismiss = () => setDismissedNoticeTypes(prev => new Set([...prev, notice.type]));
             const viewAndDismiss = () => {
-              setTab('employees');
-              setSelectedEmployee(currentEmployee);
+              // 標記 feedback 已讀（保留 bizflow 本地 seen 記錄）
               if (isFeedback && notice.ids && notice.ids.length > 0 && userId) {
                 const seenFbKey = `bf_seen_fb_${userId}`;
                 let seen = [];
@@ -7592,6 +7500,8 @@ export default function App() {
                 const merged = Array.from(new Set([...seen, ...notice.ids]));
                 localStorage.setItem(seenFbKey, JSON.stringify(merged));
               }
+              // 跳到 team 子應用查看（任務管理已遷出）
+              window.open('https://team.honnmono.top', '_blank', 'noopener,noreferrer');
               dismiss();
             };
             let title;
