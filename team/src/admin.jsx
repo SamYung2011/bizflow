@@ -134,8 +134,8 @@ function TasksView({ data, me, session, isMobile }) {
   const queryClient = useQueryClient()
   const userId = session.user.id
 
-  // 非 admin 強制鎖定本公司；admin 可下拉切換
-  const [companyFilter, setCompanyFilter] = useState(me.is_admin ? 'all' : (me.company_id || 'all'))
+  // 預設都鎖本公司；admin 可下拉切到別的公司或「所有公司」
+  const [companyFilter, setCompanyFilter] = useState(me.company_id || 'all')
   // 普通員工進來預設選自己（empBoard 模式）；admin 預設 overview
   const [mode, setMode] = useState(me.is_admin ? 'overview' : 'list')
   const [selectedEmpId, setSelectedEmpId] = useState(me.is_admin ? null : me.id)
