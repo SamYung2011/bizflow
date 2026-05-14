@@ -69,7 +69,7 @@ export default function AdminApp({ me, session, view, setView }) {
   // view 按角色 fallback：非 admin 訪問 admin-only view 自動回 tasks
   const isSales = me.role === '銷售'
   const allowedViews = ['tasks', 'updatelog']
-  if (me.is_admin) allowedViews.push('employees', 'accountreview')
+  if (me.is_admin) allowedViews.push('employees', 'companies', 'accountreview')
   if (me.is_admin || isSales) allowedViews.push('commission')
   const safeView = allowedViews.includes(view) ? view : 'tasks'
 
@@ -79,6 +79,7 @@ export default function AdminApp({ me, session, view, setView }) {
       <main style={{ maxWidth: 1500, margin: '0 auto', padding: isMobile ? '12px 12px' : '18px 24px' }}>
         {safeView === 'tasks' && <TasksView data={data} me={me} session={session} isMobile={isMobile} />}
         {safeView === 'employees' && me.is_admin && <EmployeesView data={data} me={me} isMobile={isMobile} />}
+        {safeView === 'companies' && me.is_admin && <CompaniesView data={data} />}
         {safeView === 'accountreview' && me.is_admin && <AccountReviewView data={data} me={me} session={session} />}
         {safeView === 'commission' && (me.is_admin || isSales) && (
           <CommissionView employees={me.is_admin ? data.employees : [me]} me={me} lockedEmpId={me.is_admin ? null : me.id} />
@@ -94,6 +95,7 @@ function AdminTopBar({ me, view, setView, isMobile, pendingCount }) {
   const navs = [
     ['tasks', '任務', true],
     ['employees', '員工管理', me.is_admin],
+    ['companies', '公司管理', me.is_admin],
     ['accountreview', '帳號審核', me.is_admin],
     ['commission', me.is_admin ? '佣金' : '我的佣金', me.is_admin || isSales],
     ['updatelog', '更新日誌', true],
@@ -1403,6 +1405,114 @@ function NewEmployeeModal({ companies, onClose, onSaved }) {
         <button onClick={save} disabled={busy || !name.trim()} style={{ ...S.btnPrimary, width: '100%', opacity: (busy || !name.trim()) ? 0.4 : 1 }}>{busy ? '處理中…' : '儲存'}</button>
       </div>
     </div>
+  )
+}
+
+// ====================  COMPANIES (admin only)  ====================
+function CompaniesView({ data }) {
+  const { companies, employees } = data
+  const queryClient = useQueryClient()
+  const [newName, setNewName] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const empCountByCompany = useMemo(() => {
+    const m = new Map()
+    for (const e of employees) {
+      if (!e.company_id) continue
+      m.set(e.company_id, (m.get(e.company_id) || 0) + 1)
+    }
+    return m
+  }, [employees])
+
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['admin', 'companies'] })
+
+  const add = async () => {
+    const name = newName.trim()
+    if (!name) return
+    setBusy(true)
+    const { error } = await supabase.from('companies').upsert({ name }, { onConflict: 'name' })
+    setBusy(false)
+    if (error) return alert('新建公司失敗：' + error.message)
+    setNewName('')
+    refresh()
+  }
+
+  const rename = async (co, nextName) => {
+    const v = (nextName || '').trim()
+    if (!v || v === co.name) return
+    const { error } = await supabase.from('companies').update({ name: v }).eq('id', co.id)
+    if (error) return alert('改名失敗：' + error.message)
+    refresh()
+  }
+
+  const del = async (co) => {
+    const count = empCountByCompany.get(co.id) || 0
+    if (count > 0) return alert(`「${co.name}」還有 ${count} 個員工，無法刪除。先把員工挪到別的公司或刪掉員工。`)
+    if (!confirm(`確定刪除「${co.name}」？`)) return
+    const { error } = await supabase.from('companies').delete().eq('id', co.id)
+    if (error) return alert('刪除失敗：' + error.message)
+    refresh()
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>公司管理 <span style={{ fontSize: 12, color: c.textFaint, fontWeight: 400 }}>{companies.length}</span></h1>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} placeholder="新公司名稱" style={{ ...S.input, marginBottom: 0, fontSize: 12, padding: '6px 10px', width: 200 }} />
+          <button onClick={add} disabled={busy || !newName.trim()} style={{ ...S.btnPrimary, opacity: (busy || !newName.trim()) ? 0.4 : 1 }}>＋ 新增</button>
+        </div>
+      </div>
+
+      <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.lg, overflow: 'hidden' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr style={{ background: c.bg, borderBottom: `1px solid ${c.border}` }}>
+              <th style={tcell('left')}>名稱</th>
+              <th style={tcell('left')}>員工數</th>
+              <th style={tcell('left')}>創建時間</th>
+              <th style={tcell('right')}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {companies.length === 0 && <tr><td colSpan={4} style={{ padding: 30, textAlign: 'center', color: c.textFaint }}>無公司</td></tr>}
+            {companies.map(co => (
+              <CompanyRow key={co.id} co={co} count={empCountByCompany.get(co.id) || 0} rename={rename} del={del} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ fontSize: 10, color: c.textFaint, marginTop: 8 }}>提示：刪除公司前要把其下員工挪走或刪除。「Honnmono」是 admin 內部公司，慎刪。</div>
+    </div>
+  )
+}
+
+function CompanyRow({ co, count, rename, del }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(co.name)
+  useEffect(() => setDraft(co.name), [co.id, co.name])
+
+  return (
+    <tr style={{ borderBottom: `1px solid ${c.border}` }}>
+      <td style={{ padding: '8px 12px', fontWeight: 600 }}>
+        {editing ? <input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && (rename(co, draft), setEditing(false))} style={{ ...S.input, marginBottom: 0, fontSize: 12 }} autoFocus /> : co.name}
+      </td>
+      <td style={{ padding: '8px 12px', color: count > 0 ? c.text : c.textFaint }}>{count}</td>
+      <td style={{ padding: '8px 12px', color: c.textMuted, fontSize: 12 }}>{co.created_at ? fmtDateTime(co.created_at) : '—'}</td>
+      <td style={{ padding: '8px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+        {editing ? (
+          <>
+            <button onClick={() => { rename(co, draft); setEditing(false) }} style={{ ...S.btnPrimary, padding: '4px 10px', fontSize: 11, marginRight: 4 }}>保存</button>
+            <button onClick={() => { setDraft(co.name); setEditing(false) }} style={{ ...S.btnGhostSm, padding: '4px 8px' }}>取消</button>
+          </>
+        ) : (
+          <>
+            <button onClick={() => setEditing(true)} style={{ ...S.btnGhostSm, padding: '4px 8px', marginRight: 4 }}>改名</button>
+            <button onClick={() => del(co)} disabled={count > 0} style={{ background: 'none', border: 'none', color: count > 0 ? c.textFaint : c.red, fontSize: 11, cursor: count > 0 ? 'not-allowed' : 'pointer', padding: 4 }}>刪除</button>
+          </>
+        )}
+      </td>
+    </tr>
   )
 }
 
