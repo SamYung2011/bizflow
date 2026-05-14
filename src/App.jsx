@@ -2786,7 +2786,7 @@ export default function App() {
         <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 2 }}>
           {navItems.map(n => (
             <button key={n.id} onClick={() => {
-              if (n.external) { window.open(n.external, "_blank"); return; }
+              if (n.external) { window.location.href = n.external; return; }
               setTab(n.id); setSelectedCustomer(null); setSearch(""); setVisibleCustomers(30); setVisibleInvoices(30);
             }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "none", cursor: "pointer", background: tab === n.id ? "rgba(99,130,255,0.18)" : "transparent", color: tab === n.id ? "#7c9dff" : "#8899cc", fontSize: 14, fontWeight: tab === n.id ? 700 : 500, textAlign: "left" }}>
               <Icon name={n.icon} size={17} />{n.label}
