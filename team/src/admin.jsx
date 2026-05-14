@@ -79,7 +79,7 @@ export default function AdminApp({ me, session, view, setView }) {
       <main style={{ maxWidth: 1500, margin: '0 auto', padding: isMobile ? '12px 12px' : '18px 24px' }}>
         {safeView === 'tasks' && <TasksView data={data} me={me} session={session} isMobile={isMobile} />}
         {safeView === 'employees' && me.is_admin && <EmployeesView data={data} me={me} isMobile={isMobile} />}
-        {safeView === 'accountreview' && me.is_admin && <AccountReviewView data={data} me={me} />}
+        {safeView === 'accountreview' && me.is_admin && <AccountReviewView data={data} me={me} session={session} />}
         {safeView === 'commission' && (me.is_admin || isSales) && (
           <CommissionView employees={me.is_admin ? data.employees : [me]} me={me} lockedEmpId={me.is_admin ? null : me.id} />
         )}
@@ -1407,11 +1407,12 @@ function NewEmployeeModal({ companies, onClose, onSaved }) {
 }
 
 // ====================  ACCOUNT REVIEW  ====================
-function AccountReviewView({ data, me }) {
+function AccountReviewView({ data, me, session }) {
   const { pendings, companies } = data
   const queryClient = useQueryClient()
   const open = pendings.filter(p => p.approved == null)
   const done = pendings.filter(p => p.approved != null).slice(0, 30)
+  const reviewerUid = session.user.id  // task_pending.reviewed_by FK 到 auth.users.id
 
   const approve = async (p) => {
     const guess = companies.find(co => co.name === p.company_name)
@@ -1434,14 +1435,14 @@ function AccountReviewView({ data, me }) {
       name: p.name, email: p.email, user_id: p.user_id, company_id: companyId, kind: 'task',
     })
     if (empErr) return alert('創建員工失敗：' + empErr.message)
-    await supabase.from('task_pending').update({ approved: true, approved_at: new Date().toISOString(), approved_by: me.id }).eq('id', p.id)
+    await supabase.from('task_pending').update({ approved: true, reviewed_at: new Date().toISOString(), reviewed_by: reviewerUid }).eq('id', p.id)
     queryClient.invalidateQueries({ queryKey: ['admin', 'task_pending'] })
     queryClient.invalidateQueries({ queryKey: ['admin', 'employees'] })
     queryClient.invalidateQueries({ queryKey: ['admin', 'companies'] })
   }
   const reject = async (p) => {
     const reason = prompt('拒絕理由（可選）：') || null
-    await supabase.from('task_pending').update({ approved: false, reject_reason: reason, approved_at: new Date().toISOString(), approved_by: me.id }).eq('id', p.id)
+    await supabase.from('task_pending').update({ approved: false, reject_reason: reason, reviewed_at: new Date().toISOString(), reviewed_by: reviewerUid }).eq('id', p.id)
     queryClient.invalidateQueries({ queryKey: ['admin', 'task_pending'] })
   }
 
