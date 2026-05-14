@@ -331,7 +331,13 @@ function TaskBoard({ emp, data, me, userId, setEditingTask, compact }) {
 
   // emp 是 assignee 或 creator 的任務
   const empOwnsTask = (t) => isTaskAssignedTo(t, emp.id, assigneesByTask) || emp.id === t.creator_employee_id
-  const topTasks = tasks.filter(t => empOwnsTask(t) && !t.parent_task_id)
+  // 顶级展示：非子任务 OR「孤兒」子任务（父任務 emp 不沾，那子任務在 emp 视圖里要独立顯示）
+  const topTasks = tasks.filter(t => {
+    if (!empOwnsTask(t)) return false
+    if (!t.parent_task_id) return true
+    const parent = tasks.find(p => p.id === t.parent_task_id)
+    return !parent || !empOwnsTask(parent)
+  })
   const allEmpTasks = tasks.filter(t => empOwnsTask(t))
   const oneEightyDaysAgo = Date.now() - 180 * 86400000
   const within180 = (t) => {
@@ -375,8 +381,12 @@ function TaskBoard({ emp, data, me, userId, setEditingTask, compact }) {
     abandoned: allEmpTasks.filter(t => showInAb(t) && within180(t) && showInTerminal(t)),
   }
 
-  // 最新反饋（每個 task 取最近一條 comment 作摘要）
-  const empTaskIds = new Set(tasks.filter(t => isTaskAssignedTo(t, emp.id, assigneesByTask)).map(t => t.id))
+  // 反饋（僅顯示 emp 未完成的 task；每個 task 取最近一條作摘要，展開後看全部）
+  const empTaskIds = new Set(tasks.filter(t =>
+    isTaskAssignedTo(t, emp.id, assigneesByTask)
+    && !empDoneFor(t, emp.id, assigneesByTask)
+    && !empAbandonedFor(t, emp.id, assigneesByTask)
+  ).map(t => t.id))
   const fbByTask = new Map()
   for (const fb of feedbacks) {
     if (!empTaskIds.has(fb.task_id)) continue
@@ -422,6 +432,10 @@ function TaskBoard({ emp, data, me, userId, setEditingTask, compact }) {
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
           <input type="checkbox" checked={isDone} disabled={!isEmpAssignee} onChange={() => isEmpAssignee && toggleDone(task)} onClick={e => e.stopPropagation()} style={{ width: 14, height: 14, marginTop: 2, cursor: isEmpAssignee ? 'pointer' : 'not-allowed' }} />
           <div style={{ flex: 1, minWidth: 0 }}>
+            {task.parent_task_id && (() => {
+              const parent = tasks.find(p => p.id === task.parent_task_id)
+              return parent ? <div style={{ fontSize: 10, color: c.textFaint, marginBottom: 2 }}>↳ {parent.title}</div> : null
+            })()}
             <div style={{ fontSize: 13, fontWeight: 500, textDecoration: isDone ? 'line-through' : 'none', color: (isDone || isAb) ? c.textMuted : c.text, lineHeight: 1.4 }}>{task.title}</div>
             <div style={{ fontSize: 10, color: c.textFaint, marginTop: 4, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {task.creator_employee_id && task.creator_employee_id !== emp.id && (() => {
@@ -529,23 +543,42 @@ function EmpHeader({ emp, me }) {
   )
 }
 
-// 反饋面板
+// 反饋面板（只看 emp 未完成 task；卡片可展開看全部反饋）
 function FbPanel({ fbList, feedbacks, setEditingTask }) {
+  const [expanded, setExpanded] = useState(new Set())
+  const toggle = (id) => setExpanded(prev => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n
+  })
   return (
     <div style={{ background: c.amberBg, border: `1px solid #fde68a`, borderRadius: radius.lg, padding: 12, minHeight: 220 }}>
       <div style={{ fontSize: 13, fontWeight: 700, color: '#a16207', marginBottom: 8 }}>💬 任務反饋記錄 <span style={{ fontSize: 11, color: '#b88a00' }}>{fbList.length}</span></div>
       {fbList.length === 0 ? (
         <div style={{ fontSize: 11, color: '#b88a00', fontStyle: 'italic' }}>暫無反饋</div>
       ) : fbList.map(tk => {
-        const total = feedbacks.filter(f => f.task_id === tk.id).length
+        const allFbs = feedbacks.filter(f => f.task_id === tk.id).sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+        const isExp = expanded.has(tk.id)
         return (
-          <div key={tk.id} onClick={() => setEditingTask(tk)} style={{ background: c.card, border: `1px solid #fde68a`, borderRadius: radius.sm, padding: '8px 10px', marginBottom: 6, cursor: 'pointer' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-              <span style={{ fontSize: 12, fontWeight: 600 }}>{tk.title}</span>
-              {total > 1 && <span style={{ fontSize: 10, color: '#b88a00' }}>{total}</span>}
+          <div key={tk.id} style={{ background: c.card, border: `1px solid #fde68a`, borderRadius: radius.sm, padding: '8px 10px', marginBottom: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <button type="button" onClick={() => toggle(tk.id)} title={isExp ? '收起' : '展開全部反饋'} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#b88a00', fontSize: 10, padding: 0, width: 12, lineHeight: 1 }}>{isExp ? '▼' : '▶'}</button>
+              <span onClick={() => setEditingTask(tk)} style={{ fontSize: 12, fontWeight: 600, flex: 1, cursor: 'pointer' }}>{tk.title}</span>
+              {allFbs.length > 1 && <span style={{ fontSize: 10, color: '#b88a00' }}>{allFbs.length}</span>}
             </div>
-            <div style={{ fontSize: 10, color: '#b88a00', marginBottom: 2 }}>{tk._fb.author_name || '未知'} · {fmtDateTime(tk._fb.created_at)}</div>
-            <div style={{ fontSize: 11, color: '#8a6900', lineHeight: 1.5, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', whiteSpace: 'pre-wrap' }}>{tk._fb.body}</div>
+            {!isExp ? (
+              <div onClick={() => setEditingTask(tk)} style={{ cursor: 'pointer' }}>
+                <div style={{ fontSize: 10, color: '#b88a00', marginBottom: 2 }}>{tk._fb.author_name || '未知'} · {fmtDateTime(tk._fb.created_at)}</div>
+                <div style={{ fontSize: 11, color: '#8a6900', lineHeight: 1.5, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', whiteSpace: 'pre-wrap' }}>{tk._fb.body}</div>
+              </div>
+            ) : (
+              <div style={{ marginTop: 4, borderTop: '1px dashed #fde68a', paddingTop: 6 }}>
+                {allFbs.map(fb => (
+                  <div key={fb.id} style={{ borderLeft: '2px solid #fde68a', paddingLeft: 8, marginBottom: 6 }}>
+                    <div style={{ fontSize: 10, color: '#b88a00', marginBottom: 1 }}><strong style={{ color: '#a16207' }}>{fb.author_name || '?'}</strong> · {fmtDateTime(fb.created_at)}</div>
+                    <div style={{ fontSize: 11, color: '#8a6900', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{fb.body}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )
       })}
