@@ -12,12 +12,35 @@ const HELEN_EMAIL = 'a1017339632@gmail.com'
 
 // 共享數據 hooks
 function useAdminData() {
-  const qEmployees = useQuery({ queryKey: ['admin', 'employees'], queryFn: () => fetchAllTable('employees', 'created_at'), refetchInterval: 30000 })
-  const qCompanies = useQuery({ queryKey: ['admin', 'companies'], queryFn: () => fetchAllTable('companies', 'name'), refetchInterval: 60000 })
-  const qTasks = useQuery({ queryKey: ['admin', 'employee_tasks'], queryFn: () => fetchAllTable('employee_tasks', 'created_at', false), refetchInterval: 5000 })
-  const qAssignees = useQuery({ queryKey: ['admin', 'task_assignees'], queryFn: () => fetchAllTable('task_assignees', 'created_at'), refetchInterval: 5000 })
-  const qFeedbacks = useQuery({ queryKey: ['admin', 'feedbacks'], queryFn: () => fetchAllTable('employee_task_feedbacks', 'created_at'), refetchInterval: 5000 })
-  const qPending = useQuery({ queryKey: ['admin', 'task_pending'], queryFn: () => fetchAllTable('task_pending', 'requested_at', false), refetchInterval: 15000 })
+  const queryClient = useQueryClient()
+
+  // 輪詢拉到 30s 兜底，主要靠 realtime push 即時刷新
+  const qEmployees = useQuery({ queryKey: ['admin', 'employees'], queryFn: () => fetchAllTable('employees', 'created_at'), refetchInterval: 60000 })
+  const qCompanies = useQuery({ queryKey: ['admin', 'companies'], queryFn: () => fetchAllTable('companies', 'name'), refetchInterval: 120000 })
+  const qTasks = useQuery({ queryKey: ['admin', 'employee_tasks'], queryFn: () => fetchAllTable('employee_tasks', 'created_at', false), refetchInterval: 30000 })
+  const qAssignees = useQuery({ queryKey: ['admin', 'task_assignees'], queryFn: () => fetchAllTable('task_assignees', 'created_at'), refetchInterval: 30000 })
+  const qFeedbacks = useQuery({ queryKey: ['admin', 'feedbacks'], queryFn: () => fetchAllTable('employee_task_feedbacks', 'created_at'), refetchInterval: 30000 })
+  const qPending = useQuery({ queryKey: ['admin', 'task_pending'], queryFn: () => fetchAllTable('task_pending', 'requested_at', false), refetchInterval: 30000 })
+
+  // realtime 訂閱：DB 任意改動立即觸發 invalidate
+  useEffect(() => {
+    const tables = [
+      ['employee_tasks', ['admin', 'employee_tasks']],
+      ['task_assignees', ['admin', 'task_assignees']],
+      ['employee_task_feedbacks', ['admin', 'feedbacks']],
+      ['employees', ['admin', 'employees']],
+      ['companies', ['admin', 'companies']],
+      ['task_pending', ['admin', 'task_pending']],
+    ]
+    const channels = tables.map(([table, key]) => supabase
+      .channel(`team-${table}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table }, () => {
+        queryClient.invalidateQueries({ queryKey: key })
+      })
+      .subscribe()
+    )
+    return () => { channels.forEach(ch => supabase.removeChannel(ch)) }
+  }, [queryClient])
 
   const employees = qEmployees.data || []
   const companies = qCompanies.data || []
