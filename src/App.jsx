@@ -7501,7 +7501,7 @@ export default function App() {
                 localStorage.setItem(seenFbKey, JSON.stringify(merged));
               }
               // 跳到 team 子應用查看（任務管理已遷出）
-              window.open('https://team.honnmono.top', '_blank', 'noopener,noreferrer');
+              window.location.href = 'https://team.honnmono.top';
               dismiss();
             };
             let title;
