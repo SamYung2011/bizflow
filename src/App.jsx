@@ -1372,6 +1372,7 @@ export default function App() {
   const qWaSettings = useQuery({ queryKey: ["bf", "wa_settings"], queryFn: async () => { const { data } = await supabase.from("wa_settings").select("*").eq("id", 1).maybeSingle(); return data; }, enabled: !!userId, refetchInterval: 30000 });
   const qWaWhitelist = useQuery({ queryKey: ["bf", "wa_whitelist"], queryFn: () => fetchAllTable("wa_whitelist", "created_at"), enabled: !!userId, refetchInterval: 30000 });
   const qWaMessages = useQuery({ queryKey: ["bf", "wa_messages"], queryFn: async () => { const { data } = await supabase.from("wa_messages").select("*").order("created_at", { ascending: false }).limit(1000); return data || []; }, enabled: !!userId, refetchInterval: 5000 });
+  const qWaPending = useQuery({ queryKey: ["bf", "wa_replies_pending"], queryFn: async () => { const { data, error } = await supabase.from("wa_replies").select("*").is("delivered_at", null).order("created_at", { ascending: false }).limit(500); if (error) throw error; return data || []; }, enabled: !!userId, refetchInterval: 5000 });
   const qWaUnresolved = useQuery({ queryKey: ["bf", "wa_unresolved"], queryFn: () => fetchAllTable("wa_unresolved", "created_at", false), enabled: !!userId, refetchInterval: 30000 });
   const qWaReports = useQuery({ queryKey: ["bf", "wa_daily_reports"], queryFn: () => fetchAllTable("wa_daily_reports", "report_date", false), enabled: !!userId, refetchInterval: 60000 });
   const qWaHeartbeat = useQuery({ queryKey: ["bf", "wa_heartbeat"], queryFn: async () => { const { data } = await supabase.from("wa_heartbeat").select("*").eq("id", 1).maybeSingle(); return data; }, enabled: !!userId, refetchInterval: 15000 });
@@ -5289,6 +5290,7 @@ export default function App() {
             { id: "prompt",     label: "Boss Prompt" },
             { id: "whitelist",  label: t("白名單") },
             { id: "messages",   label: t("對話歷史") },
+            { id: "pending",    label: t("待發送回覆") },
             { id: "unresolved", label: t("未解決問題") },
             { id: "reports",    label: t("日報") },
             { id: "logs",       label: t("日誌") },
@@ -5335,6 +5337,22 @@ export default function App() {
             const { error } = await supabase.from("wa_unresolved").update({ resolved_at: new Date().toISOString() }).eq("id", id);
             if (error) { alert(`${t("更新失敗")}：${error.message}`); return; }
             setWaUnresolved(prev => prev.map(u => u.id === id ? { ...u, resolved_at: new Date().toISOString() } : u));
+          };
+          // 跳過某條待發送回覆：标 delivered_at + delivery_meta=manual_skip，扩展不再拉
+          const skipReply = async (id) => {
+            if (!guardAdmin()) return;
+            const { error } = await supabase.from("wa_replies").update({ delivered_at: new Date().toISOString(), delivery_meta: { reason: "manual_skip" } }).eq("id", id);
+            if (error) { alert(`${t("跳過失敗")}：${error.message}`); return; }
+            queryClient.invalidateQueries({ queryKey: ["bf", "wa_replies_pending"] });
+          };
+          const skipAllReplies = async () => {
+            if (!guardAdmin()) return;
+            const ids = (qWaPending.data || []).map(r => r.id);
+            if (ids.length === 0) return;
+            if (!window.confirm(`${t("確定全部跳過")} ${ids.length} ${t("條未發送回覆？")}`)) return;
+            const { error } = await supabase.from("wa_replies").update({ delivered_at: new Date().toISOString(), delivery_meta: { reason: "manual_skip" } }).in("id", ids);
+            if (error) { alert(`${t("全部跳過失敗")}：${error.message}`); return; }
+            queryClient.invalidateQueries({ queryKey: ["bf", "wa_replies_pending"] });
           };
           // 狀態徽標：優先顯示離線（心跳超過 2 分鐘）
           const lastBeat = waHeartbeat?.last_heartbeat_at ? new Date(waHeartbeat.last_heartbeat_at).getTime() : 0;
@@ -5717,6 +5735,42 @@ export default function App() {
                   </div>
                 </div>
               )}
+
+              {/* PENDING REPLIES — 已生成但插件还没发送的回覆 */}
+              {waSubTab === "pending" && (() => {
+                const pending = qWaPending.data || [];
+                return (
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                      <div style={{ fontSize: 13, color: "#888" }}>{t("共")} {pending.length} {t("條未發送回覆")}{pending.length > 0 && ` · ${t("跳過後插件不再嘗試發送")}`}</div>
+                      {pending.length > 0 && (
+                        <button onClick={skipAllReplies} style={{ background: "#fce4ec", border: "none", color: "#c0392b", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{t("全部跳過")}</button>
+                      )}
+                    </div>
+                    {pending.length === 0 ? (
+                      <div style={{ background: "#fff", borderRadius: 10, padding: 40, textAlign: "center", color: "#aaa", border: "1px dashed #e0e0e0" }}>{t("暫無待發送回覆")}</div>
+                    ) : pending.map(r => {
+                      const segs = typeof r.segments === "string" ? (() => { try { return JSON.parse(r.segments); } catch { return []; } })() : (r.segments || []);
+                      const preview = segs.length === 0 ? t("（空回覆）") : segs.map(s => typeof s === "string" ? s : (s.content || (s.type === "image" ? `[${t("圖片")}: ${s.url || ""}]` : ""))).join(" / ").slice(0, 200);
+                      const ageMin = Math.floor((Date.now() - new Date(r.created_at).getTime()) / 60000);
+                      return (
+                        <div key={r.id} style={{ background: "#fff", border: "1px solid #fce4ec", borderRadius: 10, padding: "12px 16px", marginBottom: 8, display: "flex", gap: 12, alignItems: "flex-start" }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, color: "#222", wordBreak: "break-word" }}>{preview || t("（無內容）")}</div>
+                            <div style={{ fontSize: 11, color: "#888", marginTop: 4, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                              <span>{r.chat_name || r.customer_id || "—"}</span>
+                              <span>{segs.length} {t("段")}</span>
+                              <span>{new Date(r.created_at).toLocaleString("zh-HK", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                              {ageMin > 0 && <span style={{ color: ageMin > 5 ? "#c0392b" : "#888" }}>{ageMin}{t("分鐘前")}</span>}
+                            </div>
+                          </div>
+                          <button onClick={() => skipReply(r.id)} style={{ background: "#fce4ec", border: "none", color: "#c0392b", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>× {t("跳過")}</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
 
               {/* UNRESOLVED */}
               {waSubTab === "unresolved" && (
