@@ -1376,6 +1376,8 @@ export default function App() {
   const qWaMessages = useQuery({ queryKey: ["bf", "wa_messages"], queryFn: async () => { const { data } = await supabase.from("wa_messages").select("*").order("created_at", { ascending: false }).limit(1000); return data || []; }, enabled: !!userId, refetchInterval: 5000 });
   const qWaPending = useQuery({ queryKey: ["bf", "wa_replies_pending"], queryFn: async () => { const { data, error } = await supabase.from("wa_replies").select("*").is("delivered_at", null).order("created_at", { ascending: false }).limit(500); if (error) throw error; return data || []; }, enabled: !!userId, refetchInterval: 5000 });
   const qWaUnresolved = useQuery({ queryKey: ["bf", "wa_unresolved"], queryFn: () => fetchAllTable("wa_unresolved", "created_at", false), enabled: !!userId, refetchInterval: 30000 });
+  const qCompanies = useQuery({ queryKey: ["bf", "companies"], queryFn: () => fetchAllTable("companies", "name", true), enabled: !!userId, refetchInterval: 60000 });
+  const qTaskPending = useQuery({ queryKey: ["bf", "task_pending"], queryFn: () => fetchAllTable("task_pending", "requested_at", false), enabled: !!userId && isWaAdmin, refetchInterval: 15000 });
   const qWaReports = useQuery({ queryKey: ["bf", "wa_daily_reports"], queryFn: () => fetchAllTable("wa_daily_reports", "report_date", false), enabled: !!userId, refetchInterval: 60000 });
   const qWaHeartbeat = useQuery({ queryKey: ["bf", "wa_heartbeat"], queryFn: async () => { const { data } = await supabase.from("wa_heartbeat").select("*").eq("id", 1).maybeSingle(); return data; }, enabled: !!userId, refetchInterval: 15000 });
   const qWaLogs = useQuery({ queryKey: ["bf", "wa_logs"], queryFn: async () => { const { data } = await supabase.from("wa_logs").select("*").order("created_at", { ascending: false }).limit(500); return data || []; }, enabled: !!userId, refetchInterval: 5000 });
@@ -1748,9 +1750,11 @@ export default function App() {
     { id: "invoices", label: t("發票"), icon: "invoice" },
     { id: "warranty", label: t("保修"), icon: "warning" },
     { id: "revenue", label: t("營收"), icon: "trend_up" },
-    { id: "employees", label: t("員工管理"), icon: "customer" },
+    { id: "gototeam", label: t("前往 team"), icon: "customer", external: "https://team.honnmono.top" },
     { id: "suppliers", label: t("供應商"), icon: "product" },
     { id: "whatsapp", label: t("WhatsApp"), icon: "invoice" },
+    ...(isBfAdmin ? [{ id: "accountreview", label: t("審核帳號"), icon: "customer" }] : []),
+    { id: "updatelog", label: t("更新日誌"), icon: "trend_up" },
   ];
 
   async function handleSaveCustomer() {
@@ -2719,6 +2723,23 @@ export default function App() {
     .filter(c => c.version && c.version !== _latestExtVer);
   const _showUpdateToast = _outdatedClients.length > 0 && extUpdateToastDismissedFor !== _latestExtVer;
 
+  // task kind 用戶不能進 bizflow，引導去 team.honnmono.top
+  if (currentEmployee && currentEmployee.kind === "task") {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", flexDirection: "column", gap: 20, background: "#f7f8fc", padding: 40, fontFamily: "'DM Sans','Helvetica Neue',sans-serif" }}>
+        <div style={{ fontSize: 48 }}>🚧</div>
+        <div style={{ color: "#222", fontSize: 22, fontWeight: 700 }}>{t("此帳號僅可使用團隊任務管理")}</div>
+        <div style={{ color: "#666", fontSize: 14, maxWidth: 460, textAlign: "center", lineHeight: 1.6 }}>
+          {t("你的帳號類型為 task，只能使用 team.honnmono.top 的任務管理功能，無法訪問主業務後台。")}
+        </div>
+        <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
+          <a href="https://team.honnmono.top" style={{ padding: "12px 28px", background: "#6382ff", color: "#fff", borderRadius: 10, textDecoration: "none", fontSize: 14, fontWeight: 700 }}>{t("前往 team.honnmono.top")}</a>
+          <button onClick={async () => { await supabase.auth.signOut(); }} style={{ padding: "12px 28px", background: "#fff", color: "#666", border: "1px solid #e0e0e0", borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>{t("登出")}</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "'DM Sans','Helvetica Neue',sans-serif", background: "#f7f8fc", color: "#1a1a2e" }}>
 
@@ -2765,7 +2786,10 @@ export default function App() {
         )}
         <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 2 }}>
           {navItems.map(n => (
-            <button key={n.id} onClick={() => { setTab(n.id); setSelectedCustomer(null); setSearch(""); setVisibleCustomers(30); setVisibleInvoices(30); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "none", cursor: "pointer", background: tab === n.id ? "rgba(99,130,255,0.18)" : "transparent", color: tab === n.id ? "#7c9dff" : "#8899cc", fontSize: 14, fontWeight: tab === n.id ? 700 : 500, textAlign: "left" }}>
+            <button key={n.id} onClick={() => {
+              if (n.external) { window.open(n.external, "_blank"); return; }
+              setTab(n.id); setSelectedCustomer(null); setSearch(""); setVisibleCustomers(30); setVisibleInvoices(30);
+            }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "none", cursor: "pointer", background: tab === n.id ? "rgba(99,130,255,0.18)" : "transparent", color: tab === n.id ? "#7c9dff" : "#8899cc", fontSize: 14, fontWeight: tab === n.id ? 700 : 500, textAlign: "left" }}>
               <Icon name={n.icon} size={17} />{n.label}
             </button>
           ))}
@@ -5928,6 +5952,272 @@ export default function App() {
                   </div>
                 );
               })()}
+            </div>
+          );
+        })()}
+
+        {/* UPDATE LOG — 從員工管理 logs sub-tab 抽出來的獨立頂級板塊（沿用 employee_update_logs 表 + 同款 UI） */}
+        {tab === "updatelog" && (() => {
+          const helenEmp = employees.find(e => MARKDOWN_LOG_AUTHORS.has(e.id)) || employees.find(e => e.show_update_log === true);
+          if (!helenEmp) {
+            return <div style={{ background: "#fff", border: "1px dashed #e0e0e0", borderRadius: 12, padding: 60, textAlign: "center", color: "#aaa" }}>{t("未配置 show_update_log 員工")}</div>;
+          }
+          const canEditHelen = isBfAdmin || (currentEmployee && currentEmployee.id === helenEmp.id);
+          const allMyLogs = updateLogs.filter(l => l.employee_id === helenEmp.id);
+          const myLogs = allMyLogs.slice(0, logsVisibleCount);
+          const hasMore = allMyLogs.length > myLogs.length;
+          const fmtFull = (iso) => {
+            const d = new Date(iso);
+            const yyyy = d.getFullYear();
+            const mm = String(d.getMonth() + 1).padStart(2, "0");
+            const dd = String(d.getDate()).padStart(2, "0");
+            let h = d.getHours();
+            const min = String(d.getMinutes()).padStart(2, "0");
+            const ampm = h >= 12 ? "PM" : "AM";
+            h = h % 12; if (h === 0) h = 12;
+            return `${yyyy}/${mm}/${dd} ${String(h).padStart(2, "0")}:${min} ${ampm}`;
+          };
+          const renderCommentTree = (logId, parentId, depth) => {
+            const list = logComments.filter(c => c.update_log_id === logId && (c.parent_comment_id || null) === parentId);
+            return list.map(c => {
+              const isOwn = c.author_user_id === userId;
+              const canEditCmt = isOwn || isBfAdmin;
+              const isEditing = editingLogComment && editingLogComment.id === c.id;
+              const isReplyingHere = replyingToLogComment && replyingToLogComment.parentId === c.id;
+              return (
+                <div key={c.id} style={{ marginLeft: depth * 20, marginTop: 8, paddingLeft: depth > 0 ? 10 : 0, borderLeft: depth > 0 ? "2px solid #eef2ff" : "none" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+                    <div style={{ fontSize: 11, color: "#888" }}>
+                      <strong style={{ color: "#3b58d4" }}>{c.author_name || t("未知")}</strong>
+                      <span style={{ marginLeft: 6 }}>{new Date(c.created_at).toLocaleString("zh-HK", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                      {c.updated_at && c.updated_at !== c.created_at && <span style={{ marginLeft: 4, color: "#bbb" }}>·{t("已編輯")}</span>}
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={() => setReplyingToLogComment(isReplyingHere ? null : { logId, parentId: c.id })} style={{ background: "none", border: "none", color: "#6382ff", fontSize: 11, cursor: "pointer", padding: 0 }}>{isReplyingHere ? t("取消") : `↩ ${t("回復")}`}</button>
+                      {canEditCmt && !isEditing && <button onClick={() => setEditingLogComment({ id: c.id, body: c.body })} style={{ background: "none", border: "none", color: "#888", fontSize: 11, cursor: "pointer", padding: 0 }}>✏</button>}
+                      {canEditCmt && <button onClick={() => handleDeleteLogComment(c.id)} style={{ background: "none", border: "none", color: "#e53935", fontSize: 11, cursor: "pointer", padding: 0 }}>×</button>}
+                    </div>
+                  </div>
+                  {isEditing ? (
+                    <div>
+                      <textarea value={editingLogComment.body} onChange={e => setEditingLogComment({ ...editingLogComment, body: e.target.value })} style={{ width: "100%", minHeight: 50, padding: "6px 8px", borderRadius: 6, border: "1px solid #6382ff", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", resize: "vertical" }} />
+                      <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                        <button onClick={async () => { await handleUpdateLogComment(c.id, editingLogComment.body); setEditingLogComment(null); }} style={{ padding: "4px 10px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>{t("保存")}</button>
+                        <button onClick={() => setEditingLogComment(null)} style={{ padding: "4px 10px", background: "#fff", color: "#888", border: "1px solid #e0e0e0", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>{t("取消")}</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: "#333", lineHeight: 1.5, whiteSpace: MARKDOWN_COMMENT_AUTHORS.has(c.author_user_id) ? "normal" : "pre-wrap" }}>
+                      {MARKDOWN_COMMENT_AUTHORS.has(c.author_user_id) ? <MarkdownText text={c.body} fontSize={12} /> : c.body}
+                    </div>
+                  )}
+                  {isReplyingHere && (
+                    <div style={{ marginTop: 6 }}>
+                      <textarea
+                        value={newLogCommentDraft[`reply:${logId}:${c.id}`] || ""}
+                        onChange={e => setNewLogCommentDraft({ ...newLogCommentDraft, [`reply:${logId}:${c.id}`]: e.target.value })}
+                        placeholder={t("回復")}
+                        style={{ width: "100%", minHeight: 40, padding: "6px 8px", borderRadius: 6, border: "1px solid #6382ff", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", resize: "vertical" }}
+                      />
+                      <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                        <button onClick={async () => { const k = `reply:${logId}:${c.id}`; await handleAddLogComment(logId, newLogCommentDraft[k] || "", c.id); setNewLogCommentDraft({ ...newLogCommentDraft, [k]: "" }); setReplyingToLogComment(null); }} style={{ padding: "4px 10px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>{t("發送")}</button>
+                      </div>
+                    </div>
+                  )}
+                  {renderCommentTree(logId, c.id, depth + 1)}
+                </div>
+              );
+            });
+          };
+          return (
+            <div>
+              <h1 style={{ fontSize: 24, marginBottom: 20 }}>{t("更新日誌")}</h1>
+              {/* 新增更新區（僅本人，admin 在別人頁面也不能寫） */}
+              {currentEmployee && helenEmp.id === currentEmployee.id && (
+                <div style={{ background: "#fafbff", border: "1px solid #eef0fa", borderRadius: 12, padding: 16, marginBottom: 20 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#3b58d4", marginBottom: 10 }}>＋ {t("新增更新")}</div>
+                  <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{t("簡略（必填）")}</div>
+                  <textarea value={newLogDraft.summary} onChange={e => setNewLogDraft({ ...newLogDraft, summary: e.target.value })} placeholder={t("一句話概括今天做了什麼...")} rows={2} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", marginBottom: 10, boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" }} />
+                  <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{t("詳細（可選，展開後顯示）")}</div>
+                  <textarea value={newLogDraft.detail} onChange={e => setNewLogDraft({ ...newLogDraft, detail: e.target.value })} placeholder={t("詳細描述...")} style={{ width: "100%", minHeight: 100, padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 12, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit", marginBottom: 10 }} />
+                  <button onClick={async () => { if (!newLogDraft.summary.trim()) return; await handleAddUpdateLog(helenEmp.id, newLogDraft.summary, newLogDraft.detail); setNewLogDraft({ summary: "", detail: "" }); }} disabled={!newLogDraft.summary.trim()} style={{ padding: "8px 18px", background: newLogDraft.summary.trim() ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: newLogDraft.summary.trim() ? "pointer" : "not-allowed" }}>{t("保存")}</button>
+                </div>
+              )}
+              {/* 時間軸 */}
+              {allMyLogs.length === 0 ? (
+                <div style={{ background: "#fff", border: "1px dashed #e0e0e0", borderRadius: 12, padding: 60, textAlign: "center", color: "#aaa", fontSize: 13 }}>{t("暫無更新記錄")}</div>
+              ) : (<>
+                <div style={{ position: "relative", paddingLeft: 24 }}>
+                  <div style={{ position: "absolute", left: 7, top: 6, bottom: 6, width: 2, background: "#eef2ff" }} />
+                  {myLogs.map(log => {
+                    const isExpanded = expandedLogIds.has(log.id);
+                    const isEditingThis = editingLogId === log.id;
+                    const cmtCount = logComments.filter(c => c.update_log_id === log.id).length;
+                    const isReplyingTopHere = replyingToLogComment && replyingToLogComment.logId === log.id && replyingToLogComment.parentId === null;
+                    return (
+                      <div key={log.id} style={{ position: "relative", marginBottom: 18 }}>
+                        <div style={{ position: "absolute", left: -22, top: 8, width: 12, height: 12, borderRadius: "50%", background: "#6382ff", border: "2px solid #fff", boxShadow: "0 0 0 2px #6382ff" }} />
+                        <div style={{ background: "#fff", border: "1px solid #eef0fa", borderRadius: 10, padding: "12px 14px" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                            <div style={{ fontSize: 11, color: "#888", fontWeight: 600 }}>{fmtFull(log.created_at)}{log.updated_at && log.updated_at !== log.created_at && <span style={{ marginLeft: 6, color: "#bbb", fontWeight: 400 }}>·{t("已編輯")} {fmtFull(log.updated_at)}</span>}</div>
+                            {canEditHelen && !isEditingThis && (
+                              <div style={{ display: "flex", gap: 6 }}>
+                                <button onClick={() => { setEditingLogId(log.id); setEditingLogDraft({ summary: log.summary || "", detail: log.detail || "" }); }} style={{ background: "none", border: "none", color: "#888", fontSize: 12, cursor: "pointer", padding: 0 }}>✏ {t("編輯")}</button>
+                                <button onClick={() => handleDeleteUpdateLog(log.id)} style={{ background: "none", border: "none", color: "#e53935", fontSize: 12, cursor: "pointer", padding: 0 }}>× {t("刪除")}</button>
+                              </div>
+                            )}
+                          </div>
+                          {isEditingThis ? (
+                            <div>
+                              <textarea value={editingLogDraft.summary} onChange={e => setEditingLogDraft({ ...editingLogDraft, summary: e.target.value })} placeholder={t("簡略")} rows={2} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #6382ff", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box", resize: "vertical", fontFamily: "inherit" }} />
+                              <textarea value={editingLogDraft.detail} onChange={e => setEditingLogDraft({ ...editingLogDraft, detail: e.target.value })} placeholder={t("詳細")} style={{ width: "100%", minHeight: 100, padding: "8px 10px", borderRadius: 6, border: "1px solid #6382ff", fontSize: 12, outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "inherit", marginBottom: 8 }} />
+                              <div style={{ display: "flex", gap: 6 }}>
+                                <button onClick={async () => { if (!editingLogDraft.summary.trim()) return; await handleUpdateUpdateLog(log.id, { summary: editingLogDraft.summary.trim(), detail: editingLogDraft.detail.trim() || null }); setEditingLogId(null); }} style={{ padding: "5px 12px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>{t("保存")}</button>
+                                <button onClick={() => setEditingLogId(null)} style={{ padding: "5px 12px", background: "#fff", color: "#888", border: "1px solid #e0e0e0", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>{t("取消")}</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <div onClick={() => { setExpandedLogIds(prev => { const n = new Set(prev); if (n.has(log.id)) n.delete(log.id); else n.add(log.id); return n; }); }} style={{ fontSize: 14, color: "#222", lineHeight: 1.5, cursor: "pointer", display: "flex", alignItems: "flex-start", gap: 8 }}>
+                                <span style={{ color: "#6382ff", fontSize: 11, marginTop: 3 }}>{isExpanded ? "▼" : "▶"}</span>
+                                <span style={{ flex: 1, whiteSpace: MARKDOWN_LOG_AUTHORS.has(log.employee_id) ? "normal" : "pre-wrap" }}>
+                                  {MARKDOWN_LOG_AUTHORS.has(log.employee_id) ? <MarkdownText text={log.summary} fontSize={14} /> : log.summary}
+                                </span>
+                              </div>
+                              {isExpanded && log.detail && (
+                                <div style={{ marginTop: 10, padding: "10px 12px", background: "#fafbff", borderRadius: 8, fontSize: 12, color: "#444", lineHeight: 1.6, whiteSpace: MARKDOWN_LOG_AUTHORS.has(log.employee_id) ? "normal" : "pre-wrap" }}>
+                                  {MARKDOWN_LOG_AUTHORS.has(log.employee_id) ? <MarkdownText text={log.detail} fontSize={12} /> : log.detail}
+                                </div>
+                              )}
+                            </>
+                          )}
+                          {/* 評論區 */}
+                          <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px dashed #eef0fa" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                              <div style={{ fontSize: 11, color: "#888" }}>💬 {t("評論")} <span style={{ color: "#aaa" }}>{cmtCount}</span></div>
+                              {!isReplyingTopHere && <button onClick={() => setReplyingToLogComment({ logId: log.id, parentId: null })} style={{ background: "none", border: "none", color: "#6382ff", fontSize: 11, cursor: "pointer", padding: 0 }}>+ {t("評論")}</button>}
+                            </div>
+                            {isReplyingTopHere && (
+                              <div style={{ marginTop: 6 }}>
+                                <textarea
+                                  value={newLogCommentDraft[`reply:${log.id}:null`] || ""}
+                                  onChange={e => setNewLogCommentDraft({ ...newLogCommentDraft, [`reply:${log.id}:null`]: e.target.value })}
+                                  placeholder={t("發表評論...")}
+                                  style={{ width: "100%", minHeight: 50, padding: "6px 8px", borderRadius: 6, border: "1px solid #6382ff", fontSize: 12, fontFamily: "inherit", outline: "none", boxSizing: "border-box", resize: "vertical" }}
+                                />
+                                <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                                  <button onClick={async () => { const k = `reply:${log.id}:null`; await handleAddLogComment(log.id, newLogCommentDraft[k] || ""); setNewLogCommentDraft({ ...newLogCommentDraft, [k]: "" }); setReplyingToLogComment(null); }} style={{ padding: "4px 10px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>{t("發送")}</button>
+                                  <button onClick={() => setReplyingToLogComment(null)} style={{ padding: "4px 10px", background: "#fff", color: "#888", border: "1px solid #e0e0e0", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>{t("取消")}</button>
+                                </div>
+                              </div>
+                            )}
+                            <div>{renderCommentTree(log.id, null, 0)}</div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {hasMore && (
+                  <div style={{ textAlign: "center", marginTop: 14 }}>
+                    <button onClick={() => setLogsVisibleCount(c => c + 20)} style={{ padding: "8px 20px", background: "#fff", border: "1px solid #6382ff", color: "#6382ff", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                      {t("加載更多")}（{t("剩餘")} {allMyLogs.length - myLogs.length}）
+                    </button>
+                  </div>
+                )}
+              </>)}
+            </div>
+          );
+        })()}
+
+        {/* ACCOUNT REVIEW — 審核 task_pending 注冊申請（admin only） */}
+        {tab === "accountreview" && isBfAdmin && (() => {
+          const pending = qTaskPending.data || [];
+          const waiting = pending.filter(p => p.approved === null || p.approved === undefined);
+          const reviewed = pending.filter(p => p.approved !== null && p.approved !== undefined);
+          const companies = qCompanies.data || [];
+
+          const approveTask = async (row) => {
+            const companyName = window.prompt(`${t("確認/編輯公司名（將綁定到 companies 表）")}：`, row.company_name || "");
+            if (!companyName) return;
+            // 找已有公司 or upsert（避免快速批准兩條同名觸發 UNIQUE 冲突）
+            let company = companies.find(c => c.name === companyName.trim());
+            if (!company) {
+              const ins = await supabase.from("companies")
+                .upsert({ name: companyName.trim() }, { onConflict: "name" })
+                .select().single();
+              if (ins.error) { alert(`${t("新增公司失敗")}：${ins.error.message}`); return; }
+              company = ins.data;
+              queryClient.invalidateQueries({ queryKey: ["bf", "companies"] });
+            }
+            // 創建 employees 行（kind='task'）
+            const empIns = await supabase.from("employees").insert({
+              name: row.name,
+              email: row.email,
+              user_id: row.user_id,
+              kind: "task",
+              company_id: company.id,
+              active: true,
+              note: row.note || null,
+            }).select().single();
+            if (empIns.error) { alert(`${t("創建員工失敗")}：${empIns.error.message}`); return; }
+            queryClient.invalidateQueries({ queryKey: ["bf", "employees"] });
+            // 標記 pending 已批准
+            await supabase.from("task_pending").update({
+              approved: true,
+              reviewed_at: new Date().toISOString(),
+              reviewed_by: userId,
+            }).eq("id", row.id);
+            queryClient.invalidateQueries({ queryKey: ["bf", "task_pending"] });
+            alert(`${t("已批准")}：${row.name} (${companyName})`);
+          };
+
+          const rejectTask = async (row) => {
+            const reason = window.prompt(t("拒絕理由（可選）："), "");
+            if (reason === null) return;
+            await supabase.from("task_pending").update({
+              approved: false,
+              reviewed_at: new Date().toISOString(),
+              reviewed_by: userId,
+              reject_reason: reason || null,
+            }).eq("id", row.id);
+            queryClient.invalidateQueries({ queryKey: ["bf", "task_pending"] });
+          };
+
+          return (
+            <div>
+              <h1 style={{ fontSize: 24, marginBottom: 8 }}>{t("審核帳號")}</h1>
+              <div style={{ fontSize: 13, color: "#888", marginBottom: 20 }}>{t("待審 task 用戶註冊申請（team.honnmono.top 注冊進來）")} · {t("待審")} {waiting.length} · {t("已處理")} {reviewed.length}</div>
+
+              <h2 style={{ fontSize: 16, marginTop: 24, marginBottom: 12, color: "#3b58d4" }}>{t("待審")}（{waiting.length}）</h2>
+              {waiting.length === 0 ? (
+                <div style={{ background: "#fff", borderRadius: 10, padding: 40, textAlign: "center", color: "#aaa", border: "1px dashed #e0e0e0" }}>{t("暫無待審申請")}</div>
+              ) : waiting.map(p => (
+                <div key={p.id} style={{ background: "#fff", border: "1px solid #fce4ec", borderRadius: 10, padding: "14px 18px", marginBottom: 10, display: "flex", gap: 14, alignItems: "center" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#222" }}>{p.name} <span style={{ fontSize: 11, color: "#888", fontWeight: 400, marginLeft: 8 }}>{p.email}</span></div>
+                    <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>{t("申請公司")}：<strong style={{ color: "#3b58d4" }}>{p.company_name}</strong></div>
+                    {p.note && <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>{t("備註")}：{p.note}</div>}
+                    <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>{t("申請時間")}：{new Date(p.requested_at).toLocaleString("zh-HK")}</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                    <button onClick={() => approveTask(p)} style={{ background: "#e8f5e9", color: "#22c55e", border: "none", borderRadius: 8, padding: "8px 16px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>✓ {t("批准")}</button>
+                    <button onClick={() => rejectTask(p)} style={{ background: "#fce4ec", color: "#c0392b", border: "none", borderRadius: 8, padding: "8px 16px", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>× {t("拒絕")}</button>
+                  </div>
+                </div>
+              ))}
+
+              {reviewed.length > 0 && (
+                <>
+                  <h2 style={{ fontSize: 16, marginTop: 32, marginBottom: 12, color: "#888" }}>{t("已處理")}（{reviewed.length}）</h2>
+                  {reviewed.slice(0, 30).map(p => (
+                    <div key={p.id} style={{ background: "#fafbff", border: "1px solid #eef0fa", borderRadius: 10, padding: "10px 16px", marginBottom: 6, display: "flex", justifyContent: "space-between", alignItems: "center", color: "#999", fontSize: 12 }}>
+                      <span>{p.name} · {p.email} · {p.company_name} · {p.approved ? <strong style={{ color: "#22c55e" }}>✓ {t("已批准")}</strong> : <strong style={{ color: "#c0392b" }}>× {t("已拒絕")}</strong>}{p.reject_reason && ` (${p.reject_reason})`}</span>
+                      <span style={{ fontSize: 11, color: "#aaa" }}>{p.reviewed_at && new Date(p.reviewed_at).toLocaleString("zh-HK", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
           );
         })()}
