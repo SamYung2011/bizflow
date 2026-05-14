@@ -65,6 +65,7 @@ function useAdminData() {
 export default function AdminApp({ me, session, view, setView }) {
   const isMobile = useIsMobile()
   const data = useAdminData()
+  const [showProfile, setShowProfile] = useState(false)
 
   // view 按角色 fallback：非 admin 訪問 admin-only view 自動回 tasks
   const isSales = me.role === '銷售'
@@ -75,7 +76,7 @@ export default function AdminApp({ me, session, view, setView }) {
 
   return (
     <div style={{ minHeight: '100vh', background: c.bg, fontFamily: font.ui, color: c.text, WebkitFontSmoothing: 'antialiased' }}>
-      <AdminTopBar me={me} view={safeView} setView={setView} isMobile={isMobile} pendingCount={data.pendings.filter(p => p.approved == null).length} />
+      <AdminTopBar me={me} view={safeView} setView={setView} isMobile={isMobile} pendingCount={data.pendings.filter(p => p.approved == null).length} onProfileClick={() => setShowProfile(true)} />
       <main style={{ maxWidth: 1500, margin: '0 auto', padding: isMobile ? '12px 12px' : '18px 24px' }}>
         {safeView === 'tasks' && <TasksView data={data} me={me} session={session} isMobile={isMobile} />}
         {safeView === 'employees' && me.is_admin && <EmployeesView data={data} me={me} isMobile={isMobile} />}
@@ -86,11 +87,12 @@ export default function AdminApp({ me, session, view, setView }) {
         )}
         {safeView === 'updatelog' && <UpdateLogView me={me} session={session} isMobile={isMobile} />}
       </main>
+      {showProfile && <ProfileModal me={me} onClose={() => setShowProfile(false)} />}
     </div>
   )
 }
 
-function AdminTopBar({ me, view, setView, isMobile, pendingCount }) {
+function AdminTopBar({ me, view, setView, isMobile, pendingCount, onProfileClick }) {
   const isSales = me.role === '銷售'
   const navs = [
     ['tasks', '任務', true],
@@ -117,9 +119,7 @@ function AdminTopBar({ me, view, setView, isMobile, pendingCount }) {
         </nav>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{ fontSize: 12, color: c.textMuted, display: isMobile ? 'none' : 'block' }}>
-          <span style={{ color: c.text, fontWeight: 600 }}>{me.name}</span>
-        </div>
+        <button onClick={onProfileClick} title="編輯個人資料" style={{ fontSize: 12, color: c.text, fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: isMobile ? 'none' : 'inline', fontFamily: font.ui, textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 3 }}>{me.name}</button>
         <button onClick={() => supabase.auth.signOut()} style={S.btnGhostSm}>登出</button>
       </div>
     </header>
@@ -1403,6 +1403,70 @@ function NewEmployeeModal({ companies, onClose, onSaved }) {
         <Field label="Email"><input value={email} onChange={e => setEmail(e.target.value)} style={S.input} placeholder="email@example.com" /></Field>
         <div style={{ fontSize: 10, color: c.textFaint, marginBottom: 10 }}>備註：員工 auth 帳號（user_id）需在 Supabase 後台另行創建並綁定。</div>
         <button onClick={save} disabled={busy || !name.trim()} style={{ ...S.btnPrimary, width: '100%', opacity: (busy || !name.trim()) ? 0.4 : 1 }}>{busy ? '處理中…' : '儲存'}</button>
+      </div>
+    </div>
+  )
+}
+
+// ====================  PROFILE (個人資料 modal，所有角色用)  ====================
+//   RLS employees_self_update 允許本人改：name/role/phone/email/note/show_update_log
+//   鎖：is_admin / company_id / kind / active / user_id（管理員管）
+function ProfileModal({ me, onClose }) {
+  const queryClient = useQueryClient()
+  const [draft, setDraft] = useState(me)
+  const [savingField, setSavingField] = useState(null)
+  useEffect(() => setDraft(me), [me.id])
+
+  const save = async (field, value) => {
+    const v = (value || '').trim() || null
+    if (v === (me[field] || null)) return
+    setSavingField(field)
+    const { error } = await supabase.from('employees').update({ [field]: v }).eq('id', me.id)
+    setSavingField(null)
+    if (error) { alert('保存失敗：' + error.message); setDraft(prev => ({ ...prev, [field]: me[field] })); return }
+    queryClient.invalidateQueries({ queryKey: ['team'] })
+    queryClient.invalidateQueries({ queryKey: ['admin', 'employees'] })
+  }
+
+  const row = (label, field, type = 'text', placeholder = '') => (
+    <Field label={label}>
+      <input
+        type={type}
+        value={draft[field] || ''}
+        onChange={e => setDraft({ ...draft, [field]: e.target.value })}
+        onBlur={e => save(field, e.target.value)}
+        placeholder={placeholder}
+        style={S.input}
+      />
+      {savingField === field && <div style={{ fontSize: 10, color: c.textFaint, marginTop: -4 }}>保存中…</div>}
+    </Field>
+  )
+
+  return (
+    <div style={S.modal} onClick={onClose}>
+      <div style={S.modalCard(440)} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>個人資料</h2>
+          <button onClick={onClose} style={S.iconBtn}>×</button>
+        </div>
+        {row('姓名', 'name', 'text', '你的名字')}
+        {row('職位', 'role', 'text', '例如 客服 / 銷售 / 技術')}
+        {row('電話', 'phone', 'tel', '+852')}
+        {row('Email', 'email', 'email', 'email@example.com')}
+        <Field label="備註">
+          <textarea
+            value={draft.note || ''}
+            onChange={e => setDraft({ ...draft, note: e.target.value })}
+            onBlur={e => save('note', e.target.value)}
+            placeholder="其他補充…"
+            style={{ ...S.input, minHeight: 60, resize: 'vertical' }}
+          />
+        </Field>
+        <div style={{ fontSize: 10, color: c.textFaint, marginTop: 8, lineHeight: 1.5 }}>
+          公司 / 角色（admin/employee/task）/ 帳號等敏感欄位需管理員調整。<br />
+          要改密碼請去 bizflow 主端登入後處理。
+        </div>
+        <button onClick={onClose} style={{ ...S.btnPrimary, width: '100%', marginTop: 12 }}>完成</button>
       </div>
     </div>
   )
