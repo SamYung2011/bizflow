@@ -54,7 +54,10 @@ const supabase = createClient(
 const LATEST_EXT_VERSION_FALLBACK = "1.3.2";
 
 // 全量拉取指定表（HEAD 先取 count，再並行分頁拉所有資料）
-async function fetchAllTable(table, orderCol, ascending = true) {
+async function fetchAllTable(table, orderCol, ascending = true, secondaryOrder = "id") {
+  // secondaryOrder: 默認用 id 保證跨頁穩定（同 ms 邊界去重，commit 2164502 加的）。
+  // 但某些表沒 id 字段（複合主鍵），調用方需顯式傳 null：
+  //   - task_assignees（主鍵 task_id+employee_id）
   const size = 1000;
   const { count, error: cErr } = await supabase.from(table).select("*", { count: "exact", head: true });
   if (cErr) throw new Error(`${table} count: ${cErr.message || cErr}`);
@@ -63,9 +66,8 @@ async function fetchAllTable(table, orderCol, ascending = true) {
   for (let i = 0; i < totalPages; i++) {
     const from = i * size;
     let q = supabase.from(table).select("*").range(from, from + size - 1);
-    // primary order by 用戶指定欄位，secondary 用 id 保證穩定（避免同 created_at 跨頁重複）
     if (orderCol) q = q.order(orderCol, { ascending });
-    q = q.order("id", { ascending: true });
+    if (secondaryOrder) q = q.order(secondaryOrder, { ascending: true });
     pagePromises.push(q);
   }
   const results = await Promise.all(pagePromises);
@@ -1305,7 +1307,7 @@ export default function App() {
   const qStocks = useQuery({ queryKey: ["bf", "inventory_stock"], queryFn: () => fetchAllTable("inventory_stock", null), enabled: !!userId });
   const qEmployees = useQuery({ queryKey: ["bf", "employees"], queryFn: () => fetchAllTable("employees", "created_at"), enabled: !!userId });
   const qTasks = useQuery({ queryKey: ["bf", "employee_tasks"], queryFn: () => fetchAllTable("employee_tasks", "created_at"), enabled: !!userId });
-  const qTaskAssignees = useQuery({ queryKey: ["bf", "task_assignees"], queryFn: () => fetchAllTable("task_assignees", "created_at"), enabled: !!userId });
+  const qTaskAssignees = useQuery({ queryKey: ["bf", "task_assignees"], queryFn: () => fetchAllTable("task_assignees", "created_at", true, null), enabled: !!userId });
 
   // task_assignees 按 task_id 分組（多處用，避免重複掃描）
   // 兜底用 qTaskAssignees.data：state 同步比 tasks 慢一幀時避免 race（剛發布完任務刷新被分配員工那邊瞬間看不到）
