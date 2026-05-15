@@ -11,6 +11,21 @@ import { UpdateLogView } from './App.jsx'
 
 const HELEN_EMAIL = 'a1017339632@gmail.com'
 
+// RBAC 權限點清單。新增權限點時，roles 表中已有的 role 沒這個 key → 視為 false。
+// label 走 t() 翻譯。
+const PERMISSION_KEYS = [
+  ['can_create_task', '新建任務'],
+  ['can_assign_others', '給他人分配任務'],
+  ['can_edit_others_tasks', '改他人任務'],
+  ['can_delete_others_tasks', '刪他人任務'],
+  ['can_validate_task', '核驗任務'],
+  ['can_manage_employees', '管理員工'],
+  ['can_approve_registration', '審核加入申請'],
+  ['can_view_commission', '看佣金'],
+  ['can_manage_roles', '管理職位'],
+  ['can_post_update_log', '發更新日誌'],
+]
+
 // 共享數據 hooks
 function useAdminData() {
   const queryClient = useQueryClient()
@@ -18,10 +33,13 @@ function useAdminData() {
   // 輪詢拉到 30s 兜底，主要靠 realtime push 即時刷新
   const qEmployees = useQuery({ queryKey: ['admin', 'employees'], queryFn: () => fetchAllTable('employees', 'created_at'), refetchInterval: 60000 })
   const qCompanies = useQuery({ queryKey: ['admin', 'companies'], queryFn: () => fetchAllTable('companies', 'name'), refetchInterval: 120000 })
+  const qEmpCompanies = useQuery({ queryKey: ['admin', 'employee_companies'], queryFn: () => fetchAllTable('employee_companies', 'joined_at'), refetchInterval: 60000 })
+  const qRoles = useQuery({ queryKey: ['admin', 'roles'], queryFn: () => fetchAllTable('roles', 'name'), refetchInterval: 120000 })
   const qTasks = useQuery({ queryKey: ['admin', 'employee_tasks'], queryFn: () => fetchAllTable('employee_tasks', 'created_at', false), refetchInterval: 30000 })
   const qAssignees = useQuery({ queryKey: ['admin', 'task_assignees'], queryFn: () => fetchAllTable('task_assignees', 'created_at'), refetchInterval: 30000 })
   const qFeedbacks = useQuery({ queryKey: ['admin', 'feedbacks'], queryFn: () => fetchAllTable('employee_task_feedbacks', 'created_at'), refetchInterval: 30000 })
   const qPending = useQuery({ queryKey: ['admin', 'task_pending'], queryFn: () => fetchAllTable('task_pending', 'requested_at', false), refetchInterval: 30000 })
+  const qJoinPending = useQuery({ queryKey: ['admin', 'company_join_pending'], queryFn: () => fetchAllTable('company_join_pending', 'requested_at', false), refetchInterval: 30000 })
 
   // realtime 訂閱：DB 任意改動立即觸發 invalidate
   useEffect(() => {
@@ -31,7 +49,10 @@ function useAdminData() {
       ['employee_task_feedbacks', ['admin', 'feedbacks']],
       ['employees', ['admin', 'employees']],
       ['companies', ['admin', 'companies']],
+      ['employee_companies', ['admin', 'employee_companies']],
+      ['roles', ['admin', 'roles']],
       ['task_pending', ['admin', 'task_pending']],
+      ['company_join_pending', ['admin', 'company_join_pending']],
     ]
     const channels = tables.map(([table, key]) => supabase
       .channel(`team-${table}`)
@@ -45,10 +66,13 @@ function useAdminData() {
 
   const employees = qEmployees.data || []
   const companies = qCompanies.data || []
+  const empCompanies = qEmpCompanies.data || []
+  const roles = qRoles.data || []
   const tasks = qTasks.data || []
   const assignees = qAssignees.data || []
   const feedbacks = qFeedbacks.data || []
   const pendings = qPending.data || []
+  const joinPendings = qJoinPending.data || []
 
   const assigneesByTask = useMemo(() => {
     const m = new Map()
@@ -59,7 +83,71 @@ function useAdminData() {
     return m
   }, [assignees])
 
-  return { employees, companies, tasks, assignees, feedbacks, pendings, assigneesByTask, loading: qEmployees.isLoading || qTasks.isLoading }
+  return { employees, companies, empCompanies, roles, tasks, assignees, feedbacks, pendings, joinPendings, assigneesByTask, loading: qEmployees.isLoading || qTasks.isLoading }
+}
+
+// 計算當前用戶的「公司綁定」、活躍公司、職位權限
+function useMyContext(me, data) {
+  // 該用戶的所有 employee_companies 行（多公司綁定）
+  const myBindings = useMemo(
+    () => data.empCompanies.filter(ec => ec.employee_id === me.id),
+    [data.empCompanies, me.id]
+  )
+  const defaultBinding = myBindings.find(b => b.is_default) || myBindings[0]
+  const defaultCompanyId = defaultBinding?.company_id || me.company_id  // fallback 老 employees.company_id
+
+  // localStorage 存當前活躍公司（按 user 維度）
+  const storageKey = `team-active-company-${me.user_id || me.id}`
+  const [activeCompanyId, setActiveCompanyIdState] = useState(() => {
+    try {
+      const saved = localStorage.getItem(storageKey)
+      if (saved && myBindings.some(b => b.company_id === saved)) return saved
+    } catch {}
+    return defaultCompanyId
+  })
+  // bindings 加載後若 activeCompanyId 不在綁定中，自動切到 default
+  useEffect(() => {
+    if (myBindings.length === 0) return
+    if (!myBindings.some(b => b.company_id === activeCompanyId)) {
+      setActiveCompanyIdState(defaultCompanyId)
+    }
+  }, [myBindings, activeCompanyId, defaultCompanyId])
+  const setActiveCompanyId = (id) => {
+    setActiveCompanyIdState(id)
+    try { localStorage.setItem(storageKey, id) } catch {}
+  }
+
+  const activeCompany = data.companies.find(c => c.id === activeCompanyId)
+  const activeBinding = myBindings.find(b => b.company_id === activeCompanyId)
+  const activeRole = activeBinding?.role_id ? data.roles.find(r => r.id === activeBinding.role_id) : null
+
+  // 是否在當前活躍公司是 admin
+  const isAdminOfActive = !!activeBinding?.is_company_admin
+  // 是否有多公司綁定（顯示公司切換器）
+  const hasMultipleCompanies = myBindings.length > 1
+  // 任意公司是不是 admin（決定能不能進「員工管理」等板塊）
+  const isAdminOfAny = myBindings.some(b => b.is_company_admin)
+
+  // 權限檢查：super admin 一切通過；否則查當前活躍 role 的 permissions JSONB
+  const hasPermission = (key) => {
+    if (me.is_super_admin === true) return true
+    if (isAdminOfActive) return true  // 公司 admin 在自己公司是全權的
+    return activeRole?.permissions?.[key] === true
+  }
+
+  return {
+    myBindings,
+    activeCompanyId,
+    setActiveCompanyId,
+    activeCompany,
+    activeBinding,
+    activeRole,
+    isAdminOfActive,
+    isAdminOfAny,
+    hasMultipleCompanies,
+    hasPermission,
+    isSuperAdmin: me.is_super_admin === true,
+  }
 }
 
 // ====================  ADMIN APP ROOT  ====================
@@ -67,51 +155,85 @@ export default function AdminApp({ me, session, view, setView }) {
   const { t } = useT()
   const isMobile = useIsMobile()
   const data = useAdminData()
+  const ctx = useMyContext(me, data)
   const [showProfile, setShowProfile] = useState(false)
 
-  // view 按角色 fallback：非 admin 訪問 admin-only view 自動回 tasks
+  // view 按權限 fallback
   const isSales = me.role === '銷售'
+  const canEmployees = ctx.isSuperAdmin || ctx.isAdminOfAny
+  const canCompanies = ctx.isSuperAdmin
+  const canAccountReview = ctx.isSuperAdmin || ctx.isAdminOfAny
+  const canCommission = ctx.isSuperAdmin || ctx.hasPermission('can_view_commission') || isSales
+  const canManageRoles = ctx.isSuperAdmin || ctx.isAdminOfActive || ctx.hasPermission('can_manage_roles')
   const allowedViews = ['tasks', 'updatelog']
-  if (me.is_admin) allowedViews.push('employees', 'companies', 'accountreview')
-  if (me.is_admin || isSales) allowedViews.push('commission')
+  if (canEmployees) allowedViews.push('employees')
+  if (canCompanies) allowedViews.push('companies')
+  if (canManageRoles) allowedViews.push('roles')
+  if (canAccountReview) allowedViews.push('accountreview')
+  if (canCommission) allowedViews.push('commission')
   const safeView = allowedViews.includes(view) ? view : 'tasks'
 
   return (
     <div style={{ minHeight: '100vh', background: c.bg, fontFamily: font.ui, color: c.text, WebkitFontSmoothing: 'antialiased' }}>
-      <AdminTopBar me={me} view={safeView} setView={setView} isMobile={isMobile} pendingCount={data.pendings.filter(p => p.approved == null).length} onProfileClick={() => setShowProfile(true)} />
+      <AdminTopBar me={me} ctx={ctx} data={data} view={safeView} setView={setView} isMobile={isMobile} pendingCount={data.pendings.filter(p => p.approved == null).length} onProfileClick={() => setShowProfile(true)} canEmployees={canEmployees} canCompanies={canCompanies} canAccountReview={canAccountReview} canCommission={canCommission} canManageRoles={canManageRoles} />
       <main style={{ maxWidth: 1500, margin: '0 auto', padding: isMobile ? '12px 12px' : '18px 24px' }}>
-        {safeView === 'tasks' && <TasksView data={data} me={me} session={session} isMobile={isMobile} />}
-        {safeView === 'employees' && me.is_admin && <EmployeesView data={data} me={me} isMobile={isMobile} />}
-        {safeView === 'companies' && me.is_admin && <CompaniesView data={data} />}
-        {safeView === 'accountreview' && me.is_admin && <AccountReviewView data={data} me={me} session={session} />}
-        {safeView === 'commission' && (me.is_admin || isSales) && (
-          <CommissionView employees={me.is_admin ? data.employees : [me]} me={me} lockedEmpId={me.is_admin ? null : me.id} />
+        {safeView === 'tasks' && <TasksView data={data} me={me} session={session} isMobile={isMobile} ctx={ctx} />}
+        {safeView === 'employees' && canEmployees && <EmployeesView data={data} me={me} isMobile={isMobile} ctx={ctx} />}
+        {safeView === 'companies' && canCompanies && <CompaniesView data={data} />}
+        {safeView === 'accountreview' && canAccountReview && <AccountReviewView data={data} me={me} session={session} />}
+        {safeView === 'commission' && canCommission && (
+          <CommissionView employees={ctx.isSuperAdmin ? data.employees : [me]} me={me} lockedEmpId={ctx.isSuperAdmin ? null : me.id} />
         )}
+        {safeView === 'roles' && canManageRoles && <RolesView data={data} ctx={ctx} />}
         {safeView === 'updatelog' && <UpdateLogView me={me} session={session} isMobile={isMobile} />}
       </main>
-      {showProfile && <ProfileModal me={me} onClose={() => setShowProfile(false)} />}
+      {showProfile && <ProfileModal me={me} data={data} onClose={() => setShowProfile(false)} />}
     </div>
   )
 }
 
-function AdminTopBar({ me, view, setView, isMobile, pendingCount, onProfileClick }) {
+function AdminTopBar({ me, ctx, data, view, setView, isMobile, pendingCount, onProfileClick, canEmployees, canCompanies, canAccountReview, canCommission, canManageRoles }) {
   const { t, lang, setLang } = useT()
   const isSales = me.role === '銷售'
+  // 只 Honnmono 公司可以跳 bizflow 主端（其他公司沒有 bizflow 後台）
+  // super admin 在任意公司視角看 Honnmono 也算（兜底）
+  const isHonnmonoActive = ctx.activeCompany?.name === 'Honnmono'
+  const canGoBizflow = isHonnmonoActive || ctx.isSuperAdmin
   const navs = [
     ['tasks', t('任務'), true],
-    ['employees', t('員工管理'), me.is_admin],
-    ['companies', t('公司管理'), me.is_admin],
-    ['accountreview', t('帳號審核'), me.is_admin],
-    ['commission', me.is_admin ? t('佣金') : t('我的佣金'), me.is_admin || isSales],
+    ['employees', t('員工管理'), canEmployees],
+    ['companies', t('公司管理'), canCompanies],
+    ['roles', t('職位管理'), canManageRoles],
+    ['accountreview', t('帳號審核'), canAccountReview],
+    ['commission', ctx.isSuperAdmin ? t('佣金') : t('我的佣金'), canCommission],
     ['updatelog', t('更新日誌'), true],
   ].filter(([, , show]) => show)
+
+  // 顯示當前公司名（多公司綁定的人才能切換）
+  const titleNode = canGoBizflow ? (
+    <a href={import.meta.env.VITE_BIZFLOW_URL || 'https://bizflowhonnmono.vercel.app'} style={{ fontSize: 15, fontWeight: 700, color: c.text, letterSpacing: -0.2, whiteSpace: 'nowrap', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }} title={t('返回 bizflow 主端')}>
+      <span style={{ fontSize: 13, color: c.textMuted }}>←</span>
+      Honnmono Team
+    </a>
+  ) : (
+    <span style={{ fontSize: 15, fontWeight: 700, color: c.text, letterSpacing: -0.2, whiteSpace: 'nowrap' }}>
+      {ctx.activeCompany?.name || 'Team'}
+    </span>
+  )
+
   return (
     <header style={{ background: c.card, borderBottom: `1px solid ${c.border}`, padding: isMobile ? '10px 14px' : '12px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, position: 'sticky', top: 0, zIndex: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 12 : 28, overflowX: 'auto' }}>
-        <a href={import.meta.env.VITE_BIZFLOW_URL || 'https://bizflowhonnmono.vercel.app'} style={{ fontSize: 15, fontWeight: 700, color: c.text, letterSpacing: -0.2, whiteSpace: 'nowrap', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6 }} title={t('返回 bizflow 主端')}>
-          <span style={{ fontSize: 13, color: c.textMuted }}>←</span>
-          Honnmono Team
-        </a>
+        {titleNode}
+        {ctx.hasMultipleCompanies && (
+          <select value={ctx.activeCompanyId || ''} onChange={e => ctx.setActiveCompanyId(e.target.value)}
+            style={{ fontSize: 12, padding: '4px 8px', border: `1px solid ${c.border}`, borderRadius: 6, background: c.bg, color: c.text, fontFamily: font.ui, cursor: 'pointer' }}>
+            {ctx.myBindings.map(b => {
+              const co = data.companies.find(co => co.id === b.company_id)
+              return <option key={b.company_id} value={b.company_id}>{co?.name || '?'}{b.is_default ? ' ★' : ''}</option>
+            })}
+          </select>
+        )}
         <nav style={{ display: 'flex', gap: 2 }}>
           {navs.map(([k, label]) => (
             <button key={k} onClick={() => setView(k)} style={{ ...S.navBtn(view === k), position: 'relative', whiteSpace: 'nowrap' }}>
@@ -165,30 +287,41 @@ function isAwaitingApproval(task, assigneesByTask) {
 }
 
 // ====================  TASKS VIEW (admin) ====================
-function TasksView({ data, me, session, isMobile }) {
+function TasksView({ data, me, session, isMobile, ctx }) {
   const { t } = useT()
-  const { employees, companies, tasks, assignees, feedbacks, assigneesByTask } = data
+  const { employees: allEmployees, companies, empCompanies, tasks: allTasks, assignees, feedbacks, assigneesByTask } = data
   const queryClient = useQueryClient()
   const userId = session.user.id
 
-  // 預設都鎖本公司；admin 可下拉切到別的公司或「所有公司」
-  const [companyFilter, setCompanyFilter] = useState(me.company_id || 'all')
-  // 普通員工進來預設選自己（empBoard 模式）；admin 預設 overview
-  const [mode, setMode] = useState(me.is_admin ? 'overview' : 'list')
-  const [selectedEmpId, setSelectedEmpId] = useState(me.is_admin ? null : me.id)
+  // 按當前活躍公司（ctx.activeCompanyId）過濾員工 + 任務
+  const empIdsInActive = useMemo(
+    () => new Set(empCompanies.filter(ec => ec.company_id === ctx.activeCompanyId).map(ec => ec.employee_id)),
+    [empCompanies, ctx.activeCompanyId]
+  )
+  const employees = useMemo(
+    () => allEmployees.filter(e => e.active !== false && empIdsInActive.has(e.id)),
+    [allEmployees, empIdsInActive]
+  )
+  const tasks = useMemo(
+    () => allTasks.filter(t => t.company_id === ctx.activeCompanyId),
+    [allTasks, ctx.activeCompanyId]
+  )
+  // 包裝 data 給子組件用（任務/員工已按公司過濾，其他不變）
+  const scopedData = useMemo(
+    () => ({ ...data, tasks, employees }),
+    [data, tasks, employees]
+  )
+  const visibleEmployees = employees  // 別名兼容
+
+  // mode：super admin 預設 overview；其他人預設選自己
+  const [mode, setMode] = useState(ctx.isSuperAdmin || ctx.isAdminOfActive ? 'overview' : 'list')
+  const [selectedEmpId, setSelectedEmpId] = useState(ctx.isSuperAdmin || ctx.isAdminOfActive ? null : me.id)
   const [editingTask, setEditingTask] = useState(null)
   const [overviewExpanded, setOverviewExpanded] = useState(new Set())
 
-  const visibleEmployees = useMemo(() => {
-    let list = employees.filter(e => e.active !== false)
-    if (!me.is_admin) {
-      // 非 admin：只看本公司同事
-      list = list.filter(e => me.company_id && e.company_id === me.company_id)
-    } else if (companyFilter !== 'all') {
-      list = list.filter(e => e.company_id === companyFilter)
-    }
-    return list
-  }, [employees, companyFilter, me])
+  // companyFilter 已被頂部公司切換器取代，這裡保留 stub 給子組件兼容
+  const companyFilter = ctx.activeCompanyId
+  const setCompanyFilter = () => {}
 
   const selectedEmp = selectedEmpId ? employees.find(e => e.id === selectedEmpId) : null
 
@@ -198,12 +331,12 @@ function TasksView({ data, me, session, isMobile }) {
         {selectedEmp ? (
           <div>
             <button onClick={() => setSelectedEmpId(null)} style={{ ...S.btnGhostSm, marginBottom: 12 }}>← {t('返回員工列表')}</button>
-            <TaskBoard emp={selectedEmp} data={data} me={me} userId={userId} setEditingTask={setEditingTask} compact />
+            <TaskBoard emp={selectedEmp} data={scopedData} me={me} userId={userId} setEditingTask={setEditingTask} companyId={ctx.activeCompanyId} compact />
           </div>
         ) : (
           <EmpListMobile employees={visibleEmployees} companies={companies} companyFilter={companyFilter} setCompanyFilter={setCompanyFilter} tasks={tasks} assigneesByTask={assigneesByTask} onSelect={(e) => setSelectedEmpId(e.id)} me={me} />
         )}
-        {editingTask && <EditTaskModal task={editingTask} data={data} me={me} userId={userId} onClose={() => setEditingTask(null)} />}
+        {editingTask && <EditTaskModal task={editingTask} data={scopedData} me={me} userId={userId} onClose={() => setEditingTask(null)} />}
       </div>
     )
   }
@@ -219,12 +352,12 @@ function TasksView({ data, me, session, isMobile }) {
         {mode === 'overview' ? (
           <OverviewView employees={visibleEmployees} tasks={tasks} assigneesByTask={assigneesByTask} expanded={overviewExpanded} setExpanded={setOverviewExpanded} setEditingTask={setEditingTask} />
         ) : selectedEmp ? (
-          <TaskBoard emp={selectedEmp} data={data} me={me} userId={userId} setEditingTask={setEditingTask} />
+          <TaskBoard emp={selectedEmp} data={scopedData} me={me} userId={userId} setEditingTask={setEditingTask} companyId={ctx.activeCompanyId} />
         ) : (
           <Empty>← {t('從左側選擇員工查看任務看板')}</Empty>
         )}
       </div>
-      {editingTask && <EditTaskModal task={editingTask} data={data} me={me} userId={userId} onClose={() => setEditingTask(null)} />}
+      {editingTask && <EditTaskModal task={editingTask} data={scopedData} me={me} userId={userId} onClose={() => setEditingTask(null)} />}
     </div>
   )
 }
@@ -368,7 +501,7 @@ function OverviewView({ employees, tasks, assigneesByTask, expanded, setExpanded
 }
 
 // ====================  TASK BOARD（單員工任務看板）  ====================
-function TaskBoard({ emp, data, me, userId, setEditingTask, compact }) {
+function TaskBoard({ emp, data, me, userId, setEditingTask, compact, companyId }) {
   const { t } = useT()
   const { employees, tasks, feedbacks, assigneesByTask } = data
   const queryClient = useQueryClient()
@@ -531,7 +664,7 @@ function TaskBoard({ emp, data, me, userId, setEditingTask, compact }) {
   // 只有 admin / 本人 / 同公司同事可新增任務（普通員工給同事分配，沿用 bizflow 邏輯）
   const canCreate = me.is_admin || emp.id === me.id || (me.company_id && emp.company_id === me.company_id)
   const newTaskBlock = canCreate
-    ? <NewTaskForm emp={emp} me={me} employees={employees} />
+    ? <NewTaskForm emp={emp} me={me} employees={employees} companyId={companyId} />
     : <div style={{ background: c.card, border: `1px dashed ${c.border}`, borderRadius: radius.lg, padding: 24, textAlign: 'center', color: c.textFaint, fontSize: 12 }}>{t('非本公司同事，無法新增任務')}</div>
 
   return (
@@ -633,7 +766,7 @@ function FbPanel({ fbList, feedbacks, setEditingTask }) {
 }
 
 // 新建任務表單
-function NewTaskForm({ emp, me, employees }) {
+function NewTaskForm({ emp, me, employees, companyId }) {
   const { t } = useT()
   const queryClient = useQueryClient()
   const [title, setTitle] = useState('')
@@ -667,6 +800,7 @@ function NewTaskForm({ emp, me, employees }) {
         priority,
         note: note.trim() || null,
         due_date: dueDate || null,
+        company_id: companyId,
       }).select().single()
       if (error) throw error
       const rows = effective.map(eid => ({ task_id: data.id, employee_id: eid }))
@@ -686,6 +820,7 @@ function NewTaskForm({ emp, me, employees }) {
           title: subTitle,
           priority: 'none',
           parent_task_id: data.id,
+          company_id: companyId,
         }).select().single()
         if (se) { console.error('子任務新增失敗', se); continue }
         await supabase.from('task_assignees').insert(effective.map(eid => ({ task_id: sub.id, employee_id: eid })))
@@ -1055,7 +1190,7 @@ function SubtaskList({ tk, subtasks, employees, feedbacks, assigneesByTask, me, 
     if (effectiveSub.length === 0) return alert(t('至少需要一個負責人'))
     const { data, error } = await supabase.from('employee_tasks').insert({
       employee_id: effectiveSub[0], creator_employee_id: me.id, needs_approval: !!tk.needs_approval,
-      title, priority: 'none', parent_task_id: tk.id,
+      title, priority: 'none', parent_task_id: tk.id, company_id: tk.company_id,
     }).select().single()
     if (error) return alert(error.message)
     await supabase.from('task_assignees').insert(effectiveSub.map(eid => ({ task_id: data.id, employee_id: eid })))
@@ -1270,20 +1405,51 @@ function FeedbackThread({ tk, fbList, employees, me, userId, scopeCompanyId }) {
 }
 
 // ====================  EMPLOYEES VIEW (admin)  ====================
-function EmployeesView({ data, me, isMobile }) {
+function EmployeesView({ data, me, isMobile, ctx }) {
   const { t } = useT()
-  const { employees, companies } = data
+  const { employees, companies, empCompanies, roles } = data
   const queryClient = useQueryClient()
   const [showAdd, setShowAdd] = useState(false)
-  const [companyFilter, setCompanyFilter] = useState('all')
+  const [companyFilter, setCompanyFilter] = useState(ctx?.isSuperAdmin ? 'all' : (ctx?.activeCompanyId || 'all'))
 
-  const list = companyFilter === 'all' ? employees : employees.filter(e => e.company_id === companyFilter)
+  // 公司 admin 只能看本公司員工（按 employee_companies 過濾）
+  // super admin 看所有，可以下拉切公司或 all
+  const visibleEmployees = useMemo(() => {
+    let list = employees
+    if (!ctx?.isSuperAdmin) {
+      // 公司 admin：限制到自己管理的公司們
+      const myAdminCompanyIds = new Set(empCompanies.filter(ec => ec.employee_id === me.id && ec.is_company_admin).map(ec => ec.company_id))
+      const empsInAdminCo = new Set(empCompanies.filter(ec => myAdminCompanyIds.has(ec.company_id)).map(ec => ec.employee_id))
+      list = list.filter(e => empsInAdminCo.has(e.id))
+    }
+    if (companyFilter !== 'all') {
+      const empsInFilter = new Set(empCompanies.filter(ec => ec.company_id === companyFilter).map(ec => ec.employee_id))
+      list = list.filter(e => empsInFilter.has(e.id))
+    }
+    return list
+  }, [employees, empCompanies, companyFilter, ctx, me.id])
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['admin', 'employees'] })
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['admin', 'employees'] })
+    queryClient.invalidateQueries({ queryKey: ['admin', 'employee_companies'] })
+  }
 
   const updateField = async (id, patch) => {
     const { error } = await supabase.from('employees').update(patch).eq('id', id)
     if (error) return alert(t('更新失敗：') + error.message)
+    refresh()
+  }
+
+  const updateBinding = async (employee_id, company_id, patch) => {
+    // employee_companies 行的 upsert / update：如果不存在就 INSERT，存在就 UPDATE
+    const existing = empCompanies.find(ec => ec.employee_id === employee_id && ec.company_id === company_id)
+    if (existing) {
+      const { error } = await supabase.from('employee_companies').update(patch).eq('id', existing.id)
+      if (error) return alert(t('更新失敗：') + error.message)
+    } else {
+      const { error } = await supabase.from('employee_companies').insert({ employee_id, company_id, ...patch })
+      if (error) return alert(t('新增失敗：') + error.message)
+    }
     refresh()
   }
 
@@ -1294,14 +1460,19 @@ function EmployeesView({ data, me, isMobile }) {
     refresh()
   }
 
+  // 候選公司：super admin 全部，公司 admin 只本公司
+  const filterOptions = ctx?.isSuperAdmin
+    ? companies
+    : companies.filter(co => empCompanies.some(ec => ec.employee_id === me.id && ec.company_id === co.id && ec.is_company_admin))
+
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>{t('員工管理')} <span style={{ fontSize: 12, color: c.textFaint, fontWeight: 400 }}>{employees.length}</span></h1>
+        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>{t('員工管理')} <span style={{ fontSize: 12, color: c.textFaint, fontWeight: 400 }}>{visibleEmployees.length}</span></h1>
         <div style={{ display: 'flex', gap: 8 }}>
           <select value={companyFilter} onChange={e => setCompanyFilter(e.target.value)} style={{ ...S.input, marginBottom: 0, width: 'auto', fontSize: 12, padding: '6px 8px' }}>
-            <option value="all">{t('所有公司')}</option>
-            {companies.map(co => <option key={co.id} value={co.id}>{co.name}</option>)}
+            {ctx?.isSuperAdmin && <option value="all">{t('所有公司')}</option>}
+            {filterOptions.map(co => <option key={co.id} value={co.id}>{co.name}</option>)}
           </select>
           <button onClick={() => setShowAdd(true)} style={S.btnPrimary}>＋ {t('新增員工')}</button>
         </div>
@@ -1312,8 +1483,9 @@ function EmployeesView({ data, me, isMobile }) {
           <thead>
             <tr style={{ background: c.bg, borderBottom: `1px solid ${c.border}` }}>
               <th style={tcell('left')}>{t('姓名')}</th>
-              <th style={tcell('left')}>{t('職位')}</th>
               <th style={tcell('left')}>{t('公司')}</th>
+              <th style={tcell('left')}>{t('職位')}</th>
+              <th style={tcell('left')}>{t('公司管理員')}</th>
               <th style={tcell('left')}>{t('電話')}</th>
               <th style={tcell('left')}>Email</th>
               <th style={tcell('left')}>{t('狀態')}</th>
@@ -1321,8 +1493,10 @@ function EmployeesView({ data, me, isMobile }) {
             </tr>
           </thead>
           <tbody>
-            {list.map(e => (
-              <EmployeeRow key={e.id} emp={e} companies={companies} updateField={updateField} del={del} me={me} />
+            {visibleEmployees.map(e => (
+              <EmployeeRow key={e.id} emp={e} companies={companies} empCompanies={empCompanies} roles={roles}
+                companyContext={companyFilter !== 'all' ? companyFilter : ctx?.activeCompanyId}
+                updateField={updateField} updateBinding={updateBinding} del={del} me={me} ctx={ctx} />
             ))}
           </tbody>
         </table>
@@ -1335,20 +1509,40 @@ function EmployeesView({ data, me, isMobile }) {
 
 const tcell = (align = 'left') => ({ padding: '10px 12px', textAlign: align, fontSize: 11, color: c.textMuted, fontWeight: 600, letterSpacing: 0.3 })
 
-function EmployeeRow({ emp, companies, updateField, del, me }) {
+function EmployeeRow({ emp, companies, empCompanies, roles, companyContext, updateField, updateBinding, del, me, ctx }) {
   const { t } = useT()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(emp)
   useEffect(() => setDraft(emp), [emp.id, emp.updated_at])
 
+  // 該員工在「當前上下文公司」的綁定（職位 + is_company_admin）
+  const myBindings = empCompanies.filter(ec => ec.employee_id === emp.id)
+  const contextBinding = companyContext ? myBindings.find(b => b.company_id === companyContext) : (myBindings.find(b => b.is_default) || myBindings[0])
+  const contextRoleName = contextBinding?.role_id ? roles.find(r => r.id === contextBinding.role_id)?.name : null
+  const contextCompanyName = contextBinding ? companies.find(co => co.id === contextBinding.company_id)?.name : null
+
+  // 編輯時：本人欄位（name/phone/email）改 employees；職位/is_company_admin 改 employee_companies
+  const [bindingDraft, setBindingDraft] = useState({ role_id: contextBinding?.role_id || '', is_company_admin: !!contextBinding?.is_company_admin })
+  useEffect(() => setBindingDraft({ role_id: contextBinding?.role_id || '', is_company_admin: !!contextBinding?.is_company_admin }), [contextBinding?.id])
+
   const save = async () => {
-    const patch = {}
-    for (const k of ['name', 'role', 'phone', 'email', 'company_id', 'kind', 'is_admin', 'active']) {
-      if (draft[k] !== emp[k]) patch[k] = draft[k] || (k === 'is_admin' || k === 'active' ? false : null)
+    // employees 表只改 name/phone/email/active（kind 和 user_id 鎖；is_super_admin 由 super admin 在別處改）
+    const empPatch = {}
+    for (const k of ['name', 'phone', 'email', 'active']) {
+      if (draft[k] !== emp[k]) empPatch[k] = draft[k] ?? (k === 'active' ? false : null)
     }
-    if (Object.keys(patch).length > 0) await updateField(emp.id, patch)
+    if (Object.keys(empPatch).length > 0) await updateField(emp.id, empPatch)
+    // employee_companies 行：更新本上下文公司的 role_id / is_company_admin
+    if (contextBinding && (bindingDraft.role_id !== (contextBinding.role_id || '') || bindingDraft.is_company_admin !== !!contextBinding.is_company_admin)) {
+      await updateBinding(emp.id, contextBinding.company_id, {
+        role_id: bindingDraft.role_id || null,
+        is_company_admin: bindingDraft.is_company_admin,
+      })
+    }
     setEditing(false)
   }
+
+  const companyRoles = roles.filter(r => contextBinding && r.company_id === contextBinding.company_id)
 
   return (
     <tr style={{ borderBottom: `1px solid ${c.border}` }}>
@@ -1356,15 +1550,20 @@ function EmployeeRow({ emp, companies, updateField, del, me }) {
         {editing ? <input value={draft.name || ''} onChange={e => setDraft({ ...draft, name: e.target.value })} style={{ ...S.input, marginBottom: 0, fontSize: 12 }} /> : (emp.name || '—')}
       </td>
       <td style={{ padding: '8px 12px' }}>
-        {editing ? <input value={draft.role || ''} onChange={e => setDraft({ ...draft, role: e.target.value })} style={{ ...S.input, marginBottom: 0, fontSize: 12 }} /> : (emp.role || '—')}
+        {contextCompanyName || '—'}
       </td>
       <td style={{ padding: '8px 12px' }}>
-        {editing ? (
-          <select value={draft.company_id || ''} onChange={e => setDraft({ ...draft, company_id: e.target.value || null })} style={{ ...S.input, marginBottom: 0, fontSize: 12 }}>
+        {editing && contextBinding ? (
+          <select value={bindingDraft.role_id} onChange={e => setBindingDraft({ ...bindingDraft, role_id: e.target.value })} style={{ ...S.input, marginBottom: 0, fontSize: 12 }}>
             <option value="">—</option>
-            {companies.map(co => <option key={co.id} value={co.id}>{co.name}</option>)}
+            {companyRoles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
-        ) : (companies.find(co => co.id === emp.company_id)?.name || '—')}
+        ) : (contextRoleName || '—')}
+      </td>
+      <td style={{ padding: '8px 12px', fontSize: 11 }}>
+        {editing && contextBinding ? (
+          <input type="checkbox" checked={bindingDraft.is_company_admin} onChange={e => setBindingDraft({ ...bindingDraft, is_company_admin: e.target.checked })} />
+        ) : (contextBinding?.is_company_admin ? <span style={{ color: c.accent, fontWeight: 600 }}>✓</span> : '—')}
       </td>
       <td style={{ padding: '8px 12px' }}>
         {editing ? <input value={draft.phone || ''} onChange={e => setDraft({ ...draft, phone: e.target.value })} style={{ ...S.input, marginBottom: 0, fontSize: 12 }} /> : (emp.phone || '—')}
@@ -1385,7 +1584,7 @@ function EmployeeRow({ emp, companies, updateField, del, me }) {
         ) : (
           <>
             <button onClick={() => setEditing(true)} style={{ ...S.btnGhostSm, padding: '4px 8px', marginRight: 4 }}>{t('編輯')}</button>
-            <button onClick={() => del(emp)} style={{ background: 'none', border: 'none', color: c.red, fontSize: 11, cursor: 'pointer', padding: 4 }}>{t('刪除')}</button>
+            {(ctx?.isSuperAdmin || ctx?.isAdminOfActive) && <button onClick={() => del(emp)} style={{ background: 'none', border: 'none', color: c.red, fontSize: 11, cursor: 'pointer', padding: 4 }}>{t('刪除')}</button>}
           </>
         )}
       </td>
@@ -1438,12 +1637,43 @@ function NewEmployeeModal({ companies, onClose, onSaved }) {
 // ====================  PROFILE (個人資料 + 修改密碼 modal，所有角色用)  ====================
 //   RLS employees_self_update 允許本人改：name/role/phone/email/note/show_update_log
 //   鎖：is_admin / company_id / kind / active / user_id（管理員管）
-function ProfileModal({ me, onClose }) {
+function ProfileModal({ me, data, onClose }) {
   const { t } = useT()
   const queryClient = useQueryClient()
   const [draft, setDraft] = useState(me)
   const [savingField, setSavingField] = useState(null)
   useEffect(() => setDraft(me), [me.id])
+
+  // 跨公司加入申請
+  const companies = data?.companies || []
+  const empCompanies = data?.empCompanies || []
+  const joinPendings = data?.joinPendings || []
+  const myJoinPendings = joinPendings.filter(p => p.employee_id === me.id)
+  const myBindingIds = new Set(empCompanies.filter(ec => ec.employee_id === me.id).map(ec => ec.company_id))
+  const myPendingIds = new Set(myJoinPendings.filter(p => p.approved == null).map(p => p.company_id))
+  const joinableCompanies = companies.filter(co => !myBindingIds.has(co.id) && !myPendingIds.has(co.id))
+  const [joinCompanyId, setJoinCompanyId] = useState('')
+  const [joinNote, setJoinNote] = useState('')
+  const [joinBusy, setJoinBusy] = useState(false)
+  const submitJoin = async () => {
+    if (!joinCompanyId) return
+    setJoinBusy(true)
+    const { error } = await supabase.from('company_join_pending').insert({
+      employee_id: me.id,
+      company_id: joinCompanyId,
+      note: joinNote.trim() || null,
+    })
+    setJoinBusy(false)
+    if (error) return alert(t('提交失敗：') + error.message)
+    setJoinCompanyId(''); setJoinNote('')
+    queryClient.invalidateQueries({ queryKey: ['admin', 'company_join_pending'] })
+  }
+  const cancelJoin = async (pid) => {
+    if (!confirm(t('撤回申請？'))) return
+    const { error } = await supabase.from('company_join_pending').delete().eq('id', pid)
+    if (error) return alert(t('刪除失敗：') + error.message)
+    queryClient.invalidateQueries({ queryKey: ['admin', 'company_join_pending'] })
+  }
 
   // 密碼
   const [pw1, setPw1] = useState('')
@@ -1523,6 +1753,37 @@ function ProfileModal({ me, onClose }) {
           <input type="password" value={pw2} onChange={e => { setPw2(e.target.value); setPwMsg(''); setPwOk(false) }} placeholder={t('再次輸入')} style={S.input} />
           {pwMsg && <div style={{ fontSize: 12, color: pwOk ? c.green : c.red, marginBottom: 8 }}>{pwOk ? '✓ ' : ''}{pwMsg}</div>}
           <button onClick={changePassword} disabled={pwBusy || !pw1 || !pw2} style={{ ...S.btnPrimary, width: '100%', opacity: (pwBusy || !pw1 || !pw2) ? 0.4 : 1 }}>{pwBusy ? t('處理中…') : t('更新密碼')}</button>
+        </div>
+
+        <div style={{ borderTop: `1px dashed ${c.border}`, paddingTop: 14, marginTop: 14, marginBottom: 4 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>{t('申請加入其他公司')}</div>
+          {myJoinPendings.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              {myJoinPendings.map(p => {
+                const co = companies.find(co => co.id === p.company_id)
+                const status = p.approved == null ? t('審核中') : p.approved ? t('已通過') : t('已拒絕')
+                const color = p.approved == null ? c.textMuted : p.approved ? c.green : c.red
+                return (
+                  <div key={p.id} style={{ fontSize: 12, padding: '6px 10px', background: c.bg, borderRadius: 6, marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span><strong>{co?.name || '?'}</strong> · <span style={{ color }}>{status}</span>{p.reject_reason && ` · ${p.reject_reason}`}</span>
+                    {p.approved == null && <button onClick={() => cancelJoin(p.id)} style={{ ...S.btnGhostSm, fontSize: 10 }}>{t('撤回')}</button>}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          {joinableCompanies.length > 0 ? (
+            <>
+              <select value={joinCompanyId} onChange={e => setJoinCompanyId(e.target.value)} style={S.input}>
+                <option value="">{t('選擇要加入的公司…')}</option>
+                {joinableCompanies.map(co => <option key={co.id} value={co.id}>{co.name}</option>)}
+              </select>
+              <textarea value={joinNote} onChange={e => setJoinNote(e.target.value)} placeholder={t('附言（可選，給審批者看）')} style={{ ...S.input, minHeight: 50 }} />
+              <button onClick={submitJoin} disabled={!joinCompanyId || joinBusy} style={{ ...S.btnPrimary, width: '100%', opacity: (!joinCompanyId || joinBusy) ? 0.4 : 1 }}>{joinBusy ? t('處理中…') : t('提交加入申請')}</button>
+            </>
+          ) : (
+            <div style={{ fontSize: 11, color: c.textFaint }}>{t('暫無可申請加入的公司')}</div>
+          )}
         </div>
 
         <button onClick={onClose} style={{ ...S.btnGhost, width: '100%', marginTop: 12 }}>{t('完成')}</button>
@@ -1644,11 +1905,48 @@ function CompanyRow({ co, count, rename, del }) {
 // ====================  ACCOUNT REVIEW  ====================
 function AccountReviewView({ data, me, session }) {
   const { t } = useT()
-  const { pendings, companies } = data
+  const { pendings, companies, joinPendings, employees, empCompanies } = data
   const queryClient = useQueryClient()
+  const [reviewTab, setReviewTab] = useState('register')  // 'register' | 'join'
+
+  // ========== task_pending（新註冊）==========
   const open = pendings.filter(p => p.approved == null)
   const done = pendings.filter(p => p.approved != null).slice(0, 30)
   const reviewerUid = session.user.id  // task_pending.reviewed_by FK 到 auth.users.id
+
+  // ========== company_join_pending（跨公司加入）==========
+  // 過濾：super admin 看所有 / 公司 admin 只看自己管理的公司
+  const myAdminCompanyIds = useMemo(
+    () => new Set(empCompanies.filter(ec => ec.employee_id === me.id && ec.is_company_admin).map(ec => ec.company_id)),
+    [empCompanies, me.id]
+  )
+  const visibleJoinPendings = useMemo(
+    () => me.is_super_admin
+      ? joinPendings
+      : joinPendings.filter(p => myAdminCompanyIds.has(p.company_id)),
+    [joinPendings, me.is_super_admin, myAdminCompanyIds]
+  )
+  const joinOpen = visibleJoinPendings.filter(p => p.approved == null)
+  const joinDone = visibleJoinPendings.filter(p => p.approved != null).slice(0, 30)
+
+  const approveJoin = async (p) => {
+    // 加 employee_companies 行（is_default=false）
+    const { error: ecErr } = await supabase.from('employee_companies').insert({
+      employee_id: p.employee_id,
+      company_id: p.company_id,
+      is_default: false,
+      is_company_admin: false,
+    })
+    if (ecErr && !String(ecErr.message).includes('duplicate')) return alert(t('創建綁定失敗：') + ecErr.message)
+    await supabase.from('company_join_pending').update({ approved: true, reviewed_at: new Date().toISOString(), reviewed_by: reviewerUid }).eq('id', p.id)
+    queryClient.invalidateQueries({ queryKey: ['admin', 'company_join_pending'] })
+    queryClient.invalidateQueries({ queryKey: ['admin', 'employee_companies'] })
+  }
+  const rejectJoin = async (p) => {
+    const reason = prompt(t('拒絕理由（可選）：')) || null
+    await supabase.from('company_join_pending').update({ approved: false, reject_reason: reason, reviewed_at: new Date().toISOString(), reviewed_by: reviewerUid }).eq('id', p.id)
+    queryClient.invalidateQueries({ queryKey: ['admin', 'company_join_pending'] })
+  }
 
   const approve = async (p) => {
     const guess = companies.find(co => co.name === p.company_name)
@@ -1684,7 +1982,58 @@ function AccountReviewView({ data, me, session }) {
 
   return (
     <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 16 }}>{t('帳號審核')} <span style={{ fontSize: 12, color: c.textFaint, fontWeight: 400 }}>{open.length} {t('待處理')}</span></h1>
+      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 16 }}>{t('帳號審核')}</h1>
+      <div style={{ display: 'flex', gap: 4, padding: 4, background: c.bg, borderRadius: radius.md, marginBottom: 18, width: 'fit-content' }}>
+        <button onClick={() => setReviewTab('register')} style={S.segmentBtn(reviewTab === 'register')}>{t('新註冊')} · {open.length}</button>
+        <button onClick={() => setReviewTab('join')} style={S.segmentBtn(reviewTab === 'join')}>{t('跨公司加入')} · {joinOpen.length}</button>
+      </div>
+      {reviewTab === 'join' && (
+        <>
+          <Section label={t('待審核') + ' · ' + joinOpen.length}>
+            {joinOpen.length === 0 ? <Empty>{t('沒有待審核申請')}</Empty> : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {joinOpen.map(p => {
+                  const emp = employees.find(e => e.id === p.employee_id)
+                  const co = companies.find(co => co.id === p.company_id)
+                  return (
+                    <div key={p.id} style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.lg, padding: 14, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700 }}>{emp?.name || p.employee_id}</div>
+                        <div style={{ fontSize: 12, color: c.textMuted, marginTop: 3 }}>{emp?.email || ''}</div>
+                        <div style={{ fontSize: 11, color: c.textMuted, marginTop: 6 }}>{t('申請加入：')}<strong style={{ color: c.text }}>{co?.name || '?'}</strong></div>
+                        {p.note && <div style={{ fontSize: 11, color: c.textMuted, marginTop: 6, padding: 8, background: c.bg, borderRadius: radius.sm }}>{t('備註：')}{p.note}</div>}
+                        <div style={{ fontSize: 10, color: c.textFaint, marginTop: 6 }}>{fmtDateTime(p.requested_at)}</div>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <button onClick={() => approveJoin(p)} style={S.btnSuccess}>{t('批准')}</button>
+                        <button onClick={() => rejectJoin(p)} style={S.btnDanger}>{t('拒絕')}</button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </Section>
+          {joinDone.length > 0 && (
+            <Section label={t('最近處理') + ' · ' + joinDone.length}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                {joinDone.map(p => {
+                  const emp = employees.find(e => e.id === p.employee_id)
+                  const co = companies.find(co => co.id === p.company_id)
+                  return (
+                    <div key={p.id} style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.sm, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10, fontSize: 12 }}>
+                      <span style={{ fontWeight: 600, flex: 1 }}>{emp?.name || p.employee_id}</span>
+                      <span style={{ color: c.textFaint }}>→ {co?.name || '?'}</span>
+                      <span style={{ color: p.approved ? c.green : c.red, fontWeight: 600 }}>{p.approved ? '✓ ' + t('已批准') : '✗ ' + t('已拒絕')}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </Section>
+          )}
+        </>
+      )}
+      {reviewTab === 'register' && <>
       <Section label={t('待審核') + ' · ' + open.length}>
         {open.length === 0 ? <Empty>{t('沒有待審核申請')}</Empty> : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1720,6 +2069,7 @@ function AccountReviewView({ data, me, session }) {
           </div>
         </Section>
       )}
+      </>}
     </div>
   )
 }
@@ -1806,6 +2156,129 @@ export function CommissionView({ employees, me, lockedEmpId = null }) {
         </table>
       </div>
       <div style={{ fontSize: 10, color: c.textFaint, marginTop: 8 }}>{t('佣金規則沿用 bizflow（轉插 600 HKD/件 cutoff 5/9）。要改規則請聯繫 admin。')}</div>
+    </div>
+  )
+}
+
+// ====================  ROLES VIEW（職位管理）  ====================
+// super admin：看所有公司的職位；公司 admin：只本公司
+// 編輯 inline，每個 role 一張卡片，10 個權限點 checkbox
+function RolesView({ data, ctx }) {
+  const { t } = useT()
+  const queryClient = useQueryClient()
+  const { roles, companies } = data
+
+  // 過濾：super admin 看全部，否則只看當前活躍公司
+  const visibleCompanies = useMemo(
+    () => ctx.isSuperAdmin ? companies : companies.filter(co => co.id === ctx.activeCompanyId),
+    [companies, ctx.isSuperAdmin, ctx.activeCompanyId]
+  )
+
+  const [newRoleByCompany, setNewRoleByCompany] = useState({})  // { [companyId]: 'role name draft' }
+  const [editingId, setEditingId] = useState(null)
+  const [editDraft, setEditDraft] = useState({ name: '', permissions: {} })
+
+  const startEdit = (r) => {
+    setEditingId(r.id)
+    setEditDraft({ name: r.name, permissions: { ...r.permissions } })
+  }
+  const cancelEdit = () => { setEditingId(null); setEditDraft({ name: '', permissions: {} }) }
+
+  const saveEdit = async (id) => {
+    if (!editDraft.name.trim()) return alert(t('名稱必填'))
+    const { error } = await supabase.from('roles').update({
+      name: editDraft.name.trim(),
+      permissions: editDraft.permissions,
+    }).eq('id', id)
+    if (error) return alert(t('更新失敗：') + error.message)
+    cancelEdit()
+    queryClient.invalidateQueries({ queryKey: ['admin', 'roles'] })
+  }
+
+  const del = async (r) => {
+    if (!confirm(t('確定刪除職位') + '「' + r.name + '」？')) return
+    const { error } = await supabase.from('roles').delete().eq('id', r.id)
+    if (error) return alert(t('刪除失敗：') + error.message)
+    queryClient.invalidateQueries({ queryKey: ['admin', 'roles'] })
+    queryClient.invalidateQueries({ queryKey: ['admin', 'employee_companies'] })
+  }
+
+  const addRole = async (companyId) => {
+    const name = (newRoleByCompany[companyId] || '').trim()
+    if (!name) return
+    // 預設權限：全部 false
+    const permissions = Object.fromEntries(PERMISSION_KEYS.map(([k]) => [k, false]))
+    const { error } = await supabase.from('roles').insert({ company_id: companyId, name, permissions })
+    if (error) return alert(t('新增失敗：') + error.message)
+    setNewRoleByCompany(prev => ({ ...prev, [companyId]: '' }))
+    queryClient.invalidateQueries({ queryKey: ['admin', 'roles'] })
+  }
+
+  return (
+    <div>
+      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 18, letterSpacing: -0.3 }}>{t('職位管理')}</h1>
+      {visibleCompanies.map(co => {
+        const coRoles = roles.filter(r => r.company_id === co.id)
+        return (
+          <div key={co.id} style={{ marginBottom: 28 }}>
+            <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10, color: c.text }}>{co.name}</h2>
+
+            {coRoles.length === 0 && <Empty>{t('還沒有職位')}</Empty>}
+
+            {coRoles.map(r => {
+              const isEdit = editingId === r.id
+              const draft = isEdit ? editDraft : { name: r.name, permissions: r.permissions || {} }
+              return (
+                <div key={r.id} style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.lg, padding: 14, marginBottom: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8 }}>
+                    {isEdit ? (
+                      <input value={draft.name} onChange={e => setEditDraft({ ...editDraft, name: e.target.value })} style={{ ...S.input, marginBottom: 0, fontWeight: 600, flex: 1 }} />
+                    ) : (
+                      <div style={{ fontSize: 14, fontWeight: 700 }}>{r.name}</div>
+                    )}
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {isEdit ? (
+                        <>
+                          <button onClick={() => saveEdit(r.id)} style={S.btnPrimary}>{t('保存')}</button>
+                          <button onClick={cancelEdit} style={S.btnGhost}>{t('取消')}</button>
+                        </>
+                      ) : (
+                        <>
+                          <button onClick={() => startEdit(r)} style={S.btnGhostSm}>✏</button>
+                          <button onClick={() => del(r)} style={{ ...S.btnGhostSm, color: c.red }}>×</button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
+                    {PERMISSION_KEYS.map(([key, label]) => {
+                      const enabled = draft.permissions?.[key] === true
+                      return (
+                        <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: enabled ? c.text : c.textMuted, cursor: isEdit ? 'pointer' : 'default' }}>
+                          <input type="checkbox" checked={enabled} disabled={!isEdit}
+                            onChange={e => isEdit && setEditDraft({ ...editDraft, permissions: { ...draft.permissions, [key]: e.target.checked } })} />
+                          {t(label)}
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+
+            <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+              <input
+                value={newRoleByCompany[co.id] || ''}
+                onChange={e => setNewRoleByCompany(prev => ({ ...prev, [co.id]: e.target.value }))}
+                placeholder={t('新職位名稱')}
+                style={{ ...S.input, marginBottom: 0, flex: 1 }}
+              />
+              <button onClick={() => addRole(co.id)} disabled={!(newRoleByCompany[co.id] || '').trim()}
+                style={{ ...S.btnPrimary, opacity: (newRoleByCompany[co.id] || '').trim() ? 1 : 0.4 }}>{t('新增職位')}</button>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
