@@ -2031,13 +2031,20 @@ function AccountReviewView({ data, me, session }) {
         companyId = found.id
       }
     }
-    const { error: empErr } = await supabase.from('employees').insert({
+    const { data: newEmp, error: empErr } = await supabase.from('employees').insert({
       name: p.name, email: p.email, user_id: p.user_id, company_id: companyId, kind: 'task',
-    })
+    }).select().single()
     if (empErr) return alert(t('創建員工失敗：') + empErr.message)
+    // 新邏輯：employee_companies 才是公司歸屬的真表（老 employees.company_id 是兼容字段）
+    // 沒這行 → 員工進 team 切換器空、看不到任何任務（jaykc bug）
+    const { error: ecErr } = await supabase.from('employee_companies').insert({
+      employee_id: newEmp.id, company_id: companyId, is_default: true, is_company_admin: false,
+    })
+    if (ecErr) return alert(t('創建綁定失敗：') + ecErr.message)
     await supabase.from('task_pending').update({ approved: true, reviewed_at: new Date().toISOString(), reviewed_by: reviewerUid }).eq('id', p.id)
     queryClient.invalidateQueries({ queryKey: ['admin', 'task_pending'] })
     queryClient.invalidateQueries({ queryKey: ['admin', 'employees'] })
+    queryClient.invalidateQueries({ queryKey: ['admin', 'employee_companies'] })
     queryClient.invalidateQueries({ queryKey: ['admin', 'companies'] })
   }
   const reject = async (p) => {
