@@ -1987,15 +1987,24 @@ function AccountReviewView({ data, me, session }) {
   const joinDone = visibleJoinPendings.filter(p => p.approved != null).slice(0, 30)
 
   const approveJoin = async (p) => {
-    // 加 employee_companies 行（is_default=false）
-    const { error: ecErr } = await supabase.from('employee_companies').insert({
-      employee_id: p.employee_id,
-      company_id: p.company_id,
-      is_default: false,
-      is_company_admin: false,
-    })
-    if (ecErr && !String(ecErr.message).includes('duplicate')) return alert(t('創建綁定失敗：') + ecErr.message)
-    await supabase.from('company_join_pending').update({ approved: true, reviewed_at: new Date().toISOString(), reviewed_by: reviewerUid }).eq('id', p.id)
+    // 1. 先檢查 binding 存不存在（避免靜默吞 duplicate 後標 approved，但實際 INSERT 失敗）
+    const { data: existing } = await supabase.from('employee_companies')
+      .select('id').eq('employee_id', p.employee_id).eq('company_id', p.company_id).maybeSingle()
+    // 2. 不存在才 INSERT。失敗立即彈框 + return（不繼續標 approved）
+    if (!existing) {
+      const { error: ecErr } = await supabase.from('employee_companies').insert({
+        employee_id: p.employee_id,
+        company_id: p.company_id,
+        is_default: false,
+        is_company_admin: false,
+      })
+      if (ecErr) return alert(t('創建綁定失敗：') + ecErr.message)
+    }
+    // 3. binding 確認在了，才標 approved
+    const { error: upErr } = await supabase.from('company_join_pending').update({
+      approved: true, reviewed_at: new Date().toISOString(), reviewed_by: reviewerUid,
+    }).eq('id', p.id)
+    if (upErr) return alert(t('更新失敗：') + upErr.message)
     queryClient.invalidateQueries({ queryKey: ['admin', 'company_join_pending'] })
     queryClient.invalidateQueries({ queryKey: ['admin', 'employee_companies'] })
   }
