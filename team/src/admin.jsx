@@ -96,22 +96,31 @@ function useMyContext(me, data) {
   const defaultBinding = myBindings.find(b => b.is_default) || myBindings[0]
   const defaultCompanyId = defaultBinding?.company_id || me.company_id  // fallback 老 employees.company_id
 
+  // 切換器選項：super admin 看所有公司（不受 binding 限制）；其他人只看自己綁的
+  const switchableCompanies = useMemo(() => {
+    if (me.is_super_admin === true) {
+      return data.companies.map(co => ({
+        company_id: co.id,
+        is_default: co.id === defaultCompanyId,
+      }))
+    }
+    return myBindings.map(b => ({ company_id: b.company_id, is_default: b.is_default }))
+  }, [me.is_super_admin, data.companies, myBindings, defaultCompanyId])
+
   // localStorage 存當前活躍公司（按 user 維度）
-  // 注意：useState initializer 跑時 myBindings 還是空（query 沒回），不能在這裡校驗。
+  // 注意：useState initializer 跑時 switchableCompanies 還是空（query 沒回），不能在這裡校驗。
   // 先信任 localStorage，等 bindings 加載後再校驗（見下面 useEffect）。
   const storageKey = `team-active-company-${me.user_id || me.id}`
   const [activeCompanyId, setActiveCompanyIdState] = useState(() => {
     try { return localStorage.getItem(storageKey) || null } catch { return null }
   })
-  // bindings 加載後：
-  //   - activeCompanyId 為 null → 用 default
-  //   - activeCompanyId 不在 bindings → 用 default（防舊 localStorage 值錯誤）
+  // 加載後：activeCompanyId 為 null OR 不在可選列表 → 回 default
   useEffect(() => {
-    if (myBindings.length === 0) return
-    if (!activeCompanyId || !myBindings.some(b => b.company_id === activeCompanyId)) {
+    if (switchableCompanies.length === 0) return
+    if (!activeCompanyId || !switchableCompanies.some(b => b.company_id === activeCompanyId)) {
       setActiveCompanyIdState(defaultCompanyId)
     }
-  }, [myBindings, activeCompanyId, defaultCompanyId])
+  }, [switchableCompanies, activeCompanyId, defaultCompanyId])
   const setActiveCompanyId = (id) => {
     setActiveCompanyIdState(id)
     try { localStorage.setItem(storageKey, id) } catch {}
@@ -121,10 +130,10 @@ function useMyContext(me, data) {
   const activeBinding = myBindings.find(b => b.company_id === activeCompanyId)
   const activeRole = activeBinding?.role_id ? data.roles.find(r => r.id === activeBinding.role_id) : null
 
-  // 是否在當前活躍公司是 admin
-  const isAdminOfActive = !!activeBinding?.is_company_admin
-  // 是否有多公司綁定（顯示公司切換器）
-  const hasMultipleCompanies = myBindings.length > 1
+  // 是否在當前活躍公司是 admin（super admin 視為所有公司 admin）
+  const isAdminOfActive = me.is_super_admin === true || !!activeBinding?.is_company_admin
+  // 是否顯示公司切換器（多個可切的 OR super admin 視角）
+  const hasMultipleCompanies = switchableCompanies.length > 1
   // 任意公司是不是 admin（決定能不能進「員工管理」等板塊）
   const isAdminOfAny = myBindings.some(b => b.is_company_admin)
 
@@ -137,6 +146,7 @@ function useMyContext(me, data) {
 
   return {
     myBindings,
+    switchableCompanies,
     activeCompanyId,
     setActiveCompanyId,
     activeCompany,
@@ -228,7 +238,7 @@ function AdminTopBar({ me, ctx, data, view, setView, isMobile, pendingCount, onP
         {ctx.hasMultipleCompanies && (
           <select value={ctx.activeCompanyId || ''} onChange={e => ctx.setActiveCompanyId(e.target.value)}
             style={{ fontSize: 12, padding: '4px 8px', border: `1px solid ${c.border}`, borderRadius: 6, background: c.bg, color: c.text, fontFamily: font.ui, cursor: 'pointer' }}>
-            {ctx.myBindings.map(b => {
+            {ctx.switchableCompanies.map(b => {
               const co = data.companies.find(co => co.id === b.company_id)
               return <option key={b.company_id} value={b.company_id}>{co?.name || '?'}{b.is_default ? ' ★' : ''}</option>
             })}
