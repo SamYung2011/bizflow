@@ -1111,8 +1111,30 @@ function EditTaskModal({ task: initial, data, me, userId, onClose, ctx }) {
                 ? <span style={{ background: '#f3e8ff', color: '#7c3aed', padding: '2px 8px', borderRadius: 10, fontSize: 11, fontWeight: 600 }}>{cur.name} {t('部門')}</span>
                 : <span style={{ color: c.textFaint, fontSize: 11 }}>{t('公司內可見')}</span>
             }
+            const onDeptChange = async (newDeptId) => {
+              // 切到部門時：把不在新部門的 assignees 提示後一起清掉，避免「鬼任務」（看不見但還在 assignee 列）
+              if (newDeptId) {
+                const memberSet = new Set((empDepts || []).filter(ed => ed.department_id === newDeptId).map(ed => ed.employee_id))
+                const ghosts = tkList.filter(a => !memberSet.has(a.employee_id))
+                if (ghosts.length > 0) {
+                  const names = ghosts.map(a => (employees.find(e => e.id === a.employee_id) || {}).name || '?').join(', ')
+                  if (!confirm(t('以下 assignee 不在新部門，切換後他們將失去任務訪問：') + names + '\n' + t('繼續？'))) return
+                  // 把不在 dept 的 assignee 從 task_assignees 移除（一致性）
+                  const ghostIds = ghosts.map(g => g.employee_id)
+                  await supabase.from('task_assignees').delete().eq('task_id', tk.id).in('employee_id', ghostIds)
+                  // 如果主 assignee 被清掉，把剩下第一個提上來
+                  const remaining = tkList.filter(a => memberSet.has(a.employee_id))
+                  if (remaining.length > 0 && ghostIds.includes(tk.employee_id)) {
+                    await supabase.from('employee_tasks').update({ employee_id: remaining[0].employee_id }).eq('id', tk.id)
+                  }
+                  queryClient.invalidateQueries({ queryKey: ['admin', 'task_assignees'] })
+                  queryClient.invalidateQueries({ queryKey: ['admin', 'employee_tasks'] })
+                }
+              }
+              await updateField({ department_id: newDeptId || null })
+            }
             return (
-              <select value={tk.department_id || ''} onChange={e => updateField({ department_id: e.target.value || null })}
+              <select value={tk.department_id || ''} onChange={e => onDeptChange(e.target.value)}
                 style={{ padding: '4px 8px', borderRadius: radius.sm, border: `1px solid ${c.border}`, fontSize: 12, background: c.card }}>
                 <option value="">{t('公司內可見')}</option>
                 {coDepts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}

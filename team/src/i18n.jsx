@@ -1258,6 +1258,8 @@ const DICT_EN = {
   "公司內可見": "Company-wide",
   "（部門專屬）": " (dept only)",
   "部門": "dept",
+  "以下 assignee 不在新部門，切換後他們將失去任務訪問：": "Some assignees aren't in the new dept and will lose access: ",
+  "繼續？": "Continue?",
 };
 
 const DICT_FR = {
@@ -2513,6 +2515,8 @@ const DICT_FR = {
   "公司內可見": "Toute l'entreprise",
   "（部門專屬）": " (réservé au département)",
   "部門": "dépt",
+  "以下 assignee 不在新部門，切換後他們將失去任務訪問：": "Ces assignés ne sont pas dans le nouveau département et perdront l'accès : ",
+  "繼續？": "Continuer ?",
 };
 
 const I18nContext = createContext({ lang: "zh", setLang: () => {}, t: (s) => s });
