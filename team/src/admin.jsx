@@ -800,6 +800,11 @@ function NewTaskForm({ emp, me, employees, companyId }) {
 
   const submit = async () => {
     if (!title.trim() || effective.length === 0) return
+    // company_id fallback：優先 prop，否則用 emp.company_id（任務所屬員工的公司），最後 me.company_id
+    const effectiveCompanyId = companyId || emp?.company_id || me.company_id
+    if (!effectiveCompanyId) {
+      return alert(t('未選定公司，請先在右上角切換公司再新增任務'))
+    }
     setBusy(true)
     try {
       const { data, error } = await supabase.from('employee_tasks').insert({
@@ -810,7 +815,7 @@ function NewTaskForm({ emp, me, employees, companyId }) {
         priority,
         note: note.trim() || null,
         due_date: dueDate || null,
-        company_id: companyId,
+        company_id: effectiveCompanyId,
       }).select().single()
       if (error) throw error
       const rows = effective.map(eid => ({ task_id: data.id, employee_id: eid }))
@@ -830,7 +835,7 @@ function NewTaskForm({ emp, me, employees, companyId }) {
           title: subTitle,
           priority: 'none',
           parent_task_id: data.id,
-          company_id: companyId,
+          company_id: effectiveCompanyId,
         }).select().single()
         if (se) { console.error('子任務新增失敗', se); continue }
         await supabase.from('task_assignees').insert(effective.map(eid => ({ task_id: sub.id, employee_id: eid })))

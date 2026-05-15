@@ -1214,6 +1214,7 @@ const DICT_EN = {
   "看佣金": "View commission",
   "管理職位": "Manage roles",
   "發更新日誌": "Post update logs",
+  "未選定公司，請先在右上角切換公司再新增任務": "No active company. Switch one via the top-right selector first.",
 };
 
 const DICT_FR = {
@@ -2425,6 +2426,7 @@ const DICT_FR = {
   "看佣金": "Voir les commissions",
   "管理職位": "Gérer les rôles",
   "發更新日誌": "Publier des notes de mise à jour",
+  "未選定公司，請先在右上角切換公司再新增任務": "Aucune entreprise active. Sélectionnez-en une en haut à droite d'abord.",
 };
 
 const I18nContext = createContext({ lang: "zh", setLang: () => {}, t: (s) => s });
