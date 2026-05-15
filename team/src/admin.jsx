@@ -1498,7 +1498,6 @@ function EmployeesView({ data, me, isMobile, ctx }) {
           <thead>
             <tr style={{ background: c.bg, borderBottom: `1px solid ${c.border}` }}>
               <th style={tcell('left')}>{t('姓名')}</th>
-              <th style={tcell('left')}>{t('公司')}</th>
               <th style={tcell('left')}>{t('職位')}</th>
               <th style={tcell('left')}>{t('公司管理員')}</th>
               <th style={tcell('left')}>{t('電話')}</th>
@@ -1563,9 +1562,6 @@ function EmployeeRow({ emp, companies, empCompanies, roles, companyContext, upda
     <tr style={{ borderBottom: `1px solid ${c.border}` }}>
       <td style={{ padding: '8px 12px', fontWeight: 600 }}>
         {editing ? <input value={draft.name || ''} onChange={e => setDraft({ ...draft, name: e.target.value })} style={{ ...S.input, marginBottom: 0, fontSize: 12 }} /> : (emp.name || '—')}
-      </td>
-      <td style={{ padding: '8px 12px' }}>
-        {contextCompanyName || '—'}
       </td>
       <td style={{ padding: '8px 12px' }}>
         {editing && contextBinding ? (
