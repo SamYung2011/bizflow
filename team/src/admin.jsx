@@ -2066,9 +2066,13 @@ function CompanyRow({ co, count, rename, del }) {
 // ====================  ACCOUNT REVIEW  ====================
 function AccountReviewView({ data, me, session }) {
   const { t } = useT()
-  const { pendings, companies, joinPendings, employees, empCompanies } = data
+  const { pendings, companies, joinPendings, employees, empCompanies, roles } = data
   const queryClient = useQueryClient()
   const [reviewTab, setReviewTab] = useState('register')  // 'register' | 'join'
+
+  // 給新建 binding 填默認 role_id：本公司的「普通員工」role（migration 054 起每個公司都有）
+  const defaultRoleIdFor = (companyId) =>
+    roles.find(r => r.company_id === companyId && r.name === '普通員工')?.id || null
 
   // ========== task_pending（新註冊）==========
   const open = pendings.filter(p => p.approved == null)
@@ -2101,6 +2105,7 @@ function AccountReviewView({ data, me, session }) {
         company_id: p.company_id,
         is_default: false,
         is_company_admin: false,
+        role_id: defaultRoleIdFor(p.company_id),
       })
       if (ecErr) return alert(t('創建綁定失敗：') + ecErr.message)
     }
@@ -2143,6 +2148,7 @@ function AccountReviewView({ data, me, session }) {
     // 沒這行 → 員工進 team 切換器空、看不到任何任務（jaykc bug）
     const { error: ecErr } = await supabase.from('employee_companies').insert({
       employee_id: newEmp.id, company_id: companyId, is_default: true, is_company_admin: false,
+      role_id: defaultRoleIdFor(companyId),
     })
     if (ecErr) return alert(t('創建綁定失敗：') + ecErr.message)
     await supabase.from('task_pending').update({ approved: true, reviewed_at: new Date().toISOString(), reviewed_by: reviewerUid }).eq('id', p.id)
