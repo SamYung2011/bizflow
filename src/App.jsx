@@ -1,4 +1,7 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, Suspense, lazy } from "react";
+
+// 報銷模組：lazy load 防內存爆。切到「報銷」tab 才下載這 chunk
+const ExpenseView = lazy(() => import("./views/Expense.jsx"));
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createClient } from "@supabase/supabase-js";
 import { INVOICE_SHELL_HEAD, INVOICE_PAGE, INVOICE_SHELL_TAIL } from "./invoiceTemplate.js";
@@ -112,6 +115,7 @@ const Icon = ({ name, size = 18 }) => {
     trend_up: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>,
     car: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 17H3a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v9a2 2 0 0 1-2 2h-3"/><circle cx="7.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>,
     x: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+    money: <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/></svg>,
   };
   return icons[name] || null;
 };
@@ -1750,6 +1754,7 @@ export default function App() {
     { id: "invoices", label: t("發票"), icon: "invoice" },
     { id: "warranty", label: t("保修"), icon: "warning" },
     { id: "revenue", label: t("營收"), icon: "trend_up" },
+    { id: "expense", label: t("報銷"), icon: "money" },
     { id: "gototeam", label: t("前往 team"), icon: "customer", external: "https://team.honnmono.top" },
     { id: "suppliers", label: t("供應商"), icon: "product" },
     { id: "whatsapp", label: t("WhatsApp"), icon: "invoice" },
@@ -4474,6 +4479,19 @@ export default function App() {
             </div>
           );
         })()}
+
+        {/* EXPENSE — 報銷（lazy load，切過去才下載這個 chunk） */}
+        {tab === "expense" && (
+          <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入報銷模組…")}</div>}>
+            <ExpenseView
+              supabase={supabase}
+              session={session}
+              currentEmployee={currentEmployee}
+              employees={employees}
+              isAdmin={isBfAdmin}
+            />
+          </Suspense>
+        )}
 
         {/* EMPLOYEES — 員工管理（左列表 + 右三欄看板） */}
         {tab === "employees" && (() => {
