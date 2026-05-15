@@ -1419,24 +1419,14 @@ function EmployeesView({ data, me, isMobile, ctx }) {
   const { employees, companies, empCompanies, roles } = data
   const queryClient = useQueryClient()
   const [showAdd, setShowAdd] = useState(false)
-  const [companyFilter, setCompanyFilter] = useState(ctx?.isSuperAdmin ? 'all' : (ctx?.activeCompanyId || 'all'))
-
-  // 公司 admin 只能看本公司員工（按 employee_companies 過濾）
-  // super admin 看所有，可以下拉切公司或 all
-  const visibleEmployees = useMemo(() => {
-    let list = employees
-    if (!ctx?.isSuperAdmin) {
-      // 公司 admin：限制到自己管理的公司們
-      const myAdminCompanyIds = new Set(empCompanies.filter(ec => ec.employee_id === me.id && ec.is_company_admin).map(ec => ec.company_id))
-      const empsInAdminCo = new Set(empCompanies.filter(ec => myAdminCompanyIds.has(ec.company_id)).map(ec => ec.employee_id))
-      list = list.filter(e => empsInAdminCo.has(e.id))
-    }
-    if (companyFilter !== 'all') {
-      const empsInFilter = new Set(empCompanies.filter(ec => ec.company_id === companyFilter).map(ec => ec.employee_id))
-      list = list.filter(e => empsInFilter.has(e.id))
-    }
-    return list
-  }, [employees, empCompanies, companyFilter, ctx, me.id])
+  // 折疊狀態：存「主動折疊」的公司 id（默認全展開）
+  const [collapsed, setCollapsed] = useState(() => new Set())
+  const toggle = (coId) => setCollapsed(prev => {
+    const n = new Set(prev)
+    if (n.has(coId)) n.delete(coId)
+    else n.add(coId)
+    return n
+  })
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['admin', 'employees'] })
@@ -1516,46 +1506,69 @@ function EmployeesView({ data, me, isMobile, ctx }) {
     refresh()
   }
 
-  // 候選公司：super admin 全部，公司 admin 只本公司
-  const filterOptions = ctx?.isSuperAdmin
+  // 可見公司：super admin 看所有；公司 admin 只看自己管理的公司
+  const visibleCompanies = ctx?.isSuperAdmin
     ? companies
     : companies.filter(co => empCompanies.some(ec => ec.employee_id === me.id && ec.company_id === co.id && ec.is_company_admin))
+
+  // 每家公司的員工列表：按 employee_companies 反查（合作者會出現在多家公司）
+  const empsByCompany = useMemo(() => {
+    const m = new Map()
+    for (const co of visibleCompanies) {
+      const ids = new Set(empCompanies.filter(ec => ec.company_id === co.id).map(ec => ec.employee_id))
+      m.set(co.id, employees.filter(e => e.active !== false && ids.has(e.id)))
+    }
+    return m
+  }, [employees, empCompanies, visibleCompanies])
 
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>{t('員工管理')} <span style={{ fontSize: 12, color: c.textFaint, fontWeight: 400 }}>{visibleEmployees.length}</span></h1>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <select value={companyFilter} onChange={e => setCompanyFilter(e.target.value)} style={{ ...S.input, marginBottom: 0, width: 'auto', fontSize: 12, padding: '6px 8px' }}>
-            {ctx?.isSuperAdmin && <option value="all">{t('所有公司')}</option>}
-            {filterOptions.map(co => <option key={co.id} value={co.id}>{co.name}</option>)}
-          </select>
-          <button onClick={() => setShowAdd(true)} style={S.btnPrimary}>＋ {t('新增員工')}</button>
-        </div>
+        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>{t('員工管理')}</h1>
+        <button onClick={() => setShowAdd(true)} style={S.btnPrimary}>＋ {t('新增員工')}</button>
       </div>
 
-      <div style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.lg, overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-          <thead>
-            <tr style={{ background: c.bg, borderBottom: `1px solid ${c.border}` }}>
-              <th style={tcell('left')}>{t('姓名')}</th>
-              <th style={tcell('left')}>{t('職位')}</th>
-              <th style={tcell('left')}>{t('公司管理員')}</th>
-              <th style={tcell('left')}>{t('電話')}</th>
-              <th style={tcell('left')}>Email</th>
-              <th style={tcell('left')}>{t('狀態')}</th>
-              <th style={tcell('right')}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {visibleEmployees.map(e => (
-              <EmployeeRow key={e.id} emp={e} companies={companies} empCompanies={empCompanies} roles={roles}
-                companyContext={companyFilter !== 'all' ? companyFilter : ctx?.activeCompanyId}
-                updateField={updateField} updateBinding={updateBinding} removeFromCompany={removeFromCompany} permanentDelete={permanentDelete} me={me} ctx={ctx} />
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {visibleCompanies.length === 0 && <Empty>{t('沒有可管理的公司')}</Empty>}
+
+      {visibleCompanies.map(co => {
+        const coEmps = empsByCompany.get(co.id) || []
+        const isCollapsed = collapsed.has(co.id)
+        return (
+          <div key={co.id} style={{ marginBottom: 14, background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.lg, overflow: 'hidden' }}>
+            <div onClick={() => toggle(co.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', cursor: 'pointer', borderBottom: isCollapsed ? 'none' : `1px solid ${c.border}`, background: c.bg }}>
+              <span style={{ fontSize: 11, color: c.textMuted, width: 12 }}>{isCollapsed ? '▶' : '▼'}</span>
+              <span style={{ fontSize: 15, fontWeight: 700 }}>{co.name}</span>
+              <span style={{ fontSize: 11, color: c.textFaint }}>{coEmps.length} {t('人')}</span>
+            </div>
+            {!isCollapsed && (
+              coEmps.length === 0 ? (
+                <div style={{ padding: 18, textAlign: 'center', fontSize: 12, color: c.textFaint }}>{t('該公司暫無員工')}</div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${c.border}` }}>
+                      <th style={tcell('left')}>{t('姓名')}</th>
+                      <th style={tcell('left')}>{t('職位')}</th>
+                      <th style={tcell('left')}>{t('公司管理員')}</th>
+                      <th style={tcell('left')}>{t('電話')}</th>
+                      <th style={tcell('left')}>Email</th>
+                      <th style={tcell('left')}>{t('狀態')}</th>
+                      <th style={tcell('right')}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {coEmps.map(e => (
+                      <EmployeeRow key={e.id} emp={e} companies={companies} empCompanies={empCompanies} roles={roles}
+                        companyContext={co.id}
+                        updateField={updateField} updateBinding={updateBinding} removeFromCompany={removeFromCompany} permanentDelete={permanentDelete} me={me} ctx={ctx} />
+                    ))}
+                  </tbody>
+                </table>
+              )
+            )}
+          </div>
+        )
+      })}
 
       {showAdd && <NewEmployeeModal companies={companies} onClose={() => setShowAdd(false)} onSaved={refresh} />}
     </div>

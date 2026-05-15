@@ -1234,6 +1234,9 @@ const DICT_EN = {
   "刪除該員工在本公司的所有任務 + 解綁。其他公司不影響。": "Delete their tasks in this company + unbind. Other companies unaffected.",
   "繞過 6 天 grace，立即永久刪除員工 + 帳號": "Bypass 6-day grace, purge employee + account immediately",
   "（無權分配他人）": " (no permission to assign others)",
+  "沒有可管理的公司": "No company to manage",
+  "該公司暫無員工": "No employees in this company",
+  "人": "people",
 };
 
 const DICT_FR = {
@@ -2465,6 +2468,9 @@ const DICT_FR = {
   "刪除該員工在本公司的所有任務 + 解綁。其他公司不影響。": "Supprimer ses tâches ici + délier. Pas d'effet sur les autres entreprises.",
   "繞過 6 天 grace，立即永久刪除員工 + 帳號": "Ignorer le délai de 6 jours, purger employé + compte immédiatement",
   "（無權分配他人）": " (pas d'autorisation pour assigner d'autres)",
+  "沒有可管理的公司": "Aucune entreprise à gérer",
+  "該公司暫無員工": "Aucun employé dans cette entreprise",
+  "人": "personnes",
 };
 
 const I18nContext = createContext({ lang: "zh", setLang: () => {}, t: (s) => s });
