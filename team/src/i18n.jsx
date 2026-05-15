@@ -1260,6 +1260,8 @@ const DICT_EN = {
   "部門": "dept",
   "以下 assignee 不在新部門，切換後他們將失去任務訪問：": "Some assignees aren't in the new dept and will lose access: ",
   "繼續？": "Continue?",
+  "個職位": "roles",
+  "個部門": "depts",
 };
 
 const DICT_FR = {
@@ -2517,6 +2519,8 @@ const DICT_FR = {
   "部門": "dépt",
   "以下 assignee 不在新部門，切換後他們將失去任務訪問：": "Ces assignés ne sont pas dans le nouveau département et perdront l'accès : ",
   "繼續？": "Continuer ?",
+  "個職位": "rôles",
+  "個部門": "dépts",
 };
 
 const I18nContext = createContext({ lang: "zh", setLang: () => {}, t: (s) => s });

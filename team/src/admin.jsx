@@ -2360,6 +2360,10 @@ function RolesView({ data, ctx }) {
   const [newRoleByCompany, setNewRoleByCompany] = useState({})  // { [companyId]: 'role name draft' }
   const [editingId, setEditingId] = useState(null)
   const [editDraft, setEditDraft] = useState({ name: '', permissions: {} })
+  const [collapsed, setCollapsed] = useState(() => new Set())
+  const toggleCo = (coId) => setCollapsed(prev => {
+    const n = new Set(prev); n.has(coId) ? n.delete(coId) : n.add(coId); return n
+  })
 
   const startEdit = (r) => {
     setEditingId(r.id)
@@ -2401,63 +2405,71 @@ function RolesView({ data, ctx }) {
     <div>
       {visibleCompanies.map(co => {
         const coRoles = roles.filter(r => r.company_id === co.id)
+        const isCollapsed = collapsed.has(co.id)
         return (
-          <div key={co.id} style={{ marginBottom: 28 }}>
-            <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10, color: c.text }}>{co.name}</h2>
-
-            {coRoles.length === 0 && <Empty>{t('還沒有職位')}</Empty>}
-
-            {coRoles.map(r => {
-              const isEdit = editingId === r.id
-              const draft = isEdit ? editDraft : { name: r.name, permissions: r.permissions || {} }
-              return (
-                <div key={r.id} style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.lg, padding: 14, marginBottom: 10 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8 }}>
-                    {isEdit ? (
-                      <input value={draft.name} onChange={e => setEditDraft({ ...editDraft, name: e.target.value })} style={{ ...S.input, marginBottom: 0, fontWeight: 600, flex: 1 }} />
-                    ) : (
-                      <div style={{ fontSize: 14, fontWeight: 700 }}>{r.name}</div>
-                    )}
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      {isEdit ? (
-                        <>
-                          <button onClick={() => saveEdit(r.id)} style={S.btnPrimary}>{t('保存')}</button>
-                          <button onClick={cancelEdit} style={S.btnGhost}>{t('取消')}</button>
-                        </>
-                      ) : (
-                        <>
-                          <button onClick={() => startEdit(r)} style={S.btnGhostSm}>✏</button>
-                          <button onClick={() => del(r)} style={{ ...S.btnGhostSm, color: c.red }}>×</button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
-                    {PERMISSION_KEYS.map(([key, label]) => {
-                      const enabled = draft.permissions?.[key] === true
-                      return (
-                        <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: enabled ? c.text : c.textMuted, cursor: isEdit ? 'pointer' : 'default' }}>
-                          <input type="checkbox" checked={enabled} disabled={!isEdit}
-                            onChange={e => isEdit && setEditDraft({ ...editDraft, permissions: { ...draft.permissions, [key]: e.target.checked } })} />
-                          {t(label)}
-                        </label>
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            })}
-
-            <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-              <input
-                value={newRoleByCompany[co.id] || ''}
-                onChange={e => setNewRoleByCompany(prev => ({ ...prev, [co.id]: e.target.value }))}
-                placeholder={t('新職位名稱')}
-                style={{ ...S.input, marginBottom: 0, flex: 1 }}
-              />
-              <button onClick={() => addRole(co.id)} disabled={!(newRoleByCompany[co.id] || '').trim()}
-                style={{ ...S.btnPrimary, opacity: (newRoleByCompany[co.id] || '').trim() ? 1 : 0.4 }}>{t('新增職位')}</button>
+          <div key={co.id} style={{ marginBottom: 14, background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.lg, overflow: 'hidden' }}>
+            <div onClick={() => toggleCo(co.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', cursor: 'pointer', borderBottom: isCollapsed ? 'none' : `1px solid ${c.border}`, background: c.bg }}>
+              <span style={{ fontSize: 11, color: c.textMuted, width: 12 }}>{isCollapsed ? '▶' : '▼'}</span>
+              <span style={{ fontSize: 15, fontWeight: 700 }}>{co.name}</span>
+              <span style={{ fontSize: 11, color: c.textFaint }}>{coRoles.length} {t('個職位')}</span>
             </div>
+            {!isCollapsed && (
+              <div style={{ padding: 14 }}>
+                {coRoles.length === 0 && <Empty>{t('還沒有職位')}</Empty>}
+
+                {coRoles.map(r => {
+                  const isEdit = editingId === r.id
+                  const draft = isEdit ? editDraft : { name: r.name, permissions: r.permissions || {} }
+                  return (
+                    <div key={r.id} style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: radius.md, padding: 12, marginBottom: 10 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8 }}>
+                        {isEdit ? (
+                          <input value={draft.name} onChange={e => setEditDraft({ ...editDraft, name: e.target.value })} style={{ ...S.input, marginBottom: 0, fontWeight: 600, flex: 1 }} />
+                        ) : (
+                          <div style={{ fontSize: 14, fontWeight: 700 }}>{r.name}</div>
+                        )}
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          {isEdit ? (
+                            <>
+                              <button onClick={() => saveEdit(r.id)} style={S.btnPrimary}>{t('保存')}</button>
+                              <button onClick={cancelEdit} style={S.btnGhost}>{t('取消')}</button>
+                            </>
+                          ) : (
+                            <>
+                              <button onClick={() => startEdit(r)} style={S.btnGhostSm}>✏</button>
+                              <button onClick={() => del(r)} style={{ ...S.btnGhostSm, color: c.red }}>×</button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
+                        {PERMISSION_KEYS.map(([key, label]) => {
+                          const enabled = draft.permissions?.[key] === true
+                          return (
+                            <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: enabled ? c.text : c.textMuted, cursor: isEdit ? 'pointer' : 'default' }}>
+                              <input type="checkbox" checked={enabled} disabled={!isEdit}
+                                onChange={e => isEdit && setEditDraft({ ...editDraft, permissions: { ...draft.permissions, [key]: e.target.checked } })} />
+                              {t(label)}
+                            </label>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  <input
+                    value={newRoleByCompany[co.id] || ''}
+                    onChange={e => setNewRoleByCompany(prev => ({ ...prev, [co.id]: e.target.value }))}
+                    placeholder={t('新職位名稱')}
+                    style={{ ...S.input, marginBottom: 0, flex: 1 }}
+                  />
+                  <button onClick={() => addRole(co.id)} disabled={!(newRoleByCompany[co.id] || '').trim()}
+                    style={{ ...S.btnPrimary, opacity: (newRoleByCompany[co.id] || '').trim() ? 1 : 0.4 }}>{t('新增職位')}</button>
+                </div>
+              </div>
+            )}
           </div>
         )
       })}
@@ -2522,6 +2534,14 @@ function DepartmentsView({ data, ctx }) {
   const [editName, setEditName] = useState('')
   const [addMemberFor, setAddMemberFor] = useState(null)
   const [memberQuery, setMemberQuery] = useState('')
+  const [collapsedCo, setCollapsedCo] = useState(() => new Set())
+  const toggleCo = (coId) => setCollapsedCo(prev => {
+    const n = new Set(prev); n.has(coId) ? n.delete(coId) : n.add(coId); return n
+  })
+  const [expandedDept, setExpandedDept] = useState(() => new Set())
+  const toggleDept = (dId) => setExpandedDept(prev => {
+    const n = new Set(prev); n.has(dId) ? n.delete(dId) : n.add(dId); return n
+  })
 
   const addDept = async (companyId) => {
     const name = (newDeptByCompany[companyId] || '').trim()
@@ -2573,88 +2593,104 @@ function DepartmentsView({ data, ctx }) {
         const coDepts = departments.filter(d => d.company_id === co.id)
         const coEmpIds = new Set(empCompanies.filter(ec => ec.company_id === co.id).map(ec => ec.employee_id))
         const coEmps = employees.filter(e => coEmpIds.has(e.id) && e.active !== false)
+        const isCoCollapsed = collapsedCo.has(co.id)
         return (
-          <div key={co.id} style={{ marginBottom: 28 }}>
-            <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10, color: c.text }}>{co.name}</h2>
-            {coDepts.length === 0 && <Empty>{t('還沒有部門')}</Empty>}
-            {coDepts.map(d => {
-              const memberIds = empDepts.filter(ed => ed.department_id === d.id).map(ed => ed.employee_id)
-              const memberEmps = coEmps.filter(e => memberIds.includes(e.id))
-              const nonMembers = coEmps.filter(e => !memberIds.includes(e.id))
-              const isEdit = editingId === d.id
-              const isAddingMember = addMemberFor === d.id
-              const q = memberQuery.toLowerCase()
-              const candidateNonMembers = q ? nonMembers.filter(e => (e.name || '').toLowerCase().includes(q)) : nonMembers
-              return (
-                <div key={d.id} style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.lg, padding: 14, marginBottom: 10 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8 }}>
-                    {isEdit ? (
-                      <input value={editName} onChange={e => setEditName(e.target.value)} style={{ ...S.input, marginBottom: 0, fontWeight: 600, flex: 1 }} />
-                    ) : (
-                      <div style={{ fontSize: 14, fontWeight: 700 }}>
-                        {d.name}
-                        <span style={{ fontSize: 11, color: c.textFaint, fontWeight: 400, marginLeft: 8 }}>{memberEmps.length} {t('人')}</span>
+          <div key={co.id} style={{ marginBottom: 14, background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.lg, overflow: 'hidden' }}>
+            <div onClick={() => toggleCo(co.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', cursor: 'pointer', borderBottom: isCoCollapsed ? 'none' : `1px solid ${c.border}`, background: c.bg }}>
+              <span style={{ fontSize: 11, color: c.textMuted, width: 12 }}>{isCoCollapsed ? '▶' : '▼'}</span>
+              <span style={{ fontSize: 15, fontWeight: 700 }}>{co.name}</span>
+              <span style={{ fontSize: 11, color: c.textFaint }}>{coDepts.length} {t('個部門')}</span>
+            </div>
+            {!isCoCollapsed && (
+              <div style={{ padding: 14 }}>
+                {coDepts.length === 0 && <Empty>{t('還沒有部門')}</Empty>}
+                {coDepts.map(d => {
+                  const memberIds = empDepts.filter(ed => ed.department_id === d.id).map(ed => ed.employee_id)
+                  const memberEmps = coEmps.filter(e => memberIds.includes(e.id))
+                  const nonMembers = coEmps.filter(e => !memberIds.includes(e.id))
+                  const isEdit = editingId === d.id
+                  const isAddingMember = addMemberFor === d.id
+                  const isExpanded = expandedDept.has(d.id)
+                  const q = memberQuery.toLowerCase()
+                  const candidateNonMembers = q ? nonMembers.filter(e => (e.name || '').toLowerCase().includes(q)) : nonMembers
+                  return (
+                    <div key={d.id} style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: radius.md, marginBottom: 10, overflow: 'hidden' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '10px 12px', cursor: isEdit ? 'default' : 'pointer' }}
+                        onClick={() => { if (!isEdit) toggleDept(d.id) }}>
+                        {isEdit ? (
+                          <input value={editName} onChange={e => setEditName(e.target.value)} onClick={e => e.stopPropagation()} style={{ ...S.input, marginBottom: 0, fontWeight: 600, flex: 1 }} />
+                        ) : (
+                          <div style={{ fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontSize: 10, color: c.textMuted, width: 10 }}>{isExpanded ? '▼' : '▶'}</span>
+                            {d.name}
+                            <span style={{ fontSize: 11, color: c.textFaint, fontWeight: 400 }}>{memberEmps.length} {t('人')}</span>
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', gap: 6 }} onClick={e => e.stopPropagation()}>
+                          {isEdit ? (
+                            <>
+                              <button onClick={() => saveEdit(d.id)} style={S.btnPrimary}>{t('保存')}</button>
+                              <button onClick={cancelEdit} style={S.btnGhost}>{t('取消')}</button>
+                            </>
+                          ) : (
+                            <>
+                              <button onClick={() => startEdit(d)} style={S.btnGhostSm}>✏</button>
+                              <button onClick={() => delDept(d)} style={{ ...S.btnGhostSm, color: c.red }}>×</button>
+                            </>
+                          )}
+                        </div>
                       </div>
-                    )}
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      {isEdit ? (
-                        <>
-                          <button onClick={() => saveEdit(d.id)} style={S.btnPrimary}>{t('保存')}</button>
-                          <button onClick={cancelEdit} style={S.btnGhost}>{t('取消')}</button>
-                        </>
-                      ) : (
-                        <>
-                          <button onClick={() => startEdit(d)} style={S.btnGhostSm}>✏</button>
-                          <button onClick={() => delDept(d)} style={{ ...S.btnGhostSm, color: c.red }}>×</button>
-                        </>
+
+                      {isExpanded && (
+                        <div style={{ padding: '0 12px 12px', borderTop: `1px solid ${c.border}` }}>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10, marginBottom: 8 }}>
+                            {memberEmps.length === 0 ? (
+                              <span style={{ fontSize: 11, color: c.textFaint }}>{t('暫無成員')}</span>
+                            ) : memberEmps.map(e => (
+                              <span key={e.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', background: c.accentBg, color: c.accent, borderRadius: 10, fontSize: 11, fontWeight: 600 }}>
+                                {e.name}
+                                <button onClick={() => removeMember(d.id, e.id)} style={{ background: 'none', border: 'none', color: c.accent, cursor: 'pointer', fontSize: 12, lineHeight: 1 }}>×</button>
+                              </span>
+                            ))}
+                          </div>
+
+                          {isAddingMember ? (
+                            <div style={{ borderTop: `1px dashed ${c.border}`, paddingTop: 8, marginTop: 4 }}>
+                              <input value={memberQuery} onChange={e => setMemberQuery(e.target.value)} placeholder={t('搜索員工姓名...')}
+                                style={{ ...S.input, marginBottom: 6 }} />
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxHeight: 160, overflowY: 'auto' }}>
+                                {candidateNonMembers.length === 0 ? (
+                                  <span style={{ fontSize: 11, color: c.textFaint }}>{t('沒有可加入的員工')}</span>
+                                ) : candidateNonMembers.map(e => (
+                                  <button key={e.id} onClick={() => addMember(d.id, e.id)}
+                                    style={{ padding: '4px 10px', background: c.bg, border: `1px solid ${c.border}`, borderRadius: 9, fontSize: 11, color: c.text, cursor: 'pointer' }}>
+                                    + {e.name}{e.role && <span style={{ color: c.textFaint, marginLeft: 4 }}>{e.role}</span>}
+                                  </button>
+                                ))}
+                              </div>
+                              <button onClick={() => { setAddMemberFor(null); setMemberQuery('') }} style={{ ...S.btnGhostSm, marginTop: 6 }}>{t('完成')}</button>
+                            </div>
+                          ) : (
+                            <button onClick={() => { setAddMemberFor(d.id); setMemberQuery('') }} style={{ ...S.btnGhostSm }}>+ {t('加入成員')}</button>
+                          )}
+                        </div>
                       )}
                     </div>
-                  </div>
+                  )
+                })}
 
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-                    {memberEmps.length === 0 ? (
-                      <span style={{ fontSize: 11, color: c.textFaint }}>{t('暫無成員')}</span>
-                    ) : memberEmps.map(e => (
-                      <span key={e.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', background: c.accentBg, color: c.accent, borderRadius: 10, fontSize: 11, fontWeight: 600 }}>
-                        {e.name}
-                        <button onClick={() => removeMember(d.id, e.id)} style={{ background: 'none', border: 'none', color: c.accent, cursor: 'pointer', fontSize: 12, lineHeight: 1 }}>×</button>
-                      </span>
-                    ))}
-                  </div>
-
-                  {isAddingMember ? (
-                    <div style={{ borderTop: `1px dashed ${c.border}`, paddingTop: 8, marginTop: 4 }}>
-                      <input value={memberQuery} onChange={e => setMemberQuery(e.target.value)} placeholder={t('搜索員工姓名...')}
-                        style={{ ...S.input, marginBottom: 6 }} />
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxHeight: 160, overflowY: 'auto' }}>
-                        {candidateNonMembers.length === 0 ? (
-                          <span style={{ fontSize: 11, color: c.textFaint }}>{t('沒有可加入的員工')}</span>
-                        ) : candidateNonMembers.map(e => (
-                          <button key={e.id} onClick={() => addMember(d.id, e.id)}
-                            style={{ padding: '4px 10px', background: c.bg, border: `1px solid ${c.border}`, borderRadius: 9, fontSize: 11, color: c.text, cursor: 'pointer' }}>
-                            + {e.name}{e.role && <span style={{ color: c.textFaint, marginLeft: 4 }}>{e.role}</span>}
-                          </button>
-                        ))}
-                      </div>
-                      <button onClick={() => { setAddMemberFor(null); setMemberQuery('') }} style={{ ...S.btnGhostSm, marginTop: 6 }}>{t('完成')}</button>
-                    </div>
-                  ) : (
-                    <button onClick={() => { setAddMemberFor(d.id); setMemberQuery('') }} style={{ ...S.btnGhostSm }}>+ {t('加入成員')}</button>
-                  )}
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  <input
+                    value={newDeptByCompany[co.id] || ''}
+                    onChange={e => setNewDeptByCompany(prev => ({ ...prev, [co.id]: e.target.value }))}
+                    placeholder={t('新部門名稱')}
+                    style={{ ...S.input, marginBottom: 0, flex: 1 }}
+                  />
+                  <button onClick={() => addDept(co.id)} disabled={!(newDeptByCompany[co.id] || '').trim()}
+                    style={{ ...S.btnPrimary, opacity: (newDeptByCompany[co.id] || '').trim() ? 1 : 0.4 }}>{t('新增部門')}</button>
                 </div>
-              )
-            })}
-
-            <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-              <input
-                value={newDeptByCompany[co.id] || ''}
-                onChange={e => setNewDeptByCompany(prev => ({ ...prev, [co.id]: e.target.value }))}
-                placeholder={t('新部門名稱')}
-                style={{ ...S.input, marginBottom: 0, flex: 1 }}
-              />
-              <button onClick={() => addDept(co.id)} disabled={!(newDeptByCompany[co.id] || '').trim()}
-                style={{ ...S.btnPrimary, opacity: (newDeptByCompany[co.id] || '').trim() ? 1 : 0.4 }}>{t('新增部門')}</button>
-            </div>
+              </div>
+            )}
           </div>
         )
       })}
