@@ -2642,37 +2642,58 @@ function DepartmentsView({ data, ctx }) {
                       </div>
 
                       {isExpanded && (
-                        <div style={{ padding: '0 12px 12px', borderTop: `1px solid ${c.border}` }}>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10, marginBottom: 8 }}>
-                            {memberEmps.length === 0 ? (
-                              <span style={{ fontSize: 11, color: c.textFaint }}>{t('暫無成員')}</span>
-                            ) : memberEmps.map(e => (
-                              <span key={e.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', background: c.accentBg, color: c.accent, borderRadius: 10, fontSize: 11, fontWeight: 600 }}>
-                                {e.name}
-                                <button onClick={() => removeMember(d.id, e.id)} style={{ background: 'none', border: 'none', color: c.accent, cursor: 'pointer', fontSize: 12, lineHeight: 1 }}>×</button>
-                              </span>
-                            ))}
-                          </div>
-
-                          {isAddingMember ? (
-                            <div style={{ borderTop: `1px dashed ${c.border}`, paddingTop: 8, marginTop: 4 }}>
-                              <input value={memberQuery} onChange={e => setMemberQuery(e.target.value)} placeholder={t('搜索員工姓名...')}
-                                style={{ ...S.input, marginBottom: 6 }} />
-                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxHeight: 160, overflowY: 'auto' }}>
-                                {candidateNonMembers.length === 0 ? (
-                                  <span style={{ fontSize: 11, color: c.textFaint }}>{t('沒有可加入的員工')}</span>
-                                ) : candidateNonMembers.map(e => (
-                                  <button key={e.id} onClick={() => addMember(d.id, e.id)}
-                                    style={{ padding: '4px 10px', background: c.bg, border: `1px solid ${c.border}`, borderRadius: 9, fontSize: 11, color: c.text, cursor: 'pointer' }}>
-                                    + {e.name}{e.role && <span style={{ color: c.textFaint, marginLeft: 4 }}>{e.role}</span>}
-                                  </button>
-                                ))}
-                              </div>
-                              <button onClick={() => { setAddMemberFor(null); setMemberQuery('') }} style={{ ...S.btnGhostSm, marginTop: 6 }}>{t('完成')}</button>
-                            </div>
+                        <div style={{ padding: '0 0 10px', borderTop: `1px solid ${c.border}`, background: c.card }}>
+                          {memberEmps.length === 0 ? (
+                            <div style={{ padding: 14, textAlign: 'center', fontSize: 12, color: c.textFaint }}>{t('暫無成員')}</div>
                           ) : (
-                            <button onClick={() => { setAddMemberFor(d.id); setMemberQuery('') }} style={{ ...S.btnGhostSm }}>+ {t('加入成員')}</button>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                              <thead>
+                                <tr style={{ borderBottom: `1px solid ${c.border}` }}>
+                                  <th style={tcell('left')}>{t('姓名')}</th>
+                                  <th style={tcell('left')}>{t('職位')}</th>
+                                  <th style={tcell('left')}>{t('電話')}</th>
+                                  <th style={tcell('right')}></th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {memberEmps.map(e => (
+                                  <tr key={e.id} style={{ borderBottom: `1px solid ${c.border}` }}>
+                                    <td style={{ padding: '8px 12px', fontWeight: 600 }}>{e.name}</td>
+                                    <td style={{ padding: '8px 12px', color: c.textMuted }}>{e.role || '—'}</td>
+                                    <td style={{ padding: '8px 12px', color: c.textMuted }}>{e.phone || '—'}</td>
+                                    <td style={{ padding: '8px 12px', textAlign: 'right' }}>
+                                      <button onClick={() => removeMember(d.id, e.id)} style={{ ...S.btnGhostSm, color: c.red }}>{t('移出')}</button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
                           )}
+
+                          <div style={{ padding: '10px 12px 0' }}>
+                            {isAddingMember ? (
+                              <div style={{ borderTop: `1px dashed ${c.border}`, paddingTop: 8 }}>
+                                <input value={memberQuery} onChange={e => setMemberQuery(e.target.value)} placeholder={t('搜索員工姓名...')}
+                                  style={{ ...S.input, marginBottom: 6 }} />
+                                <div style={{ maxHeight: 200, overflowY: 'auto', border: `1px solid ${c.border}`, borderRadius: radius.sm }}>
+                                  {candidateNonMembers.length === 0 ? (
+                                    <div style={{ padding: 10, fontSize: 11, color: c.textFaint, textAlign: 'center' }}>{t('沒有可加入的員工')}</div>
+                                  ) : candidateNonMembers.map(e => (
+                                    <div key={e.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', borderBottom: `1px solid ${c.border}`, fontSize: 12 }}>
+                                      <div>
+                                        <span style={{ fontWeight: 600 }}>{e.name}</span>
+                                        {e.role && <span style={{ color: c.textFaint, marginLeft: 8, fontSize: 11 }}>{e.role}</span>}
+                                      </div>
+                                      <button onClick={() => addMember(d.id, e.id)} style={S.btnPrimary}>+ {t('加入')}</button>
+                                    </div>
+                                  ))}
+                                </div>
+                                <button onClick={() => { setAddMemberFor(null); setMemberQuery('') }} style={{ ...S.btnGhostSm, marginTop: 6 }}>{t('完成')}</button>
+                              </div>
+                            ) : (
+                              <button onClick={() => { setAddMemberFor(d.id); setMemberQuery('') }} style={{ ...S.btnGhostSm }}>+ {t('加入成員')}</button>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>

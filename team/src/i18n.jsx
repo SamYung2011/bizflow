@@ -1262,6 +1262,8 @@ const DICT_EN = {
   "繼續？": "Continue?",
   "個職位": "roles",
   "個部門": "depts",
+  "移出": "Remove",
+  "加入": "Add",
 };
 
 const DICT_FR = {
@@ -2521,6 +2523,8 @@ const DICT_FR = {
   "繼續？": "Continuer ?",
   "個職位": "rôles",
   "個部門": "dépts",
+  "移出": "Retirer",
+  "加入": "Ajouter",
 };
 
 const I18nContext = createContext({ lang: "zh", setLang: () => {}, t: (s) => s });
