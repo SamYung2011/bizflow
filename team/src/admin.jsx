@@ -169,9 +169,9 @@ export default function AdminApp({ me, session, view, setView }) {
 
   // view 按權限 fallback
   const isSales = me.role === '銷售'
-  const canEmployees = ctx.isSuperAdmin || ctx.isAdminOfAny
+  const canEmployees = ctx.isSuperAdmin || ctx.isAdminOfAny || ctx.hasPermission('can_manage_employees')
   const canCompanies = ctx.isSuperAdmin
-  const canAccountReview = ctx.isSuperAdmin || ctx.isAdminOfAny
+  const canAccountReview = ctx.isSuperAdmin || ctx.isAdminOfAny || ctx.hasPermission('can_approve_registration')
   const canCommission = ctx.isSuperAdmin || ctx.hasPermission('can_view_commission') || isSales
   const canManageRoles = ctx.isSuperAdmin || ctx.isAdminOfActive || ctx.hasPermission('can_manage_roles')
   const allowedViews = ['tasks', 'updatelog']
@@ -340,12 +340,12 @@ function TasksView({ data, me, session, isMobile, ctx }) {
         {selectedEmp ? (
           <div>
             <button onClick={() => setSelectedEmpId(null)} style={{ ...S.btnGhostSm, marginBottom: 12 }}>← {t('返回員工列表')}</button>
-            <TaskBoard emp={selectedEmp} data={scopedData} me={me} userId={userId} setEditingTask={setEditingTask} companyId={ctx.activeCompanyId} compact />
+            <TaskBoard emp={selectedEmp} data={scopedData} me={me} userId={userId} setEditingTask={setEditingTask} companyId={ctx.activeCompanyId} ctx={ctx} compact />
           </div>
         ) : (
           <EmpListMobile employees={visibleEmployees} companies={companies} companyFilter={companyFilter} setCompanyFilter={setCompanyFilter} tasks={tasks} assigneesByTask={assigneesByTask} onSelect={(e) => setSelectedEmpId(e.id)} me={me} />
         )}
-        {editingTask && <EditTaskModal task={editingTask} data={scopedData} me={me} userId={userId} onClose={() => setEditingTask(null)} />}
+        {editingTask && <EditTaskModal task={editingTask} data={scopedData} me={me} userId={userId} onClose={() => setEditingTask(null)} ctx={ctx} />}
       </div>
     )
   }
@@ -361,12 +361,12 @@ function TasksView({ data, me, session, isMobile, ctx }) {
         {mode === 'overview' ? (
           <OverviewView employees={visibleEmployees} tasks={tasks} assigneesByTask={assigneesByTask} expanded={overviewExpanded} setExpanded={setOverviewExpanded} setEditingTask={setEditingTask} />
         ) : selectedEmp ? (
-          <TaskBoard emp={selectedEmp} data={scopedData} me={me} userId={userId} setEditingTask={setEditingTask} companyId={ctx.activeCompanyId} />
+          <TaskBoard emp={selectedEmp} data={scopedData} me={me} userId={userId} setEditingTask={setEditingTask} companyId={ctx.activeCompanyId} ctx={ctx} />
         ) : (
           <Empty>← {t('從左側選擇員工查看任務看板')}</Empty>
         )}
       </div>
-      {editingTask && <EditTaskModal task={editingTask} data={scopedData} me={me} userId={userId} onClose={() => setEditingTask(null)} />}
+      {editingTask && <EditTaskModal task={editingTask} data={scopedData} me={me} userId={userId} onClose={() => setEditingTask(null)} ctx={ctx} />}
     </div>
   )
 }
@@ -498,7 +498,7 @@ function OverviewView({ employees, tasks, assigneesByTask, expanded, setExpanded
 }
 
 // ====================  TASK BOARD（單員工任務看板）  ====================
-function TaskBoard({ emp, data, me, userId, setEditingTask, compact, companyId }) {
+function TaskBoard({ emp, data, me, userId, setEditingTask, compact, companyId, ctx }) {
   const { t } = useT()
   const { employees, tasks, feedbacks, assigneesByTask } = data
   const queryClient = useQueryClient()
@@ -658,10 +658,10 @@ function TaskBoard({ emp, data, me, userId, setEditingTask, compact, companyId }
     </div>
   )
 
-  // 只有 admin / 本人 / 同公司同事可新增任務（普通員工給同事分配，沿用 bizflow 邏輯）
-  const canCreate = me.is_admin || emp.id === me.id || (me.company_id && emp.company_id === me.company_id)
+  // 新增任務權限：super/company admin / 有 can_create_task / 自己給自己（永遠允許）
+  const canCreate = ctx?.isSuperAdmin || ctx?.isAdminOfActive || ctx?.hasPermission?.('can_create_task') || emp.id === me.id
   const newTaskBlock = canCreate
-    ? <NewTaskForm emp={emp} me={me} employees={employees} companyId={companyId} />
+    ? <NewTaskForm emp={emp} me={me} employees={employees} companyId={companyId} ctx={ctx} />
     : <div style={{ background: c.card, border: `1px dashed ${c.border}`, borderRadius: radius.lg, padding: 24, textAlign: 'center', color: c.textFaint, fontSize: 12 }}>{t('非本公司同事，無法新增任務')}</div>
 
   return (
@@ -763,7 +763,7 @@ function FbPanel({ fbList, feedbacks, setEditingTask }) {
 }
 
 // 新建任務表單
-function NewTaskForm({ emp, me, employees, companyId }) {
+function NewTaskForm({ emp, me, employees, companyId, ctx }) {
   const { t } = useT()
   const queryClient = useQueryClient()
   const [title, setTitle] = useState('')
@@ -783,7 +783,11 @@ function NewTaskForm({ emp, me, employees, companyId }) {
   const sameCo = (e) => emp.company_id ? e.company_id === emp.company_id : true
   const activeEmps = employees.filter(e => e.active !== false && sameCo(e))
   const q = assigneeInput.replace(/^@/, '').toLowerCase()
-  const candidates = activeEmps.filter(e => !effective.includes(e.id) && (q === '' || (e.name || '').toLowerCase().includes(q)))
+  // can_assign_others：沒這個權限 → 候選列表空 + 鎖住現有 assignee 不能刪（強制只能自己）
+  const canAssignOthers = ctx?.isSuperAdmin || ctx?.isAdminOfActive || ctx?.hasPermission?.('can_assign_others')
+  const candidates = canAssignOthers
+    ? activeEmps.filter(e => !effective.includes(e.id) && (q === '' || (e.name || '').toLowerCase().includes(q)))
+    : []
 
   const submit = async () => {
     if (!title.trim() || effective.length === 0) return
@@ -844,19 +848,19 @@ function NewTaskForm({ emp, me, employees, companyId }) {
           <button key={opt.v} onClick={() => setPriority(opt.v)} style={{ flex: 1, padding: '6px 0', borderRadius: radius.sm, border: `1px solid ${priority === opt.v ? opt.c : c.border}`, background: priority === opt.v ? opt.c + '18' : c.bg, color: priority === opt.v ? opt.c : c.textMuted, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>{opt.l}</button>
         ))}
       </div>
-      <div style={{ fontSize: 11, color: c.textMuted, marginBottom: 4 }}>{t('分配給')} · {effective.length}</div>
-      <div style={{ position: 'relative', border: `1px solid ${c.border}`, borderRadius: radius.sm, padding: '4px 6px', marginBottom: 8, display: 'flex', flexWrap: 'wrap', gap: 3, minHeight: 28, background: c.card }}>
+      <div style={{ fontSize: 11, color: c.textMuted, marginBottom: 4 }}>{t('分配給')} · {effective.length}{!canAssignOthers && <span style={{ color: c.textFaint, marginLeft: 6, fontSize: 10 }}>{t('（無權分配他人）')}</span>}</div>
+      <div style={{ position: 'relative', border: `1px solid ${c.border}`, borderRadius: radius.sm, padding: '4px 6px', marginBottom: 8, display: 'flex', flexWrap: 'wrap', gap: 3, minHeight: 28, background: c.card, opacity: canAssignOthers ? 1 : 0.7 }}>
         {effective.map(id => {
           const e2 = employees.find(x => x.id === id)
           return (
             <span key={id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2, padding: '2px 6px', background: c.accentBg, color: c.accent, borderRadius: 9, fontSize: 10, fontWeight: 600 }}>
               @{e2?.name || '?'}
-              <button type="button" onClick={() => setAssigneeIds(effective.filter(x => x !== id))} style={{ background: 'none', border: 'none', color: c.accent, cursor: 'pointer', fontSize: 11 }}>×</button>
+              {canAssignOthers && <button type="button" onClick={() => setAssigneeIds(effective.filter(x => x !== id))} style={{ background: 'none', border: 'none', color: c.accent, cursor: 'pointer', fontSize: 11 }}>×</button>}
             </span>
           )
         })}
-        <input value={assigneeInput} onChange={e => { setAssigneeInput(e.target.value); setAssigneeOpen(true) }} onFocus={() => setAssigneeOpen(true)} onBlur={() => setTimeout(() => setAssigneeOpen(false), 200)} placeholder={t('@ 加成員')} style={{ flex: 1, minWidth: 60, border: 'none', outline: 'none', fontSize: 11, background: 'transparent' }} />
-        {assigneeOpen && candidates.length > 0 && (
+        {canAssignOthers && <input value={assigneeInput} onChange={e => { setAssigneeInput(e.target.value); setAssigneeOpen(true) }} onFocus={() => setAssigneeOpen(true)} onBlur={() => setTimeout(() => setAssigneeOpen(false), 200)} placeholder={t('@ 加成員')} style={{ flex: 1, minWidth: 60, border: 'none', outline: 'none', fontSize: 11, background: 'transparent' }} />}
+        {assigneeOpen && canAssignOthers && candidates.length > 0 && (
           <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 3, background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.sm, boxShadow: '0 4px 14px rgba(0,0,0,0.1)', padding: 3, width: '100%', maxHeight: 180, overflowY: 'auto', zIndex: 30 }}>
             {candidates.map(e2 => (
               <button key={e2.id} type="button" onMouseDown={ev => { ev.preventDefault(); setAssigneeIds([...effective, e2.id]); setAssigneeInput('') }} style={{ display: 'block', width: '100%', textAlign: 'left', padding: '5px 8px', background: 'none', border: 'none', fontSize: 11, color: c.text, cursor: 'pointer', borderRadius: 3 }}>{e2.name}{e2.role && <span style={{ color: c.textFaint, marginLeft: 4, fontSize: 9 }}>{e2.role}</span>}</button>
@@ -934,7 +938,7 @@ export async function uploadAttachment(file, taskId) {
 }
 
 // ====================  EDIT TASK MODAL  ====================
-function EditTaskModal({ task: initial, data, me, userId, onClose }) {
+function EditTaskModal({ task: initial, data, me, userId, onClose, ctx }) {
   const { t } = useT()
   const { employees, tasks, feedbacks, assigneesByTask } = data
   const queryClient = useQueryClient()
@@ -945,7 +949,9 @@ function EditTaskModal({ task: initial, data, me, userId, onClose }) {
   const tkList = assigneesByTask.get(tk.id) || []
   const isAssignee = tkList.some(a => a.employee_id === me.id)
   const isCreator = tk.creator_employee_id === me.id
-  const canEdit = me.is_admin || isCreator
+  // RBAC：super/company admin / 有 can_edit_others_tasks / 創建人本人 → 可編輯
+  const canEdit = ctx?.isSuperAdmin || ctx?.isAdminOfActive || isCreator || ctx?.hasPermission?.('can_edit_others_tasks')
+  const canAssignOthers = ctx?.isSuperAdmin || ctx?.isAdminOfActive || ctx?.hasPermission?.('can_assign_others')
   const ro = !canEdit
   // 公司範圍：所有候選都限本任務所屬公司（admin 通過左側員工列表切換）
   const scopeCompanyId = getTaskCompanyId(tk, assigneesByTask, employees)
@@ -1015,7 +1021,8 @@ function EditTaskModal({ task: initial, data, me, userId, onClose }) {
     onClose()
   }
 
-  const canDelete = me.is_admin || isCreator || (isAssignee && tkList.length === 1 && !tk.needs_approval)
+  const canDelete = ctx?.isSuperAdmin || ctx?.isAdminOfActive || isCreator || (isAssignee && tkList.length === 1 && !tk.needs_approval) || ctx?.hasPermission?.('can_delete_others_tasks')
+  const canValidate = ctx?.isSuperAdmin || ctx?.isAdminOfActive || isCreator || ctx?.hasPermission?.('can_validate_task')
 
   return (
     <div style={S.modal} onClick={onClose}>
@@ -1035,8 +1042,8 @@ function EditTaskModal({ task: initial, data, me, userId, onClose }) {
 
         {isAwaitingApproval(tk, assigneesByTask) && (
           <div style={{ background: c.amberBg, border: '1px solid #fde68a', borderRadius: radius.sm, padding: '10px 14px', marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-            <div style={{ fontSize: 12, color: '#a16207', fontWeight: 600 }}>⏳ {t('此任務全員已結算')}{(me.is_admin || isCreator) ? t('，待你核驗') : t('，等待發布人核驗')}</div>
-            {(me.is_admin || isCreator) && <button onClick={approve} style={{ background: c.amber, color: '#fff', border: 'none', borderRadius: radius.sm, padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>✓ {t('核驗通過')}</button>}
+            <div style={{ fontSize: 12, color: '#a16207', fontWeight: 600 }}>⏳ {t('此任務全員已結算')}{canValidate ? t('，待你核驗') : t('，等待發布人核驗')}</div>
+            {canValidate && <button onClick={approve} style={{ background: c.amber, color: '#fff', border: 'none', borderRadius: radius.sm, padding: '6px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>✓ {t('核驗通過')}</button>}
           </div>
         )}
 
@@ -1045,7 +1052,7 @@ function EditTaskModal({ task: initial, data, me, userId, onClose }) {
           <input type="date" value={tk.due_date || ''} readOnly={ro} onChange={e => setTk({ ...tk, due_date: e.target.value || null })} onBlur={() => updateField({ due_date: tk.due_date || null })} style={{ padding: '4px 8px', borderRadius: radius.sm, border: `1px solid ${c.border}`, fontSize: 12 }} />
         </div>
 
-        <AssigneeEditor tk={tk} tkList={tkList} employees={employees} canManage={canEdit} setAssignees={setAssignees} scopeCompanyId={scopeCompanyId} />
+        <AssigneeEditor tk={tk} tkList={tkList} employees={employees} canManage={canEdit && canAssignOthers} setAssignees={setAssignees} scopeCompanyId={scopeCompanyId} />
 
         {canEdit ? (
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 8, fontSize: 12, color: c.textMuted, cursor: 'pointer' }}>
@@ -1060,9 +1067,9 @@ function EditTaskModal({ task: initial, data, me, userId, onClose }) {
 
         <AttachmentList tk={tk} ro={ro} onUpdate={updateField} />
 
-        <SubtaskList tk={tk} subtasks={subtasks} employees={employees} feedbacks={feedbacks} assigneesByTask={assigneesByTask} me={me} canEdit={canEdit} scopeCompanyId={scopeCompanyId} />
+        <SubtaskList tk={tk} subtasks={subtasks} employees={employees} feedbacks={feedbacks} assigneesByTask={assigneesByTask} me={me} canEdit={canEdit} scopeCompanyId={scopeCompanyId} ctx={ctx} />
 
-        <FeedbackThread tk={tk} fbList={fbList} employees={employees} me={me} userId={userId} scopeCompanyId={scopeCompanyId} />
+        <FeedbackThread tk={tk} fbList={fbList} employees={employees} me={me} userId={userId} scopeCompanyId={scopeCompanyId} ctx={ctx} />
 
         <div style={{ fontSize: 10, color: c.textFaint, marginTop: 12, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <span>{t('添加於')} {fmtDateTime(tk.created_at)}</span>
@@ -1172,7 +1179,7 @@ function AttachmentList({ tk, ro, onUpdate }) {
   )
 }
 
-function SubtaskList({ tk, subtasks, employees, feedbacks, assigneesByTask, me, canEdit, scopeCompanyId }) {
+function SubtaskList({ tk, subtasks, employees, feedbacks, assigneesByTask, me, canEdit, scopeCompanyId, ctx }) {
   const { t } = useT()
   const queryClient = useQueryClient()
   const [subTitle, setSubTitle] = useState('')
@@ -1224,7 +1231,7 @@ function SubtaskList({ tk, subtasks, employees, feedbacks, assigneesByTask, me, 
       {subtasks.map(st => {
         const fbCount = feedbacks.filter(f => f.task_id === st.id).length
         const stIsMine = (assigneesByTask.get(st.id) || []).some(a => a.employee_id === me.id)
-        const canTick = me.is_admin || tk.creator_employee_id === me.id || stIsMine
+        const canTick = ctx?.isSuperAdmin || ctx?.isAdminOfActive || tk.creator_employee_id === me.id || stIsMine || ctx?.hasPermission?.('can_validate_task')
         return (
           <div key={st.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 0', borderBottom: `1px solid ${c.border}` }}>
             <input type="checkbox" checked={st.status === 'done' || empDoneFor(st, me.id, assigneesByTask)} disabled={!canTick} onChange={() => canTick && toggleSubDone(st)} style={{ width: 14, height: 14, cursor: canTick ? 'pointer' : 'not-allowed' }} />
@@ -1265,7 +1272,7 @@ function SubtaskList({ tk, subtasks, employees, feedbacks, assigneesByTask, me, 
   )
 }
 
-function FeedbackThread({ tk, fbList, employees, me, userId, scopeCompanyId }) {
+function FeedbackThread({ tk, fbList, employees, me, userId, scopeCompanyId, ctx }) {
   const { t } = useT()
   const queryClient = useQueryClient()
   const [body, setBody] = useState('')
@@ -1331,7 +1338,7 @@ function FeedbackThread({ tk, fbList, employees, me, userId, scopeCompanyId }) {
           <div style={{ fontSize: 11, color: '#b88a00', fontStyle: 'italic' }}>{t('暫無反饋')}</div>
         ) : fbList.map(fb => {
           const isOwn = fb.author_user_id === userId
-          const canDel = isOwn || me.is_admin
+          const canDel = isOwn || ctx?.isSuperAdmin || ctx?.isAdminOfActive
           const isReply = !!fb.parent_feedback_id
           const parent = isReply ? fbList.find(p => p.id === fb.parent_feedback_id) : null
           return (
