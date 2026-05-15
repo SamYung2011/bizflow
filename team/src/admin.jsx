@@ -21,9 +21,8 @@ const PERMISSION_KEYS = [
   ['can_validate_task', '核驗任務'],
   ['can_manage_employees', '管理員工'],
   ['can_approve_registration', '審核加入申請'],
-  ['can_view_commission', '看佣金'],
+  ['can_view_commission', '看佣金（僅本人銷售業績）'],
   ['can_manage_roles', '管理職位'],
-  ['can_post_update_log', '發更新日誌'],
 ]
 
 // 共享數據 hooks
