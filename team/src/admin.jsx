@@ -1456,10 +1456,57 @@ function EmployeesView({ data, me, isMobile, ctx }) {
     refresh()
   }
 
-  const del = async (emp) => {
-    if (!confirm(t('確定刪除員工') + '「' + emp.name + '」' + t('？該員工的所有任務也會被刪除。此操作不可撤銷。'))) return
-    const { error } = await supabase.from('employees').delete().eq('id', emp.id)
-    if (error) return alert(t('刪除失敗：') + error.message)
+  // 「移除出本公司」：只刪該員工在當前活躍公司的 binding + 任務 / assignees。
+  // 若該員工沒別的公司 binding（變孤兒）→ 標 active=false + deactivated_at，6 天後 pg_cron 自動清。
+  const removeFromCompany = async (emp) => {
+    const targetCompanyId = ctx?.activeCompanyId
+    if (!targetCompanyId) return alert(t('未選定公司'))
+    if (emp.id === me.id) return alert(t('不能移除自己'))
+    const empBindings = empCompanies.filter(ec => ec.employee_id === emp.id)
+    const willBeOrphan = empBindings.length === 1 && empBindings[0].company_id === targetCompanyId
+    const targetCo = companies.find(co => co.id === targetCompanyId)
+    const msg = willBeOrphan
+      ? (t('員工只屬於') + targetCo?.name + t('，移除等於銷號。6 天後自動清除所有任務 + 帳號。確定？'))
+      : (t('把') + ' ' + emp.name + ' ' + t('從') + targetCo?.name + t('移除？\n他在本公司創建的任務 + assignee 行會一併刪除。其他公司的數據保留。'))
+    if (!confirm(msg)) return
+    try {
+      // 刪該員工在本公司創建的所有任務（cascade 帶 assignees + feedbacks）
+      await supabase.from('employee_tasks').delete()
+        .eq('creator_employee_id', emp.id)
+        .eq('company_id', targetCompanyId)
+      // 刪該員工在本公司任務的 assignees 行（A 是 assignee 不是 creator 的情況）
+      const { data: companyTasks } = await supabase.from('employee_tasks')
+        .select('id').eq('company_id', targetCompanyId)
+      if (companyTasks && companyTasks.length > 0) {
+        await supabase.from('task_assignees').delete()
+          .eq('employee_id', emp.id)
+          .in('task_id', companyTasks.map(tk => tk.id))
+      }
+      // 刪 binding
+      const { error: bErr } = await supabase.from('employee_companies').delete()
+        .eq('employee_id', emp.id)
+        .eq('company_id', targetCompanyId)
+      if (bErr) throw bErr
+      // 變孤兒 → 標停用
+      if (willBeOrphan) {
+        await supabase.from('employees').update({
+          active: false,
+          deactivated_at: new Date().toISOString(),
+        }).eq('id', emp.id)
+      }
+      refresh()
+    } catch (e) {
+      alert(t('移除失敗：') + (e.message || String(e)))
+    }
+  }
+
+  // 「永久刪除」：super admin only，繞過 6 天 grace。走 RPC（前端沒權限刪 auth.users）。
+  const permanentDelete = async (emp) => {
+    if (emp.id === me.id) return alert(t('不能刪除自己'))
+    if (!confirm(t('永久刪除') + ' ' + emp.name + ' ？\n' + t('他的所有任務 / 公司綁定 / 帳號全部清除，不可恢復。'))) return
+    if (!confirm(t('再次確認：永久刪除 ') + emp.name + ' ？')) return
+    const { error } = await supabase.rpc('permanent_delete_employee', { emp_id: emp.id })
+    if (error) return alert(t('永久刪除失敗：') + error.message)
     refresh()
   }
 
@@ -1498,7 +1545,7 @@ function EmployeesView({ data, me, isMobile, ctx }) {
             {visibleEmployees.map(e => (
               <EmployeeRow key={e.id} emp={e} companies={companies} empCompanies={empCompanies} roles={roles}
                 companyContext={companyFilter !== 'all' ? companyFilter : ctx?.activeCompanyId}
-                updateField={updateField} updateBinding={updateBinding} del={del} me={me} ctx={ctx} />
+                updateField={updateField} updateBinding={updateBinding} removeFromCompany={removeFromCompany} permanentDelete={permanentDelete} me={me} ctx={ctx} />
             ))}
           </tbody>
         </table>
@@ -1511,7 +1558,7 @@ function EmployeesView({ data, me, isMobile, ctx }) {
 
 const tcell = (align = 'left') => ({ padding: '10px 12px', textAlign: align, fontSize: 11, color: c.textMuted, fontWeight: 600, letterSpacing: 0.3 })
 
-function EmployeeRow({ emp, companies, empCompanies, roles, companyContext, updateField, updateBinding, del, me, ctx }) {
+function EmployeeRow({ emp, companies, empCompanies, roles, companyContext, updateField, updateBinding, removeFromCompany, permanentDelete, me, ctx }) {
   const { t } = useT()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(emp)
@@ -1583,7 +1630,12 @@ function EmployeeRow({ emp, companies, empCompanies, roles, companyContext, upda
         ) : (
           <>
             <button onClick={() => setEditing(true)} style={{ ...S.btnGhostSm, padding: '4px 8px', marginRight: 4 }}>{t('編輯')}</button>
-            {(ctx?.isSuperAdmin || ctx?.isAdminOfActive) && <button onClick={() => del(emp)} style={{ background: 'none', border: 'none', color: c.red, fontSize: 11, cursor: 'pointer', padding: 4 }}>{t('刪除')}</button>}
+            {(ctx?.isSuperAdmin || ctx?.isAdminOfActive) && (
+              <button onClick={() => removeFromCompany(emp)} style={{ background: 'none', border: 'none', color: c.red, fontSize: 11, cursor: 'pointer', padding: 4, marginRight: 4 }} title={t('刪除該員工在本公司的所有任務 + 解綁。其他公司不影響。')}>{t('移除')}</button>
+            )}
+            {ctx?.isSuperAdmin && (
+              <button onClick={() => permanentDelete(emp)} style={{ background: 'none', border: 'none', color: c.red, fontSize: 10, cursor: 'pointer', padding: 4, opacity: 0.7 }} title={t('繞過 6 天 grace，立即永久刪除員工 + 帳號')}>{t('永久刪')}</button>
+            )}
           </>
         )}
       </td>
