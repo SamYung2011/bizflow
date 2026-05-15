@@ -51,7 +51,7 @@ const supabase = createClient(
 );
 
 // Chrome 雲端版扩展最新版本（發版時跟 chrome-extension-cloud/manifest.json 的 version 同步改）
-const LATEST_EXT_VERSION_FALLBACK = "1.3.2";
+const LATEST_EXT_VERSION_FALLBACK = "1.3.3";
 
 // 全量拉取指定表（HEAD 先取 count，再並行分頁拉所有資料）
 async function fetchAllTable(table, orderCol, ascending = true, secondaryOrder = "id") {
