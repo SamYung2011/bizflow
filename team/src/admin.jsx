@@ -39,6 +39,8 @@ function useAdminData() {
   const qFeedbacks = useQuery({ queryKey: ['admin', 'feedbacks'], queryFn: () => fetchAllTable('employee_task_feedbacks', 'created_at'), refetchInterval: 30000 })
   const qPending = useQuery({ queryKey: ['admin', 'task_pending'], queryFn: () => fetchAllTable('task_pending', 'requested_at', false), refetchInterval: 30000 })
   const qJoinPending = useQuery({ queryKey: ['admin', 'company_join_pending'], queryFn: () => fetchAllTable('company_join_pending', 'requested_at', false), refetchInterval: 30000 })
+  const qDepartments = useQuery({ queryKey: ['admin', 'departments'], queryFn: () => fetchAllTable('departments', 'name'), refetchInterval: 120000 })
+  const qEmpDepts = useQuery({ queryKey: ['admin', 'employee_departments'], queryFn: () => fetchAllTable('employee_departments', 'created_at'), refetchInterval: 120000 })
 
   // realtime 訂閱：DB 任意改動立即觸發 invalidate
   useEffect(() => {
@@ -52,6 +54,8 @@ function useAdminData() {
       ['roles', ['admin', 'roles']],
       ['task_pending', ['admin', 'task_pending']],
       ['company_join_pending', ['admin', 'company_join_pending']],
+      ['departments', ['admin', 'departments']],
+      ['employee_departments', ['admin', 'employee_departments']],
     ]
     const channels = tables.map(([table, key]) => supabase
       .channel(`team-${table}`)
@@ -72,6 +76,8 @@ function useAdminData() {
   const feedbacks = qFeedbacks.data || []
   const pendings = qPending.data || []
   const joinPendings = qJoinPending.data || []
+  const departments = qDepartments.data || []
+  const empDepts = qEmpDepts.data || []
 
   const assigneesByTask = useMemo(() => {
     const m = new Map()
@@ -82,7 +88,7 @@ function useAdminData() {
     return m
   }, [assignees])
 
-  return { employees, companies, empCompanies, roles, tasks, assignees, feedbacks, pendings, joinPendings, assigneesByTask, loading: qEmployees.isLoading || qTasks.isLoading }
+  return { employees, companies, empCompanies, roles, tasks, assignees, feedbacks, pendings, joinPendings, departments, empDepts, assigneesByTask, loading: qEmployees.isLoading || qTasks.isLoading }
 }
 
 // 計算當前用戶的「公司綁定」、活躍公司、職位權限
@@ -193,7 +199,7 @@ export default function AdminApp({ me, session, view, setView }) {
         {safeView === 'commission' && canCommission && (
           <CommissionView employees={ctx.isSuperAdmin ? data.employees : [me]} me={me} lockedEmpId={ctx.isSuperAdmin ? null : me.id} />
         )}
-        {safeView === 'roles' && canManageRoles && <RolesView data={data} ctx={ctx} />}
+        {safeView === 'roles' && canManageRoles && <RolesAndDepartmentsView data={data} ctx={ctx} />}
         {safeView === 'updatelog' && <UpdateLogView me={me} session={session} isMobile={isMobile} />}
       </main>
       {showProfile && <ProfileModal me={me} data={data} onClose={() => setShowProfile(false)} />}
@@ -212,7 +218,7 @@ function AdminTopBar({ me, ctx, data, view, setView, isMobile, pendingCount, onP
     ['tasks', t('任務'), true],
     ['employees', t('員工管理'), canEmployees],
     ['companies', t('公司管理'), canCompanies],
-    ['roles', t('職位管理'), canManageRoles],
+    ['roles', t('職位 / 權限 / 部門管理'), canManageRoles],
     ['accountreview', t('帳號審核'), canAccountReview],
     ['commission', ctx.isSuperAdmin ? t('佣金') : t('我的佣金'), canCommission],
     ['updatelog', t('更新日誌'), true],
@@ -500,7 +506,7 @@ function OverviewView({ employees, tasks, assigneesByTask, expanded, setExpanded
 // ====================  TASK BOARD（單員工任務看板）  ====================
 function TaskBoard({ emp, data, me, userId, setEditingTask, compact, companyId, ctx }) {
   const { t } = useT()
-  const { employees, tasks, feedbacks, assigneesByTask } = data
+  const { employees, tasks, feedbacks, assigneesByTask, departments, empDepts } = data
   const queryClient = useQueryClient()
 
   // emp 是 assignee 或 creator 的任務
@@ -641,6 +647,10 @@ function TaskBoard({ emp, data, me, userId, setEditingTask, compact, companyId, 
                 const cr = employees.find(x => x.id === task.creator_employee_id)
                 return <span style={{ background: c.amberBg, color: c.amber, padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>{t('等待')} {cr?.name || t('發布人')} {t('核驗')}</span>
               })()}
+              {task.department_id && (() => {
+                const d = (departments || []).find(x => x.id === task.department_id)
+                return d ? <span style={{ background: '#f3e8ff', color: '#7c3aed', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>{d.name} {t('部門')}</span> : null
+              })()}
             </div>
           </div>
         </div>
@@ -661,7 +671,7 @@ function TaskBoard({ emp, data, me, userId, setEditingTask, compact, companyId, 
   // 新增任務權限：super/company admin / 有 can_create_task / 自己給自己（永遠允許）
   const canCreate = ctx?.isSuperAdmin || ctx?.isAdminOfActive || ctx?.hasPermission?.('can_create_task') || emp.id === me.id
   const newTaskBlock = canCreate
-    ? <NewTaskForm emp={emp} me={me} employees={employees} companyId={companyId} ctx={ctx} />
+    ? <NewTaskForm emp={emp} me={me} employees={employees} companyId={companyId} departments={departments} empDepts={empDepts} ctx={ctx} />
     : <div style={{ background: c.card, border: `1px dashed ${c.border}`, borderRadius: radius.lg, padding: 24, textAlign: 'center', color: c.textFaint, fontSize: 12 }}>{t('非本公司同事，無法新增任務')}</div>
 
   return (
@@ -763,7 +773,7 @@ function FbPanel({ fbList, feedbacks, setEditingTask }) {
 }
 
 // 新建任務表單
-function NewTaskForm({ emp, me, employees, companyId, ctx }) {
+function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts = [], ctx }) {
   const { t } = useT()
   const queryClient = useQueryClient()
   const [title, setTitle] = useState('')
@@ -777,11 +787,27 @@ function NewTaskForm({ emp, me, employees, companyId, ctx }) {
   const [files, setFiles] = useState([])
   const [busy, setBusy] = useState(false)
   const [subtaskTitles, setSubtaskTitles] = useState([])  // 子任務標題列表，submit 時一起 INSERT，assignees 沿用父任務
+  const [departmentId, setDepartmentId] = useState('')  // '' = 公司內可見；非空 = 部門專屬
+
+  // 任務所屬公司：companyId prop → emp.company_id → me.company_id
+  const taskCompanyId = companyId || emp?.company_id || me.company_id
+  // 該公司的部門列表
+  const coDepartments = useMemo(
+    () => departments.filter(d => d.company_id === taskCompanyId),
+    [departments, taskCompanyId]
+  )
+  // 選中部門時的成員 id set（過濾候選 assignee 用）
+  const deptMemberIds = useMemo(() => {
+    if (!departmentId) return null
+    return new Set(empDepts.filter(ed => ed.department_id === departmentId).map(ed => ed.employee_id))
+  }, [departmentId, empDepts])
 
   const effective = assigneeIds === null ? [emp.id] : assigneeIds
   // 候選限本公司（emp 所屬公司）；admin 跨公司請左側切員工
   const sameCo = (e) => emp.company_id ? e.company_id === emp.company_id : true
-  const activeEmps = employees.filter(e => e.active !== false && sameCo(e))
+  let activeEmps = employees.filter(e => e.active !== false && sameCo(e))
+  // 選了部門 → 候選再過濾為該部門成員
+  if (deptMemberIds) activeEmps = activeEmps.filter(e => deptMemberIds.has(e.id))
   const q = assigneeInput.replace(/^@/, '').toLowerCase()
   // can_assign_others：沒這個權限 → 候選列表空 + 鎖住現有 assignee 不能刪（強制只能自己）
   const canAssignOthers = ctx?.isSuperAdmin || ctx?.isAdminOfActive || ctx?.hasPermission?.('can_assign_others')
@@ -807,6 +833,7 @@ function NewTaskForm({ emp, me, employees, companyId, ctx }) {
         note: note.trim() || null,
         due_date: dueDate || null,
         company_id: effectiveCompanyId,
+        department_id: departmentId || null,
       }).select().single()
       if (error) throw error
       const rows = effective.map(eid => ({ task_id: data.id, employee_id: eid }))
@@ -827,11 +854,12 @@ function NewTaskForm({ emp, me, employees, companyId, ctx }) {
           priority: 'none',
           parent_task_id: data.id,
           company_id: effectiveCompanyId,
+          department_id: departmentId || null,
         }).select().single()
         if (se) { console.error('子任務新增失敗', se); continue }
         await supabase.from('task_assignees').insert(effective.map(eid => ({ task_id: sub.id, employee_id: eid })))
       }
-      setTitle(''); setNote(''); setPriority('low'); setAssigneeIds(null); setNeedsApproval(false); setDueDate(''); setFiles([]); setSubtaskTitles([])
+      setTitle(''); setNote(''); setPriority('low'); setAssigneeIds(null); setNeedsApproval(false); setDueDate(''); setFiles([]); setSubtaskTitles([]); setDepartmentId('')
       queryClient.invalidateQueries({ queryKey: ['admin', 'employee_tasks'] })
       queryClient.invalidateQueries({ queryKey: ['admin', 'task_assignees'] })
     } catch (e) {
@@ -848,6 +876,30 @@ function NewTaskForm({ emp, me, employees, companyId, ctx }) {
           <button key={opt.v} onClick={() => setPriority(opt.v)} style={{ flex: 1, padding: '6px 0', borderRadius: radius.sm, border: `1px solid ${priority === opt.v ? opt.c : c.border}`, background: priority === opt.v ? opt.c + '18' : c.bg, color: priority === opt.v ? opt.c : c.textMuted, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>{opt.l}</button>
         ))}
       </div>
+      {coDepartments.length > 0 && (
+        <>
+          <div style={{ fontSize: 11, color: c.textMuted, marginBottom: 4 }}>{t('發佈範圍')}</div>
+          <select
+            value={departmentId}
+            onChange={e => {
+              const newDeptId = e.target.value
+              setDepartmentId(newDeptId)
+              if (newDeptId) {
+                const memberSet = new Set(empDepts.filter(ed => ed.department_id === newDeptId).map(ed => ed.employee_id))
+                if (assigneeIds !== null) {
+                  const pruned = assigneeIds.filter(id => memberSet.has(id))
+                  setAssigneeIds(pruned.length > 0 ? pruned : null)
+                }
+              }
+            }}
+            style={{ ...S.input, marginBottom: 8 }}>
+            <option value="">{t('公司內可見（默認）')}</option>
+            {coDepartments.map(d => (
+              <option key={d.id} value={d.id}>{d.name} {t('（部門專屬）')}</option>
+            ))}
+          </select>
+        </>
+      )}
       <div style={{ fontSize: 11, color: c.textMuted, marginBottom: 4 }}>{t('分配給')} · {effective.length}{!canAssignOthers && <span style={{ color: c.textFaint, marginLeft: 6, fontSize: 10 }}>{t('（無權分配他人）')}</span>}</div>
       <div style={{ position: 'relative', border: `1px solid ${c.border}`, borderRadius: radius.sm, padding: '4px 6px', marginBottom: 8, display: 'flex', flexWrap: 'wrap', gap: 3, minHeight: 28, background: c.card, opacity: canAssignOthers ? 1 : 0.7 }}>
         {effective.map(id => {
@@ -940,7 +992,7 @@ export async function uploadAttachment(file, taskId) {
 // ====================  EDIT TASK MODAL  ====================
 function EditTaskModal({ task: initial, data, me, userId, onClose, ctx }) {
   const { t } = useT()
-  const { employees, tasks, feedbacks, assigneesByTask } = data
+  const { employees, tasks, feedbacks, assigneesByTask, departments, empDepts } = data
   const queryClient = useQueryClient()
   const [tk, setTk] = useState(initial)
   // 切到不同 task 時 reset。同 task 內部由本地 state 主導，後台 query 刷新不會吞用戶輸入
@@ -1047,9 +1099,26 @@ function EditTaskModal({ task: initial, data, me, userId, onClose, ctx }) {
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 11, color: c.textMuted }}>{t('截止')}</span>
           <input type="date" value={tk.due_date || ''} readOnly={ro} onChange={e => setTk({ ...tk, due_date: e.target.value || null })} onBlur={() => updateField({ due_date: tk.due_date || null })} style={{ padding: '4px 8px', borderRadius: radius.sm, border: `1px solid ${c.border}`, fontSize: 12 }} />
+          <span style={{ fontSize: 11, color: c.textMuted, marginLeft: 6 }}>{t('發佈範圍')}</span>
+          {(() => {
+            const coDepts = (departments || []).filter(d => d.company_id === (tk.company_id || scopeCompanyId))
+            if (ro) {
+              const cur = (departments || []).find(d => d.id === tk.department_id)
+              return cur
+                ? <span style={{ background: '#f3e8ff', color: '#7c3aed', padding: '2px 8px', borderRadius: 10, fontSize: 11, fontWeight: 600 }}>{cur.name} {t('部門')}</span>
+                : <span style={{ color: c.textFaint, fontSize: 11 }}>{t('公司內可見')}</span>
+            }
+            return (
+              <select value={tk.department_id || ''} onChange={e => updateField({ department_id: e.target.value || null })}
+                style={{ padding: '4px 8px', borderRadius: radius.sm, border: `1px solid ${c.border}`, fontSize: 12, background: c.card }}>
+                <option value="">{t('公司內可見')}</option>
+                {coDepts.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            )
+          })()}
         </div>
 
         <AssigneeEditor tk={tk} tkList={tkList} employees={employees} canManage={canEdit && canAssignOthers} setAssignees={setAssignees} scopeCompanyId={scopeCompanyId} />
@@ -2302,7 +2371,6 @@ function RolesView({ data, ctx }) {
 
   return (
     <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 18, letterSpacing: -0.3 }}>{t('職位管理')}</h1>
       {visibleCompanies.map(co => {
         const coRoles = roles.filter(r => r.company_id === co.id)
         return (
@@ -2361,6 +2429,203 @@ function RolesView({ data, ctx }) {
               />
               <button onClick={() => addRole(co.id)} disabled={!(newRoleByCompany[co.id] || '').trim()}
                 style={{ ...S.btnPrimary, opacity: (newRoleByCompany[co.id] || '').trim() ? 1 : 0.4 }}>{t('新增職位')}</button>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ====================  ROLES + DEPARTMENTS WRAPPER  ====================
+// 容納兩個 sub-tab：職位權限（RolesView）+ 部門設置（DepartmentsView）
+function RolesAndDepartmentsView({ data, ctx }) {
+  const { t } = useT()
+  const [sub, setSub] = useState('roles')
+
+  const tabs = [
+    ['roles', t('職位權限')],
+    ['departments', t('部門設置')],
+  ]
+
+  return (
+    <div>
+      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 14, letterSpacing: -0.3 }}>{t('職位 / 權限 / 部門管理')}</h1>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 18, borderBottom: `1px solid ${c.border}` }}>
+        {tabs.map(([id, label]) => (
+          <button key={id} onClick={() => setSub(id)}
+            style={{
+              padding: '8px 16px',
+              background: 'transparent',
+              border: 'none',
+              borderBottom: `2px solid ${sub === id ? c.accent : 'transparent'}`,
+              color: sub === id ? c.accent : c.textMuted,
+              fontSize: 13,
+              fontWeight: sub === id ? 700 : 500,
+              cursor: 'pointer',
+              marginBottom: -1,
+            }}>{label}</button>
+        ))}
+      </div>
+      {sub === 'roles' && <RolesView data={data} ctx={ctx} />}
+      {sub === 'departments' && <DepartmentsView data={data} ctx={ctx} />}
+    </div>
+  )
+}
+
+// ====================  DEPARTMENTS VIEW（部門設置）  ====================
+// 公司 admin 自由 CRUD 部門 + 把公司內員工加入/移出部門
+function DepartmentsView({ data, ctx }) {
+  const { t } = useT()
+  const queryClient = useQueryClient()
+  const { companies, departments, empDepts, empCompanies, employees } = data
+
+  // 過濾：super admin 看全部，否則只看自己是 admin 的公司
+  const visibleCompanies = useMemo(() => {
+    if (ctx.isSuperAdmin) return companies
+    const adminCompanyIds = new Set(
+      empCompanies.filter(ec => ec.is_company_admin).map(ec => ec.company_id)
+    )
+    return companies.filter(co => adminCompanyIds.has(co.id))
+  }, [companies, empCompanies, ctx.isSuperAdmin])
+
+  const [newDeptByCompany, setNewDeptByCompany] = useState({})
+  const [editingId, setEditingId] = useState(null)
+  const [editName, setEditName] = useState('')
+  const [addMemberFor, setAddMemberFor] = useState(null)
+  const [memberQuery, setMemberQuery] = useState('')
+
+  const addDept = async (companyId) => {
+    const name = (newDeptByCompany[companyId] || '').trim()
+    if (!name) return
+    const { error } = await supabase.from('departments').insert({ company_id: companyId, name })
+    if (error) return alert(t('新增失敗：') + error.message)
+    setNewDeptByCompany(prev => ({ ...prev, [companyId]: '' }))
+    queryClient.invalidateQueries({ queryKey: ['admin', 'departments'] })
+  }
+
+  const startEdit = (d) => { setEditingId(d.id); setEditName(d.name) }
+  const cancelEdit = () => { setEditingId(null); setEditName('') }
+
+  const saveEdit = async (id) => {
+    if (!editName.trim()) return alert(t('名稱必填'))
+    const { error } = await supabase.from('departments').update({ name: editName.trim() }).eq('id', id)
+    if (error) return alert(t('更新失敗：') + error.message)
+    cancelEdit()
+    queryClient.invalidateQueries({ queryKey: ['admin', 'departments'] })
+  }
+
+  const delDept = async (d) => {
+    if (!confirm(t('確定刪除部門') + '「' + d.name + '」？' + t('（部門內成員會被移出，原本屬於此部門的任務變回公司內可見）'))) return
+    const { error } = await supabase.from('departments').delete().eq('id', d.id)
+    if (error) return alert(t('刪除失敗：') + error.message)
+    queryClient.invalidateQueries({ queryKey: ['admin', 'departments'] })
+    queryClient.invalidateQueries({ queryKey: ['admin', 'employee_departments'] })
+    queryClient.invalidateQueries({ queryKey: ['admin', 'employee_tasks'] })
+  }
+
+  const addMember = async (deptId, employeeId) => {
+    const { error } = await supabase.from('employee_departments').insert({ employee_id: employeeId, department_id: deptId })
+    if (error) return alert(t('加入失敗：') + error.message)
+    queryClient.invalidateQueries({ queryKey: ['admin', 'employee_departments'] })
+  }
+
+  const removeMember = async (deptId, employeeId) => {
+    if (!confirm(t('確定把該成員移出此部門？'))) return
+    const { error } = await supabase.from('employee_departments').delete()
+      .eq('employee_id', employeeId).eq('department_id', deptId)
+    if (error) return alert(t('移除失敗：') + error.message)
+    queryClient.invalidateQueries({ queryKey: ['admin', 'employee_departments'] })
+  }
+
+  return (
+    <div>
+      {visibleCompanies.length === 0 && <Empty>{t('沒有可管理的公司')}</Empty>}
+      {visibleCompanies.map(co => {
+        const coDepts = departments.filter(d => d.company_id === co.id)
+        const coEmpIds = new Set(empCompanies.filter(ec => ec.company_id === co.id).map(ec => ec.employee_id))
+        const coEmps = employees.filter(e => coEmpIds.has(e.id) && e.active !== false)
+        return (
+          <div key={co.id} style={{ marginBottom: 28 }}>
+            <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 10, color: c.text }}>{co.name}</h2>
+            {coDepts.length === 0 && <Empty>{t('還沒有部門')}</Empty>}
+            {coDepts.map(d => {
+              const memberIds = empDepts.filter(ed => ed.department_id === d.id).map(ed => ed.employee_id)
+              const memberEmps = coEmps.filter(e => memberIds.includes(e.id))
+              const nonMembers = coEmps.filter(e => !memberIds.includes(e.id))
+              const isEdit = editingId === d.id
+              const isAddingMember = addMemberFor === d.id
+              const q = memberQuery.toLowerCase()
+              const candidateNonMembers = q ? nonMembers.filter(e => (e.name || '').toLowerCase().includes(q)) : nonMembers
+              return (
+                <div key={d.id} style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.lg, padding: 14, marginBottom: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, gap: 8 }}>
+                    {isEdit ? (
+                      <input value={editName} onChange={e => setEditName(e.target.value)} style={{ ...S.input, marginBottom: 0, fontWeight: 600, flex: 1 }} />
+                    ) : (
+                      <div style={{ fontSize: 14, fontWeight: 700 }}>
+                        {d.name}
+                        <span style={{ fontSize: 11, color: c.textFaint, fontWeight: 400, marginLeft: 8 }}>{memberEmps.length} {t('人')}</span>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {isEdit ? (
+                        <>
+                          <button onClick={() => saveEdit(d.id)} style={S.btnPrimary}>{t('保存')}</button>
+                          <button onClick={cancelEdit} style={S.btnGhost}>{t('取消')}</button>
+                        </>
+                      ) : (
+                        <>
+                          <button onClick={() => startEdit(d)} style={S.btnGhostSm}>✏</button>
+                          <button onClick={() => delDept(d)} style={{ ...S.btnGhostSm, color: c.red }}>×</button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                    {memberEmps.length === 0 ? (
+                      <span style={{ fontSize: 11, color: c.textFaint }}>{t('暫無成員')}</span>
+                    ) : memberEmps.map(e => (
+                      <span key={e.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', background: c.accentBg, color: c.accent, borderRadius: 10, fontSize: 11, fontWeight: 600 }}>
+                        {e.name}
+                        <button onClick={() => removeMember(d.id, e.id)} style={{ background: 'none', border: 'none', color: c.accent, cursor: 'pointer', fontSize: 12, lineHeight: 1 }}>×</button>
+                      </span>
+                    ))}
+                  </div>
+
+                  {isAddingMember ? (
+                    <div style={{ borderTop: `1px dashed ${c.border}`, paddingTop: 8, marginTop: 4 }}>
+                      <input value={memberQuery} onChange={e => setMemberQuery(e.target.value)} placeholder={t('搜索員工姓名...')}
+                        style={{ ...S.input, marginBottom: 6 }} />
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxHeight: 160, overflowY: 'auto' }}>
+                        {candidateNonMembers.length === 0 ? (
+                          <span style={{ fontSize: 11, color: c.textFaint }}>{t('沒有可加入的員工')}</span>
+                        ) : candidateNonMembers.map(e => (
+                          <button key={e.id} onClick={() => addMember(d.id, e.id)}
+                            style={{ padding: '4px 10px', background: c.bg, border: `1px solid ${c.border}`, borderRadius: 9, fontSize: 11, color: c.text, cursor: 'pointer' }}>
+                            + {e.name}{e.role && <span style={{ color: c.textFaint, marginLeft: 4 }}>{e.role}</span>}
+                          </button>
+                        ))}
+                      </div>
+                      <button onClick={() => { setAddMemberFor(null); setMemberQuery('') }} style={{ ...S.btnGhostSm, marginTop: 6 }}>{t('完成')}</button>
+                    </div>
+                  ) : (
+                    <button onClick={() => { setAddMemberFor(d.id); setMemberQuery('') }} style={{ ...S.btnGhostSm }}>+ {t('加入成員')}</button>
+                  )}
+                </div>
+              )
+            })}
+
+            <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+              <input
+                value={newDeptByCompany[co.id] || ''}
+                onChange={e => setNewDeptByCompany(prev => ({ ...prev, [co.id]: e.target.value }))}
+                placeholder={t('新部門名稱')}
+                style={{ ...S.input, marginBottom: 0, flex: 1 }}
+              />
+              <button onClick={() => addDept(co.id)} disabled={!(newDeptByCompany[co.id] || '').trim()}
+                style={{ ...S.btnPrimary, opacity: (newDeptByCompany[co.id] || '').trim() ? 1 : 0.4 }}>{t('新增部門')}</button>
             </div>
           </div>
         )

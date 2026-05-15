@@ -1237,6 +1237,27 @@ const DICT_EN = {
   "沒有可管理的公司": "No company to manage",
   "該公司暫無員工": "No employees in this company",
   "人": "people",
+
+  // ── 部門系統 / departments ──
+  "職位 / 權限 / 部門管理": "Roles / Permissions / Departments",
+  "職位權限": "Roles & permissions",
+  "部門設置": "Departments",
+  "新部門名稱": "New department name",
+  "新增部門": "Add department",
+  "還沒有部門": "No departments yet",
+  "暫無成員": "No members yet",
+  "加入成員": "Add member",
+  "搜索員工姓名...": "Search employees by name...",
+  "沒有可加入的員工": "No employees available to add",
+  "確定刪除部門": "Delete department",
+  "（部門內成員會被移出，原本屬於此部門的任務變回公司內可見）": " (members will be removed; tasks belonging to this dept become company-wide visible)",
+  "確定把該成員移出此部門？": "Remove this member from the department?",
+  "加入失敗：": "Join failed: ",
+  "發佈範圍": "Scope",
+  "公司內可見（默認）": "Company-wide (default)",
+  "公司內可見": "Company-wide",
+  "（部門專屬）": " (dept only)",
+  "部門": "dept",
 };
 
 const DICT_FR = {
@@ -2471,6 +2492,27 @@ const DICT_FR = {
   "沒有可管理的公司": "Aucune entreprise à gérer",
   "該公司暫無員工": "Aucun employé dans cette entreprise",
   "人": "personnes",
+
+  // ── 部門系統 / departments ──
+  "職位 / 權限 / 部門管理": "Rôles / Permissions / Départements",
+  "職位權限": "Rôles & permissions",
+  "部門設置": "Départements",
+  "新部門名稱": "Nom du nouveau département",
+  "新增部門": "Ajouter un département",
+  "還沒有部門": "Aucun département",
+  "暫無成員": "Aucun membre",
+  "加入成員": "Ajouter un membre",
+  "搜索員工姓名...": "Rechercher par nom...",
+  "沒有可加入的員工": "Aucun employé à ajouter",
+  "確定刪除部門": "Supprimer le département",
+  "（部門內成員會被移出，原本屬於此部門的任務變回公司內可見）": " (les membres seront retirés ; les tâches deviendront visibles dans toute l'entreprise)",
+  "確定把該成員移出此部門？": "Retirer ce membre du département ?",
+  "加入失敗：": "Échec de l'ajout : ",
+  "發佈範圍": "Portée",
+  "公司內可見（默認）": "Toute l'entreprise (par défaut)",
+  "公司內可見": "Toute l'entreprise",
+  "（部門專屬）": " (réservé au département)",
+  "部門": "dépt",
 };
 
 const I18nContext = createContext({ lang: "zh", setLang: () => {}, t: (s) => s });
