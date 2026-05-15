@@ -378,13 +378,7 @@ function EmpSidebar({ employees, companies, companyFilter, setCompanyFilter, mod
   return (
     <aside style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.lg, padding: 14, display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 100px)' }}>
       <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>{t('員工')} <span style={{ fontSize: 11, color: c.textFaint, fontWeight: 400 }}>{employees.length}</span></div>
-        {me.is_admin && (
-          <select value={companyFilter} onChange={e => setCompanyFilter(e.target.value)} style={{ ...S.input, marginBottom: 0, fontSize: 12, padding: '6px 8px' }}>
-            <option value="all">{t('所有公司')}</option>
-            {companies.map(co => <option key={co.id} value={co.id}>{co.name}</option>)}
-          </select>
-        )}
+        <div style={{ fontSize: 15, fontWeight: 700 }}>{t('員工')} <span style={{ fontSize: 11, color: c.textFaint, fontWeight: 400 }}>{employees.length}</span></div>
       </div>
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div onClick={() => { setMode('overview'); setSelectedEmpId(null) }} style={{ background: mode === 'overview' ? c.accentBg : c.bg, border: `1px solid ${mode === 'overview' ? c.accent : c.border}`, borderRadius: radius.md, padding: '10px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: mode === 'overview' ? c.accent : c.text }}>
@@ -422,12 +416,6 @@ function EmpListMobile({ employees, companies, companyFilter, setCompanyFilter, 
   const { t } = useT()
   return (
     <div>
-      {me?.is_admin && (
-        <select value={companyFilter} onChange={e => setCompanyFilter(e.target.value)} style={{ ...S.input, marginBottom: 10, fontSize: 12 }}>
-          <option value="all">{t('所有公司')}</option>
-          {companies.map(co => <option key={co.id} value={co.id}>{co.name}</option>)}
-        </select>
-      )}
       {employees.map(e => {
         const openCount = tasks.filter(tk => isTaskAssignedTo(tk, e.id, assigneesByTask) && !tk.parent_task_id && !empDoneFor(tk, e.id, assigneesByTask) && !empAbandonedFor(tk, e.id, assigneesByTask)).length
         return (
