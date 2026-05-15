@@ -97,18 +97,18 @@ function useMyContext(me, data) {
   const defaultCompanyId = defaultBinding?.company_id || me.company_id  // fallback 老 employees.company_id
 
   // localStorage 存當前活躍公司（按 user 維度）
+  // 注意：useState initializer 跑時 myBindings 還是空（query 沒回），不能在這裡校驗。
+  // 先信任 localStorage，等 bindings 加載後再校驗（見下面 useEffect）。
   const storageKey = `team-active-company-${me.user_id || me.id}`
   const [activeCompanyId, setActiveCompanyIdState] = useState(() => {
-    try {
-      const saved = localStorage.getItem(storageKey)
-      if (saved && myBindings.some(b => b.company_id === saved)) return saved
-    } catch {}
-    return defaultCompanyId
+    try { return localStorage.getItem(storageKey) || null } catch { return null }
   })
-  // bindings 加載後若 activeCompanyId 不在綁定中，自動切到 default
+  // bindings 加載後：
+  //   - activeCompanyId 為 null → 用 default
+  //   - activeCompanyId 不在 bindings → 用 default（防舊 localStorage 值錯誤）
   useEffect(() => {
     if (myBindings.length === 0) return
-    if (!myBindings.some(b => b.company_id === activeCompanyId)) {
+    if (!activeCompanyId || !myBindings.some(b => b.company_id === activeCompanyId)) {
       setActiveCompanyIdState(defaultCompanyId)
     }
   }, [myBindings, activeCompanyId, defaultCompanyId])
