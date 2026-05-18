@@ -354,7 +354,7 @@ export default function App() {
   const [forceChangePwLoading, setForceChangePwLoading] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false);
 
-  // 批 1+2 遷出：products / warehouses / stocks / suppliers / customers / line_item_aliases 已搬到 AppContext
+  // 批 1+2+3 遷出：products / warehouses / stocks / suppliers / customers / line_item_aliases / invoices / inventory 已搬到 AppContext
   const {
     products, setProducts,
     warehouses, setWarehouses,
@@ -362,7 +362,9 @@ export default function App() {
     suppliers, setSuppliers,
     customers, setCustomers,
     lineItemAliases, setLineItemAliases,
-    qProducts, qWarehouses, qStocks, qSuppliers, qCustomers, qLineItemAliases,
+    invoices, setInvoices,
+    inventory, setInventory,
+    qProducts, qWarehouses, qStocks, qSuppliers, qCustomers, qLineItemAliases, qInvoices, qInventory,
   } = useAppContext();
 
   const [tab, setTab] = useState("dashboard");
@@ -428,8 +430,6 @@ export default function App() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [productOrgDraft, setProductOrgDraft] = useState(null);
   const [expandedSkuGroups, setExpandedSkuGroups] = useState(new Set());
-  const [inventory, setInventory] = useState([]);
-  const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [search, setSearch] = useState("");
@@ -1269,9 +1269,7 @@ export default function App() {
   const canShip = isBfAdmin || (currentEmployee && currentEmployee.can_ship === true);
   const queryClient = useQueryClient();
 
-  // 使用 React Query 管理 fetch + 緩存（products/warehouses/stocks/suppliers/customers/line_item_aliases 已遷至 AppContext）
-  const qInventory = useQuery({ queryKey: ["bf", "inventory"], queryFn: () => fetchAllTable("inventory", null), enabled: !!userId });
-  const qInvoices = useQuery({ queryKey: ["bf", "invoices"], queryFn: () => fetchAllTable("invoices", "date", false), enabled: !!userId });
+  // 使用 React Query 管理 fetch + 緩存（products/warehouses/stocks/suppliers/customers/line_item_aliases/invoices/inventory 已遷至 AppContext）
   const qEmployees = useQuery({ queryKey: ["bf", "employees"], queryFn: () => fetchAllTable("employees", "created_at"), enabled: !!userId });
   const qTasks = useQuery({ queryKey: ["bf", "employee_tasks"], queryFn: () => fetchAllTable("employee_tasks", "created_at"), enabled: !!userId });
   const qTaskAssignees = useQuery({ queryKey: ["bf", "task_assignees"], queryFn: () => fetchAllTable("task_assignees", "created_at", true, null), enabled: !!userId });
@@ -1349,9 +1347,7 @@ export default function App() {
   const qWaClients = useQuery({ queryKey: ["bf", "wa_clients"], queryFn: async () => { const { data } = await supabase.from("wa_clients").select("*").order("last_seen", { ascending: false }); return data || []; }, enabled: !!userId, refetchInterval: 2000 });
 
   // query data 同步到現有 useState，現存的 mutation 代碼（setProducts 等）照舊工作
-  // products/warehouses/stocks/suppliers/customers/line_item_aliases 的同步 effect 已搬到 AppContext
-  useEffect(() => { if (qInventory.data) setInventory(qInventory.data); }, [qInventory.data]);
-  useEffect(() => { if (qInvoices.data) setInvoices(qInvoices.data); }, [qInvoices.data]);
+  // products/warehouses/stocks/suppliers/customers/line_item_aliases/invoices/inventory 的同步 effect 已搬到 AppContext
   useEffect(() => { if (qEmployees.data) setEmployees(qEmployees.data); }, [qEmployees.data]);
   useEffect(() => { if (qTasks.data) setTasks(qTasks.data); }, [qTasks.data]);
   useEffect(() => { if (qTaskAssignees.data) setTaskAssignees(qTaskAssignees.data); }, [qTaskAssignees.data]);

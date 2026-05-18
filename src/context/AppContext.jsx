@@ -28,12 +28,18 @@ export function AppProvider({ children }) {
   const qCustomers = useQuery({ queryKey: ['bf', 'customers'], queryFn: () => fetchAllTable('customers', 'name'), enabled: !!userId })
   const qLineItemAliases = useQuery({ queryKey: ['bf', 'line_item_aliases'], queryFn: () => fetchAllTable('line_item_aliases', 'alias_name'), enabled: !!userId })
 
+  // 批 3：invoices / inventory
+  const qInvoices = useQuery({ queryKey: ['bf', 'invoices'], queryFn: () => fetchAllTable('invoices', 'date', false), enabled: !!userId })
+  const qInventory = useQuery({ queryKey: ['bf', 'inventory'], queryFn: () => fetchAllTable('inventory', null), enabled: !!userId })
+
   const [products, setProducts] = useState([])
   const [warehouses, setWarehouses] = useState([])
   const [stocks, setStocks] = useState([])
   const [suppliers, setSuppliers] = useState([])
   const [customers, setCustomers] = useState([])
   const [lineItemAliases, setLineItemAliases] = useState([])
+  const [invoices, setInvoices] = useState([])
+  const [inventory, setInventory] = useState([])
 
   useEffect(() => { if (qProducts.data) setProducts(qProducts.data) }, [qProducts.data])
   useEffect(() => { if (qWarehouses.data) setWarehouses(qWarehouses.data) }, [qWarehouses.data])
@@ -41,6 +47,8 @@ export function AppProvider({ children }) {
   useEffect(() => { if (qSuppliers.data) setSuppliers(qSuppliers.data) }, [qSuppliers.data])
   useEffect(() => { if (qCustomers.data) setCustomers(qCustomers.data) }, [qCustomers.data])
   useEffect(() => { if (qLineItemAliases.data) setLineItemAliases(qLineItemAliases.data) }, [qLineItemAliases.data])
+  useEffect(() => { if (qInvoices.data) setInvoices(qInvoices.data) }, [qInvoices.data])
+  useEffect(() => { if (qInventory.data) setInventory(qInventory.data) }, [qInventory.data])
 
   const value = {
     products, setProducts,
@@ -49,7 +57,9 @@ export function AppProvider({ children }) {
     suppliers, setSuppliers,
     customers, setCustomers,
     lineItemAliases, setLineItemAliases,
-    qProducts, qWarehouses, qStocks, qSuppliers, qCustomers, qLineItemAliases,
+    invoices, setInvoices,
+    inventory, setInventory,
+    qProducts, qWarehouses, qStocks, qSuppliers, qCustomers, qLineItemAliases, qInvoices, qInventory,
   }
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
 }
