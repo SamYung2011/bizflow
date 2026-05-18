@@ -354,13 +354,15 @@ export default function App() {
   const [forceChangePwLoading, setForceChangePwLoading] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false);
 
-  // 批 1 遷出：products / warehouses / stocks / suppliers state + query 已搬到 AppContext
+  // 批 1+2 遷出：products / warehouses / stocks / suppliers / customers / line_item_aliases 已搬到 AppContext
   const {
     products, setProducts,
     warehouses, setWarehouses,
     stocks, setStocks,
     suppliers, setSuppliers,
-    qProducts, qWarehouses, qStocks, qSuppliers,
+    customers, setCustomers,
+    lineItemAliases, setLineItemAliases,
+    qProducts, qWarehouses, qStocks, qSuppliers, qCustomers, qLineItemAliases,
   } = useAppContext();
 
   const [tab, setTab] = useState("dashboard");
@@ -388,7 +390,6 @@ export default function App() {
   // 員工更新日誌 state
   const [updateLogs, setUpdateLogs] = useState([]);
   const [logComments, setLogComments] = useState([]);
-  const [lineItemAliases, setLineItemAliases] = useState([]); // 發票 line item → bizflow products 映射
   const [showAddSupplier, setShowAddSupplier] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState(null);
   const [supplierSearch, setSupplierSearch] = useState("");
@@ -428,7 +429,6 @@ export default function App() {
   const [productOrgDraft, setProductOrgDraft] = useState(null);
   const [expandedSkuGroups, setExpandedSkuGroups] = useState(new Set());
   const [inventory, setInventory] = useState([]);
-  const [customers, setCustomers] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -1269,9 +1269,8 @@ export default function App() {
   const canShip = isBfAdmin || (currentEmployee && currentEmployee.can_ship === true);
   const queryClient = useQueryClient();
 
-  // 使用 React Query 管理 fetch + 緩存（products / warehouses / stocks / suppliers 已遷至 AppContext）
+  // 使用 React Query 管理 fetch + 緩存（products/warehouses/stocks/suppliers/customers/line_item_aliases 已遷至 AppContext）
   const qInventory = useQuery({ queryKey: ["bf", "inventory"], queryFn: () => fetchAllTable("inventory", null), enabled: !!userId });
-  const qCustomers = useQuery({ queryKey: ["bf", "customers"], queryFn: () => fetchAllTable("customers", "name"), enabled: !!userId });
   const qInvoices = useQuery({ queryKey: ["bf", "invoices"], queryFn: () => fetchAllTable("invoices", "date", false), enabled: !!userId });
   const qEmployees = useQuery({ queryKey: ["bf", "employees"], queryFn: () => fetchAllTable("employees", "created_at"), enabled: !!userId });
   const qTasks = useQuery({ queryKey: ["bf", "employee_tasks"], queryFn: () => fetchAllTable("employee_tasks", "created_at"), enabled: !!userId });
@@ -1337,7 +1336,6 @@ export default function App() {
   const qFeedbacks = useQuery({ queryKey: ["bf", "employee_task_feedbacks"], queryFn: () => fetchAllTable("employee_task_feedbacks", "created_at"), enabled: !!userId });
   const qUpdateLogs = useQuery({ queryKey: ["bf", "employee_update_logs"], queryFn: () => fetchAllTable("employee_update_logs", "created_at", false), enabled: !!userId });
   const qLogComments = useQuery({ queryKey: ["bf", "employee_update_log_comments"], queryFn: () => fetchAllTable("employee_update_log_comments", "created_at"), enabled: !!userId });
-  const qLineItemAliases = useQuery({ queryKey: ["bf", "line_item_aliases"], queryFn: () => fetchAllTable("line_item_aliases", "alias_name"), enabled: !!userId });
   const qWaSettings = useQuery({ queryKey: ["bf", "wa_settings"], queryFn: async () => { const { data } = await supabase.from("wa_settings").select("*").eq("id", 1).maybeSingle(); return data; }, enabled: !!userId, refetchInterval: 30000 });
   const qWaWhitelist = useQuery({ queryKey: ["bf", "wa_whitelist"], queryFn: () => fetchAllTable("wa_whitelist", "created_at"), enabled: !!userId, refetchInterval: 30000 });
   const qWaMessages = useQuery({ queryKey: ["bf", "wa_messages"], queryFn: async () => { const { data } = await supabase.from("wa_messages").select("*").order("created_at", { ascending: false }).limit(1000); return data || []; }, enabled: !!userId, refetchInterval: 5000 });
@@ -1350,10 +1348,9 @@ export default function App() {
   const qWaLogs = useQuery({ queryKey: ["bf", "wa_logs"], queryFn: async () => { const { data } = await supabase.from("wa_logs").select("*").order("created_at", { ascending: false }).limit(500); return data || []; }, enabled: !!userId, refetchInterval: 5000 });
   const qWaClients = useQuery({ queryKey: ["bf", "wa_clients"], queryFn: async () => { const { data } = await supabase.from("wa_clients").select("*").order("last_seen", { ascending: false }); return data || []; }, enabled: !!userId, refetchInterval: 2000 });
 
-  // query data 同步到現有 useState，現存的 mutation 代碼（setCustomers 等）照舊工作
-  // products / warehouses / stocks / suppliers 的同步 effect 已搬到 AppContext
+  // query data 同步到現有 useState，現存的 mutation 代碼（setProducts 等）照舊工作
+  // products/warehouses/stocks/suppliers/customers/line_item_aliases 的同步 effect 已搬到 AppContext
   useEffect(() => { if (qInventory.data) setInventory(qInventory.data); }, [qInventory.data]);
-  useEffect(() => { if (qCustomers.data) setCustomers(qCustomers.data); }, [qCustomers.data]);
   useEffect(() => { if (qInvoices.data) setInvoices(qInvoices.data); }, [qInvoices.data]);
   useEffect(() => { if (qEmployees.data) setEmployees(qEmployees.data); }, [qEmployees.data]);
   useEffect(() => { if (qTasks.data) setTasks(qTasks.data); }, [qTasks.data]);
@@ -1406,7 +1403,6 @@ export default function App() {
   useEffect(() => { if (qFeedbacks.data) setFeedbacks(qFeedbacks.data); }, [qFeedbacks.data]);
   useEffect(() => { if (qUpdateLogs.data) setUpdateLogs(qUpdateLogs.data); }, [qUpdateLogs.data]);
   useEffect(() => { if (qLogComments.data) setLogComments(qLogComments.data); }, [qLogComments.data]);
-  useEffect(() => { if (qLineItemAliases.data) setLineItemAliases(qLineItemAliases.data); }, [qLineItemAliases.data]);
   // 切員工 / 切回更新日誌 tab 時重置懶加載計數
   useEffect(() => { setLogsVisibleCount(20); }, [selectedEmployee?.id, empSubTab]);
   useEffect(() => { if (qWaSettings.data) setWaSettings(qWaSettings.data); }, [qWaSettings.data]);

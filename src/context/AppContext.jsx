@@ -24,22 +24,32 @@ export function AppProvider({ children }) {
   const qStocks = useQuery({ queryKey: ['bf', 'inventory_stock'], queryFn: () => fetchAllTable('inventory_stock', null), enabled: !!userId })
   const qSuppliers = useQuery({ queryKey: ['bf', 'suppliers'], queryFn: () => fetchAllTable('suppliers', 'created_at', false), enabled: !!userId })
 
+  // 批 2：customers / line_item_aliases
+  const qCustomers = useQuery({ queryKey: ['bf', 'customers'], queryFn: () => fetchAllTable('customers', 'name'), enabled: !!userId })
+  const qLineItemAliases = useQuery({ queryKey: ['bf', 'line_item_aliases'], queryFn: () => fetchAllTable('line_item_aliases', 'alias_name'), enabled: !!userId })
+
   const [products, setProducts] = useState([])
   const [warehouses, setWarehouses] = useState([])
   const [stocks, setStocks] = useState([])
   const [suppliers, setSuppliers] = useState([])
+  const [customers, setCustomers] = useState([])
+  const [lineItemAliases, setLineItemAliases] = useState([])
 
   useEffect(() => { if (qProducts.data) setProducts(qProducts.data) }, [qProducts.data])
   useEffect(() => { if (qWarehouses.data) setWarehouses(qWarehouses.data) }, [qWarehouses.data])
   useEffect(() => { if (qStocks.data) setStocks(qStocks.data) }, [qStocks.data])
   useEffect(() => { if (qSuppliers.data) setSuppliers(qSuppliers.data) }, [qSuppliers.data])
+  useEffect(() => { if (qCustomers.data) setCustomers(qCustomers.data) }, [qCustomers.data])
+  useEffect(() => { if (qLineItemAliases.data) setLineItemAliases(qLineItemAliases.data) }, [qLineItemAliases.data])
 
   const value = {
     products, setProducts,
     warehouses, setWarehouses,
     stocks, setStocks,
     suppliers, setSuppliers,
-    qProducts, qWarehouses, qStocks, qSuppliers,
+    customers, setCustomers,
+    lineItemAliases, setLineItemAliases,
+    qProducts, qWarehouses, qStocks, qSuppliers, qCustomers, qLineItemAliases,
   }
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
 }
