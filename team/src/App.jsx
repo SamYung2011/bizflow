@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from './supabaseClient.js'
 import { c, radius, font, S, fetchAllTable, Center, Empty, Field, Section, fmtDateTime } from './styles.jsx'
 import AdminApp from './admin.jsx'
+import MarkdownText from './MarkdownText.jsx'
 import { useT } from './i18n.jsx'
 
 // ============================================================
@@ -11,6 +12,8 @@ import { useT } from './i18n.jsx'
 // ============================================================
 
 const HELEN_EMAIL = 'a1017339632@gmail.com'
+// 個人偏好：markdown 渲染白名單（更新日誌 + 評論）。author_user_id 命中即走 MarkdownText
+const MARKDOWN_AUTHORS = new Set(['2f88a573-c4db-4b93-aadc-2a56106c5f9c'])
 
 export default function App() {
   const { t } = useT()
@@ -271,9 +274,15 @@ export function UpdateLogView({ me, session, isMobile }) {
                   <>
                     <div onClick={() => setExpanded(p => { const n = new Set(p); n.has(log.id) ? n.delete(log.id) : n.add(log.id); return n })} style={{ cursor: log.detail ? 'pointer' : 'default', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                       {log.detail && <span style={{ color: c.textFaint, fontSize: 10, marginTop: 5 }}>{exp ? '▼' : '▶'}</span>}
-                      <div style={{ fontSize: 14, fontWeight: 500, color: c.text, whiteSpace: 'pre-wrap', flex: 1 }}>{log.summary}</div>
+                      <div style={{ fontSize: 14, fontWeight: 500, color: c.text, whiteSpace: MARKDOWN_AUTHORS.has(log.author_user_id) ? 'normal' : 'pre-wrap', flex: 1 }}>
+                        {MARKDOWN_AUTHORS.has(log.author_user_id) ? <MarkdownText text={log.summary} fontSize={14} /> : log.summary}
+                      </div>
                     </div>
-                    {exp && log.detail && <div style={{ marginTop: 10, padding: 12, background: c.bg, borderRadius: radius.md, fontSize: 13, color: c.text, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{log.detail}</div>}
+                    {exp && log.detail && (
+                      <div style={{ marginTop: 10, padding: 12, background: c.bg, borderRadius: radius.md, fontSize: 13, color: c.text, lineHeight: 1.6, whiteSpace: MARKDOWN_AUTHORS.has(log.author_user_id) ? 'normal' : 'pre-wrap' }}>
+                        {MARKDOWN_AUTHORS.has(log.author_user_id) ? <MarkdownText text={log.detail} fontSize={13} /> : log.detail}
+                      </div>
+                    )}
                   </>
                 )}
 
@@ -284,7 +293,9 @@ export function UpdateLogView({ me, session, isMobile }) {
                         <span><strong style={{ color: c.text }}>{co.author_name}</strong> · {fmtDateTime(co.created_at)}</span>
                         {(co.author_user_id === userId || me.is_admin) && <button onClick={() => delCmt(co.id)} style={{ ...S.iconBtn, color: c.red, fontSize: 11 }}>×</button>}
                       </div>
-                      <div style={{ fontSize: 12, color: c.text, marginTop: 2, whiteSpace: 'pre-wrap' }}>{co.body}</div>
+                      <div style={{ fontSize: 12, color: c.text, marginTop: 2, whiteSpace: MARKDOWN_AUTHORS.has(co.author_user_id) ? 'normal' : 'pre-wrap' }}>
+                        {MARKDOWN_AUTHORS.has(co.author_user_id) ? <MarkdownText text={co.body} fontSize={12} /> : co.body}
+                      </div>
                     </div>
                   ))}
                   <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
