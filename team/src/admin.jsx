@@ -1455,6 +1455,14 @@ function FeedbackThread({ tk, fbList, employees, empCompanies = [], me, userId, 
   const [replying, setReplying] = useState(null)
   const [mentionPop, setMentionPop] = useState({ open: false, query: '', atIdx: -1 })
   const [files, setFiles] = useState([])
+  const [editingFb, setEditingFb] = useState(null)  // { id, body } — 正在編輯的反饋本地草稿
+  const saveEdit = async () => {
+    if (!editingFb || !editingFb.body.trim()) return
+    const { error } = await supabase.from('employee_task_feedbacks').update({ body: editingFb.body.trim(), updated_at: new Date().toISOString() }).eq('id', editingFb.id)
+    if (error) return alert(error.message)
+    setEditingFb(null)
+    queryClient.invalidateQueries({ queryKey: ['admin', 'feedbacks'] })
+  }
 
   const empIdsInScope = useMemo(
     () => new Set(empCompanies.filter(ec => ec.company_id === scopeCompanyId).map(ec => ec.employee_id)),
@@ -1532,13 +1540,24 @@ function FeedbackThread({ tk, fbList, employees, empCompanies = [], me, userId, 
             <div key={fb.id} style={{ background: c.card, border: '1px solid #fde68a', borderRadius: radius.sm, padding: '6px 9px', marginBottom: 5, marginLeft: isReply ? 18 : 0 }}>
               {isReply && <div style={{ fontSize: 9, color: '#b88a00', marginBottom: 2, fontStyle: 'italic' }}>↪ {t('回覆')} <b>{parent?.author_name || '?'}</b>: {(parent?.body || '').slice(0, 28)}...</div>}
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: '#a16207' }}>{fb.author_name || '?'}<span style={{ fontWeight: 400, marginLeft: 5, color: c.textFaint }}>{fmtDateTime(fb.created_at)}</span></span>
+                <span style={{ fontSize: 10, fontWeight: 700, color: '#a16207' }}>{fb.author_name || '?'}<span style={{ fontWeight: 400, marginLeft: 5, color: c.textFaint }}>{fmtDateTime(fb.created_at)}{fb.updated_at && new Date(fb.updated_at) - new Date(fb.created_at) > 2000 ? ` (${t('已編輯')})` : ''}</span></span>
                 <div style={{ display: 'flex', gap: 5 }}>
-                  <button onClick={() => setReplying(fb.id)} style={{ background: 'none', border: 'none', color: '#b88a00', cursor: 'pointer', fontSize: 10 }}>↩ {t('回覆')}</button>
-                  {canDel && <button onClick={() => delFb(fb.id)} style={{ background: 'none', border: 'none', color: c.textFaint, cursor: 'pointer', fontSize: 12 }}>×</button>}
+                  {editingFb?.id !== fb.id && <button onClick={() => setReplying(fb.id)} style={{ background: 'none', border: 'none', color: '#b88a00', cursor: 'pointer', fontSize: 10 }}>↩ {t('回覆')}</button>}
+                  {isOwn && editingFb?.id !== fb.id && <button onClick={() => setEditingFb({ id: fb.id, body: fb.body || '' })} style={{ background: 'none', border: 'none', color: '#b88a00', cursor: 'pointer', fontSize: 10 }}>✎ {t('編輯')}</button>}
+                  {canDel && editingFb?.id !== fb.id && <button onClick={() => delFb(fb.id)} style={{ background: 'none', border: 'none', color: c.textFaint, cursor: 'pointer', fontSize: 12 }}>×</button>}
                 </div>
               </div>
-              <div style={{ fontSize: 12, color: c.text, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{fb.body}</div>
+              {editingFb?.id === fb.id ? (
+                <div>
+                  <textarea value={editingFb.body} onChange={e => setEditingFb({ ...editingFb, body: e.target.value })} onKeyDown={e => { if (e.key === 'Escape') setEditingFb(null); if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveEdit() } }} rows={2} autoFocus style={{ width: '100%', padding: '6px 8px', borderRadius: radius.sm, border: '1px solid #fde68a', fontSize: 12, outline: 'none', resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+                  <div style={{ display: 'flex', gap: 6, marginTop: 4, justifyContent: 'flex-end' }}>
+                    <button onClick={() => setEditingFb(null)} style={{ background: 'none', border: `1px solid ${c.border}`, color: c.textMuted, borderRadius: radius.sm, padding: '3px 10px', fontSize: 10, cursor: 'pointer' }}>{t('取消')}</button>
+                    <button onClick={saveEdit} disabled={!editingFb.body.trim()} style={{ background: c.amber, color: '#fff', border: 'none', borderRadius: radius.sm, padding: '3px 10px', fontSize: 10, fontWeight: 700, cursor: editingFb.body.trim() ? 'pointer' : 'not-allowed', opacity: editingFb.body.trim() ? 1 : 0.4 }}>{t('保存')}</button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: 12, color: c.text, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{fb.body}</div>
+              )}
               {Array.isArray(fb.attachments) && fb.attachments.length > 0 && (
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 5 }}>
                   {fb.attachments.map((a, i) => {
