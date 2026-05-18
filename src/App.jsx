@@ -10,8 +10,10 @@ import { Icon } from "./components/Icon.jsx";
 import { Input, Select } from "./components/Inputs.jsx";
 import { suggestEmail } from "./lib/emailSuggest.js";
 import { CAR_BRANDS, PRODUCTS_LIST, REFERRAL_SOURCES } from "./lib/constants.js";
+import { computeCommissionFor } from "./lib/commission.js";
 import { ProductEditModal, ProductNewModal, ProductsListView, ProductsDetailView, emptyNewProduct } from "./views/Products.jsx";
 import { AddCustomerModal, EditCustomerModal, MergeHistoryModal, RollbackModal, MergeCandidatesModal, CustomersListView, CustomersDetailView } from "./views/Customers.jsx";
+import InvoicesView from "./views/Invoices.jsx";
 import { INVOICE_SHELL_HEAD, INVOICE_PAGE, INVOICE_SHELL_TAIL } from "./invoiceTemplate.js";
 import { RECEIPT_FRAGMENT } from "./receiptTemplate.js";
 import { useT } from "./i18n.jsx";
@@ -237,14 +239,6 @@ function printInvoice(inv, customer, items, products = [], mode = { invoice: tru
   setTimeout(() => w.print(), 500);
 }
 
-// ── 銷售佣金規則（hardcoded） ──────────────────────────────────────────────────
-// 每件 HKD，product.category 命中才算。改規則需改這裡 + 部署
-const COMMISSION_RULES = {
-  '轉插': 600,
-};
-// 此日期之前的發票不算佣金（歷史不追溯）
-const COMMISSION_CUTOFF = '2026-05-09';
-
 // ── MAIN APP ───────────────────────────────────────────────────────────────────
 export default function App() {
   const { t, lang, setLang } = useT();
@@ -358,20 +352,7 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [showAddCustomer, setShowAddCustomer] = useState(false);
-  const [showNewInvoice, setShowNewInvoice] = useState(false);
-  const [invoiceGenerated, setInvoiceGenerated] = useState(false);
-  // 物流發貨 modal
-  const [shippingInvoice, setShippingInvoice] = useState(null);   // 當前要發貨的發票
-  const [shippingNumber, setShippingNumber] = useState("");
-  const [shippingMethod, setShippingMethod] = useState("sf");     // sf | self_pickup
-  const [shippingBusy, setShippingBusy] = useState(false);
-  // 物流軌跡查看 modal
-  const [trackingInvoice, setTrackingInvoice] = useState(null);
-  const [trackingEvents, setTrackingEvents] = useState([]);
-  const [trackingRefreshing, setTrackingRefreshing] = useState(false);
-  const [shippingFilter, setShippingFilter] = useState("all"); // all | pending | in_transit | exception | delivered
   const [saving, setSaving] = useState(false);
-  const [visibleInvoices, setVisibleInvoices] = useState(30);
   const [visibleWarranty, setVisibleWarranty] = useState(50);
   const [warrantySearch, setWarrantySearch] = useState("");
   const [warrantyBucket, setWarrantyBucket] = useState("all"); // all | expired | soon | near | far
@@ -786,17 +767,9 @@ export default function App() {
     // 合并完自动进入列印 flow（若老客户多值会先弹字段选择）
     enterPrintFlow(mergedInv, mergedOld, items, products);
   }
-  const [editingInvoice, setEditingInvoice] = useState(null); // 正在編輯的發票對象
+
   const [markPaidCtx, setMarkPaidCtx] = useState(null); // { inv, defaultWh } —— 標記已付款彈窗
   const [stockToast, setStockToast] = useState(null); // { items: [name] } —— 右下角庫存不足 toast
-  const [editInvItems, setEditInvItems] = useState([]);
-  const [editInvSalespersonId, setEditInvSalespersonId] = useState(""); // 編輯發票的銷售人
-  const [editInvTotalOverride, setEditInvTotalOverride] = useState(""); // 空字串 = 跟隨明細合計；非空 = 手動覆蓋
-  const [editInvExtras, setEditInvExtras] = useState({
-    deposit: { enabled: false, amount: 0 },
-    discount: { enabled: false, amount: 0 },
-    surcharge: { enabled: false, amount: 0 },
-  });
   const [editingProduct, setEditingProduct] = useState(null);
   const [editStock, setEditStock] = useState(0);
   const [editStocks, setEditStocks] = useState({});
@@ -813,33 +786,6 @@ export default function App() {
     car_make: "", car_model: "", address: "",
     interest_products: [], referral: "", type: "Lead", notes: ""
   });
-
-  const [newInvoice, setNewInvoice] = useState({
-    customerId: "", salespersonId: "", items: [mkItem()], notes: "", warranty: false,
-    deposit: { enabled: false, amount: 0 },
-    discount: { enabled: false, amount: 0 },
-    surcharge: { enabled: false, amount: 0 },
-    fieldOverrides: {},
-  });
-  // 新建發票彈窗的搜索框 picker state
-  const [customerQuery, setCustomerQuery] = useState("");          // 客戶搜索輸入框文字
-  const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false);
-  const [productPickerOpenId, setProductPickerOpenId] = useState(null); // 哪條明細行的產品 picker 正開著 (item.id)
-
-  // 關閉新建發票彈窗 → 一次清掉所有殘留（避免下次打開時看到上次的選擇）
-  function closeNewInvoice() {
-    setShowNewInvoice(false);
-    setNewInvoice({
-      customerId: "", salespersonId: "", items: [mkItem()], notes: "", warranty: false,
-      deposit: { enabled: false, amount: 0 },
-      discount: { enabled: false, amount: 0 },
-      surcharge: { enabled: false, amount: 0 },
-      fieldOverrides: {},
-    });
-    setCustomerQuery("");
-    setCustomerDropdownOpen(false);
-    setProductPickerOpenId(null);
-  }
 
   // 客戶頁過濾/排序：按需計算最近購買日期 + 搜索 + 時間範圍 + 排序
   // 客戶去重：
@@ -1056,32 +1002,6 @@ export default function App() {
   // 老單若需補追蹤，編輯時填單號照樣會走 trigger + Edge Function
   const SHIPPING_TRACKING_SINCE = '2026-05-05';
   const isShippingTrackable = (inv) => (inv?.date || '') >= SHIPPING_TRACKING_SINCE;
-  const filteredInvoices = useMemo(() => {
-    const q = search.toLowerCase();
-    let base = !q ? invoices : invoices.filter(inv => {
-      const c = customers.find(x => x.id === inv.customer_id);
-      return String(inv.invoice_number || "").toLowerCase().includes(q)
-        || (c?.name || "").toLowerCase().includes(q)
-        || (inv.notes || "").toLowerCase().includes(q)
-        || (inv.tracking_number || "").toLowerCase().includes(q);
-    });
-    if (shippingFilter !== "all") {
-      base = base.filter(inv => {
-        const ss = deriveShippingStatus(inv);
-        // pending 列表只顯示啟用日期之後的，老單不算
-        if (shippingFilter === "pending")    return ss === '待發貨' && isShippingTrackable(inv);
-        if (shippingFilter === "in_transit") return ['已發貨','在途','派送中'].includes(ss);
-        if (shippingFilter === "exception")  return ss === '異常';
-        if (shippingFilter === "delivered")  return ss === '已簽收';
-        return true;
-      });
-    }
-    return [...base].sort((a, b) => {
-      const da = a.date || "", db = b.date || "";
-      if (da !== db) return db.localeCompare(da);
-      return String(b.created_at || "").localeCompare(String(a.created_at || ""));
-    });
-  }, [invoices, customers, search, shippingFilter]);
 
   const queryClient = useQueryClient();
 
@@ -1455,12 +1375,6 @@ export default function App() {
     return values.sort((a, b) => b.totalSold - a.totalSold);
   }, [invoices, products, customers]);
 
-  const extrasTotal =
-    (newInvoice.deposit?.enabled ? (Number(newInvoice.deposit.amount) || 0) : 0) +
-    (newInvoice.surcharge?.enabled ? (Number(newInvoice.surcharge.amount) || 0) : 0) -
-    (newInvoice.discount?.enabled ? (Number(newInvoice.discount.amount) || 0) : 0);
-  const invoiceTotal = newInvoice.items.reduce((sum, item) => sum + (item.price * item.qty || 0), 0) + extrasTotal;
-
   const navItems = [
     { id: "dashboard", label: t("總覽"), icon: "dashboard" },
     { id: "products", label: t("產品"), icon: "product" },
@@ -1498,186 +1412,6 @@ export default function App() {
       alert(`${t("新增客戶失敗")}：${error.message}`);
     }
     setSaving(false);
-  }
-
-  // 計算發票佣金（snapshot at Paid time）
-  // 規則：date >= COMMISSION_CUTOFF + 有 salesperson_id + 非百老匯，按 line items 走 alias 解析到 product，
-  //       product.category 命中 COMMISSION_RULES 則 per_unit × qty 累加
-  function computeCommissionFor(inv, salespersonId) {
-    if (!salespersonId) return 0;
-    if (!inv.date || inv.date < COMMISSION_CUTOFF) return 0;
-    if ((inv.notes || '').includes('__BROADWAY__')) return 0;
-    let itemsArr = inv.items;
-    if (typeof itemsArr === 'string') { try { itemsArr = JSON.parse(itemsArr); } catch { itemsArr = []; } }
-    if (!Array.isArray(itemsArr)) return 0;
-    const norm = (s) => (s || '').toLowerCase().trim();
-    const aliasByName = new Map(lineItemAliases.map(a => [norm(a.alias_name), a]));
-    let total = 0;
-    for (const it of itemsArr) {
-      const itemQty = Number(it.qty) || 0;
-      if (itemQty <= 0) continue;
-      const alias = aliasByName.get(norm(it.name));
-      let resolved = []; // [{product_id, qty}]
-      if (alias && alias.skip !== true && Array.isArray(alias.products)) {
-        for (const ap of alias.products) {
-          resolved.push({ product_id: ap.product_id, qty: (Number(ap.qty) || 1) * itemQty });
-        }
-      } else if (!alias) {
-        const directProd = products.find(p => p.name === it.name);
-        if (directProd) resolved.push({ product_id: directProd.id, qty: itemQty });
-      }
-      for (const r of resolved) {
-        const p = products.find(x => x.id === r.product_id);
-        if (!p) continue;
-        const rate = COMMISSION_RULES[p.category];
-        if (!rate) continue;
-        total += rate * r.qty;
-      }
-    }
-    return total;
-  }
-
-  // 寫 invoice items 前把當前 product.warranty_months 快照進每條 item
-  // （已有 snapshot 的不覆蓋；item.name 對不上 product 的不寫）
-  function attachWarrantySnapshot(items) {
-    return items.map(it => {
-      if (it == null) return it;
-      if (it.warranty_months != null) return it;
-      if (isNonWarrantyItem(it.name)) return it;
-      const prod = products.find(p => p.name === it.name);
-      if (!prod || !prod.warranty_months) return it;
-      return { ...it, warranty_months: Number(prod.warranty_months) };
-    });
-  }
-
-  async function handleGenerateInvoice() {
-    setSaving(true);
-    const invNumber = `${Date.now()}`.slice(-6);
-    const finalItems = attachWarrantySnapshot([...newInvoice.items]);
-    if (newInvoice.deposit?.enabled && Number(newInvoice.deposit.amount)) {
-      finalItems.push({ id: mkItem().id, name: "押金", qty: 1, price: Number(newInvoice.deposit.amount) });
-    }
-    if (newInvoice.surcharge?.enabled && Number(newInvoice.surcharge.amount)) {
-      finalItems.push({ id: mkItem().id, name: "手續費", qty: 1, price: Number(newInvoice.surcharge.amount) });
-    }
-    if (newInvoice.discount?.enabled && Number(newInvoice.discount.amount)) {
-      finalItems.push({ id: mkItem().id, name: "優惠", qty: 1, price: -Number(newInvoice.discount.amount) });
-    }
-    const { data, error } = await supabase.from("invoices").insert([{
-      invoice_number: invNumber,
-      customer_id: newInvoice.customerId || null,
-      salesperson_id: newInvoice.salespersonId || null,
-      date: new Date().toISOString().slice(0, 10),
-      items: finalItems,
-      total: invoiceTotal,
-      status: "Unpaid",
-      notes: newInvoice.notes,
-    }]).select();
-    if (!error && data) {
-      setInvoices(prev => [data[0], ...prev]);
-      setInvoiceGenerated(true);
-      const customer = getCustomer(newInvoice.customerId);
-      // 把弹窗里勾选的多值字段 override 进 customer，跳过再弹信息选择 modal
-      const gid = customerGroups.idToGroup.get(newInvoice.customerId);
-      const virtual = gid ? customerGroups.virtualCustomers.find(v => v.id === gid) : null;
-      const effective = { ...(virtual || customer), ...(newInvoice.fieldOverrides || {}) };
-      enterPrintFlow(data[0], effective, finalItems, products);
-
-      // Auto-create warranty: update inventory items with warranty_end dates
-      const invoiceDate = new Date();
-      for (const item of newInvoice.items) {
-        const matchedProduct = products.find(p => p.name === item.name);
-        if (matchedProduct && matchedProduct.warranty_months) {
-          const warrantyEnd = new Date(invoiceDate);
-          warrantyEnd.setMonth(warrantyEnd.getMonth() + matchedProduct.warranty_months);
-          const warrantyEndStr = warrantyEnd.toISOString().slice(0, 10);
-          const matchingInventory = inventory.filter(
-            inv => inv.product_id === matchedProduct.id && inv.status === "In Stock"
-          );
-          for (const invItem of matchingInventory.slice(0, item.qty)) {
-            const { error: invErr } = await supabase.from("inventory").update({
-              status: "Sold",
-              customer_id: newInvoice.customerId || null,
-              sold_date: invoiceDate.toISOString().slice(0, 10),
-              warranty_end: warrantyEndStr,
-              invoice_id: data[0].id,
-            }).eq("id", invItem.id);
-            if (invErr) {
-              console.error(`庫存更新失敗 (item ${invItem.id}):`, invErr);
-              alert(`${t("發票已生成")} (#${data[0].invoice_number})，${t("但部分庫存更新失敗")}：${invErr.message}\n${t("請在庫存頁手動核對。")}`);
-              continue;
-            }
-            setInventory(prev => prev.map(i =>
-              i.id === invItem.id ? { ...i, status: "Sold", customer_id: newInvoice.customerId || null, sold_date: invoiceDate.toISOString().slice(0, 10), warranty_end: warrantyEndStr, invoice_id: data[0].id } : i
-            ));
-          }
-        }
-      }
-
-      setTimeout(() => {
-        setInvoiceGenerated(false);
-        closeNewInvoice();
-      }, 2000);
-    } else if (error) {
-      alert(`${t("發票生成失敗")}：${error.message}`);
-    }
-    setSaving(false);
-  }
-
-  function openEditInvoice(inv) {
-    const rawItems = Array.isArray(inv.items) ? inv.items : (() => { try { return JSON.parse(inv.items || "[]"); } catch { return []; } })();
-    // 拆分：押金/優惠/手續費 line item 提取出來作為 extras，其他進明細
-    const extras = { deposit: { enabled: false, amount: 0 }, discount: { enabled: false, amount: 0 }, surcharge: { enabled: false, amount: 0 } };
-    const normalItems = [];
-    for (const it of rawItems) {
-      const name = (it.name || "").trim();
-      const p = Number(it.price) || 0;
-      if (name === "押金") { extras.deposit = { enabled: true, amount: p }; continue; }
-      if (name === "優惠") { extras.discount = { enabled: true, amount: Math.abs(p) }; continue; }
-      if (name === "手續費") { extras.surcharge = { enabled: true, amount: p }; continue; }
-      normalItems.push({ id: it.id || mkItem().id, name, qty: Number(it.qty) || 1, price: p });
-    }
-    setEditingInvoice(inv);
-    setEditInvItems(normalItems.length > 0 ? normalItems : [mkItem()]);
-    setEditInvExtras(extras);
-    setEditInvTotalOverride("");
-    setEditInvSalespersonId(inv.salesperson_id || "");
-  }
-  function closeEditInvoice() {
-    setEditingInvoice(null);
-    setEditInvItems([]);
-    setEditInvSalespersonId("");
-    setEditInvTotalOverride("");
-    setEditInvExtras({ deposit: { enabled: false, amount: 0 }, discount: { enabled: false, amount: 0 }, surcharge: { enabled: false, amount: 0 } });
-  }
-  async function handleSaveInvoice() {
-    if (!editingInvoice) return;
-    // 組裝最終 items：普通明細 + 勾選的 extras 作為 line item（順手 snapshot 保修月數）
-    const cleanItems = attachWarrantySnapshot(editInvItems.filter(it => it.name || it.qty || it.price));
-    const finalItems = [...cleanItems];
-    if (editInvExtras.deposit?.enabled && Number(editInvExtras.deposit.amount)) {
-      finalItems.push({ id: mkItem().id, name: "押金", qty: 1, price: Number(editInvExtras.deposit.amount) });
-    }
-    if (editInvExtras.surcharge?.enabled && Number(editInvExtras.surcharge.amount)) {
-      finalItems.push({ id: mkItem().id, name: "手續費", qty: 1, price: Number(editInvExtras.surcharge.amount) });
-    }
-    if (editInvExtras.discount?.enabled && Number(editInvExtras.discount.amount)) {
-      finalItems.push({ id: mkItem().id, name: "優惠", qty: 1, price: -Number(editInvExtras.discount.amount) });
-    }
-    const itemsSum = finalItems.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 0), 0);
-    const finalTotal = editInvTotalOverride === "" ? itemsSum : (Number(editInvTotalOverride) || 0);
-    const newSalespersonId = editInvSalespersonId || null;
-    const updates = { items: finalItems, total: finalTotal, salesperson_id: newSalespersonId };
-    // 如果發票已 Paid 且銷售人變更 → 重算佣金 snapshot（規則：當前規則 + 新銷售人）
-    const isPaid = (editingInvoice.status || '').trim().toLowerCase() === 'paid';
-    if (isPaid && (editingInvoice.salesperson_id || null) !== newSalespersonId) {
-      updates.commission_amount = computeCommissionFor({ ...editingInvoice, items: finalItems, salesperson_id: newSalespersonId }, newSalespersonId);
-    }
-    const { error } = await supabase.from("invoices").update(updates).eq("id", editingInvoice.id);
-    if (error) { alert(`${t("儲存失敗")}：${error.message}`); return; }
-    setInvoices(prev => prev.map(i => i.id === editingInvoice.id ? { ...i, ...updates } : i));
-    queryClient.setQueryData(["bf", "invoices"], (old) => Array.isArray(old) ? old.map(i => i.id === editingInvoice.id ? { ...i, ...updates } : i) : old);
-    closeEditInvoice();
   }
 
   function handleMarkPaid(inv) {
@@ -1774,7 +1508,7 @@ export default function App() {
       });
     }
     // 佣金 snapshot：標 Paid 時按當前規則 + 銷售人 算一次寫入。後續改規則不追溯
-    const commissionAmount = computeCommissionFor(isBroadway ? { ...inv, notes: nextNotes } : inv, inv.salesperson_id);
+    const commissionAmount = computeCommissionFor(isBroadway ? { ...inv, notes: nextNotes } : inv, inv.salesperson_id, { products, lineItemAliases });
     const baseUpdates = { status: "Paid", commission_amount: commissionAmount };
     const updates = isBroadway ? { ...baseUpdates, notes: nextNotes } : baseUpdates;
     const { error } = await supabase.from("invoices").update(updates).eq("id", inv.id);
@@ -1793,103 +1527,6 @@ export default function App() {
     setMarkPaidCtx(null);
   }
 
-  // ─── 物流發貨 handlers ─────────────────────────────────
-  function openShippingModal(inv) {
-    if (!canShip) { alert(t("您沒有發貨權限。請聯繫管理員。")); return; }
-    setShippingInvoice(inv);
-    setShippingNumber(inv.tracking_number || "");
-    // 已存在的自提發票打開時保留自提模式，否則默認順豐
-    setShippingMethod(inv.carrier === "self_pickup" ? "self_pickup" : "sf");
-  }
-  async function submitShipping() {
-    if (!shippingInvoice) return;
-    setShippingBusy(true);
-    try {
-      let updates;
-      if (shippingMethod === "self_pickup") {
-        // 自提：carrier=self_pickup，直接標已簽收，shipped_at + delivered_at 同時記
-        const now = new Date().toISOString();
-        updates = {
-          carrier: "self_pickup",
-          tracking_number: null,
-          shipping_status: "已簽收",
-          shipped_at: now,
-          delivered_at: now,
-        };
-      } else {
-        const num = (shippingNumber || "").trim();
-        if (!num) { alert(t("請填寫順豐單號")); setShippingBusy(false); return; }
-        if (!/^[A-Za-z0-9]{6,}$/.test(num)) {
-          if (!window.confirm(t("單號格式可能異常，仍要保存嗎？"))) { setShippingBusy(false); return; }
-        }
-        updates = {
-          tracking_number: num,
-          carrier: "SF HK",
-        };
-      }
-      const { error } = await supabase.from("invoices").update(updates).eq("id", shippingInvoice.id);
-      if (error) { alert(`${t("發貨保存失敗")}：${error.message}`); return; }
-      // trigger 會自動 set shipped_at + shipping_status='已發貨'（順豐情況），重新拉一次拿準確值
-      const { data: fresh } = await supabase.from("invoices").select("*").eq("id", shippingInvoice.id).maybeSingle();
-      const merged = (i) => ({ ...i, ...(fresh || updates) });
-      setInvoices(prev => prev.map(i => i.id === shippingInvoice.id ? merged(i) : i));
-      queryClient.setQueryData(["bf", "invoices"], (old) => Array.isArray(old) ? old.map(i => i.id === shippingInvoice.id ? merged(i) : i) : old);
-      setShippingInvoice(null);
-      setShippingNumber("");
-    } finally {
-      setShippingBusy(false);
-    }
-  }
-  async function openTrackingModal(inv) {
-    setTrackingInvoice(inv);
-    setTrackingEvents([]);
-    const { data, error } = await supabase
-      .from("shipment_events")
-      .select("*")
-      .eq("invoice_id", inv.id)
-      .order("event_at", { ascending: false });
-    if (!error) setTrackingEvents(data || []);
-  }
-  async function refreshTracking() {
-    if (!trackingInvoice) return;
-    setTrackingRefreshing(true);
-    try {
-      const { data: { session: s } } = await supabase.auth.getSession();
-      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/track-shipments`;
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${s?.access_token}` },
-        body: JSON.stringify({ invoice_id: trackingInvoice.id }),
-      });
-      if (!resp.ok) {
-        alert(`${t("刷新失敗")}：${resp.status}（${t("可能順豐 API 還未配置")}）`);
-        return;
-      }
-      // 重新拉軌跡 + invoice
-      const { data: events } = await supabase.from("shipment_events").select("*").eq("invoice_id", trackingInvoice.id).order("event_at", { ascending: false });
-      setTrackingEvents(events || []);
-      const { data: inv } = await supabase.from("invoices").select("*").eq("id", trackingInvoice.id).maybeSingle();
-      if (inv) {
-        setTrackingInvoice(inv);
-        setInvoices(prev => prev.map(i => i.id === inv.id ? inv : i));
-        queryClient.setQueryData(["bf", "invoices"], (old) => Array.isArray(old) ? old.map(i => i.id === inv.id ? inv : i) : old);
-      }
-    } catch (e) {
-      alert(`${t("刷新失敗")}：${e.message}`);
-    } finally {
-      setTrackingRefreshing(false);
-    }
-  }
-  async function handleMarkShippingException() {
-    if (!trackingInvoice) return;
-    if (!window.confirm(t("標為「異常」？"))) return;
-    const { error } = await supabase.from("invoices").update({ shipping_status: "異常" }).eq("id", trackingInvoice.id);
-    if (error) { alert(`${t("操作失敗")}：${error.message}`); return; }
-    setInvoices(prev => prev.map(i => i.id === trackingInvoice.id ? { ...i, shipping_status: "異常" } : i));
-    queryClient.setQueryData(["bf", "invoices"], (old) => Array.isArray(old) ? old.map(i => i.id === trackingInvoice.id ? { ...i, shipping_status: "異常" } : i) : old);
-    setTrackingInvoice(prev => prev ? { ...prev, shipping_status: "異常" } : prev);
-  }
-
   async function handleDeleteCustomer(c) {
     const cids = c.allCids || c.groupCids || [c.id];
     const invCount = invoices.filter(i => cids.includes(i.customer_id)).length;
@@ -1906,46 +1543,6 @@ export default function App() {
     if (error) { alert(`${t("刪除客戶失敗")}：${error.message}`); return; }
     setCustomers(prev => prev.filter(x => !cids.includes(x.id)));
     setSelectedCustomer(null);
-  }
-
-  async function handleDeleteInvoice(inv) {
-    const cust = customers.find(c => c.id === inv.customer_id);
-    const custLine = cust ? (cust.name || t("(無名)")) + (cust.phone ? ` · ${cust.phone}` : "") : t("(無客戶)");
-    let itemsArr = inv.items;
-    if (typeof itemsArr === "string") { try { itemsArr = JSON.parse(itemsArr); } catch { itemsArr = []; } }
-    if (!Array.isArray(itemsArr)) itemsArr = [];
-    const itemsLine = itemsArr.length > 0
-      ? itemsArr.map(it => `  • ${it.name || t("(未命名)")} × ${it.qty || 1}`).join("\n")
-      : "  " + t("(無明細)");
-    const msg =
-      `⚠️ ${t("確認刪除以下發票？")}\n\n` +
-      `${t("發票號")}：DC${String(inv.invoice_number || inv.id).replace(/^DC/i, "")}\n` +
-      `${t("客戶")}：${custLine}\n` +
-      `${t("日期")}：${inv.date || "-"}\n` +
-      `${t("金額")}：HKD$${inv.total || 0}\n` +
-      `${t("狀態")}：${inv.status || "-"}\n` +
-      `${t("明細")}：\n${itemsLine}\n\n` +
-      t("此操作會同時還原對應的庫存狀態（Sold → In Stock），不可撤銷。");
-    const confirmed = window.confirm(msg);
-    if (!confirmed) return;
-    const { data: relatedInv, error: fetchErr } = await supabase
-      .from("inventory").select("id").eq("invoice_id", inv.id);
-    if (fetchErr) { alert(`${t("查詢關聯庫存失敗")}：${fetchErr.message}`); return; }
-    if (relatedInv && relatedInv.length > 0) {
-      const { error: restoreErr } = await supabase.from("inventory")
-        .update({ status: "In Stock", customer_id: null, sold_date: null, warranty_end: null, invoice_id: null })
-        .eq("invoice_id", inv.id);
-      if (restoreErr) { alert(`${t("還原庫存失敗")}：${restoreErr.message}`); return; }
-    }
-    const { error: delErr } = await supabase.from("invoices").delete().eq("id", inv.id);
-    if (delErr) { alert(`${t("刪除發票失敗")}：${delErr.message}`); return; }
-    setInvoices(prev => prev.filter(i => i.id !== inv.id));
-    if (relatedInv && relatedInv.length > 0) {
-      const ids = new Set(relatedInv.map(r => r.id));
-      setInventory(prev => prev.map(i => ids.has(i.id)
-        ? { ...i, status: "In Stock", customer_id: null, sold_date: null, warranty_end: null, invoice_id: null }
-        : i));
-    }
   }
 
   // ── 員工管理 ──────────────────────────────────────────────
@@ -2461,8 +2058,7 @@ export default function App() {
           {navItems.map(n => (
             <button key={n.id} onClick={() => {
               if (n.external) { window.location.href = n.external; return; }
-              setTab(n.id); setSelectedCustomer(null); setSearch(""); setVisibleInvoices(30);
-              // setVisibleCustomers(30) 不再需要：CustomersListView 切 tab 時 unmount，下次掛載 useState(30) 自然重置
+              setTab(n.id); setSelectedCustomer(null); setSearch("");
             }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "none", cursor: "pointer", background: tab === n.id ? "rgba(99,130,255,0.18)" : "transparent", color: tab === n.id ? "#7c9dff" : "#8899cc", fontSize: 14, fontWeight: tab === n.id ? 700 : 500, textAlign: "left" }}>
               <Icon name={n.icon} size={17} />{n.label}
             </button>
@@ -2513,7 +2109,12 @@ export default function App() {
                 if (!i.shipped_at) return false;
                 return new Date(i.shipped_at).getTime() < fourteenDaysAgo;
               }).length;
-              const goShipping = (k) => { setTab("invoices"); setShippingFilter(k); setVisibleInvoices(30); setSearch(""); };
+              const goShipping = (k) => {
+                sessionStorage.setItem('invoices.initialShippingFilter', k);
+                setTab("invoices");
+                setSelectedCustomer(null);
+                setSearch("");
+              };
               return (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 28 }}>
                   <StatCard label={t("待發貨")} value={pending} sub={t("已付款待出庫")} accent="#888" icon={<Icon name="inventory" size={20} />} onClick={() => goShipping("pending")} />
@@ -2689,7 +2290,6 @@ export default function App() {
             handleDeleteCustomer={handleDeleteCustomer}
             setMergeHistoryOpen={setMergeHistoryOpen}
             handleMarkPaid={handleMarkPaid}
-            openEditInvoice={openEditInvoice}
             openPrintChooser={openPrintChooser}
             Badge={Badge}
             fmtInvNum={fmtInvNum}
@@ -2699,116 +2299,19 @@ export default function App() {
 
         {/* INVOICES */}
         {tab === "invoices" && (
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-              <div>
-                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{t("發票")}</h1>
-                <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>{t("共")} {invoices.length} {t("張發票")}</p>
-              </div>
-              <button onClick={() => setShowNewInvoice(true)} style={{ display: "flex", alignItems: "center", gap: 8, background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, padding: "10px 18px", cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
-                <Icon name="plus" size={16} /> {t("新建發票")}
-              </button>
-            </div>
-
-            <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-              <Icon name="search" size={15} />
-              <input placeholder={t("搜尋發票 / 順豐單號...")} value={search} onChange={e => { setSearch(e.target.value); setVisibleInvoices(30); }} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
-            </div>
-
-            {/* 物流狀態 filter */}
-            <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-              {[
-                { k: "all",        label: t("全部"),       color: "#555" },
-                { k: "pending",    label: t("待發貨"),     color: "#888" },
-                { k: "in_transit", label: t("運送中"),     color: "#6382ff" },
-                { k: "exception",  label: t("異常"),       color: "#d14343" },
-                { k: "delivered",  label: t("已簽收"),     color: "#22c55e" },
-              ].map(b => (
-                <button key={b.k} onClick={() => { setShippingFilter(b.k); setVisibleInvoices(30); }}
-                  style={{ padding: "6px 14px", borderRadius: 18, border: shippingFilter === b.k ? `2px solid ${b.color}` : "1px solid #e0e0e0", background: shippingFilter === b.k ? b.color + "18" : "#fff", color: shippingFilter === b.k ? b.color : "#555", fontSize: 12, fontWeight: shippingFilter === b.k ? 700 : 500, cursor: "pointer" }}>
-                  {b.label}
-                </button>
-              ))}
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {filteredInvoices.slice(0, visibleInvoices).map(inv => {
-                const c = getCustomer(inv.customer_id);
-                return (
-                  <div key={inv.id} style={{ background: "#fff", borderRadius: 14, padding: "18px 22px", border: "1px solid #f0f0f0", boxShadow: "0 2px 8px rgba(0,0,0,0.03)", display: "flex", alignItems: "center", gap: 18 }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 800, fontSize: 15, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        {fmtInvNum(inv)}
-                        {(() => { const s = invoiceSource(inv); return <span style={{ fontSize: 10, fontWeight: 700, color: s.color, background: s.bg, padding: "2px 7px", borderRadius: 6 }}>{s.label}</span>; })()}
-                        {inv.salesperson_id && (() => {
-                          const sp = employees.find(e => e.id === inv.salesperson_id);
-                          if (!sp) return null;
-                          return <span title={t("負責銷售")} style={{ fontSize: 10, fontWeight: 700, color: "#7c3aed", background: "#ede9fe", padding: "2px 7px", borderRadius: 6 }}>{t("銷售")}: {sp.name}</span>;
-                        })()}
-                        {getPossibleDupId(inv) && (
-                          <span title={t("此發票疑似與另一張發票重複（2 天內 / 同 email / 同 phone / 同產品），標 Paid 前請核對")} style={{ fontSize: 10, fontWeight: 700, color: "#b91c1c", background: "#fee2e2", padding: "2px 7px", borderRadius: 6 }}>⚠ {t("疑似重複")}</span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>{(c?.phone || c?.phone_mainland) ? `${c.phone || c.phone_mainland} · ` : ""}{c?.name || "—"} · {inv.date || t("日期未知")} · {formatNotes(inv.notes)}</div>
-                      {Array.isArray(inv.items) && inv.items.slice(0, 2).map((item, i) => (
-                        <div key={i} style={{ fontSize: 12, color: "#999" }}>{item.name} ×{item.qty}</div>
-                      ))}
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                      {(inv.status || "").trim().toLowerCase() !== "paid" && (
-                        <button onClick={() => handleMarkPaid(inv)} title={t("標記已付款")} style={{ fontSize: 12, background: "#e8f5e9", color: "#22c55e", border: "1px solid #c8e6c9", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
-                          ✓ {t("標記已付款")}
-                        </button>
-                      )}
-                      <div style={{ fontSize: 18, fontWeight: 800 }}>HKD${inv.total}</div>
-                      <Badge status={inv.status} />
-                      {(() => {
-                        const ss = deriveShippingStatus(inv);
-                        const isSelfPickup = inv.carrier === "self_pickup";
-                        const map = {
-                          '待發貨': { color: '#888',    bg: '#f5f5f5', label: t('待發貨') },
-                          '已發貨': { color: '#6382ff', bg: '#eef2ff', label: t('已發貨') },
-                          '在途':   { color: '#b45309', bg: '#fef3c7', label: t('在途') },
-                          '派送中': { color: '#c2410c', bg: '#ffedd5', label: t('派送中') },
-                          '已簽收': { color: '#16a34a', bg: '#dcfce7', label: t('已簽收') },
-                          '異常':   { color: '#b91c1c', bg: '#fee2e2', label: t('異常') },
-                        };
-                        const selfPickupTag = { color: '#16a34a', bg: '#dcfce7', label: t('已自提') };
-                        const m = isSelfPickup ? selfPickupTag : (map[ss] || map['待發貨']);
-                        const isPending = ss === '待發貨' && !isSelfPickup;
-                        const onClick = isPending
-                          ? (canShip ? () => openShippingModal(inv) : null)
-                          : () => openTrackingModal(inv);
-                        const title = isPending
-                          ? (canShip ? t("點擊發貨") : t("待發貨（無發貨權限）"))
-                          : (isSelfPickup ? t("店面自提") : `${t("順豐")} ${inv.tracking_number || ""}`);
-                        return (
-                          <button onClick={onClick} disabled={!onClick} title={title}
-                            style={{ background: m.bg, color: m.color, border: "none", borderRadius: 8, padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: onClick ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}>
-                            {m.label}
-                          </button>
-                        );
-                      })()}
-                      <button onClick={() => openEditInvoice(inv)} title={t("編輯發票")} style={{ fontSize: 12, background: "#fff8e1", color: "#f59e0b", border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700 }}>
-                        ✏️
-                      </button>
-                      <button onClick={() => openPrintChooser(inv, c, inv.items || [], products)} style={{ fontSize: 12, background: "#f0f4ff", color: "#6382ff", border: "none", borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
-                        <Icon name="print" size={13} /> {t("列印")}
-                      </button>
-                      <button onClick={() => handleDeleteInvoice(inv)} title={t("刪除發票")} style={{ fontSize: 12, background: "#fff0f0", color: "#d14343", border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
-                        🗑️
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-              {visibleInvoices < filteredInvoices.length && (
-                <button onClick={() => setVisibleInvoices(v => v + 30)} style={{ display: "block", margin: "12px auto", padding: "10px 28px", background: "#f0f4ff", color: "#6382ff", border: "1px solid #e0e8ff", borderRadius: 10, cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
-                  {t("載入更多")}（{filteredInvoices.length - visibleInvoices} {t("項待載入")}）
-                </button>
-              )}
-            </div>
-          </div>
+          <InvoicesView
+            search={search} setSearch={setSearch}
+            customerGroups={customerGroups}
+            getCustomer={getCustomer}
+            fmtInvNum={fmtInvNum}
+            formatNotes={formatNotes}
+            invoiceSource={invoiceSource}
+            getPossibleDupId={getPossibleDupId}
+            handleMarkPaid={handleMarkPaid}
+            openPrintChooser={openPrintChooser}
+            handleUpgradePhysical={handleUpgradePhysical}
+            Badge={Badge}
+          />
         )}
 
         {/* WARRANTY */}
@@ -4434,102 +3937,6 @@ export default function App() {
         </div>
       )}
 
-      {/* ADD CUSTOMER MODAL */}
-      {editingInvoice && (() => {
-        const itemsSubtotal = editInvItems.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 0), 0);
-        const extrasTotal =
-          (editInvExtras.deposit?.enabled ? (Number(editInvExtras.deposit.amount) || 0) : 0) +
-          (editInvExtras.surcharge?.enabled ? (Number(editInvExtras.surcharge.amount) || 0) : 0) -
-          (editInvExtras.discount?.enabled ? (Number(editInvExtras.discount.amount) || 0) : 0);
-        const itemsSum = itemsSubtotal + extrasTotal;
-        const finalTotal = editInvTotalOverride === "" ? itemsSum : (Number(editInvTotalOverride) || 0);
-        return (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
-            <div style={{ background: "#fff", borderRadius: 20, padding: 32, width: 700, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-                <div>
-                  <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{t("編輯發票")}</h2>
-                  <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>#{editingInvoice.invoice_number || editingInvoice.id}</div>
-                </div>
-                <button onClick={closeEditInvoice} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
-              </div>
-              {/* 負責銷售下拉 */}
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 5 }}>{t("負責銷售")}</label>
-                <select value={editInvSalespersonId} onChange={e => setEditInvSalespersonId(e.target.value)}
-                  style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", background: "#fff", boxSizing: "border-box" }}>
-                  <option value="">{t("（無）")}</option>
-                  {employees.filter(e => e.role === '銷售' && e.active !== false).map(e => (
-                    <option key={e.id} value={e.id}>{e.name}</option>
-                  ))}
-                </select>
-                {(editingInvoice.status || '').trim().toLowerCase() === 'paid' && (editingInvoice.salesperson_id || '') !== editInvSalespersonId && (
-                  <div style={{ fontSize: 11, color: "#b87500", marginTop: 4 }}>{t("已 Paid 發票改銷售人 → 佣金將按當前規則重算")}</div>
-                )}
-              </div>
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>{t("明細")}</label>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 56px 90px 72px 36px", gap: 6, fontSize: 11, color: "#888", marginBottom: 6, paddingLeft: 4 }}>
-                  <div>{t("產品名稱")}</div><div style={{ textAlign: "center" }}>{t("數量")}</div><div>{t("單價 HKD")}</div><div>{t("倉庫")}</div><div></div>
-                </div>
-                {editInvItems.map((item, idx) => (
-                  <div key={item.id} style={{ display: "grid", gridTemplateColumns: "1fr 56px 90px 72px 36px", gap: 6, marginBottom: 8 }}>
-                    <input value={item.name} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, name: e.target.value }; setEditInvItems(arr); }} placeholder={t("產品名")} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
-                    <input type="number" value={item.qty} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, qty: parseInt(e.target.value) || 0 }; setEditInvItems(arr); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "center" }} />
-                    <input type="number" value={item.price} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, price: parseFloat(e.target.value) || 0 }; setEditInvItems(arr); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
-                    <select value={item.warehouse_id || ''} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, warehouse_id: e.target.value || null }; setEditInvItems(arr); }} title={t("扣庫存的倉庫（不顯示在發票/收據上）")} style={{ padding: "9px 6px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", background: "#fff" }}>
-                      <option value="">—</option>
-                      {warehouses.map(w => <option key={w.id} value={w.id}>{w.name.replace("分部", "")}</option>)}
-                    </select>
-                    <button onClick={() => setEditInvItems(editInvItems.filter(i => i.id !== item.id))} style={{ background: "#fce4ec", border: "none", borderRadius: 8, cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
-                  </div>
-                ))}
-                <button onClick={() => setEditInvItems([...editInvItems, mkItem(warehouses[0]?.id)])} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", width: "100%", marginTop: 4 }}>+ {t("新增項目")}</button>
-              </div>
-              <div style={{ marginBottom: 14, padding: "14px 16px", background: "#fafbff", borderRadius: 12, border: "1px solid #eef0fa" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#555", marginBottom: 10 }}>{t("額外費用")}</div>
-                {[
-                  { key: "deposit", label: t("押金"), sign: "+", color: "#6382ff" },
-                  { key: "discount", label: t("優惠"), sign: "−", color: "#d14343" },
-                  { key: "surcharge", label: t("手續費"), sign: "+", color: "#f59e0b" },
-                ].map(({ key, label, sign, color }) => {
-                  const v = editInvExtras[key] || { enabled: false, amount: 0 };
-                  return (
-                    <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                      <input type="checkbox" id={`edit-extra-${key}`} checked={v.enabled} onChange={e => setEditInvExtras({ ...editInvExtras, [key]: { ...v, enabled: e.target.checked } })} style={{ width: 16, height: 16, cursor: "pointer" }} />
-                      <label htmlFor={`edit-extra-${key}`} style={{ fontSize: 14, cursor: "pointer", minWidth: 70, fontWeight: 600 }}>
-                        <span style={{ color, marginRight: 4 }}>{sign}</span>{label}
-                      </label>
-                      {v.enabled && (
-                        <input type="number" min="0" value={v.amount || ""} onChange={e => setEditInvExtras({ ...editInvExtras, [key]: { ...v, amount: parseFloat(e.target.value) || 0 } })} placeholder={t("金額 HKD")} style={{ flex: 1, padding: "7px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-              <div style={{ background: "#fafbff", borderRadius: 12, padding: "14px 18px", marginBottom: 16, border: "1px solid #eef0fa" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, marginBottom: 8 }}>
-                  <span style={{ color: "#666" }}>{t("明細合計（含額外費用）")}</span>
-                  <span style={{ fontWeight: 700 }}>HKD${Math.round(itemsSum).toLocaleString()}</span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontSize: 13, color: "#666" }}>{t("發票總額（留空=跟明細）")}</span>
-                  <input type="number" value={editInvTotalOverride} onChange={e => setEditInvTotalOverride(e.target.value)} placeholder={String(Math.round(itemsSum))} style={{ width: 160, padding: "8px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "right" }} />
-                </div>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 20px", background: "#1a1a2e", borderRadius: 12, marginBottom: 16 }}>
-                <span style={{ color: "#aaa", fontSize: 14 }}>{t("最終總額")}</span>
-                <span style={{ color: "#fff", fontSize: 22, fontWeight: 800 }}>HKD${Math.round(finalTotal).toLocaleString()}</span>
-              </div>
-              <div style={{ display: "flex", gap: 10 }}>
-                <button onClick={closeEditInvoice} style={{ flex: 1, padding: 12, background: "#f5f5f5", color: "#555", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>{t("取消")}</button>
-                <button onClick={handleSaveInvoice} style={{ flex: 2, padding: 12, background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>{t("儲存修改")}</button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
       {/* MARK PAID CONFIRM MODAL */}
       {markPaidCtx && (() => {
         const { inv, defaultWh, channel } = markPaidCtx;
@@ -5211,278 +4618,6 @@ export default function App() {
         handleSaveCustomer={handleSaveCustomer}
       />
 
-      {/* NEW INVOICE MODAL */}
-      {showNewInvoice && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
-          <div style={{ background: "#fff", borderRadius: 20, padding: 32, width: 560, maxHeight: "88vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
-            {invoiceGenerated ? (
-              <div style={{ textAlign: "center", padding: "40px 20px" }}>
-                <div style={{ width: 72, height: 72, borderRadius: "50%", background: "#e8f5e9", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", color: "#22c55e" }}><Icon name="check" size={36} /></div>
-                <div style={{ fontSize: 22, fontWeight: 800 }}>{t("發票已生成！")}</div>
-                <div style={{ color: "#888", marginTop: 8, fontSize: 14 }}>{t("PDF 已列印並儲存到資料庫")}</div>
-              </div>
-            ) : (
-              <>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-                  <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{t("新建發票")}</h2>
-                  <button onClick={closeNewInvoice} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}><Icon name="x" size={16} /></button>
-                </div>
-                <div style={{ marginBottom: 14 }}>
-                  <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 5 }}>{t("客戶")}</label>
-                  <div style={{ position: "relative" }}>
-                    <input
-                      value={customerQuery}
-                      onChange={e => {
-                        setCustomerQuery(e.target.value);
-                        if (newInvoice.customerId) setNewInvoice({...newInvoice, customerId: "", fieldOverrides: {}});
-                        setCustomerDropdownOpen(true);
-                      }}
-                      onFocus={() => setCustomerDropdownOpen(true)}
-                      onBlur={() => setTimeout(() => setCustomerDropdownOpen(false), 150)}
-                      placeholder={t("輸入客戶姓名 / 電話 / 郵箱 / 車型搜索...")}
-                      style={{ width: "100%", padding: "10px 14px", paddingRight: newInvoice.customerId ? 38 : 14, borderRadius: 10, border: newInvoice.customerId ? "1px solid #6382ff" : "1px solid #e0e0e0", fontSize: 14, outline: "none", background: "#fff", boxSizing: "border-box" }}
-                    />
-                    {newInvoice.customerId && (
-                      <button
-                        onClick={() => { setNewInvoice({...newInvoice, customerId: "", fieldOverrides: {}}); setCustomerQuery(""); }}
-                        style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "#f0f0f0", border: "none", borderRadius: "50%", width: 22, height: 22, cursor: "pointer", fontSize: 12, color: "#666", lineHeight: 1, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
-                      >×</button>
-                    )}
-                    {customerDropdownOpen && (() => {
-                      const q = customerQuery.toLowerCase().trim();
-                      // 改用 virtualCustomers 去重，合并组只展示一次
-                      const matched = customerGroups.virtualCustomers.filter(v => {
-                        if ((!v.allNames || v.allNames.length === 0) && (!v.allPhones || v.allPhones.length === 0) && (!v.allEmails || v.allEmails.length === 0)) return false;
-                        if (!q) return true;
-                        const hit = (arr) => (arr || []).some(x => String(x).toLowerCase().includes(q));
-                        return hit(v.allNames) || hit(v.allPhones) || hit(v.allEmails)
-                          || splitMulti(v.car_make).some(x => x.toLowerCase().includes(q))
-                          || splitMulti(v.car_model).some(x => x.toLowerCase().includes(q));
-                      });
-                      const top = matched.slice(0, 20);
-                      return (
-                        <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, maxHeight: 260, overflowY: "auto", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 10, boxShadow: "0 4px 16px rgba(0,0,0,0.08)", zIndex: 100 }}>
-                          {top.length === 0 ? (
-                            <div style={{ padding: "12px 14px", fontSize: 13, color: "#999" }}>{t("沒有符合的客戶，檢查拼寫或去「客戶」頁新增")}</div>
-                          ) : (
-                            <>
-                              {top.map(v => {
-                                const merged = v.groupCids && v.groupCids.length > 1;
-                                const preview = [v.phone, v.email, splitMulti(v.car_make)[0], splitMulti(v.car_model)[0]].filter(Boolean).join(" · ");
-                                return (
-                                  <div
-                                    key={v.id}
-                                    onMouseDown={() => {
-                                      // 选中合并组：customerId 存 root（= v.id），fieldOverrides 默认选第一值
-                                      const overrides = {};
-                                      for (const def of PRINT_FIELD_DEFS) {
-                                        const arrVals = def.arr && v[def.arr] ? v[def.arr] : [];
-                                        const singleVal = v[def.key];
-                                        const sources = arrVals.length > 0 ? arrVals : (singleVal ? [singleVal] : []);
-                                        const vals = [...new Set(sources.flatMap(s => splitMulti(s)))];
-                                        if (vals.length > 0) overrides[def.key] = vals[0];
-                                      }
-                                      setNewInvoice({ ...newInvoice, customerId: v.id, fieldOverrides: overrides });
-                                      setCustomerQuery([v.name, v.phone].filter(Boolean).join(" · "));
-                                      setCustomerDropdownOpen(false);
-                                    }}
-                                    style={{ padding: "8px 14px", cursor: "pointer", borderBottom: "1px solid #f5f5f5" }}
-                                    onMouseEnter={e => e.currentTarget.style.background = "#f8f9ff"}
-                                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                                  >
-                                    <div style={{ fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
-                                      {v.name || t("(未命名客戶)")}
-                                      {merged && <span style={{ fontSize: 10, color: "#6382ff", background: "#eef2ff", borderRadius: 20, padding: "1px 8px", fontWeight: 700 }}>{t("已合併")} {v.groupCids.length}</span>}
-                                    </div>
-                                    <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{preview || "—"}</div>
-                                  </div>
-                                );
-                              })}
-                              {matched.length > 20 && (
-                                <div style={{ padding: "8px 14px", fontSize: 11, color: "#999", background: "#fafafa", textAlign: "center" }}>
-                                  {t("還有")} {matched.length - 20} {t("位客戶，繼續輸入縮小範圍")}
-                                </div>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </div>
-                {/* 負責銷售下拉（可空 = 無歸屬不算佣金） */}
-                <div style={{ marginBottom: 14 }}>
-                  <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 5 }}>{t("負責銷售")}</label>
-                  <select value={newInvoice.salespersonId || ""} onChange={e => setNewInvoice({ ...newInvoice, salespersonId: e.target.value })}
-                    style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", background: "#fff", boxSizing: "border-box" }}>
-                    <option value="">{t("（無）")}</option>
-                    {employees.filter(e => e.role === '銷售' && e.active !== false).map(e => (
-                      <option key={e.id} value={e.id}>{e.name}</option>
-                    ))}
-                  </select>
-                </div>
-                {newInvoice.customerId && (() => {
-                  const gid = customerGroups.idToGroup.get(newInvoice.customerId);
-                  const virtual = gid ? customerGroups.virtualCustomers.find(v => v.id === gid) : null;
-                  if (!virtual) return null;
-                  const upgradeable = (virtual.groupCids || []).filter(id => id !== virtual.id).length;
-                  if (upgradeable === 0) return null;
-                  return (
-                    <div style={{ marginBottom: 14, padding: "12px 14px", background: "#eef4ff", borderRadius: 10, border: "1px solid #c7d7ff", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-                      <div style={{ fontSize: 13, color: "#2b4eb5", lineHeight: 1.4 }}>
-                        <div style={{ fontWeight: 700, marginBottom: 2 }}>{t("偵測到")} {upgradeable} {t("條疑似重複客戶")}</div>
-                        <div style={{ fontSize: 11, color: "#5b75b8" }}>{t("虛擬合併中（資料命中 3+ 字段），可一鍵物理合併到主記錄")}</div>
-                      </div>
-                      <button
-                        onClick={() => handleUpgradePhysical(virtual)}
-                        style={{ background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", fontWeight: 700, cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}
-                      >{t("合併並繼續")}</button>
-                    </div>
-                  );
-                })()}
-                {newInvoice.customerId && (() => {
-                  const gid = customerGroups.idToGroup.get(newInvoice.customerId);
-                  const virtual = gid ? customerGroups.virtualCustomers.find(v => v.id === gid) : null;
-                  if (!virtual) return null;
-                  const multi = {};
-                  for (const def of PRINT_FIELD_DEFS) {
-                    const arrVals = def.arr && virtual[def.arr] ? virtual[def.arr] : [];
-                    const singleVal = virtual[def.key];
-                    const sources = arrVals.length > 0 ? arrVals : (singleVal ? [singleVal] : []);
-                    const vals = [...new Set(sources.flatMap(s => splitMulti(s)))];
-                    if (vals.length > 1) multi[def.key] = vals;
-                  }
-                  if (Object.keys(multi).length === 0) return null;
-                  const labels = Object.fromEntries(PRINT_FIELD_DEFS.map(d => [d.key, d.label]));
-                  return (
-                    <div style={{ marginBottom: 14, padding: "14px 16px", background: "#fff9ec", borderRadius: 12, border: "1px solid #f4dca4" }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "#8a6900", marginBottom: 10 }}>{t("此客戶有多個資料，請選擇本次發票使用的")}</div>
-                      {Object.keys(multi).map(field => (
-                        <div key={field} style={{ marginBottom: 10 }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "#666", marginBottom: 6 }}>{labels[field] || field}</div>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                            {multi[field].map((v, idx) => {
-                              const checked = (newInvoice.fieldOverrides || {})[field] === v;
-                              return (
-                                <label key={idx} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "7px 10px", border: "1px solid " + (checked ? "#6382ff" : "#e8dfb6"), background: checked ? "#f0f4ff" : "#fff", borderRadius: 8, cursor: "pointer" }}>
-                                  <input type="radio" name={"inv-fc-"+field} checked={checked} onChange={() => setNewInvoice(prev => ({ ...prev, fieldOverrides: { ...(prev.fieldOverrides || {}), [field]: v } }))} style={{ marginTop: 2 }} />
-                                  <span style={{ fontSize: 13, color: "#111", whiteSpace: "pre-wrap", lineHeight: 1.4 }}>{v}</span>
-                                </label>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })()}
-                <div style={{ marginBottom: 14 }}>
-                  <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>{t("商品項目")}</label>
-                  {newInvoice.items.map((item, idx) => (
-                    <div key={item.id} style={{ display: "grid", gridTemplateColumns: "1fr 56px 82px 72px auto", gap: 6, marginBottom: 8, alignItems: "start" }}>
-                      <div style={{ position: "relative" }}>
-                        <input
-                          value={item.name}
-                          onChange={e => { const items = [...newInvoice.items]; items[idx] = {...item, name: e.target.value}; setNewInvoice({...newInvoice, items}); }}
-                          onFocus={() => setProductPickerOpenId(item.id)}
-                          onBlur={() => setTimeout(() => setProductPickerOpenId(cur => cur === item.id ? null : cur), 150)}
-                          placeholder={t("產品 / 服務（輸入關鍵字）")}
-                          style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", width: "100%", boxSizing: "border-box" }}
-                        />
-                        {productPickerOpenId === item.id && (() => {
-                          const q = (item.name || "").toLowerCase().trim();
-                          const parentIds = new Set(products.filter(x => x.parent_product_id).map(x => x.parent_product_id));
-                          const matched = products.filter(p => {
-                            if (!p.name) return false;
-                            if (p.category === '_archived') return false;
-                            if (parentIds.has(p.id)) return false;
-                            if (!q) return true;
-                            return p.name.toLowerCase().includes(q) || (p.code || "").toLowerCase().includes(q) || (p.category || "").toLowerCase().includes(q);
-                          });
-                          const top = matched.slice(0, 10);
-                          if (top.length === 0) return null;
-                          return (
-                            <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, width: 360, maxWidth: "calc(100vw - 80px)", maxHeight: 240, overflowY: "auto", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 10, boxShadow: "0 4px 16px rgba(0,0,0,0.08)", zIndex: 100 }}>
-                              {top.map(p => (
-                                <div
-                                  key={p.id}
-                                  onMouseDown={() => {
-                                    const items = [...newInvoice.items];
-                                    items[idx] = {...item, name: p.name, price: Number(p.price) || item.price};
-                                    setNewInvoice({...newInvoice, items});
-                                    setProductPickerOpenId(null);
-                                  }}
-                                  style={{ padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid #f5f5f5" }}
-                                  onMouseEnter={e => e.currentTarget.style.background = "#f8f9ff"}
-                                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                                >
-                                  <div style={{ fontSize: 13, fontWeight: 600 }}>{p.name}</div>
-                                  <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
-                                    HK${p.price ?? "—"}{p.category ? ` · ${p.category}` : ""}{p.stock != null ? ` · ${t("庫存")} ${p.stock}` : ""}
-                                  </div>
-                                </div>
-                              ))}
-                              {matched.length > 10 && (
-                                <div style={{ padding: "6px 12px", fontSize: 10, color: "#999", background: "#fafafa", textAlign: "center" }}>
-                                  {t("還有")} {matched.length - 10} {t("個產品，繼續輸入縮小範圍")}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })()}
-                      </div>
-                      <input type="number" min="1" value={item.qty} onChange={e => { const items = [...newInvoice.items]; items[idx].qty = parseInt(e.target.value) || 1; setNewInvoice({...newInvoice, items}); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "center" }} />
-                      <input type="number" value={item.price} onChange={e => { const items = [...newInvoice.items]; items[idx].price = parseFloat(e.target.value) || 0; setNewInvoice({...newInvoice, items}); }} placeholder={t("價格")} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
-                      <select value={item.warehouse_id || ''} onChange={e => { const items = [...newInvoice.items]; items[idx] = {...item, warehouse_id: e.target.value || null}; setNewInvoice({...newInvoice, items}); }} title={t("扣庫存的倉庫（不顯示在發票/收據上）")} style={{ padding: "9px 6px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", background: "#fff" }}>
-                        {warehouses.map(w => <option key={w.id} value={w.id}>{w.name.replace("分部", "")}</option>)}
-                      </select>
-                      <button onClick={() => { const items = newInvoice.items.filter(i => i.id !== item.id); setNewInvoice({...newInvoice, items: items.length ? items : [mkItem(warehouses[0]?.id)]}); }} style={{ background: "#fce4ec", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
-                    </div>
-                  ))}
-                  <button onClick={() => setNewInvoice({...newInvoice, items: [...newInvoice.items, mkItem(warehouses[0]?.id)]})} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", width: "100%" }}>+ 新增項目</button>
-                </div>
-                <div style={{ marginBottom: 14, padding: "14px 16px", background: "#fafbff", borderRadius: 12, border: "1px solid #eef0fa" }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#555", marginBottom: 10 }}>{t("額外費用（可選）")}</div>
-                  {[
-                    { key: "deposit", label: t("押金"), sign: "+", color: "#6382ff" },
-                    { key: "discount", label: t("優惠"), sign: "−", color: "#d14343" },
-                    { key: "surcharge", label: t("手續費"), sign: "+", color: "#f59e0b" },
-                  ].map(({ key, label, sign, color }) => {
-                    const v = newInvoice[key] || { enabled: false, amount: 0 };
-                    return (
-                      <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                        <input type="checkbox" id={`extra-${key}`} checked={v.enabled} onChange={e => setNewInvoice({ ...newInvoice, [key]: { ...v, enabled: e.target.checked } })} style={{ width: 16, height: 16, cursor: "pointer" }} />
-                        <label htmlFor={`extra-${key}`} style={{ fontSize: 14, cursor: "pointer", minWidth: 70, fontWeight: 600 }}>
-                          <span style={{ color, marginRight: 4 }}>{sign}</span>{label}
-                        </label>
-                        {v.enabled && (
-                          <input type="number" min="0" value={v.amount || ""} onChange={e => setNewInvoice({ ...newInvoice, [key]: { ...v, amount: parseFloat(e.target.value) || 0 } })} placeholder="金額 HKD" style={{ flex: 1, padding: "7px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-                <div style={{ marginBottom: 14 }}>
-                  <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 5 }}>{t("備註")}</label>
-                  <input value={newInvoice.notes} onChange={e => setNewInvoice({...newInvoice, notes: e.target.value})} placeholder={t("例如 Shopify 訂單 #1055、WhatsApp 訂單...")} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", background: "#f0f4ff", borderRadius: 12, marginBottom: 20 }}>
-                  <input type="checkbox" id="warranty" checked={newInvoice.warranty} onChange={e => setNewInvoice({...newInvoice, warranty: e.target.checked})} style={{ width: 16, height: 16, cursor: "pointer" }} />
-                  <label htmlFor="warranty" style={{ fontSize: 14, cursor: "pointer", fontWeight: 600 }}>{t("客戶需要延長保修（+1 年）")}</label>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", background: "#1a1a2e", borderRadius: 12, marginBottom: 16 }}>
-                  <span style={{ color: "#aaa", fontSize: 14 }}>{t("合計")}</span>
-                  <span style={{ color: "#fff", fontSize: 24, fontWeight: 800 }}>HKD${invoiceTotal.toLocaleString()}</span>
-                </div>
-                <button onClick={handleGenerateInvoice} disabled={invoiceTotal === 0 || !newInvoice.customerId || saving} style={{ width: "100%", padding: 14, background: (invoiceTotal > 0 && newInvoice.customerId) ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 12, fontSize: 16, fontWeight: 800, cursor: (invoiceTotal > 0 && newInvoice.customerId) ? "pointer" : "not-allowed" }}>
-                  {saving ? t("生成中...") : !newInvoice.customerId ? t("請先選擇客戶") : t("生成發票並列印 PDF")}
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* EDIT PRODUCT STOCK MODAL (分倉) */}
       {/* LINE ITEM ALIAS EDIT MODAL */}
 
@@ -5497,146 +4632,6 @@ export default function App() {
         newProduct={newProduct} setNewProduct={setNewProduct}
         newProductSaving={newProductSaving} setNewProductSaving={setNewProductSaving}
       />
-
-      {/* ─── 物流發貨 modal ─── */}
-      {shippingInvoice && (
-        <div onClick={() => !shippingBusy && setShippingInvoice(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 24, width: 460, maxWidth: "90vw" }}>
-            <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 4 }}>{t("發貨")}</div>
-            <div style={{ fontSize: 13, color: "#888", marginBottom: 20 }}>{t("發票")} #{fmtInvNum(shippingInvoice)} · {getCustomer(shippingInvoice.customer_id)?.name || "—"}</div>
-
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 12, color: "#666", marginBottom: 8, fontWeight: 600 }}>{t("發貨方式")}</div>
-              <div style={{ display: "flex", gap: 8 }}>
-                {[
-                  { k: "sf",          label: t("順豐快遞") },
-                  { k: "self_pickup", label: t("店面自提") },
-                ].map(opt => {
-                  const active = shippingMethod === opt.k;
-                  return (
-                    <button key={opt.k} onClick={() => setShippingMethod(opt.k)}
-                      style={{ flex: 1, padding: "10px 12px", border: active ? "2px solid #6382ff" : "1px solid #d0d0d0", background: active ? "#eef2ff" : "#fff", color: active ? "#6382ff" : "#666", borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: active ? 700 : 500 }}>
-                      {opt.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {shippingMethod === "sf" ? (
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 12, color: "#666", marginBottom: 6, fontWeight: 600 }}>{t("順豐單號")}</div>
-                <input
-                  autoFocus
-                  value={shippingNumber}
-                  onChange={e => setShippingNumber(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter" && !shippingBusy) submitShipping(); }}
-                  placeholder={t("例如 SF1234567890")}
-                  style={{ width: "100%", padding: "10px 14px", border: "1px solid #d0d0d0", borderRadius: 8, fontSize: 15, outline: "none", boxSizing: "border-box", letterSpacing: 1 }}
-                />
-                <div style={{ fontSize: 11, color: "#aaa", marginTop: 6 }}>{t("保存後系統每 6 小時自動拉取軌跡更新狀態")}</div>
-              </div>
-            ) : (
-              <div style={{ marginBottom: 20, padding: "14px 14px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8 }}>
-                <div style={{ fontSize: 12, color: "#666" }}>{t("客人當場取貨，保存後直接標為「已簽收」")}</div>
-              </div>
-            )}
-
-            <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => setShippingInvoice(null)} disabled={shippingBusy} style={{ flex: 1, padding: 11, background: "#f5f5f5", color: "#666", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: shippingBusy ? "not-allowed" : "pointer" }}>{t("取消")}</button>
-              <button onClick={submitShipping} disabled={shippingBusy || (shippingMethod === "sf" && !shippingNumber.trim())} style={{ flex: 2, padding: 11, background: shippingBusy ? "#a8b8e8" : "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: (shippingBusy || (shippingMethod === "sf" && !shippingNumber.trim())) ? "not-allowed" : "pointer" }}>
-                {shippingBusy ? t("保存中...") : (shippingMethod === "self_pickup" ? t("確認自提") : t("確認發貨"))}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─── 物流軌跡查看 modal ─── */}
-      {trackingInvoice && (() => {
-        const isSelfPickup = trackingInvoice.carrier === "self_pickup";
-        return (
-        <div onClick={() => setTrackingInvoice(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 24, width: 560, maxWidth: "92vw", maxHeight: "85vh", display: "flex", flexDirection: "column" }}>
-            <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 4 }}>{isSelfPickup ? t("店面自提") : t("物流軌跡")}</div>
-            <div style={{ fontSize: 13, color: "#888", marginBottom: 18 }}>{t("發票")} #{fmtInvNum(trackingInvoice)} · {getCustomer(trackingInvoice.customer_id)?.name || "—"}</div>
-
-            {isSelfPickup ? (
-              <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "16px 18px", marginBottom: 14 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#16a34a", marginBottom: 6 }}>{t("客人已當場簽收")}</div>
-                {trackingInvoice.delivered_at && (
-                  <div style={{ fontSize: 12, color: "#666" }}>{t("簽收時間")}：{new Date(trackingInvoice.delivered_at).toLocaleString()}</div>
-                )}
-              </div>
-            ) : (
-              <div style={{ background: "#f7f8fc", borderRadius: 10, padding: "12px 14px", marginBottom: 14 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                  <div style={{ fontSize: 13, color: "#666" }}>{t("香港順豐")}</div>
-                  <div style={{ fontSize: 12, color: "#888" }}>
-                    {trackingInvoice.shipping_last_synced_at ? `${t("上次同步")}：${new Date(trackingInvoice.shipping_last_synced_at).toLocaleString()}` : t("尚未同步")}
-                  </div>
-                </div>
-                <div style={{ fontSize: 14, fontWeight: 700, fontFamily: "monospace", letterSpacing: 1, display: "flex", alignItems: "center", gap: 8 }}>
-                  {trackingInvoice.tracking_number}
-                  <button onClick={() => navigator.clipboard.writeText(trackingInvoice.tracking_number)} style={{ background: "none", border: "1px solid #d0d0d0", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontSize: 11, color: "#666" }}>{t("複製")}</button>
-                  <a href={`https://htm.sf-express.com/hk/tc/dynamic_function/waybill/#search/bill-number/${trackingInvoice.tracking_number}`} target="_blank" rel="noopener noreferrer" style={{ background: "none", border: "1px solid #d0d0d0", borderRadius: 6, padding: "2px 8px", textDecoration: "none", fontSize: 11, color: "#666" }}>{t("順豐網站")}</a>
-                </div>
-                <div style={{ marginTop: 8, fontSize: 13, fontWeight: 700 }}>{t("狀態")}：{t(deriveShippingStatus(trackingInvoice))}</div>
-              </div>
-            )}
-
-            {!isSelfPickup && (
-              <div style={{ flex: 1, overflowY: "auto", borderTop: "1px solid #f0f0f0", paddingTop: 12 }}>
-                {trackingEvents.length === 0 ? (
-                  <div style={{ textAlign: "center", padding: 30, color: "#999", fontSize: 13 }}>
-                    {t("暫無軌跡，順豐 API 還未配置或單號剛填寫，6 小時內自動拉取")}
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    {trackingEvents.map((ev, idx) => (
-                      <div key={ev.id} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                        <div style={{ flexShrink: 0, marginTop: 4 }}>
-                          <div style={{ width: 10, height: 10, borderRadius: "50%", background: idx === 0 ? "#22c55e" : "#d0d0d0" }} />
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: idx === 0 ? "#16a34a" : "#333" }}>{ev.description}</div>
-                          <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>{ev.location || "—"}</div>
-                          <div style={{ fontSize: 11, color: "#aaa", marginTop: 1 }}>{new Date(ev.event_at).toLocaleString()}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div style={{ display: "flex", gap: 10, marginTop: 16, paddingTop: 12, borderTop: "1px solid #f0f0f0" }}>
-              <button onClick={() => setTrackingInvoice(null)} style={{ flex: 1, padding: 11, background: "#f5f5f5", color: "#666", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>{t("關閉")}</button>
-              {canShip && !isSelfPickup && (
-                <>
-                  <button onClick={handleMarkShippingException} style={{ padding: "11px 14px", background: "#fff0f0", color: "#d14343", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-                    {t("標為異常")}
-                  </button>
-                  <button onClick={() => { openShippingModal(trackingInvoice); setTrackingInvoice(null); }} style={{ padding: "11px 14px", background: "#fff8e1", color: "#f59e0b", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-                    {t("修改單號")}
-                  </button>
-                </>
-              )}
-              {canShip && isSelfPickup && (
-                <button onClick={() => { openShippingModal(trackingInvoice); setTrackingInvoice(null); }} style={{ padding: "11px 14px", background: "#fff8e1", color: "#f59e0b", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-                  {t("改為快遞發貨")}
-                </button>
-              )}
-              {!isSelfPickup && (
-                <button onClick={refreshTracking} disabled={trackingRefreshing} style={{ flex: 1, padding: 11, background: trackingRefreshing ? "#a8b8e8" : "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: trackingRefreshing ? "not-allowed" : "pointer" }}>
-                  {trackingRefreshing ? t("刷新中...") : t("立即刷新")}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-        );
-      })()}
     </div>
   );
 }

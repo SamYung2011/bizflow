@@ -5,6 +5,7 @@ import { useAppContext } from '../context/AppContext.jsx'
 import { useT } from '../i18n.jsx'
 import { Icon } from '../components/Icon.jsx'
 import { Input, Select } from '../components/Inputs.jsx'
+import InvoiceEditModal from '../components/InvoiceEditModal.jsx'
 import { suggestEmail } from '../lib/emailSuggest.js'
 import { CAR_BRANDS, PRODUCTS_LIST, REFERRAL_SOURCES } from '../lib/constants.js'
 
@@ -688,7 +689,6 @@ export function CustomersDetailView({
   handleDeleteCustomer,
   setMergeHistoryOpen,
   handleMarkPaid,
-  openEditInvoice,
   openPrintChooser,
   Badge,
   fmtInvNum,
@@ -696,6 +696,8 @@ export function CustomersDetailView({
 }) {
   const { t } = useT()
   const { invoices, products } = useAppContext()
+  // 客戶詳情頁本地的「編輯發票 modal」狀態 —— 零跨 view 通信
+  const [editingInvFromCustomer, setEditingInvFromCustomer] = useState(null)
   return (
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
@@ -826,7 +828,7 @@ export function CustomersDetailView({
                     )}
                     <div style={{ fontSize: 18, fontWeight: 800 }}>HKD${inv.total}</div>
                     <Badge status={inv.status} />
-                    <button onClick={() => openEditInvoice(inv)} title={t("編輯發票")} style={{ fontSize: 12, background: "#fff8e1", color: "#f59e0b", border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700 }}>
+                    <button onClick={() => setEditingInvFromCustomer(inv)} title={t("編輯發票")} style={{ fontSize: 12, background: "#fff8e1", color: "#f59e0b", border: "none", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontWeight: 700 }}>
                       ✏️
                     </button>
                     <button onClick={() => openPrintChooser(inv, selectedCustomer, inv.items || [], products)} style={{ fontSize: 12, background: "#f0f4ff", color: "#6382ff", border: "none", borderRadius: 8, padding: "7px 12px", cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>
@@ -837,6 +839,12 @@ export function CustomersDetailView({
               ));
               })()}
             </div>
+
+            {/* 編輯發票 modal —— view 自管 state，零跨 view 通信 */}
+            <InvoiceEditModal
+              invoice={editingInvFromCustomer}
+              onClose={() => setEditingInvFromCustomer(null)}
+            />
           </div>
   );
 }
