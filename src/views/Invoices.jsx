@@ -38,6 +38,7 @@ export default function InvoicesView({
   getPossibleDupId,
   handleMarkPaid,
   openPrintChooser,
+  enterPrintFlow,
   handleUpgradePhysical,
   Badge,
 }) {
@@ -193,12 +194,13 @@ export default function InvoicesView({
     }]).select()
     if (!error && data) {
       setInvoices(prev => [data[0], ...prev])
+      queryClient.setQueryData(["bf", "invoices"], (old) => Array.isArray(old) ? [data[0], ...old] : [data[0]])
       setInvoiceGenerated(true)
       const customer = getCustomer(newInvoice.customerId)
       const gid = customerGroups.idToGroup.get(newInvoice.customerId)
       const virtual = gid ? customerGroups.virtualCustomers.find(v => v.id === gid) : null
       const effective = { ...(virtual || customer), ...(newInvoice.fieldOverrides || {}) }
-      openPrintChooser(data[0], effective, finalItems, products)
+      enterPrintFlow(data[0], effective, finalItems, products)
 
       // Auto-create warranty: update inventory items with warranty_end dates
       const invoiceDate = new Date()

@@ -2309,6 +2309,7 @@ export default function App() {
             getPossibleDupId={getPossibleDupId}
             handleMarkPaid={handleMarkPaid}
             openPrintChooser={openPrintChooser}
+            enterPrintFlow={enterPrintFlow}
             handleUpgradePhysical={handleUpgradePhysical}
             Badge={Badge}
           />
