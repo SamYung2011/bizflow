@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react'
+import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from './supabaseClient.js'
 import { c, radius, font, S, fetchAllTable, useIsMobile, Center, Empty, Field, Section, fmtShort, fmtDateTime } from './styles.jsx'
@@ -1068,6 +1068,15 @@ function EditTaskModal({ task: initial, data, me, userId, onClose, ctx }) {
   const canEdit = ctx?.isSuperAdmin || ctx?.isAdminOfActive || isCreator || ctx?.hasPermission?.('can_edit_others_tasks')
   const canAssignOthers = ctx?.isSuperAdmin || ctx?.isAdminOfActive || ctx?.hasPermission?.('can_assign_others')
   const ro = !canEdit
+  // ro 觸發提示：替代之前頂部 banner，浮窗 toast 樣式，3 秒自動消失
+  const [roToast, setRoToast] = useState(false)
+  const roToastTimer = useRef(null)
+  const roAlert = () => {
+    setRoToast(true)
+    if (roToastTimer.current) clearTimeout(roToastTimer.current)
+    roToastTimer.current = setTimeout(() => setRoToast(false), 3000)
+  }
+  const roBlur = (e) => { e.target.blur(); roAlert() }
   // 公司範圍：所有候選都限本任務所屬公司（admin 通過左側員工列表切換）
   const scopeCompanyId = getTaskCompanyId(tk, assigneesByTask, employees)
 
@@ -1141,19 +1150,23 @@ function EditTaskModal({ task: initial, data, me, userId, onClose, ctx }) {
 
   return (
     <div style={S.modal} onClick={onClose}>
-      <div style={S.modalCard(600)} onClick={e => e.stopPropagation()}>
-        {ro && <div style={{ background: c.amberBg, border: '1px solid #fde68a', color: '#a16207', padding: '8px 12px', borderRadius: radius.sm, fontSize: 12, marginBottom: 12 }}>{t('🔒 只讀模式：你不是發布人也不是 admin，僅查看')}</div>}
+      <div style={{ ...S.modalCard(600), position: 'relative' }} onClick={e => e.stopPropagation()}>
+        {roToast && (
+          <div style={{ position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)', background: '#1f2937', color: '#fff', padding: '8px 16px', borderRadius: 8, fontSize: 12, fontWeight: 600, boxShadow: '0 8px 24px rgba(0,0,0,0.18)', zIndex: 100, pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+            {t('您不是發布人，不能修改內容')}
+          </div>
+        )}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <div style={{ display: 'flex', gap: 6 }}>
             {[{ v: 'high', l: t('高優'), c: c.red }, { v: 'mid', l: t('中優'), c: c.amber }, { v: 'low', l: t('低優'), c: c.green }].map(opt => {
               const on = tk.priority === opt.v || (opt.v === 'low' && (tk.priority === 'none' || !tk.priority))
-              return <button key={opt.v} disabled={ro} onClick={() => updateField({ priority: opt.v })} style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 20, border: `1px solid ${on ? opt.c : c.border}`, background: on ? opt.c + '18' : c.card, color: on ? opt.c : c.textMuted, cursor: ro ? 'not-allowed' : 'pointer', opacity: ro ? 0.6 : 1 }}>{opt.l}</button>
+              return <button key={opt.v} onClick={ro ? roAlert : (() => updateField({ priority: opt.v }))} style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 20, border: `1px solid ${on ? opt.c : c.border}`, background: on ? opt.c + '18' : c.card, color: on ? opt.c : c.textMuted, cursor: 'pointer' }}>{opt.l}</button>
             })}
           </div>
           <button onClick={onClose} style={S.iconBtn}>×</button>
         </div>
 
-        <input value={tk.title || ''} readOnly={ro} onChange={e => setTk({ ...tk, title: e.target.value })} onBlur={() => updateField({ title: tk.title })} style={{ width: '100%', padding: '8px 0', fontSize: 20, fontWeight: 700, border: 'none', outline: 'none', background: 'transparent', marginBottom: 8, color: c.text }} />
+        <input value={tk.title || ''} onFocus={ro ? roBlur : undefined} onChange={e => setTk({ ...tk, title: e.target.value })} onBlur={() => updateField({ title: tk.title })} style={{ width: '100%', padding: '8px 0', fontSize: 20, fontWeight: 700, border: 'none', outline: 'none', background: 'transparent', marginBottom: 8, color: c.text }} />
 
         {isAwaitingApproval(tk, assigneesByTask) && (
           <div style={{ background: c.amberBg, border: '1px solid #fde68a', borderRadius: radius.sm, padding: '10px 14px', marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
@@ -1164,7 +1177,7 @@ function EditTaskModal({ task: initial, data, me, userId, onClose, ctx }) {
 
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 11, color: c.textMuted }}>{t('截止')}</span>
-          <input type="date" value={tk.due_date || ''} readOnly={ro} onChange={e => setTk({ ...tk, due_date: e.target.value || null })} onBlur={() => updateField({ due_date: tk.due_date || null })} style={{ padding: '4px 8px', borderRadius: radius.sm, border: `1px solid ${c.border}`, fontSize: 12 }} />
+          <input type="date" value={tk.due_date || ''} onFocus={ro ? roBlur : undefined} onChange={e => setTk({ ...tk, due_date: e.target.value || null })} onBlur={() => updateField({ due_date: tk.due_date || null })} style={{ padding: '4px 8px', borderRadius: radius.sm, border: `1px solid ${c.border}`, fontSize: 12 }} />
           <span style={{ fontSize: 11, color: c.textMuted, marginLeft: 6 }}>{t('發佈範圍')}</span>
           {(() => {
             const allCoDepts = (departments || []).filter(d => d.company_id === (tk.company_id || scopeCompanyId))
@@ -1211,7 +1224,7 @@ function EditTaskModal({ task: initial, data, me, userId, onClose, ctx }) {
           })()}
         </div>
 
-        <AssigneeEditor tk={tk} tkList={tkList} employees={employees} empCompanies={empCompanies} canManage={canEdit && canAssignOthers} setAssignees={setAssignees} scopeCompanyId={scopeCompanyId} />
+        <AssigneeEditor tk={tk} tkList={tkList} employees={employees} empCompanies={empCompanies} canManage={canEdit && canAssignOthers} setAssignees={setAssignees} scopeCompanyId={scopeCompanyId} onForbidden={roAlert} />
 
         {canEdit ? (
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 8, fontSize: 12, color: c.textMuted, cursor: 'pointer' }}>
@@ -1222,11 +1235,11 @@ function EditTaskModal({ task: initial, data, me, userId, onClose, ctx }) {
         ) : null}
 
         <div style={{ fontSize: 11, color: c.textMuted, marginTop: 14, marginBottom: 4 }}>{t('描述 / 備註')}</div>
-        <textarea value={tk.note || ''} readOnly={ro} onChange={e => setTk({ ...tk, note: e.target.value })} onBlur={() => updateField({ note: tk.note || null })} style={{ ...S.input, minHeight: 60, resize: 'vertical', background: ro ? c.bg : c.card }} />
+        <textarea value={tk.note || ''} onFocus={ro ? roBlur : undefined} onChange={e => setTk({ ...tk, note: e.target.value })} onBlur={() => updateField({ note: tk.note || null })} style={{ ...S.input, minHeight: 60, resize: 'vertical' }} />
 
-        <AttachmentList tk={tk} ro={ro} onUpdate={updateField} />
+        <AttachmentList tk={tk} ro={ro} onUpdate={updateField} onForbidden={roAlert} />
 
-        <SubtaskList tk={tk} subtasks={subtasks} employees={employees} empCompanies={empCompanies} feedbacks={feedbacks} assigneesByTask={assigneesByTask} me={me} canEdit={canEdit} scopeCompanyId={scopeCompanyId} ctx={ctx} />
+        <SubtaskList tk={tk} subtasks={subtasks} employees={employees} empCompanies={empCompanies} feedbacks={feedbacks} assigneesByTask={assigneesByTask} me={me} canEdit={canEdit} scopeCompanyId={scopeCompanyId} ctx={ctx} onForbidden={roAlert} />
 
         <FeedbackThread tk={tk} fbList={fbList} employees={employees} empCompanies={empCompanies} me={me} userId={userId} scopeCompanyId={scopeCompanyId} ctx={ctx} />
 
@@ -1253,7 +1266,7 @@ function EditTaskModal({ task: initial, data, me, userId, onClose, ctx }) {
   )
 }
 
-function AssigneeEditor({ tk, tkList, employees, empCompanies = [], canManage, setAssignees, scopeCompanyId }) {
+function AssigneeEditor({ tk, tkList, employees, empCompanies = [], canManage, setAssignees, scopeCompanyId, onForbidden = () => {} }) {
   const { t } = useT()
   const [input, setInput] = useState('')
   const [open, setOpen] = useState(false)
@@ -1274,19 +1287,17 @@ function AssigneeEditor({ tk, tkList, employees, empCompanies = [], canManage, s
           return cr ? <span style={{ fontSize: 11, color: c.textMuted, marginLeft: 'auto' }}>{t('發布人:')} <span style={{ color: c.accent, fontWeight: 600 }}>{cr.name}</span></span> : null
         })()}
       </div>
-      <div style={{ position: 'relative', border: `1px solid ${canManage ? c.border : c.bg}`, borderRadius: radius.sm, padding: '4px 6px', display: 'flex', flexWrap: 'wrap', gap: 3, minHeight: 28, background: canManage ? c.card : c.bg }}>
+      <div style={{ position: 'relative', border: `1px solid ${c.border}`, borderRadius: radius.sm, padding: '4px 6px', display: 'flex', flexWrap: 'wrap', gap: 3, minHeight: 28, background: c.card }}>
         {cur.map(id => {
           const e2 = employees.find(x => x.id === id)
           return (
             <span key={id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2, padding: '2px 6px', background: c.accentBg, color: c.accent, borderRadius: 9, fontSize: 10, fontWeight: 600 }}>
               @{e2?.name || '?'}
-              {canManage && <button type="button" onClick={() => setAssignees(cur.filter(x => x !== id))} style={{ background: 'none', border: 'none', color: c.accent, cursor: 'pointer', fontSize: 11 }}>×</button>}
+              <button type="button" onClick={canManage ? (() => setAssignees(cur.filter(x => x !== id))) : onForbidden} style={{ background: 'none', border: 'none', color: c.accent, cursor: 'pointer', fontSize: 11 }}>×</button>
             </span>
           )
         })}
-        {canManage && (
-          <input value={input} onChange={e => { setInput(e.target.value); setOpen(true) }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 200)} placeholder={t('@ 加成員')} style={{ flex: 1, minWidth: 60, border: 'none', outline: 'none', fontSize: 10, background: 'transparent' }} />
-        )}
+        <input value={input} onChange={canManage ? (e => { setInput(e.target.value); setOpen(true) }) : undefined} onFocus={canManage ? (() => setOpen(true)) : (e => { e.target.blur(); onForbidden() })} onBlur={() => setTimeout(() => setOpen(false), 200)} placeholder={t('@ 加成員')} style={{ flex: 1, minWidth: 60, border: 'none', outline: 'none', fontSize: 10, background: 'transparent' }} />
         {canManage && open && cands.length > 0 && (
           <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 3, background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.sm, boxShadow: '0 4px 14px rgba(0,0,0,0.1)', padding: 3, width: '100%', maxHeight: 180, overflowY: 'auto', zIndex: 30 }}>
             {cands.map(e2 => (
@@ -1299,8 +1310,9 @@ function AssigneeEditor({ tk, tkList, employees, empCompanies = [], canManage, s
   )
 }
 
-function AttachmentList({ tk, ro, onUpdate }) {
+function AttachmentList({ tk, ro, onUpdate, onForbidden = () => {} }) {
   const { t } = useT()
+  const fileRef = useRef(null)
   return (
     <div style={{ marginTop: 12 }}>
       <div style={{ fontSize: 11, color: c.textMuted, marginBottom: 5 }}>📎 {t('任務附件')}{Array.isArray(tk.attachments) && tk.attachments.length > 0 && <span style={{ marginLeft: 4 }}>{tk.attachments.length}</span>}</div>
@@ -1314,35 +1326,32 @@ function AttachmentList({ tk, ro, onUpdate }) {
               ) : (
                 <a href={a.url} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '3px 8px', background: c.accentBg, borderRadius: radius.sm, fontSize: 10, color: c.accent, textDecoration: 'none' }}>📎 {a.name}</a>
               )}
-              {!ro && <button onClick={async () => {
+              <button onClick={async () => {
+                if (ro) return onForbidden()
                 if (!confirm(t('確定移除？'))) return
                 const rest = tk.attachments.filter((_, j) => j !== i)
                 await onUpdate({ attachments: rest.length > 0 ? rest : null })
-              }} style={{ background: 'none', border: 'none', color: c.textFaint, cursor: 'pointer', fontSize: 13 }}>×</button>}
+              }} style={{ background: 'none', border: 'none', color: c.textFaint, cursor: 'pointer', fontSize: 13 }}>×</button>
             </div>
           )
         })}
-        {!ro && (
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '3px 10px', background: c.bg, border: `1px dashed ${c.border}`, borderRadius: radius.sm, fontSize: 10, color: c.accent, cursor: 'pointer' }}>
-            ＋ {t('添加')}
-            <input type="file" multiple style={{ display: 'none' }} onChange={async e => {
-              const fs = Array.from(e.target.files || [])
-              e.target.value = ''
-              if (fs.length === 0) return
-              try {
-                const newOnes = await Promise.all(fs.map(f => uploadAttachment(f, tk.id)))
-                const merged = [...(Array.isArray(tk.attachments) ? tk.attachments : []), ...newOnes]
-                await onUpdate({ attachments: merged })
-              } catch (err) { alert(t('上傳失敗：') + err.message) }
-            }} />
-          </label>
-        )}
+        <button type="button" onClick={() => { if (ro) return onForbidden(); fileRef.current?.click() }} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '3px 10px', background: c.bg, border: `1px dashed ${c.border}`, borderRadius: radius.sm, fontSize: 10, color: c.accent, cursor: 'pointer' }}>＋ {t('添加')}</button>
+        <input ref={fileRef} type="file" multiple style={{ display: 'none' }} onChange={async e => {
+          const fs = Array.from(e.target.files || [])
+          e.target.value = ''
+          if (fs.length === 0) return
+          try {
+            const newOnes = await Promise.all(fs.map(f => uploadAttachment(f, tk.id)))
+            const merged = [...(Array.isArray(tk.attachments) ? tk.attachments : []), ...newOnes]
+            await onUpdate({ attachments: merged })
+          } catch (err) { alert(t('上傳失敗：') + err.message) }
+        }} />
       </div>
     </div>
   )
 }
 
-function SubtaskList({ tk, subtasks, employees, empCompanies = [], feedbacks, assigneesByTask, me, canEdit, scopeCompanyId, ctx }) {
+function SubtaskList({ tk, subtasks, employees, empCompanies = [], feedbacks, assigneesByTask, me, canEdit, scopeCompanyId, ctx, onForbidden = () => {} }) {
   const { t } = useT()
   const queryClient = useQueryClient()
   const [subTitle, setSubTitle] = useState('')
@@ -1412,37 +1421,35 @@ function SubtaskList({ tk, subtasks, employees, empCompanies = [], feedbacks, as
                   ))}
             </span>
             {fbCount > 0 && <span style={{ fontSize: 10, color: c.amber }}>💬 {fbCount}</span>}
-            {canEdit && <button onClick={() => deleteSub(st)} style={{ background: 'none', border: 'none', color: c.textFaint, cursor: 'pointer', fontSize: 13 }}>×</button>}
+            <button onClick={canEdit ? (() => deleteSub(st)) : onForbidden} style={{ background: 'none', border: 'none', color: c.textFaint, cursor: 'pointer', fontSize: 13 }}>×</button>
           </div>
         )
       })}
-      {canEdit && (
-        <div style={{ marginTop: 8, padding: '8px 10px', border: `1px dashed ${c.border}`, borderRadius: radius.sm, background: c.bg }}>
-          <div style={{ fontSize: 10, color: c.textMuted, marginBottom: 3 }}>{t('分配給')}</div>
-          <div style={{ position: 'relative', border: `1px solid ${c.border}`, borderRadius: radius.sm, padding: '3px 5px', marginBottom: 5, display: 'flex', flexWrap: 'wrap', gap: 3, minHeight: 24, background: c.card }}>
-            {effectiveSub.map(id => {
-              const e2 = employees.find(x => x.id === id)
-              return (
-                <span key={id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2, padding: '1px 5px', background: c.accentBg, color: c.accent, borderRadius: 9, fontSize: 9, fontWeight: 600 }}>
-                  @{e2?.name || '?'}
-                  <button type="button" onClick={() => setSubAssignees(effectiveSub.filter(x => x !== id))} style={{ background: 'none', border: 'none', color: c.accent, cursor: 'pointer', fontSize: 10 }}>×</button>
-                </span>
-              )
-            })}
-            <input value={subInput} onChange={e => { setSubInput(e.target.value); setSubOpen(true) }} onFocus={() => setSubOpen(true)} onBlur={() => setTimeout(() => setSubOpen(false), 200)} placeholder={t('@ 加')} style={{ flex: 1, minWidth: 50, border: 'none', outline: 'none', fontSize: 10, background: 'transparent' }} />
-            {subOpen && subCands.length > 0 && (
-              <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 3, background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.sm, boxShadow: '0 4px 14px rgba(0,0,0,0.1)', padding: 3, width: '100%', maxHeight: 160, overflowY: 'auto', zIndex: 30 }}>
-                {subCands.map(e2 => (
-                  <button key={e2.id} type="button" onMouseDown={ev => { ev.preventDefault(); setSubAssignees([...effectiveSub, e2.id]); setSubInput('') }} style={{ display: 'block', width: '100%', textAlign: 'left', padding: '4px 7px', background: 'none', border: 'none', fontSize: 10, color: c.text, cursor: 'pointer' }}>{e2.name}</button>
-                ))}
-              </div>
-            )}
-          </div>
-          <form onSubmit={e => { e.preventDefault(); addSub() }}>
-            <input value={subTitle} onChange={e => setSubTitle(e.target.value)} placeholder={t('＋ 子任務（Enter 確認）')} style={{ width: '100%', padding: '6px 8px', borderRadius: radius.sm, border: `1px solid ${c.border}`, fontSize: 12, outline: 'none', boxSizing: 'border-box' }} />
-          </form>
+      <div style={{ marginTop: 8, padding: '8px 10px', border: `1px dashed ${c.border}`, borderRadius: radius.sm, background: c.bg }}>
+        <div style={{ fontSize: 10, color: c.textMuted, marginBottom: 3 }}>{t('分配給')}</div>
+        <div style={{ position: 'relative', border: `1px solid ${c.border}`, borderRadius: radius.sm, padding: '3px 5px', marginBottom: 5, display: 'flex', flexWrap: 'wrap', gap: 3, minHeight: 24, background: c.card }}>
+          {effectiveSub.map(id => {
+            const e2 = employees.find(x => x.id === id)
+            return (
+              <span key={id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2, padding: '1px 5px', background: c.accentBg, color: c.accent, borderRadius: 9, fontSize: 9, fontWeight: 600 }}>
+                @{e2?.name || '?'}
+                <button type="button" onClick={canEdit ? (() => setSubAssignees(effectiveSub.filter(x => x !== id))) : onForbidden} style={{ background: 'none', border: 'none', color: c.accent, cursor: 'pointer', fontSize: 10 }}>×</button>
+              </span>
+            )
+          })}
+          <input value={subInput} onChange={canEdit ? (e => { setSubInput(e.target.value); setSubOpen(true) }) : undefined} onFocus={canEdit ? (() => setSubOpen(true)) : (e => { e.target.blur(); onForbidden() })} onBlur={() => setTimeout(() => setSubOpen(false), 200)} placeholder={t('@ 加')} style={{ flex: 1, minWidth: 50, border: 'none', outline: 'none', fontSize: 10, background: 'transparent' }} />
+          {subOpen && canEdit && subCands.length > 0 && (
+            <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 3, background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.sm, boxShadow: '0 4px 14px rgba(0,0,0,0.1)', padding: 3, width: '100%', maxHeight: 160, overflowY: 'auto', zIndex: 30 }}>
+              {subCands.map(e2 => (
+                <button key={e2.id} type="button" onMouseDown={ev => { ev.preventDefault(); setSubAssignees([...effectiveSub, e2.id]); setSubInput('') }} style={{ display: 'block', width: '100%', textAlign: 'left', padding: '4px 7px', background: 'none', border: 'none', fontSize: 10, color: c.text, cursor: 'pointer' }}>{e2.name}</button>
+              ))}
+            </div>
+          )}
         </div>
-      )}
+        <form onSubmit={e => { e.preventDefault(); if (!canEdit) return onForbidden(); addSub() }}>
+          <input value={subTitle} onChange={canEdit ? (e => setSubTitle(e.target.value)) : undefined} onFocus={canEdit ? undefined : (e => { e.target.blur(); onForbidden() })} placeholder={t('＋ 子任務（Enter 確認）')} style={{ width: '100%', padding: '6px 8px', borderRadius: radius.sm, border: `1px solid ${c.border}`, fontSize: 12, outline: 'none', boxSizing: 'border-box' }} />
+        </form>
+      </div>
     </div>
   )
 }
