@@ -5,6 +5,7 @@ import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client
 import { createSyncStoragePersister } from '@tanstack/query-sync-storage-persister'
 import App from './App.jsx'
 import { I18nProvider } from './i18n.jsx'
+import { AppProvider } from './context/AppContext.jsx'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -37,7 +38,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       }}
     >
       <I18nProvider>
-        <App />
+        <AppProvider>
+          <App />
+        </AppProvider>
       </I18nProvider>
     </PersistQueryClientProvider>
   </React.StrictMode>,
