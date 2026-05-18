@@ -7,7 +7,7 @@ import { supabase, fetchAllTable } from "./lib/supabaseClient.js";
 import { isNonWarrantyItem, itemWarrantyMonths } from "./lib/warranty.js";
 import { useAppContext } from "./context/AppContext.jsx";
 import { Icon } from "./components/Icon.jsx";
-import { ProductEditModal, ProductNewModal, emptyNewProduct } from "./views/Products.jsx";
+import { ProductEditModal, ProductNewModal, ProductsListView, emptyNewProduct } from "./views/Products.jsx";
 import { INVOICE_SHELL_HEAD, INVOICE_PAGE, INVOICE_SHELL_TAIL } from "./invoiceTemplate.js";
 import { RECEIPT_FRAGMENT } from "./receiptTemplate.js";
 import { useT } from "./i18n.jsx";
@@ -397,10 +397,7 @@ export default function App() {
   const [supplierSearch, setSupplierSearch] = useState("");
   const [supplierCategoryFilter, setSupplierCategoryFilter] = useState("all");
   const [newSupplier, setNewSupplier] = useState({ name: "", contact_url: "", contact_person: "", category: "", note: "" });
-  const [productsSubTab, setProductsSubTab] = useState("list"); // "list" | "aliases"
-  const [editingAlias, setEditingAlias] = useState(null); // { id?, alias_name, skip, products: [{product_id, qty}], note } 創建時無 id
-  const [aliasSaving, setAliasSaving] = useState(false);
-  const [expandedAliasGroups, setExpandedAliasGroups] = useState(() => new Set());
+  // productsSubTab / editingAlias / aliasSaving / expandedAliasGroups 已搬到 ProductsListView 本地
   const [empSubTab, setEmpSubTab] = useState("tasks"); // "tasks" | "logs"
   const [empPageMode, setEmpPageMode] = useState("list"); // "list" | "overview"
   const [overviewExpanded, setOverviewExpanded] = useState(new Set()); // 總覽展開的員工 id
@@ -422,7 +419,6 @@ export default function App() {
   const [productOrgDraft, setProductOrgDraft] = useState(null);
   const [expandedSkuGroups, setExpandedSkuGroups] = useState(new Set());
   const [search, setSearch] = useState("");
-  const [productCategoryFilter, setProductCategoryFilter] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [showAddCustomer, setShowAddCustomer] = useState(false);
   const [showNewInvoice, setShowNewInvoice] = useState(false);
@@ -2458,52 +2454,7 @@ export default function App() {
     queryClient.setQueryData(["bf", "employee_update_log_comments"], (old) => Array.isArray(old) ? old.filter(c => c.id !== commentId) : old);
   }
 
-  // ====== Line Item Alias handlers ======
-  async function handleSaveAlias(draft) {
-    if (!draft.alias_name || !draft.alias_name.trim()) { alert(t("alias_name 不能為空")); return; }
-    setAliasSaving(true);
-    try {
-      const payload = {
-        alias_name: draft.alias_name.trim(),
-        skip: draft.skip === true,
-        products: draft.skip === true ? [] : (Array.isArray(draft.products) ? draft.products.filter(p => p.product_id && Number(p.qty) > 0) : []),
-        note: (draft.note || "").trim() || null,
-        verified: true,  // 用戶手動保存 = 視為已校對
-        updated_at: new Date().toISOString(),
-      };
-      if (draft.id) {
-        const { data, error } = await supabase.from("line_item_aliases").update(payload).eq("id", draft.id).select().single();
-        if (error) throw error;
-        setLineItemAliases(prev => prev.map(a => a.id === draft.id ? data : a));
-        queryClient.setQueryData(["bf", "line_item_aliases"], (old) => Array.isArray(old) ? old.map(a => a.id === draft.id ? data : a) : old);
-      } else {
-        const { data, error } = await supabase.from("line_item_aliases").insert(payload).select().single();
-        if (error) throw error;
-        setLineItemAliases(prev => [...prev, data]);
-        queryClient.setQueryData(["bf", "line_item_aliases"], (old) => Array.isArray(old) ? [...old, data] : [data]);
-      }
-      setEditingAlias(null);
-    } catch (e) {
-      alert(`${t("保存失敗")}：${e.message}`);
-    } finally {
-      setAliasSaving(false);
-    }
-  }
-
-  async function handleDeleteAlias(aliasId) {
-    if (!window.confirm(t("確定刪除此映射？"))) return;
-    const { error } = await supabase.from("line_item_aliases").delete().eq("id", aliasId);
-    if (error) { alert(`${t("刪除失敗")}：${error.message}`); return; }
-    setLineItemAliases(prev => prev.filter(a => a.id !== aliasId));
-    queryClient.setQueryData(["bf", "line_item_aliases"], (old) => Array.isArray(old) ? old.filter(a => a.id !== aliasId) : old);
-  }
-
-  async function handleVerifyAlias(aliasId) {
-    const { data, error } = await supabase.from("line_item_aliases").update({ verified: true, updated_at: new Date().toISOString() }).eq("id", aliasId).select().single();
-    if (error) { alert(`${t("確認失敗")}：${error.message}`); return; }
-    setLineItemAliases(prev => prev.map(a => a.id === aliasId ? data : a));
-    queryClient.setQueryData(["bf", "line_item_aliases"], (old) => Array.isArray(old) ? old.map(a => a.id === aliasId ? data : a) : old);
-  }
+  // handleSaveAlias / handleDeleteAlias / handleVerifyAlias 已搬到 ProductsListView 本地
 
   // 認證載入中（Supabase 正在讀 session）
   if (authLoading) return (
@@ -2834,265 +2785,14 @@ export default function App() {
         {/* INVENTORY */}
         {/* PRODUCTS (合并庫存) */}
         {tab === "products" && !selectedProduct && (
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-              <div>
-                <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{t("產品")}</h1>
-                <p style={{ color: "#888", margin: "4px 0 0", fontSize: 14 }}>{t("產品目錄 + 庫存管理")}</p>
-              </div>
-              <button
-                onClick={() => {
-                  const init = emptyNewProduct();
-                  const re = /^PRD-(\d{4})(?:-\d+)?$/;
-                  let max = 0;
-                  for (const p of products) {
-                    const m = (p.internal_code || '').match(re);
-                    if (m) max = Math.max(max, parseInt(m[1], 10));
-                  }
-                  init.internal_code = `PRD-${String(max + 1).padStart(4, '0')}`;
-                  setNewProduct(init);
-                  setNewProductOpen(true);
-                }}
-                style={{ background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, padding: "10px 18px", cursor: "pointer", fontSize: 14, fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontSize: 18, lineHeight: 1 }}>+</span> {t("新增產品")}
-              </button>
-            </div>
-            {/* 子 tab：產品列表 / Line Item 映射 */}
-            <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: "1px solid #eef0fa" }}>
-              {[["list", t("產品列表")], ["aliases", t("Line Item 映射")]].map(([k, label]) => {
-                const on = productsSubTab === k;
-                return (
-                  <button key={k} onClick={() => setProductsSubTab(k)} style={{ padding: "8px 16px", background: "transparent", border: "none", borderBottom: on ? "2px solid #6382ff" : "2px solid transparent", color: on ? "#3b58d4" : "#888", fontSize: 13, fontWeight: 700, cursor: "pointer", marginBottom: -1 }}>{label}</button>
-                );
-              })}
-            </div>
-            {productsSubTab === "list" && (<>
-            <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-              <Icon name="search" size={15} />
-              <input placeholder={t("搜尋和篩選...")} value={search} onChange={e => setSearch(e.target.value)} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
-            </div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-              {(() => {
-                const cats = [...new Set(products.filter(p => !p.parent_product_id && p.category !== '_archived').map(p => p.category).filter(Boolean))];
-                const all = [["", t("全部")], ...cats.map(c => [c, c])];
-                return all.map(([key, label]) => {
-                  const active = productCategoryFilter === key;
-                  return (
-                    <div key={key || 'all'} onClick={() => setProductCategoryFilter(key)}
-                      style={{ padding: "6px 14px", background: active ? "#1a73e8" : "#f0f2f5", color: active ? "#fff" : "#555", borderRadius: 16, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-                      {label}
-                    </div>
-                  );
-                });
-              })()}
-            </div>
-            <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", overflow: "hidden" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "36px 60px 2.5fr 0.8fr 1fr 1fr 0.8fr", gap: 12, padding: "12px 16px", background: "#fafbfc", borderBottom: "1px solid #f0f0f0", fontSize: 12, color: "#666", fontWeight: 600 }}>
-                <div><input type="checkbox" /></div>
-                <div>{t("圖片")}</div>
-                <div>{t("商品")}</div>
-                <div>{t("狀態")}</div>
-                <div>{t("庫存")}</div>
-                <div>{t("類別")}</div>
-                <div style={{ textAlign: "right" }}>{t("價格")}</div>
-              </div>
-              {products.filter(p => {
-                // 只显示顶层产品（非子 SKU）+ 隐藏 _archived 老数据
-                if (p.parent_product_id) return false;
-                if (p.category === '_archived') return false;
-                if (productCategoryFilter && p.category !== productCategoryFilter) return false;
-                const q = search.toLowerCase();
-                return !q || (p.name || "").toLowerCase().includes(q) || (p.internal_code || "").toLowerCase().includes(q) || (p.category || "").toLowerCase().includes(q) || (p.specs || "").toLowerCase().includes(q);
-              }).map(p => {
-                const children = products.filter(c => c.parent_product_id === p.id);
-                const hasChildren = children.length > 0;
-                const status = p.status || "active";
-                // 分仓聚合：某产品（+所有子 SKU）在每个仓库的总数
-                const stockByWarehouse = warehouses.map(w => {
-                  const pids = hasChildren ? children.map(c => c.id) : [p.id];
-                  const qty = stocks.filter(s => s.warehouse_id === w.id && pids.includes(s.product_id)).reduce((sum, s) => sum + (s.qty || 0), 0);
-                  return { warehouse: w, qty };
-                });
-                const totalStock = stockByWarehouse.reduce((s, x) => s + x.qty, 0);
-                const prices = hasChildren ? children.map(c => c.price ?? 0).filter(v => v > 0) : [];
-                const priceDisplay = hasChildren
-                  ? (prices.length ? `HK$ ${Math.min(...prices)} - ${Math.max(...prices)}` : "—")
-                  : `HK$ ${p.price}`;
-                return (
-                  <div key={p.id} onClick={() => setSelectedProduct(p)} style={{ display: "grid", gridTemplateColumns: "36px 60px 2.5fr 0.8fr 1.2fr 1fr 1.1fr", gap: 12, padding: "12px 16px", borderBottom: "1px solid #f5f5f5", alignItems: "center", fontSize: 13, cursor: "pointer" }}
-                    onMouseEnter={e => e.currentTarget.style.background = "#fafbfc"}
-                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                    <div onClick={e => e.stopPropagation()}><input type="checkbox" /></div>
-                    {p.image_url ? (
-                      <img src={p.image_url} style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 8, border: "1px solid #f0f0f0" }} />
-                    ) : (
-                      <div style={{ width: 48, height: 48, background: "#f0f2f5", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", color: "#bbb", fontSize: 10 }}>{t("圖")}</div>
-                    )}
-                    <div>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: "#1a1a1a" }}>{p.name}</div>
-                      <div style={{ fontFamily: "monospace", fontSize: 10, color: "#aaa", marginTop: 2 }}>{p.internal_code || p.code || p.id.slice(0, 8)}</div>
-                    </div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                      <span style={{ padding: "3px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600, background: status === "draft" ? "#e5e7eb" : status === "discontinued" ? "#fee2e2" : "#d1fae5", color: status === "draft" ? "#6b7280" : status === "discontinued" ? "#991b1b" : "#047857" }}>
-                        {status === "draft" ? t("草稿") : status === "discontinued" ? t("停售") : t("啟用")}
-                      </span>
-                      {p.is_virtual === true && (
-                        <span style={{ padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, background: "#e0e7ff", color: "#3b58d4" }}>{t("虛擬")}</span>
-                      )}
-                      {p.is_virtual !== true && status !== "discontinued" && (() => {
-                        const targetIds = hasChildren ? children.map(c => c.id) : [p.id];
-                        const isLow = lowStockSkus.some(x => targetIds.includes(x.id));
-                        return isLow ? <span style={{ padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700, background: "#fef3c7", color: "#92400e" }}>⚠ {t("低庫存")}</span> : null;
-                      })()}
-                    </div>
-                    <div onClick={hasChildren ? undefined : (e) => { e.stopPropagation(); setEditingProduct(p); }} style={{ cursor: hasChildren ? "default" : "pointer" }}>
-                      {hasChildren && <div style={{ fontSize: 11, color: "#888", marginBottom: 2 }}>{t("共")} {children.length} {t("個子類")} · {t("共")} {totalStock} {t("件")}</div>}
-                      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                        {stockByWarehouse.map(({ warehouse, qty }) => (
-                          <span key={warehouse.id} style={{ fontSize: 12 }}>
-                            <span style={{ color: "#888" }}>{warehouse.name.replace("分部", "")}</span>
-                            <span style={{ color: qty > 0 ? "#22c55e" : "#ef4444", fontWeight: 700, marginLeft: 4 }}>{qty}</span>
-                          </span>
-                        ))}
-                        {!hasChildren && <span style={{ fontSize: 11, color: "#bbb" }}>✏️</span>}
-                      </div>
-                    </div>
-                    <div style={{ color: "#555" }}>{p.category || t("未分類")}</div>
-                    <div style={{ textAlign: "right", fontWeight: 700, color: "#1a1a1a" }}>{priceDisplay}</div>
-                  </div>
-                );
-              })}
-              {products.length === 0 && (
-                <div style={{ padding: 40, textAlign: "center", color: "#aaa" }}>{t("暫無產品")}</div>
-              )}
-            </div>
-            </>)}
-            {productsSubTab === "aliases" && (() => {
-              // 從所有非 legacy 發票（將來扣庫存的）+ 所有發票一起掃 unmatched line items
-              // 但 legacy=true 的單子不會扣庫存，所以也不需要 mapping，這裡只看 legacy=false 的
-              const known = new Set(lineItemAliases.map(a => (a.alias_name || "").toLowerCase().trim()));
-              const productNames = new Set(products.map(p => (p.name || "").toLowerCase().trim()));
-              const unmatched = new Map(); // name → count
-              for (const inv of invoices) {
-                if (inv.legacy_skip_deduct === true) continue;
-                let arr = inv.items;
-                if (typeof arr === "string") { try { arr = JSON.parse(arr); } catch { arr = []; } }
-                if (!Array.isArray(arr)) continue;
-                for (const it of arr) {
-                  const nm = (it.name || "").trim();
-                  const k = nm.toLowerCase();
-                  if (!nm) continue;
-                  if (known.has(k)) continue;
-                  if (productNames.has(k)) continue; // products.name 直接匹配的不算 unmatched
-                  unmatched.set(nm, (unmatched.get(nm) || 0) + 1);
-                }
-              }
-              const unmatchedSorted = [...unmatched.entries()].sort((a, b) => b[1] - a[1]);
-              const productById = new Map(products.map(p => [p.id, p]));
-              const productLabel = (id) => productById.get(id)?.name || "?";
-              return (
-                <div>
-                  {/* 未匹配 items */}
-                  <div style={{ background: "#fff8e1", border: "1px solid #ffe082", borderRadius: 12, padding: 16, marginBottom: 20 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: "#8a6900", marginBottom: 10 }}>
-                      ⚠ {t("未匹配的 line item")} <span style={{ fontSize: 12, color: "#b88a00", marginLeft: 6 }}>{unmatchedSorted.length}</span>
-                    </div>
-                    {unmatchedSorted.length === 0 ? (
-                      <div style={{ fontSize: 12, color: "#b8a76a", fontStyle: "italic" }}>{t("全部 line item 都已配映射 ✓")}</div>
-                    ) : (
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 60px 100px", gap: 8, alignItems: "center" }}>
-                        {unmatchedSorted.slice(0, 50).map(([nm, cnt]) => (
-                          <React.Fragment key={nm}>
-                            <div style={{ fontSize: 13, color: "#333" }}>{nm}</div>
-                            <div style={{ fontSize: 11, color: "#888", textAlign: "right" }}>{cnt} {t("次")}</div>
-                            <button onClick={() => setEditingAlias({ alias_name: nm, skip: false, products: [{ product_id: "", qty: 1 }], note: "" })} style={{ padding: "4px 10px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>+ {t("配映射")}</button>
-                          </React.Fragment>
-                        ))}
-                        {unmatchedSorted.length > 50 && <div style={{ gridColumn: "1 / -1", fontSize: 11, color: "#888", textAlign: "center", paddingTop: 6 }}>{t("還有")} {unmatchedSorted.length - 50} {t("條未顯示")}</div>}
-                      </div>
-                    )}
-                  </div>
-                  {/* 已建 aliases 列表 */}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700 }}>{t("已配映射")} <span style={{ color: "#888", fontWeight: 400 }}>{lineItemAliases.length}</span></div>
-                    <button onClick={() => setEditingAlias({ alias_name: "", skip: false, products: [{ product_id: "", qty: 1 }], note: "" })} style={{ padding: "6px 14px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>+ {t("新增映射")}</button>
-                  </div>
-                  <div>
-                    {lineItemAliases.length === 0 ? (
-                      <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, padding: 40, textAlign: "center", color: "#aaa", fontSize: 13 }}>{t("暫無映射，從上方未匹配列表點「配映射」開始")}</div>
-                    ) : (() => {
-                      // 按 映射目標 分組：單品產品 / 套裝 / 不扣 / 未配產品
-                      const productGroups = new Map(); // pid → { label, items, productId }
-                      const bundleGroup = { key: "__bundle__", label: t("套裝"), items: [], color: "#6382ff", bg: "#eef2ff" };
-                      const skipGroup = { key: "__skip__", label: t("不扣（押金 / 運費 / Final Payment / 租務 等）"), items: [], color: "#991b1b", bg: "#fee2e2" };
-                      const noProdGroup = { key: "__noprod__", label: t("未配產品（需處理）"), items: [], color: "#b45309", bg: "#fef3c7" };
-                      for (const a of lineItemAliases) {
-                        if (a.skip === true) { skipGroup.items.push(a); continue; }
-                        const ps = Array.isArray(a.products) ? a.products : [];
-                        if (ps.length === 0) { noProdGroup.items.push(a); continue; }
-                        if (ps.length >= 2) { bundleGroup.items.push(a); continue; }
-                        const pid = ps[0].product_id;
-                        const prod = productById.get(pid);
-                        if (!productGroups.has(pid)) productGroups.set(pid, { key: pid, label: prod?.name || t("已刪除產品"), items: [], productId: pid, color: "#047857", bg: "#d1fae5" });
-                        productGroups.get(pid).items.push(a);
-                      }
-                      const allGroups = [
-                        ...[...productGroups.values()].sort((x, y) => y.items.length - x.items.length || x.label.localeCompare(y.label)),
-                        ...(bundleGroup.items.length > 0 ? [bundleGroup] : []),
-                        ...(skipGroup.items.length > 0 ? [skipGroup] : []),
-                        ...(noProdGroup.items.length > 0 ? [noProdGroup] : []),
-                      ];
-                      const toggleGroup = (k) => setExpandedAliasGroups(prev => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n; });
-                      return (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                          {allGroups.map(g => {
-                            const expanded = expandedAliasGroups.has(g.key);
-                            const unverifiedCount = g.items.filter(a => a.verified !== true).length;
-                            return (
-                              <div key={g.key} style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, overflow: "hidden" }}>
-                                <div onClick={() => toggleGroup(g.key)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", background: g.bg, cursor: "pointer", borderBottom: expanded ? "1px solid " + g.bg : "none" }}>
-                                  <span style={{ fontSize: 11, color: g.color }}>{expanded ? "▼" : "▶"}</span>
-                                  <span style={{ fontSize: 14, fontWeight: 700, color: g.color, flex: 1 }}>{g.label}</span>
-                                  {unverifiedCount > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: "#b45309", background: "#fef3c7", padding: "2px 8px", borderRadius: 6 }}>⚠ {unverifiedCount} {t("待校對")}</span>}
-                                  <span style={{ fontSize: 12, color: g.color, fontWeight: 600 }}>{g.items.length} {t("條")}</span>
-                                </div>
-                                {expanded && (
-                                  <div>
-                                    {[...g.items].sort((a, b) => (a.verified === b.verified ? (a.alias_name || "").localeCompare(b.alias_name || "") : (a.verified ? 1 : -1))).map(a => {
-                                      const isUnverified = a.verified !== true;
-                                      return (
-                                        <div key={a.id} style={{ display: "grid", gridTemplateColumns: "2fr 1.5fr 140px", gap: 12, padding: "10px 16px", borderBottom: "1px solid #f5f5f5", alignItems: "center", fontSize: 13, background: isUnverified ? "#fffbeb" : "transparent" }}>
-                                          <div>
-                                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                              <span style={{ fontWeight: 600 }}>{a.alias_name}</span>
-                                              {isUnverified && <span style={{ fontSize: 9, fontWeight: 700, color: "#b45309", background: "#fef3c7", padding: "1px 6px", borderRadius: 4 }}>⚠ {t("待校對")}</span>}
-                                            </div>
-                                            {a.skip !== true && Array.isArray(a.products) && a.products.length >= 2 && (
-                                              <div style={{ fontSize: 11, color: "#666", marginTop: 3 }}>→ {a.products.map(p => `${productLabel(p.product_id)}×${p.qty || 1}`).join(" + ")}</div>
-                                            )}
-                                          </div>
-                                          <div style={{ fontSize: 11, color: "#888" }}>{a.note || ""}</div>
-                                          <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
-                                            {isUnverified && <button onClick={() => handleVerifyAlias(a.id)} title={t("一鍵確認此映射正確")} style={{ padding: "4px 8px", background: "#d1fae5", color: "#047857", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer", fontWeight: 700 }}>✓ {t("確認")}</button>}
-                                            <button onClick={() => setEditingAlias({ id: a.id, alias_name: a.alias_name, skip: a.skip, products: Array.isArray(a.products) && a.products.length > 0 ? a.products : [{ product_id: "", qty: 1 }], note: a.note || "" })} style={{ padding: "4px 8px", background: "#eef2ff", color: "#3b58d4", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>✏️</button>
-                                            <button onClick={() => handleDeleteAlias(a.id)} style={{ padding: "4px 8px", background: "#fce4ec", color: "#e53935", border: "none", borderRadius: 6, fontSize: 11, cursor: "pointer" }}>×</button>
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
+          <ProductsListView
+            setSelectedProduct={setSelectedProduct}
+            setEditingProduct={setEditingProduct}
+            setNewProduct={setNewProduct}
+            setNewProductOpen={setNewProductOpen}
+            search={search}
+            setSearch={setSearch}
+          />
         )}
 
         {/* PRODUCT DETAIL */}
@@ -7009,64 +6709,6 @@ export default function App() {
 
       {/* EDIT PRODUCT STOCK MODAL (分倉) */}
       {/* LINE ITEM ALIAS EDIT MODAL */}
-      {editingAlias && (() => {
-        const draft = editingAlias;
-        const isNew = !draft.id;
-        const setDraft = (patch) => setEditingAlias(prev => ({ ...prev, ...patch }));
-        const setProduct = (idx, patch) => setEditingAlias(prev => ({ ...prev, products: prev.products.map((p, i) => i === idx ? { ...p, ...patch } : p) }));
-        const addRow = () => setEditingAlias(prev => ({ ...prev, products: [...prev.products, { product_id: "", qty: 1 }] }));
-        const removeRow = (idx) => setEditingAlias(prev => ({ ...prev, products: prev.products.filter((_, i) => i !== idx) }));
-        const selectableProducts = products.filter(p => p.category !== '_archived').sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-        return (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 }}>
-            <div style={{ background: "#fff", borderRadius: 16, width: 560, maxWidth: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 22px", borderBottom: "1px solid #f0f0f0" }}>
-                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>{isNew ? t("新增 Line Item 映射") : t("編輯映射")}</h2>
-                <button onClick={() => setEditingAlias(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}>×</button>
-              </div>
-              <div style={{ padding: 22, overflowY: "auto", flex: 1 }}>
-                <div style={{ marginBottom: 14 }}>
-                  <label style={{ fontSize: 12, fontWeight: 700, color: "#555", display: "block", marginBottom: 6 }}>alias_name <span style={{ color: "#ef4444" }}>*</span></label>
-                  <input value={draft.alias_name} onChange={e => setDraft({ alias_name: e.target.value })} disabled={!isNew} placeholder={t("發票 items 裡的原始名字")} style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", boxSizing: "border-box", background: isNew ? "#fff" : "#f5f5f5", color: isNew ? "#222" : "#888" }} />
-                  {!isNew && <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>{t("已存在的 alias 不可改名（避免破壞已建關聯）")}</div>}
-                </div>
-                <div style={{ marginBottom: 14 }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-                    <input type="checkbox" checked={draft.skip === true} onChange={e => setDraft({ skip: e.target.checked })} />
-                    {t("此 alias 不扣庫存（押金 / 運費 / Final Payment / 租務 等）")}
-                  </label>
-                </div>
-                {draft.skip !== true && (
-                  <div style={{ marginBottom: 14 }}>
-                    <label style={{ fontSize: 12, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>{t("映射到產品")} <span style={{ fontSize: 11, color: "#888", fontWeight: 400 }}>· {t("套裝可加多行")}</span></label>
-                    {draft.products.map((row, idx) => (
-                      <div key={idx} style={{ display: "grid", gridTemplateColumns: "1fr 70px 30px", gap: 8, marginBottom: 6 }}>
-                        <select value={row.product_id} onChange={e => setProduct(idx, { product_id: e.target.value })} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", background: "#fff" }}>
-                          <option value="">{t("選擇產品...")}</option>
-                          {selectableProducts.map(p => (
-                            <option key={p.id} value={p.id}>{p.name}{p.parent_product_id ? "" : ""}</option>
-                          ))}
-                        </select>
-                        <input type="number" min="1" value={row.qty} onChange={e => setProduct(idx, { qty: Number(e.target.value) || 1 })} placeholder="qty" style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", textAlign: "center" }} />
-                        <button onClick={() => removeRow(idx)} disabled={draft.products.length === 1} style={{ background: draft.products.length === 1 ? "#f5f5f5" : "#fce4ec", color: draft.products.length === 1 ? "#ccc" : "#e53935", border: "none", borderRadius: 8, fontSize: 14, cursor: draft.products.length === 1 ? "not-allowed" : "pointer" }}>×</button>
-                      </div>
-                    ))}
-                    <button onClick={addRow} style={{ padding: "6px 12px", background: "#fafbff", border: "1px dashed #c6d3ff", color: "#6382ff", borderRadius: 8, fontSize: 12, cursor: "pointer", marginTop: 4 }}>+ {t("加一行")}</button>
-                  </div>
-                )}
-                <div style={{ marginBottom: 14 }}>
-                  <label style={{ fontSize: 12, fontWeight: 700, color: "#555", display: "block", marginBottom: 6 }}>{t("備註（可選）")}</label>
-                  <input value={draft.note || ""} onChange={e => setDraft({ note: e.target.value })} placeholder={t("例如：DC 二代首付 / Final Payment / 套裝")} style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: 10, padding: "14px 22px", borderTop: "1px solid #f0f0f0" }}>
-                <button onClick={() => setEditingAlias(null)} style={{ flex: 1, padding: 10, background: "#f5f5f5", color: "#666", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>{t("取消")}</button>
-                <button onClick={() => handleSaveAlias(draft)} disabled={aliasSaving} style={{ flex: 2, padding: 10, background: aliasSaving ? "#a0aec0" : "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 800, cursor: aliasSaving ? "not-allowed" : "pointer" }}>{aliasSaving ? t("保存中...") : t("保存")}</button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
 
       <ProductEditModal
         editingProduct={editingProduct} setEditingProduct={setEditingProduct}
