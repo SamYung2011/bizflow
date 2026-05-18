@@ -114,10 +114,29 @@ export function AppProvider({ children }) {
   // qTaskPending：依賴 isWaAdmin，1c 從 App.jsx 搬進來
   const qTaskPending = useQuery({ queryKey: ['bf', 'task_pending'], queryFn: () => fetchAllTable('task_pending', 'requested_at', false), enabled: !!userId && isWaAdmin, refetchInterval: 15000 })
 
+  // 全 App 共享：當前 tab + 首屏 loading/error 匯總
+  const [tab, setTab] = useState('dashboard')
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
+
+  // 最快一張到位就解 spinner
+  useEffect(() => {
+    if (qProducts.data || qInventory.data || qCustomers.data || qInvoices.data) setLoading(false)
+  }, [qProducts.data, qInventory.data, qCustomers.data, qInvoices.data])
+
+  // 匯總錯誤
+  useEffect(() => {
+    const errs = [qProducts.error, qInventory.error, qCustomers.error, qInvoices.error].filter(Boolean)
+    if (errs.length > 0) setLoadError(errs[0].message || String(errs[0]))
+  }, [qProducts.error, qInventory.error, qCustomers.error, qInvoices.error])
+
   const value = {
     session, setSession,
     authLoading, setAuthLoading,
     userId, currentEmployee, isBfAdmin, isWaAdmin, canShip,
+    tab, setTab,
+    loading, setLoading,
+    loadError, setLoadError,
     products, setProducts,
     warehouses, setWarehouses,
     stocks, setStocks,

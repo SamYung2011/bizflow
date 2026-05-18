@@ -353,11 +353,14 @@ export default function App() {
   const [forceChangePwLoading, setForceChangePwLoading] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false);
 
-  // 數據層 + auth/admin 整套都從 AppContext 拿
+  // 數據層 + auth/admin + tab + loading 整套都從 AppContext 拿
   const {
     session, setSession,
     authLoading, setAuthLoading,
     userId, currentEmployee, isBfAdmin, isWaAdmin, canShip,
+    tab, setTab,
+    loading, setLoading,
+    loadError, setLoadError,
     products, setProducts,
     warehouses, setWarehouses,
     stocks, setStocks,
@@ -390,7 +393,6 @@ export default function App() {
     qTaskPending,
   } = useAppContext();
 
-  const [tab, setTab] = useState("dashboard");
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [showAddEmployee, setShowAddEmployee] = useState(false);
   const [newEmployee, setNewEmployee] = useState({ name: "", role: "", phone: "", email: "", note: "" });
@@ -437,8 +439,6 @@ export default function App() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [productOrgDraft, setProductOrgDraft] = useState(null);
   const [expandedSkuGroups, setExpandedSkuGroups] = useState(new Set());
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(null);
   const [search, setSearch] = useState("");
   const [productCategoryFilter, setProductCategoryFilter] = useState("");
   const [selectedCustomer, setSelectedCustomer] = useState(null);
@@ -1388,16 +1388,7 @@ export default function App() {
     setEditProductWarranty(editingProduct.warranty_months != null ? String(editingProduct.warranty_months) : "");
   }, [editingProduct, warehouses, stocks]);
 
-  // 最快一張到位就解 spinner
-  useEffect(() => {
-    if (qProducts.data || qInventory.data || qCustomers.data || qInvoices.data) setLoading(false);
-  }, [qProducts.data, qInventory.data, qCustomers.data, qInvoices.data]);
-
-  // 匯總錯誤
-  useEffect(() => {
-    const errs = [qProducts.error, qInventory.error, qCustomers.error, qInvoices.error].filter(Boolean);
-    if (errs.length > 0) setLoadError(errs[0].message || String(errs[0]));
-  }, [qProducts.error, qInventory.error, qCustomers.error, qInvoices.error]);
+  // loading/loadError 匯總 effect 已搬到 AppContext
 
   // Realtime 訂閱 customers 表：INSERT/UPDATE/DELETE 時靜默刷新本地 state
   // 用途：Framer 意向表單寫入 Supabase 後前端自動同步，不用 F5
