@@ -354,7 +354,11 @@ export default function App() {
   const [forceChangePwLoading, setForceChangePwLoading] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false);
 
-  // 批 1+2+3 遷出：products / warehouses / stocks / suppliers / customers / line_item_aliases / invoices / inventory 已搬到 AppContext
+  // 批 1-4 遷出：products / warehouses / stocks / suppliers / customers / line_item_aliases /
+  // invoices / inventory / employees / tasks / task_assignees / feedbacks / update_logs / log_comments /
+  // wa_settings / wa_whitelist / wa_messages / wa_replies_pending / wa_unresolved / companies /
+  // wa_daily_reports / wa_heartbeat / wa_logs / wa_clients 全部 query + state + sync effect 已搬到 AppContext。
+  // 留在 App.jsx 的：qTaskPending（依賴 isWaAdmin），到 1c 搬 auth 時一起處理。
   const {
     products, setProducts,
     warehouses, setWarehouses,
@@ -364,14 +368,30 @@ export default function App() {
     lineItemAliases, setLineItemAliases,
     invoices, setInvoices,
     inventory, setInventory,
-    qProducts, qWarehouses, qStocks, qSuppliers, qCustomers, qLineItemAliases, qInvoices, qInventory,
+    employees, setEmployees,
+    tasks, setTasks,
+    taskAssignees, setTaskAssignees,
+    feedbacks, setFeedbacks,
+    updateLogs, setUpdateLogs,
+    logComments, setLogComments,
+    waSettings, setWaSettings,
+    waWhitelist, setWaWhitelist,
+    waMessages, setWaMessages,
+    waUnresolved, setWaUnresolved,
+    waReports, setWaReports,
+    waLogs, setWaLogs,
+    waClients, setWaClients,
+    waHeartbeat, setWaHeartbeat,
+    qProducts, qWarehouses, qStocks, qSuppliers,
+    qCustomers, qLineItemAliases,
+    qInvoices, qInventory,
+    qEmployees, qTasks, qTaskAssignees,
+    qFeedbacks, qUpdateLogs, qLogComments,
+    qWaSettings, qWaWhitelist, qWaMessages, qWaPending, qWaUnresolved,
+    qCompanies, qWaReports, qWaHeartbeat, qWaLogs, qWaClients,
   } = useAppContext();
 
   const [tab, setTab] = useState("dashboard");
-  const [employees, setEmployees] = useState([]);
-  const [tasks, setTasks] = useState([]);
-  const [taskAssignees, setTaskAssignees] = useState([]); // task_assignees (多對多分配 + 個人完成狀態)
-  const [feedbacks, setFeedbacks] = useState([]); // employee_task_feedbacks (comments thread)
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [showAddEmployee, setShowAddEmployee] = useState(false);
   const [newEmployee, setNewEmployee] = useState({ name: "", role: "", phone: "", email: "", note: "" });
@@ -389,9 +409,6 @@ export default function App() {
   const [newTaskAssigneeOpen, setNewTaskAssigneeOpen] = useState(false);
   const [editTaskAssigneeInput, setEditTaskAssigneeInput] = useState(""); // 編輯任務的分配輸入框
   const [editTaskAssigneeOpen, setEditTaskAssigneeOpen] = useState(false);
-  // 員工更新日誌 state
-  const [updateLogs, setUpdateLogs] = useState([]);
-  const [logComments, setLogComments] = useState([]);
   const [showAddSupplier, setShowAddSupplier] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState(null);
   const [supplierSearch, setSupplierSearch] = useState("");
@@ -412,20 +429,11 @@ export default function App() {
   const [replyingToLogComment, setReplyingToLogComment] = useState(null); // { logId, parentId }
   const [editingLogComment, setEditingLogComment] = useState(null); // { id, body }
   const [logsVisibleCount, setLogsVisibleCount] = useState(20); // 時間軸懶加載：當前可見條數
-  // WhatsApp tab state
-  const [waSettings, setWaSettings] = useState(null);
-  const [waWhitelist, setWaWhitelist] = useState([]);
-  const [waMessages, setWaMessages] = useState([]);
-  const [waUnresolved, setWaUnresolved] = useState([]);
-  const [waReports, setWaReports] = useState([]);
-  const [waLogs, setWaLogs] = useState([]);
-  const [waClients, setWaClients] = useState([]);
   const [showInstallTutorial, setShowInstallTutorial] = useState(false);
   // 扩展更新 toast：純內存 state，× 關掉只在本次頁面 session 內生效。刷新頁面就重新彈（提醒及時感）
   const [extUpdateToastDismissedFor, setExtUpdateToastDismissedFor] = useState("");
   const [waSubTab, setWaSubTab] = useState("settings"); // settings | knowledge | prompt | whitelist | messages | unresolved | reports | logs
   const [waSelectedCustomer, setWaSelectedCustomer] = useState(null);
-  const [waHeartbeat, setWaHeartbeat] = useState(null);
   const [waSecretUnlocked, setWaSecretUnlocked] = useState(false); // 輸過密碼後這次 session 內放開
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [productOrgDraft, setProductOrgDraft] = useState(null);
@@ -1269,10 +1277,8 @@ export default function App() {
   const canShip = isBfAdmin || (currentEmployee && currentEmployee.can_ship === true);
   const queryClient = useQueryClient();
 
-  // 使用 React Query 管理 fetch + 緩存（products/warehouses/stocks/suppliers/customers/line_item_aliases/invoices/inventory 已遷至 AppContext）
-  const qEmployees = useQuery({ queryKey: ["bf", "employees"], queryFn: () => fetchAllTable("employees", "created_at"), enabled: !!userId });
-  const qTasks = useQuery({ queryKey: ["bf", "employee_tasks"], queryFn: () => fetchAllTable("employee_tasks", "created_at"), enabled: !!userId });
-  const qTaskAssignees = useQuery({ queryKey: ["bf", "task_assignees"], queryFn: () => fetchAllTable("task_assignees", "created_at", true, null), enabled: !!userId });
+  // 剩下唯一一個還在 App.jsx 的 useQuery：qTaskPending 依賴 isWaAdmin，到 1c 搬 auth 時一起處理
+  const qTaskPending = useQuery({ queryKey: ["bf", "task_pending"], queryFn: () => fetchAllTable("task_pending", "requested_at", false), enabled: !!userId && isWaAdmin, refetchInterval: 15000 });
 
   // task_assignees 按 task_id 分組（多處用，避免重複掃描）
   // 兜底用 qTaskAssignees.data：state 同步比 tasks 慢一幀時避免 race（剛發布完任務刷新被分配員工那邊瞬間看不到）
@@ -1331,26 +1337,8 @@ export default function App() {
     }
     return task.status === "abandoned";
   };
-  const qFeedbacks = useQuery({ queryKey: ["bf", "employee_task_feedbacks"], queryFn: () => fetchAllTable("employee_task_feedbacks", "created_at"), enabled: !!userId });
-  const qUpdateLogs = useQuery({ queryKey: ["bf", "employee_update_logs"], queryFn: () => fetchAllTable("employee_update_logs", "created_at", false), enabled: !!userId });
-  const qLogComments = useQuery({ queryKey: ["bf", "employee_update_log_comments"], queryFn: () => fetchAllTable("employee_update_log_comments", "created_at"), enabled: !!userId });
-  const qWaSettings = useQuery({ queryKey: ["bf", "wa_settings"], queryFn: async () => { const { data } = await supabase.from("wa_settings").select("*").eq("id", 1).maybeSingle(); return data; }, enabled: !!userId, refetchInterval: 30000 });
-  const qWaWhitelist = useQuery({ queryKey: ["bf", "wa_whitelist"], queryFn: () => fetchAllTable("wa_whitelist", "created_at"), enabled: !!userId, refetchInterval: 30000 });
-  const qWaMessages = useQuery({ queryKey: ["bf", "wa_messages"], queryFn: async () => { const { data } = await supabase.from("wa_messages").select("*").order("created_at", { ascending: false }).limit(1000); return data || []; }, enabled: !!userId, refetchInterval: 5000 });
-  const qWaPending = useQuery({ queryKey: ["bf", "wa_replies_pending"], queryFn: async () => { const { data, error } = await supabase.from("wa_replies").select("*").is("delivered_at", null).order("created_at", { ascending: false }).limit(500); if (error) throw error; return data || []; }, enabled: !!userId, refetchInterval: 5000 });
-  const qWaUnresolved = useQuery({ queryKey: ["bf", "wa_unresolved"], queryFn: () => fetchAllTable("wa_unresolved", "created_at", false), enabled: !!userId, refetchInterval: 30000 });
-  const qCompanies = useQuery({ queryKey: ["bf", "companies"], queryFn: () => fetchAllTable("companies", "name", true), enabled: !!userId, refetchInterval: 60000 });
-  const qTaskPending = useQuery({ queryKey: ["bf", "task_pending"], queryFn: () => fetchAllTable("task_pending", "requested_at", false), enabled: !!userId && isWaAdmin, refetchInterval: 15000 });
-  const qWaReports = useQuery({ queryKey: ["bf", "wa_daily_reports"], queryFn: () => fetchAllTable("wa_daily_reports", "report_date", false), enabled: !!userId, refetchInterval: 60000 });
-  const qWaHeartbeat = useQuery({ queryKey: ["bf", "wa_heartbeat"], queryFn: async () => { const { data } = await supabase.from("wa_heartbeat").select("*").eq("id", 1).maybeSingle(); return data; }, enabled: !!userId, refetchInterval: 15000 });
-  const qWaLogs = useQuery({ queryKey: ["bf", "wa_logs"], queryFn: async () => { const { data } = await supabase.from("wa_logs").select("*").order("created_at", { ascending: false }).limit(500); return data || []; }, enabled: !!userId, refetchInterval: 5000 });
-  const qWaClients = useQuery({ queryKey: ["bf", "wa_clients"], queryFn: async () => { const { data } = await supabase.from("wa_clients").select("*").order("last_seen", { ascending: false }); return data || []; }, enabled: !!userId, refetchInterval: 2000 });
 
-  // query data 同步到現有 useState，現存的 mutation 代碼（setProducts 等）照舊工作
-  // products/warehouses/stocks/suppliers/customers/line_item_aliases/invoices/inventory 的同步 effect 已搬到 AppContext
-  useEffect(() => { if (qEmployees.data) setEmployees(qEmployees.data); }, [qEmployees.data]);
-  useEffect(() => { if (qTasks.data) setTasks(qTasks.data); }, [qTasks.data]);
-  useEffect(() => { if (qTaskAssignees.data) setTaskAssignees(qTaskAssignees.data); }, [qTaskAssignees.data]);
+  // 所有 query data → useState 的同步 effect 已全部遷至 AppContext（除 qTaskPending 暫留 App.jsx）
   // 任務提醒：tasks/assignees/feedbacks 加載完一次後計算所有類型 → 堆疊顯示
   useEffect(() => {
     if (!currentEmployee || !userId) return;
@@ -1396,19 +1384,8 @@ export default function App() {
     }
     setTaskNotices(notices);
   }, [tasks, taskAssignees, feedbacks, currentEmployee?.id, userId, dismissedNoticeTypes]);
-  useEffect(() => { if (qFeedbacks.data) setFeedbacks(qFeedbacks.data); }, [qFeedbacks.data]);
-  useEffect(() => { if (qUpdateLogs.data) setUpdateLogs(qUpdateLogs.data); }, [qUpdateLogs.data]);
-  useEffect(() => { if (qLogComments.data) setLogComments(qLogComments.data); }, [qLogComments.data]);
   // 切員工 / 切回更新日誌 tab 時重置懶加載計數
   useEffect(() => { setLogsVisibleCount(20); }, [selectedEmployee?.id, empSubTab]);
-  useEffect(() => { if (qWaSettings.data) setWaSettings(qWaSettings.data); }, [qWaSettings.data]);
-  useEffect(() => { if (qWaWhitelist.data) setWaWhitelist(qWaWhitelist.data); }, [qWaWhitelist.data]);
-  useEffect(() => { if (qWaMessages.data) setWaMessages(qWaMessages.data); }, [qWaMessages.data]);
-  useEffect(() => { if (qWaUnresolved.data) setWaUnresolved(qWaUnresolved.data); }, [qWaUnresolved.data]);
-  useEffect(() => { if (qWaReports.data) setWaReports(qWaReports.data); }, [qWaReports.data]);
-  useEffect(() => { if (qWaHeartbeat.data) setWaHeartbeat(qWaHeartbeat.data); }, [qWaHeartbeat.data]);
-  useEffect(() => { if (qWaLogs.data) setWaLogs(qWaLogs.data); }, [qWaLogs.data]);
-  useEffect(() => { if (qWaClients.data) setWaClients(qWaClients.data); }, [qWaClients.data]);
 
   // 進 task detail modal 時自動標記該 task 反饋為已讀（更新 localStorage + 觸發任務卡重渲染）
   useEffect(() => {
