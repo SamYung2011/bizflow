@@ -506,7 +506,7 @@ function OverviewView({ employees, tasks, assigneesByTask, expanded, setExpanded
 // ====================  TASK BOARD（單員工任務看板）  ====================
 function TaskBoard({ emp, data, me, userId, setEditingTask, compact, companyId, ctx }) {
   const { t } = useT()
-  const { employees, tasks, feedbacks, assigneesByTask, departments, empDepts } = data
+  const { employees, tasks, feedbacks, assigneesByTask, departments, empDepts, empCompanies } = data
   const queryClient = useQueryClient()
 
   // emp 是 assignee 或 creator 的任務
@@ -671,7 +671,7 @@ function TaskBoard({ emp, data, me, userId, setEditingTask, compact, companyId, 
   // 新增任務權限：super/company admin / 有 can_create_task / 自己給自己（永遠允許）
   const canCreate = ctx?.isSuperAdmin || ctx?.isAdminOfActive || ctx?.hasPermission?.('can_create_task') || emp.id === me.id
   const newTaskBlock = canCreate
-    ? <NewTaskForm emp={emp} me={me} employees={employees} companyId={companyId} departments={departments} empDepts={empDepts} ctx={ctx} />
+    ? <NewTaskForm emp={emp} me={me} employees={employees} companyId={companyId} departments={departments} empDepts={empDepts} empCompanies={empCompanies} ctx={ctx} />
     : <div style={{ background: c.card, border: `1px dashed ${c.border}`, borderRadius: radius.lg, padding: 24, textAlign: 'center', color: c.textFaint, fontSize: 12 }}>{t('非本公司同事，無法新增任務')}</div>
 
   return (
@@ -773,7 +773,7 @@ function FbPanel({ fbList, feedbacks, setEditingTask }) {
 }
 
 // 新建任務表單
-function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts = [], ctx }) {
+function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts = [], empCompanies = [], ctx }) {
   const { t } = useT()
   const queryClient = useQueryClient()
   const [title, setTitle] = useState('')
@@ -786,16 +786,19 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
   const [assigneeOpen, setAssigneeOpen] = useState(false)
   const [files, setFiles] = useState([])
   const [busy, setBusy] = useState(false)
-  const [subtaskTitles, setSubtaskTitles] = useState([])  // 子任務標題列表，submit 時一起 INSERT，assignees 沿用父任務
+  // 子任務：[{ title, assignees }]。assignees=null 沿用父任務；否則自定義
+  const [subtaskItems, setSubtaskItems] = useState([])
   const [departmentId, setDepartmentId] = useState('')  // '' = 公司內可見；非空 = 部門專屬
 
   // 任務所屬公司：companyId prop → emp.company_id → me.company_id
   const taskCompanyId = companyId || emp?.company_id || me.company_id
-  // 該公司的部門列表
-  const coDepartments = useMemo(
-    () => departments.filter(d => d.company_id === taskCompanyId),
-    [departments, taskCompanyId]
-  )
+  // 該公司的部門列表 — 普通員工只能選自己加入的部門，admin / super admin 看全部
+  const coDepartments = useMemo(() => {
+    const all = departments.filter(d => d.company_id === taskCompanyId)
+    if (ctx?.isSuperAdmin || ctx?.isAdminOfActive) return all
+    const myDeptIds = new Set(empDepts.filter(ed => ed.employee_id === me.id).map(ed => ed.department_id))
+    return all.filter(d => myDeptIds.has(d.id))
+  }, [departments, taskCompanyId, ctx?.isSuperAdmin, ctx?.isAdminOfActive, empDepts, me.id])
   // 選中部門時的成員 id set（過濾候選 assignee 用）
   const deptMemberIds = useMemo(() => {
     if (!departmentId) return null
@@ -803,8 +806,12 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
   }, [departmentId, empDepts])
 
   const effective = assigneeIds === null ? [emp.id] : assigneeIds
-  // 候選限本公司（emp 所屬公司）；admin 跨公司請左側切員工
-  const sameCo = (e) => emp.company_id ? e.company_id === emp.company_id : true
+  // 候選限「任務所屬公司」的 binding 成員（跨公司綁定靠 employee_companies，不能用 employees.company_id 老字段）
+  const empIdsInScope = useMemo(
+    () => new Set(empCompanies.filter(ec => ec.company_id === taskCompanyId).map(ec => ec.employee_id)),
+    [empCompanies, taskCompanyId]
+  )
+  const sameCo = (e) => taskCompanyId ? empIdsInScope.has(e.id) : true
   let activeEmps = employees.filter(e => e.active !== false && sameCo(e))
   // 選了部門 → 候選再過濾為該部門成員
   if (deptMemberIds) activeEmps = activeEmps.filter(e => deptMemberIds.has(e.id))
@@ -843,11 +850,14 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
         const attachments = await Promise.all(files.map(f => uploadAttachment(f, data.id)))
         await supabase.from('employee_tasks').update({ attachments }).eq('id', data.id)
       }
-      // 子任務（assignees 沿用父）
-      const cleanSubs = subtaskTitles.map(s => s.trim()).filter(Boolean)
-      for (const subTitle of cleanSubs) {
+      // 子任務：assignees=null 沿用父；否則用自定義列表
+      const cleanSubs = subtaskItems
+        .map(s => ({ title: s.title.trim(), assignees: s.assignees }))
+        .filter(s => s.title)
+      for (const { title: subTitle, assignees: subAssignees } of cleanSubs) {
+        const eff = subAssignees && subAssignees.length > 0 ? subAssignees : effective
         const { data: sub, error: se } = await supabase.from('employee_tasks').insert({
-          employee_id: effective[0],
+          employee_id: eff[0],
           creator_employee_id: me.id,
           needs_approval: needsApproval,
           title: subTitle,
@@ -857,9 +867,9 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
           department_id: departmentId || null,
         }).select().single()
         if (se) { console.error('子任務新增失敗', se); continue }
-        await supabase.from('task_assignees').insert(effective.map(eid => ({ task_id: sub.id, employee_id: eid })))
+        await supabase.from('task_assignees').insert(eff.map(eid => ({ task_id: sub.id, employee_id: eid })))
       }
-      setTitle(''); setNote(''); setPriority('low'); setAssigneeIds(null); setNeedsApproval(false); setDueDate(''); setFiles([]); setSubtaskTitles([]); setDepartmentId('')
+      setTitle(''); setNote(''); setPriority('low'); setAssigneeIds(null); setNeedsApproval(false); setDueDate(''); setFiles([]); setSubtaskItems([]); setDepartmentId('')
       queryClient.invalidateQueries({ queryKey: ['admin', 'employee_tasks'] })
       queryClient.invalidateQueries({ queryKey: ['admin', 'task_assignees'] })
     } catch (e) {
@@ -890,6 +900,12 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
                   const pruned = assigneeIds.filter(id => memberSet.has(id))
                   setAssigneeIds(pruned.length > 0 ? pruned : null)
                 }
+                // 子任務的自定義 assignees 也要過濾，否則部門 trigger 會卡 INSERT
+                setSubtaskItems(prev => prev.map(it => {
+                  if (it.assignees === null) return it
+                  const pruned = it.assignees.filter(id => memberSet.has(id))
+                  return { ...it, assignees: pruned.length > 0 ? pruned : null }
+                }))
               }
             }}
             style={{ ...S.input, marginBottom: 8 }}>
@@ -942,18 +958,17 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
         ))}
       </div>
 
-      {/* 子任務（assignees 沿用父任務；要單獨改去 EditTaskModal） */}
+      {/* 子任務：assignees 默認沿用父任務，可單獨改 */}
       <div style={{ marginBottom: 10, paddingTop: 8, borderTop: `1px dashed ${c.border}` }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-          <span style={{ fontSize: 11, color: c.textMuted }}>{t('子任務（可選）')}{subtaskTitles.length > 0 && <span style={{ color: c.textFaint, marginLeft: 4 }}>· {subtaskTitles.length}</span>}</span>
-          <button type="button" onClick={() => setSubtaskTitles(prev => [...prev, ''])} style={{ background: c.bg, border: `1px dashed ${c.border}`, borderRadius: radius.sm, padding: '2px 8px', fontSize: 10, color: c.accent, cursor: 'pointer' }}>＋ {t('加子任務')}</button>
+          <span style={{ fontSize: 11, color: c.textMuted }}>{t('子任務（可選）')}{subtaskItems.length > 0 && <span style={{ color: c.textFaint, marginLeft: 4 }}>· {subtaskItems.length}</span>}</span>
+          <button type="button" onClick={() => setSubtaskItems(prev => [...prev, { title: '', assignees: null }])} style={{ background: c.bg, border: `1px dashed ${c.border}`, borderRadius: radius.sm, padding: '2px 8px', fontSize: 10, color: c.accent, cursor: 'pointer' }}>＋ {t('加子任務')}</button>
         </div>
-        {subtaskTitles.map((stTitle, i) => (
-          <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center' }}>
-            <span style={{ fontSize: 9, color: c.textFaint, width: 14 }}>{i + 1}.</span>
-            <input value={stTitle} onChange={e => setSubtaskTitles(prev => prev.map((v, j) => j === i ? e.target.value : v))} placeholder={t('子任務標題')} style={{ flex: 1, padding: '5px 8px', borderRadius: radius.sm, border: `1px solid ${c.border}`, fontSize: 11, outline: 'none', boxSizing: 'border-box' }} />
-            <button type="button" onClick={() => setSubtaskTitles(prev => prev.filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', color: c.textFaint, cursor: 'pointer', fontSize: 13 }}>×</button>
-          </div>
+        {subtaskItems.map((item, i) => (
+          <NewSubtaskRow key={i} index={i} item={item}
+            setItem={(next) => setSubtaskItems(prev => prev.map((v, j) => j === i ? next : v))}
+            removeItem={() => setSubtaskItems(prev => prev.filter((_, j) => j !== i))}
+            parentEffective={effective} activeEmps={activeEmps} canAssignOthers={canAssignOthers} />
         ))}
       </div>
 
@@ -962,8 +977,56 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
   )
 }
 
-// 算出任務所屬公司：取 assignees 中第一個有 company_id 的；fallback creator
+// NewTaskForm 的子任務一行：title + 獨立 assignee chip editor（默認沿用父）
+function NewSubtaskRow({ index, item, setItem, removeItem, parentEffective, activeEmps, canAssignOthers }) {
+  const { t } = useT()
+  const [input, setInput] = useState('')
+  const [open, setOpen] = useState(false)
+  const eff = item.assignees ?? parentEffective
+  const inherited = item.assignees === null
+  const q = input.replace(/^@/, '').toLowerCase()
+  const cands = activeEmps.filter(e => !eff.includes(e.id) && (q === '' || (e.name || '').toLowerCase().includes(q)))
+  const addAssignee = (id) => { setItem({ ...item, assignees: [...eff, id] }); setInput('') }
+  const removeAssignee = (id) => {
+    const next = eff.filter(x => x !== id)
+    // × 到空 → 回到 null（沿用父任務），避免提交時走 fallback 走得不明顯
+    setItem({ ...item, assignees: next.length === 0 ? null : next })
+  }
+  return (
+    <div style={{ marginBottom: 6, padding: '6px 8px', border: `1px solid ${c.border}`, borderRadius: radius.sm, background: c.bg }}>
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 4 }}>
+        <span style={{ fontSize: 9, color: c.textFaint, width: 14 }}>{index + 1}.</span>
+        <input value={item.title} onChange={e => setItem({ ...item, title: e.target.value })} placeholder={t('子任務標題')} style={{ flex: 1, padding: '5px 8px', borderRadius: radius.sm, border: `1px solid ${c.border}`, fontSize: 11, outline: 'none', boxSizing: 'border-box' }} />
+        <button type="button" onClick={removeItem} style={{ background: 'none', border: 'none', color: c.textFaint, cursor: 'pointer', fontSize: 13 }}>×</button>
+      </div>
+      {canAssignOthers && (
+        <div style={{ position: 'relative', border: `1px solid ${c.border}`, borderRadius: radius.sm, padding: '2px 4px', display: 'flex', flexWrap: 'wrap', gap: 3, minHeight: 22, background: c.card, opacity: inherited ? 0.85 : 1 }}>
+          {eff.map(id => {
+            const e2 = activeEmps.find(x => x.id === id)
+            return (
+              <span key={id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2, padding: '1px 5px', background: c.accentBg, color: c.accent, borderRadius: 9, fontSize: 9, fontWeight: 600 }}>
+                @{e2?.name || '?'}
+                <button type="button" onClick={() => removeAssignee(id)} style={{ background: 'none', border: 'none', color: c.accent, cursor: 'pointer', fontSize: 10 }}>×</button>
+              </span>
+            )
+          })}
+          <input value={input} onChange={e => { setInput(e.target.value); setOpen(true) }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 200)} placeholder={inherited ? t('沿用父任務 · @ 改') : t('@ 加')} style={{ flex: 1, minWidth: 50, border: 'none', outline: 'none', fontSize: 10, background: 'transparent' }} />
+          {open && cands.length > 0 && (
+            <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 3, background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.sm, boxShadow: '0 4px 14px rgba(0,0,0,0.1)', padding: 3, width: '100%', maxHeight: 160, overflowY: 'auto', zIndex: 30 }}>
+              {cands.map(e2 => (
+                <button key={e2.id} type="button" onMouseDown={ev => { ev.preventDefault(); addAssignee(e2.id) }} style={{ display: 'block', width: '100%', textAlign: 'left', padding: '4px 7px', background: 'none', border: 'none', fontSize: 10, color: c.text, cursor: 'pointer' }}>{e2.name}</button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// 算出任務所屬公司：優先 task.company_id（migration 043 起必填）；老任務 fallback 看 assignee/creator 的 employees.company_id
 function getTaskCompanyId(task, assigneesByTask, employees) {
+  if (task.company_id) return task.company_id
   const list = assigneesByTask.get(task.id) || []
   for (const a of list) {
     const e = employees.find(x => x.id === a.employee_id)
@@ -992,7 +1055,7 @@ export async function uploadAttachment(file, taskId) {
 // ====================  EDIT TASK MODAL  ====================
 function EditTaskModal({ task: initial, data, me, userId, onClose, ctx }) {
   const { t } = useT()
-  const { employees, tasks, feedbacks, assigneesByTask, departments, empDepts } = data
+  const { employees, tasks, feedbacks, assigneesByTask, departments, empDepts, empCompanies } = data
   const queryClient = useQueryClient()
   const [tk, setTk] = useState(initial)
   // 切到不同 task 時 reset。同 task 內部由本地 state 主導，後台 query 刷新不會吞用戶輸入
@@ -1104,7 +1167,12 @@ function EditTaskModal({ task: initial, data, me, userId, onClose, ctx }) {
           <input type="date" value={tk.due_date || ''} readOnly={ro} onChange={e => setTk({ ...tk, due_date: e.target.value || null })} onBlur={() => updateField({ due_date: tk.due_date || null })} style={{ padding: '4px 8px', borderRadius: radius.sm, border: `1px solid ${c.border}`, fontSize: 12 }} />
           <span style={{ fontSize: 11, color: c.textMuted, marginLeft: 6 }}>{t('發佈範圍')}</span>
           {(() => {
-            const coDepts = (departments || []).filter(d => d.company_id === (tk.company_id || scopeCompanyId))
+            const allCoDepts = (departments || []).filter(d => d.company_id === (tk.company_id || scopeCompanyId))
+            // 普通員工只能選自己加入的部門；admin / super admin / 任務當前所在部門（保留以便看到當前值）不限
+            const myDeptIds = new Set((empDepts || []).filter(ed => ed.employee_id === me.id).map(ed => ed.department_id))
+            const coDepts = (ctx?.isSuperAdmin || ctx?.isAdminOfActive)
+              ? allCoDepts
+              : allCoDepts.filter(d => myDeptIds.has(d.id) || d.id === tk.department_id)
             if (ro) {
               const cur = (departments || []).find(d => d.id === tk.department_id)
               return cur
@@ -1143,7 +1211,7 @@ function EditTaskModal({ task: initial, data, me, userId, onClose, ctx }) {
           })()}
         </div>
 
-        <AssigneeEditor tk={tk} tkList={tkList} employees={employees} canManage={canEdit && canAssignOthers} setAssignees={setAssignees} scopeCompanyId={scopeCompanyId} />
+        <AssigneeEditor tk={tk} tkList={tkList} employees={employees} empCompanies={empCompanies} canManage={canEdit && canAssignOthers} setAssignees={setAssignees} scopeCompanyId={scopeCompanyId} />
 
         {canEdit ? (
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 8, fontSize: 12, color: c.textMuted, cursor: 'pointer' }}>
@@ -1158,9 +1226,9 @@ function EditTaskModal({ task: initial, data, me, userId, onClose, ctx }) {
 
         <AttachmentList tk={tk} ro={ro} onUpdate={updateField} />
 
-        <SubtaskList tk={tk} subtasks={subtasks} employees={employees} feedbacks={feedbacks} assigneesByTask={assigneesByTask} me={me} canEdit={canEdit} scopeCompanyId={scopeCompanyId} ctx={ctx} />
+        <SubtaskList tk={tk} subtasks={subtasks} employees={employees} empCompanies={empCompanies} feedbacks={feedbacks} assigneesByTask={assigneesByTask} me={me} canEdit={canEdit} scopeCompanyId={scopeCompanyId} ctx={ctx} />
 
-        <FeedbackThread tk={tk} fbList={fbList} employees={employees} me={me} userId={userId} scopeCompanyId={scopeCompanyId} ctx={ctx} />
+        <FeedbackThread tk={tk} fbList={fbList} employees={employees} empCompanies={empCompanies} me={me} userId={userId} scopeCompanyId={scopeCompanyId} ctx={ctx} />
 
         <div style={{ fontSize: 10, color: c.textFaint, marginTop: 12, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <span>{t('添加於')} {fmtDateTime(tk.created_at)}</span>
@@ -1185,13 +1253,17 @@ function EditTaskModal({ task: initial, data, me, userId, onClose, ctx }) {
   )
 }
 
-function AssigneeEditor({ tk, tkList, employees, canManage, setAssignees, scopeCompanyId }) {
+function AssigneeEditor({ tk, tkList, employees, empCompanies = [], canManage, setAssignees, scopeCompanyId }) {
   const { t } = useT()
   const [input, setInput] = useState('')
   const [open, setOpen] = useState(false)
   const cur = tkList.map(a => a.employee_id)
   const q = input.replace(/^@/, '').toLowerCase()
-  const sameCo = (e) => scopeCompanyId ? e.company_id === scopeCompanyId : true
+  const empIdsInScope = useMemo(
+    () => new Set(empCompanies.filter(ec => ec.company_id === scopeCompanyId).map(ec => ec.employee_id)),
+    [empCompanies, scopeCompanyId]
+  )
+  const sameCo = (e) => scopeCompanyId ? empIdsInScope.has(e.id) : true
   const cands = employees.filter(e => e.active !== false && sameCo(e) && !cur.includes(e.id) && (q === '' || (e.name || '').toLowerCase().includes(q)))
   return (
     <div style={{ marginTop: 12 }}>
@@ -1270,7 +1342,7 @@ function AttachmentList({ tk, ro, onUpdate }) {
   )
 }
 
-function SubtaskList({ tk, subtasks, employees, feedbacks, assigneesByTask, me, canEdit, scopeCompanyId, ctx }) {
+function SubtaskList({ tk, subtasks, employees, empCompanies = [], feedbacks, assigneesByTask, me, canEdit, scopeCompanyId, ctx }) {
   const { t } = useT()
   const queryClient = useQueryClient()
   const [subTitle, setSubTitle] = useState('')
@@ -1281,7 +1353,11 @@ function SubtaskList({ tk, subtasks, employees, feedbacks, assigneesByTask, me, 
   const parentAssignees = (assigneesByTask.get(tk.id) || []).map(a => a.employee_id)
   const effectiveSub = subAssignees === null ? parentAssignees : subAssignees
   const sq = subInput.replace(/^@/, '').toLowerCase()
-  const sameCo = (e) => scopeCompanyId ? e.company_id === scopeCompanyId : true
+  const empIdsInScope = useMemo(
+    () => new Set(empCompanies.filter(ec => ec.company_id === scopeCompanyId).map(ec => ec.employee_id)),
+    [empCompanies, scopeCompanyId]
+  )
+  const sameCo = (e) => scopeCompanyId ? empIdsInScope.has(e.id) : true
   const subCands = employees.filter(e => e.active !== false && sameCo(e) && !effectiveSub.includes(e.id) && (sq === '' || (e.name || '').toLowerCase().includes(sq)))
 
   const addSub = async () => {
@@ -1323,10 +1399,18 @@ function SubtaskList({ tk, subtasks, employees, feedbacks, assigneesByTask, me, 
         const fbCount = feedbacks.filter(f => f.task_id === st.id).length
         const stIsMine = (assigneesByTask.get(st.id) || []).some(a => a.employee_id === me.id)
         const canTick = ctx?.isSuperAdmin || ctx?.isAdminOfActive || tk.creator_employee_id === me.id || stIsMine || ctx?.hasPermission?.('can_validate_task')
+        const stAssignees = (assigneesByTask.get(st.id) || []).map(a => employees.find(e => e.id === a.employee_id)).filter(Boolean)
         return (
           <div key={st.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 0', borderBottom: `1px solid ${c.border}` }}>
             <input type="checkbox" checked={st.status === 'done' || empDoneFor(st, me.id, assigneesByTask)} disabled={!canTick} onChange={() => canTick && toggleSubDone(st)} style={{ width: 14, height: 14, cursor: canTick ? 'pointer' : 'not-allowed' }} />
             <span style={{ flex: 1, fontSize: 12, color: st.status === 'done' ? c.textMuted : c.text, textDecoration: st.status === 'done' ? 'line-through' : 'none' }}>{st.title}</span>
+            <span style={{ display: 'inline-flex', gap: 3, flexWrap: 'wrap' }}>
+              {stAssignees.length === 0
+                ? <span style={{ fontSize: 9, color: c.red, fontWeight: 600 }}>{t('未分配')}</span>
+                : stAssignees.map(e2 => (
+                    <span key={e2.id} style={{ padding: '1px 6px', background: c.accentBg, color: c.accent, borderRadius: 9, fontSize: 9, fontWeight: 600 }}>@{e2.name}</span>
+                  ))}
+            </span>
             {fbCount > 0 && <span style={{ fontSize: 10, color: c.amber }}>💬 {fbCount}</span>}
             {canEdit && <button onClick={() => deleteSub(st)} style={{ background: 'none', border: 'none', color: c.textFaint, cursor: 'pointer', fontSize: 13 }}>×</button>}
           </div>
@@ -1363,7 +1447,7 @@ function SubtaskList({ tk, subtasks, employees, feedbacks, assigneesByTask, me, 
   )
 }
 
-function FeedbackThread({ tk, fbList, employees, me, userId, scopeCompanyId, ctx }) {
+function FeedbackThread({ tk, fbList, employees, empCompanies = [], me, userId, scopeCompanyId, ctx }) {
   const { t } = useT()
   const queryClient = useQueryClient()
   const [body, setBody] = useState('')
@@ -1372,7 +1456,11 @@ function FeedbackThread({ tk, fbList, employees, me, userId, scopeCompanyId, ctx
   const [mentionPop, setMentionPop] = useState({ open: false, query: '', atIdx: -1 })
   const [files, setFiles] = useState([])
 
-  const sameCo = (e) => scopeCompanyId ? e.company_id === scopeCompanyId : true
+  const empIdsInScope = useMemo(
+    () => new Set(empCompanies.filter(ec => ec.company_id === scopeCompanyId).map(ec => ec.employee_id)),
+    [empCompanies, scopeCompanyId]
+  )
+  const sameCo = (e) => scopeCompanyId ? empIdsInScope.has(e.id) : true
   const mentionables = employees.filter(e => e.active !== false && e.user_id && e.id !== me.id && sameCo(e))
   const filtered = mentionPop.open ? mentionables.filter(e => !mentionPop.query || (e.name || '').toLowerCase().includes(mentionPop.query.toLowerCase())) : []
 
