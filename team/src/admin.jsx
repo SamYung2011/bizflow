@@ -1494,9 +1494,17 @@ function FeedbackThread({ tk, fbList, employees, empCompanies = [], me, userId, 
     if (files.length > 0) {
       try { attachments = await Promise.all(files.map(f => uploadAttachment(f, tk.id))) } catch (er) { return alert(t('附件上傳失敗：') + er.message) }
     }
+    // 回復別人的反饋 → 自動 @ 原作者（除非自己回自己），讓原作者收到 bizflow 主端的反饋 toast
+    const finalMentions = [...mentions]
+    if (replying) {
+      const parent = fbList.find(f => f.id === replying)
+      if (parent && parent.author_user_id && parent.author_user_id !== userId && !finalMentions.includes(parent.author_user_id)) {
+        finalMentions.push(parent.author_user_id)
+      }
+    }
     const { error } = await supabase.from('employee_task_feedbacks').insert({
       task_id: tk.id, author_user_id: userId, author_name: me.name, body: body.trim() || null,
-      parent_feedback_id: replying, mentioned_user_ids: mentions.length > 0 ? mentions : null, attachments,
+      parent_feedback_id: replying, mentioned_user_ids: finalMentions.length > 0 ? finalMentions : null, attachments,
     })
     if (error) return alert(error.message)
     setBody(''); setMentions([]); setReplying(null); setFiles([])
