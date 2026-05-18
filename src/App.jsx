@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, Suspense, lazy } from "react";
 
 // 報銷模組：lazy load 防內存爆。切到「報銷」tab 才下載這 chunk
 const ExpenseView = lazy(() => import("./views/Expense.jsx"));
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { supabase, fetchAllTable } from "./lib/supabaseClient.js";
 import { useAppContext } from "./context/AppContext.jsx";
 import { INVOICE_SHELL_HEAD, INVOICE_PAGE, INVOICE_SHELL_TAIL } from "./invoiceTemplate.js";
@@ -328,9 +328,8 @@ const COMMISSION_CUTOFF = '2026-05-09';
 // ── MAIN APP ───────────────────────────────────────────────────────────────────
 export default function App() {
   const { t, lang, setLang } = useT();
-  // Supabase Auth：session 由 Supabase SDK 管理（localStorage 自動持久化 + 自動 refresh）
-  const [session, setSession] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  // Supabase Auth + 數據層整套搬到 AppContext。session/authLoading/userId/
+  // currentEmployee/isBfAdmin/isWaAdmin/canShip/qTaskPending 從 useAppContext 拿回。
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPw, setLoginPw] = useState("");
   const [loginError, setLoginError] = useState("");
@@ -354,12 +353,11 @@ export default function App() {
   const [forceChangePwLoading, setForceChangePwLoading] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false);
 
-  // 批 1-4 遷出：products / warehouses / stocks / suppliers / customers / line_item_aliases /
-  // invoices / inventory / employees / tasks / task_assignees / feedbacks / update_logs / log_comments /
-  // wa_settings / wa_whitelist / wa_messages / wa_replies_pending / wa_unresolved / companies /
-  // wa_daily_reports / wa_heartbeat / wa_logs / wa_clients 全部 query + state + sync effect 已搬到 AppContext。
-  // 留在 App.jsx 的：qTaskPending（依賴 isWaAdmin），到 1c 搬 auth 時一起處理。
+  // 數據層 + auth/admin 整套都從 AppContext 拿
   const {
+    session, setSession,
+    authLoading, setAuthLoading,
+    userId, currentEmployee, isBfAdmin, isWaAdmin, canShip,
     products, setProducts,
     warehouses, setWarehouses,
     stocks, setStocks,
@@ -389,6 +387,7 @@ export default function App() {
     qFeedbacks, qUpdateLogs, qLogComments,
     qWaSettings, qWaWhitelist, qWaMessages, qWaPending, qWaUnresolved,
     qCompanies, qWaReports, qWaHeartbeat, qWaLogs, qWaClients,
+    qTaskPending,
   } = useAppContext();
 
   const [tab, setTab] = useState("dashboard");
@@ -1252,33 +1251,7 @@ export default function App() {
     });
   }, [invoices, customers, search, shippingFilter]);
 
-  // Supabase Auth：初始化 + 監聽 session 變化
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setAuthLoading(false);
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
-      setSession(s);
-    });
-    return () => subscription.unsubscribe();
-  }, []);
-
-  // 登入後才加載數據 — 用 user.id 作為依賴
-  const userId = session?.user?.id;
-  // 当前登录的 employee 记录（按 user_id 反查 employees 表）
-  const currentEmployee = userId ? employees.find(e => e.user_id === userId) : null;
-  // bizflow 管理员（按 employees.is_admin 反查；samyung 老 admin 兼容保留）
-  const isBfAdmin = (currentEmployee && currentEmployee.is_admin === true) || (!!session?.user?.email && session.user.email === "samyung2011@gmail.com");
-  // WhatsApp tab 管理员（沿用旧名兼容现有代码）
-  const WA_ADMIN_EMAILS = ["samyung2011@gmail.com", "a1017339632@gmail.com"];
-  const isWaAdmin = isBfAdmin || (!!session?.user?.email && WA_ADMIN_EMAILS.includes(session.user.email));
-  // 發貨權限：admin 或 employees.can_ship=true 的人
-  const canShip = isBfAdmin || (currentEmployee && currentEmployee.can_ship === true);
   const queryClient = useQueryClient();
-
-  // 剩下唯一一個還在 App.jsx 的 useQuery：qTaskPending 依賴 isWaAdmin，到 1c 搬 auth 時一起處理
-  const qTaskPending = useQuery({ queryKey: ["bf", "task_pending"], queryFn: () => fetchAllTable("task_pending", "requested_at", false), enabled: !!userId && isWaAdmin, refetchInterval: 15000 });
 
   // task_assignees 按 task_id 分組（多處用，避免重複掃描）
   // 兜底用 qTaskAssignees.data：state 同步比 tasks 慢一幀時避免 race（剛發布完任務刷新被分配員工那邊瞬間看不到）

@@ -4,19 +4,26 @@ import { supabase, fetchAllTable } from '../lib/supabaseClient.js'
 
 const AppContext = createContext(null)
 
+// WhatsApp tab 管理员（沿用旧名）
+const WA_ADMIN_EMAILS = ['samyung2011@gmail.com', 'a1017339632@gmail.com']
+
 export function AppProvider({ children }) {
-  // Provider 自己訂閱 auth 狀態以 gate useQuery；App.jsx 仍有自己的 session state，
-  // 兩邊都訂閱 supabase.auth 同源事件流，會同步。後續 1c 把 session 也搬進來時統一。
-  const [userId, setUserId] = useState(null)
+  // Supabase Auth：初始化 + 監聽 session 變化
+  const [session, setSession] = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUserId(session?.user?.id || null)
+      setSession(session)
+      setAuthLoading(false)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
-      setUserId(s?.user?.id || null)
+      setSession(s)
     })
     return () => subscription?.unsubscribe?.()
   }, [])
+
+  // 登入後才加載數據 — 用 user.id 作為依賴
+  const userId = session?.user?.id
 
   // 批 1：products / suppliers / warehouses / stocks
   const qProducts = useQuery({ queryKey: ['bf', 'products'], queryFn: () => fetchAllTable('products', 'name'), enabled: !!userId })
@@ -32,8 +39,7 @@ export function AppProvider({ children }) {
   const qInvoices = useQuery({ queryKey: ['bf', 'invoices'], queryFn: () => fetchAllTable('invoices', 'date', false), enabled: !!userId })
   const qInventory = useQuery({ queryKey: ['bf', 'inventory'], queryFn: () => fetchAllTable('inventory', null), enabled: !!userId })
 
-  // 批 4：員工/任務/反饋/更新日誌/WhatsApp/companies 等剩餘 query
-  // qTaskPending 留在 App.jsx（依賴 isWaAdmin，到 1c 搬 auth 時一起處理）
+  // 批 4：員工/任務/反饋/更新日誌/WhatsApp/companies 等
   const qEmployees = useQuery({ queryKey: ['bf', 'employees'], queryFn: () => fetchAllTable('employees', 'created_at'), enabled: !!userId })
   const qTasks = useQuery({ queryKey: ['bf', 'employee_tasks'], queryFn: () => fetchAllTable('employee_tasks', 'created_at'), enabled: !!userId })
   const qTaskAssignees = useQuery({ queryKey: ['bf', 'task_assignees'], queryFn: () => fetchAllTable('task_assignees', 'created_at', true, null), enabled: !!userId })
@@ -97,7 +103,21 @@ export function AppProvider({ children }) {
   useEffect(() => { if (qWaLogs.data) setWaLogs(qWaLogs.data) }, [qWaLogs.data])
   useEffect(() => { if (qWaClients.data) setWaClients(qWaClients.data) }, [qWaClients.data])
 
+  // 当前登录的 employee 记录（按 user_id 反查 employees 表）
+  const currentEmployee = userId ? employees.find(e => e.user_id === userId) : null
+  // bizflow 管理员（按 employees.is_admin 反查；samyung 老 admin 兼容保留）
+  const isBfAdmin = (currentEmployee && currentEmployee.is_admin === true) || (!!session?.user?.email && session.user.email === 'samyung2011@gmail.com')
+  const isWaAdmin = isBfAdmin || (!!session?.user?.email && WA_ADMIN_EMAILS.includes(session.user.email))
+  // 發貨權限：admin 或 employees.can_ship=true 的人
+  const canShip = isBfAdmin || (currentEmployee && currentEmployee.can_ship === true)
+
+  // qTaskPending：依賴 isWaAdmin，1c 從 App.jsx 搬進來
+  const qTaskPending = useQuery({ queryKey: ['bf', 'task_pending'], queryFn: () => fetchAllTable('task_pending', 'requested_at', false), enabled: !!userId && isWaAdmin, refetchInterval: 15000 })
+
   const value = {
+    session, setSession,
+    authLoading, setAuthLoading,
+    userId, currentEmployee, isBfAdmin, isWaAdmin, canShip,
     products, setProducts,
     warehouses, setWarehouses,
     stocks, setStocks,
@@ -127,6 +147,7 @@ export function AppProvider({ children }) {
     qFeedbacks, qUpdateLogs, qLogComments,
     qWaSettings, qWaWhitelist, qWaMessages, qWaPending, qWaUnresolved,
     qCompanies, qWaReports, qWaHeartbeat, qWaLogs, qWaClients,
+    qTaskPending,
   }
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
 }
