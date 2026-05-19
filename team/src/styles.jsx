@@ -63,6 +63,8 @@ export const Empty = ({ children }) => <div style={{ background: c.card, border:
 export const Field = ({ label, children }) => <div style={{ marginBottom: 12 }}><div style={{ fontSize: 11, color: c.textMuted, fontWeight: 500, marginBottom: 5 }}>{label}</div>{children}</div>
 export const Section = ({ label, children }) => <div style={{ marginBottom: 18 }}><div style={{ fontSize: 11, color: c.textMuted, fontWeight: 600, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>{children}</div>
 
+export const tcell = (align = 'left') => ({ padding: '10px 12px', textAlign: align, fontSize: 11, color: c.textMuted, fontWeight: 600, letterSpacing: 0.3 })
+
 export function fmtShort(iso) {
   if (!iso) return ''
   const d = new Date(iso)
