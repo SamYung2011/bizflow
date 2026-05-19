@@ -19,6 +19,7 @@ import RevenueView from "./views/Revenue.jsx";
 import SuppliersView from "./views/Suppliers.jsx";
 import WhatsappView from "./views/Whatsapp.jsx";
 import UpdateLogView from "./views/UpdateLog.jsx";
+import Dashboard from "./views/Dashboard.jsx";
 import MarkdownText from "./components/MarkdownText.jsx";
 import { INVOICE_SHELL_HEAD, INVOICE_PAGE, INVOICE_SHELL_TAIL } from "./invoiceTemplate.js";
 import { RECEIPT_FRAGMENT } from "./receiptTemplate.js";
@@ -60,21 +61,7 @@ const Badge = ({ status }) => {
   );
 };
 
-const StatCard = ({ label, value, sub, accent, icon, onClick }) => (
-  <div onClick={onClick} style={{ background: "#fff", borderRadius: 16, padding: "24px 28px", border: "1px solid #f0f0f0", boxShadow: "0 2px 12px rgba(0,0,0,0.04)", display: "flex", flexDirection: "column", gap: 8, position: "relative", overflow: "hidden", cursor: onClick ? "pointer" : "default", transition: "transform 0.15s" }}
-    onMouseEnter={e => { if (onClick) e.currentTarget.style.transform = "translateY(-2px)"; }}
-    onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; }}>
-    <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: accent, borderRadius: "16px 16px 0 0" }} />
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-      <div>
-        <div style={{ fontSize: 13, color: "#888", fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase" }}>{label}</div>
-        <div style={{ fontSize: 32, fontWeight: 800, color: "#1a1a2e", lineHeight: 1.2, marginTop: 4 }}>{value}</div>
-        {sub && <div style={{ fontSize: 13, color: "#aaa", marginTop: 4 }}>{sub}</div>}
-      </div>
-      <div style={{ width: 42, height: 42, borderRadius: 12, background: accent + "18", display: "flex", alignItems: "center", justifyContent: "center", color: accent }}>{icon}</div>
-    </div>
-  </div>
-);
+// StatCard 已搬到 views/Dashboard.jsx（只有 dashboard 用）
 
 // suggestEmail 已抽到 src/lib/emailSuggest.js
 // Input / Select 已抽到 src/components/Inputs.jsx
@@ -278,7 +265,13 @@ export default function App() {
     qWaSettings, qWaWhitelist, qWaMessages, qWaPending, qWaUnresolved,
     qCompanies, qWaReports, qWaHeartbeat, qWaLogs, qWaClients,
     qTaskPending,
+    // 跨 view 共用的派生 helper（從本檔搬到 AppContext）
+    customerGroups,
+    outOfStockSkus,
+    allWarrantyItems,
   } = useAppContext();
+  // sidebar 紅標 alias（dashboard 內部有自己的 warrantyAlerts 同義引用）
+  const warrantyAlerts = allWarrantyItems;
 
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [showAddEmployee, setShowAddEmployee] = useState(false);
@@ -315,7 +308,7 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   // warranty view-local state（visibleWarranty / warrantySearch / warrantyBucket）已搬到 views/Warranty.jsx
   // revenue view-local state（revenueRange）已搬到 views/Revenue.jsx
-  const [dashSearch, setDashSearch] = useState("");
+  // dashboard view-local state（dashSearch）已搬到 views/Dashboard.jsx
   const [editingCustomer, setEditingCustomer] = useState(null); // 当前被编辑的真实 customer 对象（单条记录，不是 virtualCustomer）
   const [editCustCid, setEditCustCid] = useState(""); // 合并组内选中要编辑的 cid
   const [manualMergeOpen, setManualMergeOpen] = useState(false);
@@ -745,192 +738,7 @@ export default function App() {
     interest_products: [], referral: "", type: "Lead", notes: ""
   });
 
-  // 客戶頁過濾/排序：按需計算最近購買日期 + 搜索 + 時間範圍 + 排序
-  // 客戶去重：
-  //   規則 1（虛擬合併，union-find）：name/phone/email/address 4 字段命中 3+ 視為疑似同人
-  //   規則 2（物理合併，DB parent_id）：除 name 外所有字段完全相等 + name 都非空 → UPDATE parent_id = keeper.id
-  //     parent_id 非空的子記錄不作為獨立客戶顯示，名字作別名加入 keeper 的 allNames
-  const customerGroups = useMemo(() => {
-    const norm = s => (s || "").trim().toLowerCase();
-    // fields：multi=多值（按 \n 分行）；fuzzy=允許每行 edit distance ≤ 1 命中
-    const fields = [
-      { key: "name",           multi: false, fuzzy: false },
-      { key: "phone",          multi: true,  fuzzy: false },
-      { key: "phone_mainland", multi: true,  fuzzy: false },
-      { key: "email",          multi: true,  fuzzy: true  },
-      { key: "address",        multi: true,  fuzzy: true  },
-    ];
-    // edit distance ≤ 1（容忍 1 個字的錯漏）
-    const editDist1 = (a, b) => {
-      if (a === b) return true;
-      const la = a.length, lb = b.length;
-      if (Math.abs(la - lb) > 1) return false;
-      let i = 0, j = 0, edits = 0;
-      while (i < la && j < lb) {
-        if (a[i] === b[j]) { i++; j++; continue; }
-        if (++edits > 1) return false;
-        if (la === lb) { i++; j++; }
-        else if (la > lb) i++;
-        else j++;
-      }
-      if (i < la || j < lb) edits++;
-      return edits <= 1;
-    };
-    const splitLinesLower = s => String(s || "").split(/\n+/).map(x => x.trim().toLowerCase()).filter(Boolean);
-    const lineMatch = (a, b, fuzzy) => fuzzy ? editDist1(a, b) : a === b;
-    const fieldMatch = (f, ca, cb) => {
-      if (f.multi) {
-        const A = splitLinesLower(ca[f.key]), B = splitLinesLower(cb[f.key]);
-        if (A.length === 0 || B.length === 0) return false;
-        for (const x of A) for (const y of B) if (lineMatch(x, y, f.fuzzy)) return true;
-        return false;
-      }
-      const a = norm(ca[f.key]), b = norm(cb[f.key]);
-      return !!a && a === b;
-    };
-    // 兜底去重：state 異常時可能有重複 id（fetchAllTable 已修，這裡再保險）
-    const uniqueCustomers = Array.from(new Map(customers.map(c => [c.id, c])).values());
-    const idToCustomer = new Map();
-    uniqueCustomers.forEach(c => idToCustomer.set(c.id, c));
-    const childrenByParent = new Map();
-    uniqueCustomers.forEach(c => {
-      if (c.parent_id) {
-        if (!childrenByParent.has(c.parent_id)) childrenByParent.set(c.parent_id, []);
-        childrenByParent.get(c.parent_id).push(c);
-      }
-    });
-    const independents = uniqueCustomers.filter(c => !c.parent_id);
-    // exact-match indexes：multi 字段每行一個 entry，single 字段整字段
-    const indexes = fields.map(() => new Map());
-    independents.forEach(c => {
-      fields.forEach((f, i) => {
-        const lines = f.multi ? splitLinesLower(c[f.key]) : [norm(c[f.key])].filter(Boolean);
-        lines.forEach(line => {
-          if (!indexes[i].has(line)) indexes[i].set(line, []);
-          indexes[i].get(line).push(c.id);
-        });
-      });
-    });
-    const parent = new Map();
-    independents.forEach(c => parent.set(c.id, c.id));
-    const find = x => {
-      let r = x;
-      while (parent.get(r) !== r) r = parent.get(r);
-      let cur = x;
-      while (parent.get(cur) !== r) { const nx = parent.get(cur); parent.set(cur, r); cur = nx; }
-      return r;
-    };
-    independents.forEach(c => {
-      const candidates = new Set();
-      fields.forEach((f, i) => {
-        const lines = f.multi ? splitLinesLower(c[f.key]) : [norm(c[f.key])].filter(Boolean);
-        lines.forEach(line => {
-          indexes[i].get(line)?.forEach(id => { if (id !== c.id) candidates.add(id); });
-        });
-      });
-      candidates.forEach(id => {
-        const other = idToCustomer.get(id);
-        if (!other) return;
-        const ex1 = Array.isArray(c.merge_exclude) ? c.merge_exclude : [];
-        const ex2 = Array.isArray(other.merge_exclude) ? other.merge_exclude : [];
-        if (ex1.includes(other.id) || ex2.includes(c.id)) return;
-        let matches = 0;
-        fields.forEach(f => { if (fieldMatch(f, c, other)) matches++; });
-        if (matches >= 3) {
-          const ra = find(c.id), rb = find(id);
-          if (ra !== rb) parent.set(ra, rb);
-        }
-      });
-    });
-    const groupInfo = new Map();
-    const splitLines = v => String(v || "").split(/\n+/).map(s => s.trim()).filter(Boolean);
-    // 把 keeper 自身 + 物理子記錄的字段一起算進 group
-    const absorb = (g, c) => {
-      const n = (c.name || "").trim(); if (n) g.names.add(n);
-      splitLines(c.phone).forEach(v => g.phones.add(v));
-      splitLines(c.email).forEach(v => g.emails.add(v));
-      splitLines(c.address).forEach(v => g.addresses.add(v));
-      splitLines(c.phone_mainland).forEach(v => g.phoneMainlands.add(v));
-      splitLines(c.car_make).forEach(v => g.carMakes.add(v));
-      splitLines(c.car_model).forEach(v => g.carModels.add(v));
-    };
-    independents.forEach(c => {
-      const root = find(c.id);
-      if (!groupInfo.has(root)) groupInfo.set(root, {
-        cids: [], childCids: [], names: new Set(), phones: new Set(), emails: new Set(), addresses: new Set(),
-        phoneMainlands: new Set(), carMakes: new Set(), carModels: new Set(),
-      });
-      const g = groupInfo.get(root);
-      g.cids.push(c.id);
-      absorb(g, c);
-      // 把規則 2 合併的子記錄吸進來
-      (childrenByParent.get(c.id) || []).forEach(child => {
-        g.childCids.push(child.id);
-        absorb(g, child);
-      });
-    });
-    // 預先算每個 group 的 primaryCid，讓 virtualC.id 直接用 primaryCid（避免 root 跟 primary 不一致導致 parent_id 引用錯亂）
-    const rootToPrimary = new Map();
-    groupInfo.forEach((info, root) => {
-      const primaryCid = info.cids.find(cid => {
-        const x = idToCustomer.get(cid);
-        return x && (x.name || "").trim();
-      }) || info.cids[0];
-      rootToPrimary.set(root, primaryCid);
-    });
-    const idToGroup = new Map();
-    independents.forEach(c => {
-      const root = find(c.id);
-      idToGroup.set(c.id, rootToPrimary.get(root) || root);
-    });
-    // 子記錄 → 指向其 parent 所在的 group primary
-    uniqueCustomers.forEach(c => {
-      if (c.parent_id && !idToGroup.has(c.id)) {
-        const mapped = idToGroup.get(c.parent_id);
-        if (mapped) idToGroup.set(c.id, mapped);
-      }
-    });
-    // 構造 virtualCustomers：每組合併成一條，主信息取組內第一個有 name 的
-    const virtualCustomers = [];
-    groupInfo.forEach((info, root) => {
-      const primaryCid = rootToPrimary.get(root);
-      const primary = idToCustomer.get(primaryCid) || {};
-      const earliestCreated = info.cids
-        .map(cid => idToCustomer.get(cid)?.created_at)
-        .filter(Boolean)
-        .sort()[0];
-      const allNames = Array.from(info.names);
-      const allPhones = Array.from(info.phones);
-      const allEmails = Array.from(info.emails);
-      const allAddresses = Array.from(info.addresses);
-      const allPhoneMainlands = Array.from(info.phoneMainlands);
-      const allCarMakes = Array.from(info.carMakes);
-      const allCarModels = Array.from(info.carModels);
-      virtualCustomers.push({
-        ...primary,
-        id: primaryCid,                // 用 primaryCid 而非 union-find root，让 parent_id 引用稳定
-        groupCids: info.cids,          // rule 1 虛擬合併（獨立 customer id 列表）
-        mergedChildCids: info.childCids, // rule 2 物理合併的子記錄 id
-        allCids: [...info.cids, ...info.childCids], // 查發票用：包含所有相關 customer_id
-        allNames,
-        allPhones,
-        allEmails,
-        allAddresses,
-        allPhoneMainlands,
-        allCarMakes,
-        allCarModels,
-        name: (primary.name || "").trim() || allNames[0] || "",
-        phone: (primary.phone || "").trim() || allPhones[0] || "",
-        email: (primary.email || "").trim() || allEmails[0] || "",
-        address: (primary.address || "").trim() || allAddresses[0] || "",
-        phone_mainland: allPhoneMainlands.join("\n") || primary.phone_mainland || "",
-        car_make: allCarMakes.join("\n") || primary.car_make || "",
-        car_model: allCarModels.join("\n") || primary.car_model || "",
-        created_at: earliestCreated,
-      });
-    });
-    return { idToGroup, groupInfo, virtualCustomers };
-  }, [customers]);
+  // customerGroups 已搬到 AppContext（跨 view 共用：dashboard / customers / invoices / revenue）
 
   // selectedCustomer 是 virtualCustomer 的快照，customers 變化後需要重新同步，
   // 否則保存後用戶看到的還是舊聚合字段（allAddresses/allPhones/... 不刷新）
@@ -1166,13 +974,7 @@ export default function App() {
 
   const getProduct = (id) => products.find(p => p.id === id);
   const getCustomer = (id) => customers.find(c => c.id === id);
-  const fmtInvNum = (inv) => {
-    const raw = String(inv.invoice_number || inv.id);
-    const stripped = raw.replace(/^DC/i, "");
-    // 純數字 → 補齊到 5 位（DC01502 / DC10532）；UUID fallback 不動
-    const formatted = /^\d+$/.test(stripped) ? stripped.padStart(5, "0") : stripped;
-    return `DC${formatted}`;
-  };
+  // fmtInvNum 已搬到 src/lib/invoiceHelpers.js（跨 view 共用，純函數放 lib 更乾淨）
   // 推斷發票來源（Shopify 直接訂單 / Framer 表單 / 百老匯 / 手動）
   const invoiceSource = (inv) => {
     const notes = inv?.notes || "";
@@ -1189,148 +991,9 @@ export default function App() {
     const m = (inv?.notes || "").match(/__POSSIBLE_DUP__:([\w-]+)/);
     return m ? m[1] : "";
   };
-  // 月營收（當月）
-  const now = new Date();
-  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  const monthlyRevenue = useMemo(() => invoices.filter(i => (i.date || "").startsWith(currentMonth) && (i.status || "").trim().toLowerCase() === "paid").reduce((s, i) => s + (i.total || 0), 0), [invoices, currentMonth]);
-  const totalRevenue = invoices.reduce((s, i) => s + (i.total || 0), 0);
-  const stockSummary = useMemo(() => {
-    const byProd = {};
-    for (const s of stocks) byProd[s.product_id] = (byProd[s.product_id] || 0) + (s.qty || 0);
-    const activeIds = new Set(products.filter(p => p.category !== '_archived' && (p.status || 'active') !== 'discontinued').map(p => p.id));
-    let skuCount = 0, totalQty = 0;
-    for (const [pid, qty] of Object.entries(byProd)) {
-      if (qty > 0 && activeIds.has(pid)) { skuCount++; totalQty += qty; }
-    }
-    return { skuCount, totalQty };
-  }, [stocks, products]);
-  const inStock = stockSummary.skuCount;
-
-  // isNonWarrantyItem / itemWarrantyMonths 已抽到 src/lib/warranty.js
-  // 保修提醒：從發票 + 產品 warranty_months 推算
-  const warrantyItems = useMemo(() => {
-    const today = new Date();
-    const in30 = new Date(today); in30.setDate(in30.getDate() + 30);
-    const results = [];
-    for (const inv of invoices) {
-      if (!Array.isArray(inv.items) || !inv.date) continue;
-      const cust = customers.find(c => c.id === inv.customer_id);
-      for (const item of inv.items) {
-        if (isNonWarrantyItem(item.name)) continue;
-        const prod = products.find(p => p.name === item.name);
-        const months = itemWarrantyMonths(item, prod);
-        if (!months) continue;
-        const wEnd = new Date(inv.date);
-        wEnd.setMonth(wEnd.getMonth() + months);
-        if (wEnd >= today && wEnd <= in30) {
-          results.push({ customer: cust, customerName: cust?.name || "—", productName: item.name, invoiceNum: fmtInvNum(inv), invoiceDate: inv.date, warrantyEnd: wEnd.toISOString().slice(0, 10), daysLeft: Math.ceil((wEnd - today) / (1000 * 60 * 60 * 24)) });
-        }
-      }
-    }
-    return results.sort((a, b) => {
-      if (!!a.customer !== !!b.customer) return a.customer ? -1 : 1;
-      return a.daysLeft - b.daysLeft;
-    });
-  }, [invoices, products, customers]);
-
-  // 庫存不足 SKU（活 SKU + 非父 + 非停售 + 非虛擬 + 所有倉庫合計 <= 0）
-  const outOfStockSkus = useMemo(() => {
-    if (!products.length) return [];
-    const parentIds = new Set(products.filter(x => x.parent_product_id).map(x => x.parent_product_id));
-    const byProd = new Map();
-    for (const s of stocks) {
-      byProd.set(s.product_id, (byProd.get(s.product_id) || 0) + (s.qty || 0));
-    }
-    return products.filter(p => {
-      if (p.category === '_archived') return false;
-      if (parentIds.has(p.id)) return false;
-      if ((p.status || 'active') === 'discontinued') return false;
-      if (p.is_virtual === true) return false;
-      return (byProd.get(p.id) || 0) <= 0;
-    });
-  }, [products, stocks]);
-
-  // 庫存預警 SKU（活 SKU + 非父 + 非停售 + 非虛擬 + 合計 < 50）
-  const LOW_STOCK_THRESHOLD = 50;
-  const lowStockSkus = useMemo(() => {
-    if (!products.length) return [];
-    const parentIds = new Set(products.filter(x => x.parent_product_id).map(x => x.parent_product_id));
-    const byProd = new Map();
-    for (const s of stocks) {
-      byProd.set(s.product_id, (byProd.get(s.product_id) || 0) + (s.qty || 0));
-    }
-    return products.filter(p => {
-      if (p.category === '_archived') return false;
-      if (parentIds.has(p.id)) return false;
-      if ((p.status || 'active') === 'discontinued') return false;
-      if (p.is_virtual === true) return false;
-      return (byProd.get(p.id) || 0) < LOW_STOCK_THRESHOLD;
-    }).map(p => ({ ...p, _stockQty: byProd.get(p.id) || 0 }));
-  }, [products, stocks]);
-
-  // 全量保修條目：涵蓋過期 30 天內 + 未來 365 天內，用於獨立「保修」tab
-  // 僅顯示有客戶記錄的，無名客戶排除（無法聯繫不顯示）
-  const allWarrantyItems = useMemo(() => {
-    const today = new Date();
-    const expiredCutoff = new Date(today); expiredCutoff.setDate(expiredCutoff.getDate() - 30);
-    const upcomingCutoff = new Date(today); upcomingCutoff.setDate(upcomingCutoff.getDate() + 365);
-    const results = [];
-    for (const inv of invoices) {
-      if (!Array.isArray(inv.items) || !inv.date) continue;
-      const cust = customers.find(c => c.id === inv.customer_id);
-      if (!cust) continue;
-      for (const item of inv.items) {
-        if (isNonWarrantyItem(item.name)) continue;
-        const prod = products.find(p => p.name === item.name);
-        const months = itemWarrantyMonths(item, prod);
-        if (!months) continue;
-        const wEnd = new Date(inv.date);
-        wEnd.setMonth(wEnd.getMonth() + months);
-        if (wEnd >= expiredCutoff && wEnd <= upcomingCutoff) {
-          const daysLeft = Math.ceil((wEnd - today) / (1000 * 60 * 60 * 24));
-          let bucket;
-          if (daysLeft < 0) bucket = "expired";
-          else if (daysLeft <= 7) bucket = "week";
-          else if (daysLeft <= 30) bucket = "soon";
-          else if (daysLeft <= 90) bucket = "near";
-          else bucket = "far";
-          results.push({
-            customer: cust,
-            customerName: cust.name || "—",
-            customerPhone: cust.phone || "",
-            productName: item.name,
-            invoiceNum: fmtInvNum(inv),
-            invoiceId: inv.id,
-            invoiceDate: inv.date,
-            warrantyEnd: wEnd.toISOString().slice(0, 10),
-            daysLeft,
-            bucket,
-          });
-        }
-      }
-    }
-    return results.sort((a, b) => a.daysLeft - b.daysLeft);
-  }, [invoices, products, customers]);
-  const warrantyAlerts = allWarrantyItems;
-
-  // 從發票反推庫存：按產品聚合已售數量
-  const derivedInventory = useMemo(() => {
-    const map = {};
-    for (const inv of invoices) {
-      if (!Array.isArray(inv.items)) continue;
-      const cust = customers.find(c => c.id === inv.customer_id);
-      for (const item of inv.items) {
-        const prod = products.find(p => p.name === item.name);
-        const key = item.name;
-        if (!map[key]) map[key] = { productName: key, productId: prod?.id, totalSold: 0, stock: prod?.stock ?? 0, warrantyMonths: prod?.warranty_months, records: [] };
-        map[key].totalSold += (item.qty || 1);
-        map[key].records.push({ customerName: cust?.name || "—", date: inv.date, qty: item.qty || 1, invoiceNum: fmtInvNum(inv) });
-      }
-    }
-    const values = Object.values(map);
-    for (const v of values) v.stock = Math.max((v.stock || 0) - v.totalSold, 0);
-    return values.sort((a, b) => b.totalSold - a.totalSold);
-  }, [invoices, products, customers]);
+  // monthlyRevenue / stockSummary / inStock / warrantyItems / outOfStockSkus /
+  // lowStockSkus / allWarrantyItems / derivedInventory 已搬到 AppContext 或 Dashboard.jsx
+  // fmtInvNum 已搬到 src/lib/invoiceHelpers.js
 
   const navItems = [
     { id: "dashboard", label: t("總覽"), icon: "dashboard" },
@@ -1951,165 +1614,10 @@ export default function App() {
 
         {/* DASHBOARD */}
         {tab === "dashboard" && (
-          <div>
-            <div style={{ marginBottom: 28 }}>
-              <h1 style={{ fontSize: 26, fontWeight: 800, margin: 0 }}>{t("早安 👋")}</h1>
-              <p style={{ color: "#888", margin: "4px 0 0", fontSize: 15 }}>{t("以下是 Honnmono 今日的業務概況。")}</p>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 16 }}>
-              <StatCard label={t("本月營收")} value={`HKD$${monthlyRevenue.toLocaleString()}`} sub={lang === "en" ? `${now.toLocaleString("en", { month: "long", year: "numeric" })}` : lang === "fr" ? `${now.toLocaleString("fr", { month: "long", year: "numeric" })}` : `${now.getFullYear()}年${now.getMonth() + 1}月`} accent="#6382ff" icon={<Icon name="trend_up" size={20} />} onClick={() => setTab("revenue")} />
-              <StatCard label={t("庫存數量")} value={inStock} sub={lowStockSkus.length > 0 ? `${t("共")} ${stockSummary.totalQty} ${t("件")} · ⚠ ${lowStockSkus.length} ${t("件低庫存")}` : `${t("共")} ${stockSummary.totalQty} ${t("件")}`} accent={lowStockSkus.length > 0 ? "#f59e0b" : "#22c55e"} icon={<Icon name="inventory" size={20} />} onClick={() => setTab("products")} />
-              <StatCard label={t("客戶數")} value={customerGroups.virtualCustomers.filter(c => c.allEmails.length > 0 || c.allPhones.length > 0).length} sub={t("累計")} accent="#f59e0b" icon={<Icon name="customer" size={20} />} onClick={() => { setTab("customers"); setSelectedCustomer(null); }} />
-              <StatCard label={t("保修提醒")} value={warrantyAlerts.length} sub={t("需跟進")} accent="#ef4444" icon={<Icon name="warning" size={20} />} onClick={() => setTab("warranty")} />
-            </div>
-            {/* 物流 3 卡（dashboard 第二行） */}
-            {(() => {
-              const paidInvoices = invoices.filter(i => (i.status || "").trim().toLowerCase() === "paid");
-              // 待發貨 dashboard 卡：跟列表 filter 對齊，只算啟用日期之後的（避免 4500+ 張歷史 NULL 全進來）
-              const pending = paidInvoices.filter(i => deriveShippingStatus(i) === '待發貨' && isShippingTrackable(i)).length;
-              const inTransit = paidInvoices.filter(i => ['已發貨','在途','派送中'].includes(deriveShippingStatus(i))).length;
-              const fourteenDaysAgo = Date.now() - 14 * 24 * 60 * 60 * 1000;
-              const overdue = paidInvoices.filter(i => {
-                const ss = deriveShippingStatus(i);
-                if (!['已發貨','在途','派送中'].includes(ss)) return false;
-                if (!i.shipped_at) return false;
-                return new Date(i.shipped_at).getTime() < fourteenDaysAgo;
-              }).length;
-              const goShipping = (k) => {
-                sessionStorage.setItem('invoices.initialShippingFilter', k);
-                setTab("invoices");
-                setSelectedCustomer(null);
-                setSearch("");
-              };
-              return (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 28 }}>
-                  <StatCard label={t("待發貨")} value={pending} sub={t("已付款待出庫")} accent="#888" icon={<Icon name="inventory" size={20} />} onClick={() => goShipping("pending")} />
-                  <StatCard label={t("運送中")} value={inTransit} sub={t("已發貨待簽收")} accent="#6382ff" icon={<Icon name="trend_up" size={20} />} onClick={() => goShipping("in_transit")} />
-                  <StatCard label={t("超期未簽")} value={overdue} sub={`> 14 ${t("天未簽收")}`} accent="#ef4444" icon={<Icon name="warning" size={20} />} onClick={() => goShipping("in_transit")} />
-                </div>
-              );
-            })()}
-            <div style={{ position: "relative", marginBottom: 20 }}>
-              <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", display: "flex", alignItems: "center", gap: 8 }}>
-                <Icon name="search" size={15} />
-                <input placeholder={t("搜尋發票、客戶、產品...")} value={dashSearch} onChange={e => setDashSearch(e.target.value)} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
-                {dashSearch && (
-                  <button onClick={() => setDashSearch("")} style={{ background: "#f5f5f5", border: "none", borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontSize: 12, color: "#666" }}>×</button>
-                )}
-              </div>
-              {dashSearch.trim() && (() => {
-                const q = dashSearch.trim().toLowerCase();
-                const custMatches = customerGroups.virtualCustomers.filter(c =>
-                  c.allNames.some(n => n.toLowerCase().includes(q))
-                  || c.allPhones.some(p => p.toLowerCase().includes(q))
-                  || c.allEmails.some(e => e.toLowerCase().includes(q))
-                  || (c.car_make || "").toLowerCase().includes(q)
-                  || (c.car_model || "").toLowerCase().includes(q)
-                ).slice(0, 5);
-                const prodMatches = products.filter(p => (p.name || "").toLowerCase().includes(q)).slice(0, 5);
-                const invMatches = invoices.filter(inv => {
-                  const c = getCustomer(inv.customer_id);
-                  return String(inv.invoice_number || "").toLowerCase().includes(q)
-                    || (c?.name || "").toLowerCase().includes(q)
-                    || (inv.notes || "").toLowerCase().includes(q);
-                }).slice(0, 5);
-                const total = custMatches.length + prodMatches.length + invMatches.length;
-                const panelStyle = { position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1px solid #e0e0e0", borderRadius: 12, marginTop: 4, boxShadow: "0 8px 28px rgba(0,0,0,0.1)", zIndex: 20, maxHeight: 500, overflowY: "auto" };
-                const hdrStyle = { padding: "10px 16px 4px", fontSize: 11, fontWeight: 700, color: "#888", letterSpacing: "0.08em", textTransform: "uppercase", background: "#fafbff" };
-                const rowStyle = { padding: "10px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12, borderBottom: "1px solid #f5f5f5" };
-                if (total === 0) return (<div style={{ ...panelStyle, padding: 20, textAlign: "center", color: "#999", fontSize: 13 }}>{t("沒有符合的結果")}</div>);
-                return (
-                  <div style={panelStyle}>
-                    {custMatches.length > 0 && <>
-                      <div style={hdrStyle}>{t("客戶")}（{custMatches.length}）</div>
-                      {custMatches.map(c => (
-                        <div key={"c" + c.id} onClick={() => { setTab("customers"); setSelectedCustomer(c); setDashSearch(""); }} style={rowStyle} onMouseEnter={e => e.currentTarget.style.background = "#f7f8fc"} onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
-                          <div style={{ width: 32, height: 32, borderRadius: "50%", background: "linear-gradient(135deg,#6382ff,#a78bfa)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#fff", flexShrink: 0 }}>{(c.name || "?")[0]}</div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontWeight: 700, fontSize: 13 }}>{c.name}</div>
-                            <div style={{ fontSize: 11, color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{[c.phone, c.email].filter(Boolean).join(" · ")}{c.car_make ? ` · 🚗 ${c.car_make} ${c.car_model || ""}` : ""}</div>
-                          </div>
-                        </div>
-                      ))}
-                    </>}
-                    {prodMatches.length > 0 && <>
-                      <div style={hdrStyle}>{t("產品")}（{prodMatches.length}）</div>
-                      {prodMatches.map(p => (
-                        <div key={"p" + p.id} onClick={() => { setTab("products"); setDashSearch(""); }} style={rowStyle} onMouseEnter={e => e.currentTarget.style.background = "#f7f8fc"} onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
-                          <div style={{ fontSize: 20, width: 32, textAlign: "center" }}>📦</div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontWeight: 700, fontSize: 13 }}>{p.name}</div>
-                            <div style={{ fontSize: 11, color: "#888" }}>HKD${p.price} · {t("保修")} {p.warranty_months || "—"} {t("月")}</div>
-                          </div>
-                        </div>
-                      ))}
-                    </>}
-                    {invMatches.length > 0 && <>
-                      <div style={hdrStyle}>{t("發票")}（{invMatches.length}）</div>
-                      {invMatches.map(inv => {
-                        const c = getCustomer(inv.customer_id);
-                        return (
-                          <div key={"i" + inv.id} onClick={() => { setTab("invoices"); setSearch(String(inv.invoice_number || inv.id).replace(/^DC/i, "")); setDashSearch(""); }} style={rowStyle} onMouseEnter={e => e.currentTarget.style.background = "#f7f8fc"} onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
-                            <div style={{ fontSize: 20, width: 32, textAlign: "center" }}>📄</div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontWeight: 700, fontSize: 13 }}>{fmtInvNum(inv)}</div>
-                              <div style={{ fontSize: 11, color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c?.name || "—"} · {inv.date || "?"} · HKD${inv.total}</div>
-                            </div>
-                            <Badge status={inv.status} />
-                          </div>
-                        );
-                      })}
-                    </>}
-                  </div>
-                );
-              })()}
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-              <div style={{ background: "#fff", borderRadius: 16, padding: 24, border: "1px solid #f0f0f0", boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-                  <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{t("最近發票")}</h2>
-                  <button onClick={() => setTab("invoices")} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>{t("查看全部 →")}</button>
-                </div>
-                {invoices.slice(0, 5).map(inv => {
-                  const c = getCustomer(inv.customer_id);
-                  return (
-                    <div key={inv.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 0", borderBottom: "1px solid #f5f5f5" }}>
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: 14 }}>{fmtInvNum(inv)}</div>
-                        <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>{(c?.phone || c?.phone_mainland) ? `${c.phone || c.phone_mainland} · ` : ""}{c?.name || "—"} · {inv.date || t("日期未知")}</div>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                        <span style={{ fontWeight: 700, fontSize: 15 }}>HKD${inv.total}</span>
-                        <Badge status={inv.status} />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div style={{ background: "#fff", borderRadius: 16, padding: 24, border: "1px solid #f0f0f0", boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-                  <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{t("🔔 保修提醒")}</h2>
-                  <Badge status="Warranty Expiring" />
-                </div>
-                {warrantyItems.length === 0 ? (
-                  <div style={{ color: "#aaa", fontSize: 14, textAlign: "center", paddingTop: 20 }}>{t("目前沒有提醒 ✓")}</div>
-                ) : <>{warrantyItems.slice(0, 5).map((item, idx) => (
-                    <div key={idx} onClick={() => { if (item.customer) { setTab("customers"); setSelectedCustomer(item.customer); } }} style={{ background: "#fff8f0", border: "1px solid #ffe0b2", borderRadius: 12, padding: "12px 16px", marginBottom: 10, cursor: item.customer ? "pointer" : "default", transition: "all 0.15s" }}
-                      onMouseEnter={e => { if (item.customer) { e.currentTarget.style.borderColor = "#ff9800"; e.currentTarget.style.background = "#fff3e0"; } }}
-                      onMouseLeave={e => { e.currentTarget.style.borderColor = "#ffe0b2"; e.currentTarget.style.background = "#fff8f0"; }}>
-                      <div style={{ fontWeight: 700, fontSize: 14 }}>{item.productName}</div>
-                      <div style={{ fontSize: 12, color: "#666", marginTop: 3 }}>{item.customerName} · {item.invoiceNum}</div>
-                      <div style={{ fontSize: 12, color: "#e65100", marginTop: 4, fontWeight: 600 }}>{t("保修到期")}：{item.warrantyEnd}（{t("剩餘")} {item.daysLeft} {t("天")}）</div>
-                    </div>
-                ))}
-                {warrantyItems.length > 5 && (
-                  <button onClick={() => setTab("warranty")} style={{ display: "block", margin: "8px auto 0", padding: "8px 20px", background: "#fff3e0", color: "#ff9800", border: "1px solid #ffe0b2", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
-                    {t("查看全部保修記錄 →")}
-                  </button>
-                )}</>}
-              </div>
-            </div>
-          </div>
+          <Dashboard
+            setSelectedCustomer={setSelectedCustomer}
+            setSearch={setSearch}
+          />
         )}
 
         {/* INVENTORY */}
@@ -2141,7 +1649,6 @@ export default function App() {
             search={search} setSearch={setSearch}
             setShowAddCustomer={setShowAddCustomer}
             setMergeCandidatesOpen={setMergeCandidatesOpen}
-            customerGroups={customerGroups}
             Badge={Badge}
           />
         )}
@@ -2150,7 +1657,6 @@ export default function App() {
         {tab === "customers" && selectedCustomer && (
           <CustomersDetailView
             selectedCustomer={selectedCustomer} setSelectedCustomer={setSelectedCustomer}
-            customerGroups={customerGroups}
             openEditCustomer={openEditCustomer}
             setManualMergeQuery={setManualMergeQuery} setManualMergeOpen={setManualMergeOpen}
             handleDeleteCustomer={handleDeleteCustomer}
@@ -2158,7 +1664,6 @@ export default function App() {
             handleMarkPaid={handleMarkPaid}
             openPrintChooser={openPrintChooser}
             Badge={Badge}
-            fmtInvNum={fmtInvNum}
             formatNotes={formatNotes}
           />
         )}
@@ -2167,9 +1672,7 @@ export default function App() {
         {tab === "invoices" && (
           <InvoicesView
             search={search} setSearch={setSearch}
-            customerGroups={customerGroups}
             getCustomer={getCustomer}
-            fmtInvNum={fmtInvNum}
             formatNotes={formatNotes}
             invoiceSource={invoiceSource}
             getPossibleDupId={getPossibleDupId}
@@ -2184,14 +1687,13 @@ export default function App() {
         {/* WARRANTY */}
         {tab === "warranty" && (
           <WarrantyView
-            allWarrantyItems={allWarrantyItems}
             setSelectedCustomer={setSelectedCustomer}
           />
         )}
 
         {/* REVENUE */}
         {tab === "revenue" && (
-          <RevenueView customerGroups={customerGroups} />
+          <RevenueView />
         )}
 
         {/* EXPENSE — 報銷（lazy load，切過去才下載這個 chunk） */}
@@ -2303,7 +1805,6 @@ export default function App() {
         setMergeHistoryOpen={setMergeHistoryOpen}
         openRollback={openRollback}
         handleUpgradePhysical={handleUpgradePhysical}
-        customerGroups={customerGroups}
       />
 
       {/* ROLLBACK MODAL — 從合併記錄 modal 點「回退」打開 */}
@@ -2316,7 +1817,6 @@ export default function App() {
         rollbackTarget={rollbackTarget} setRollbackTarget={setRollbackTarget}
         rollbackFields={rollbackFields} setRollbackFields={setRollbackFields}
         rollbackBusy={rollbackBusy}
-        customerGroups={customerGroups}
         handleRollback={handleRollback}
       />
 
@@ -2324,7 +1824,6 @@ export default function App() {
       <MergeCandidatesModal
         mergeCandidatesOpen={mergeCandidatesOpen}
         setMergeCandidatesOpen={setMergeCandidatesOpen}
-        customerGroups={customerGroups}
         mergeAllBusy={mergeAllBusy}
         handleMergeAllPhysical={handleMergeAllPhysical}
         handleUpgradePhysical={handleUpgradePhysical}

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabaseClient.js'
 import { isNonWarrantyItem } from '../lib/warranty.js'
@@ -6,7 +6,7 @@ import { useAppContext } from '../context/AppContext.jsx'
 import { useT } from '../i18n.jsx'
 import { Icon } from '../components/Icon.jsx'
 
-const LOW_STOCK_THRESHOLD = 50
+// LOW_STOCK_THRESHOLD 已搬到 AppContext（lowStockSkus 也已在那裡計算）
 
 export const emptyNewProduct = () => ({
   name: '', category: '', internal_code: '', price: '',
@@ -375,7 +375,7 @@ export function ProductsListView({
   search, setSearch,
 }) {
   const { t } = useT()
-  const { products, warehouses, stocks, lineItemAliases, setLineItemAliases, invoices } = useAppContext()
+  const { products, warehouses, stocks, lineItemAliases, setLineItemAliases, invoices, lowStockSkus } = useAppContext()
   const queryClient = useQueryClient()
 
   const [productsSubTab, setProductsSubTab] = useState('list')
@@ -384,22 +384,7 @@ export function ProductsListView({
   const [aliasSaving, setAliasSaving] = useState(false)
   const [expandedAliasGroups, setExpandedAliasGroups] = useState(() => new Set())
 
-  // 庫存預警 SKU（活 SKU + 非父 + 非停售 + 非虛擬 + 合計 < 50）
-  const lowStockSkus = useMemo(() => {
-    if (!products.length) return []
-    const parentIds = new Set(products.filter(x => x.parent_product_id).map(x => x.parent_product_id))
-    const byProd = new Map()
-    for (const s of stocks) {
-      byProd.set(s.product_id, (byProd.get(s.product_id) || 0) + (s.qty || 0))
-    }
-    return products.filter(p => {
-      if (p.category === '_archived') return false
-      if (parentIds.has(p.id)) return false
-      if ((p.status || 'active') === 'discontinued') return false
-      if (p.is_virtual === true) return false
-      return (byProd.get(p.id) || 0) < LOW_STOCK_THRESHOLD
-    }).map(p => ({ ...p, _stockQty: byProd.get(p.id) || 0 }))
-  }, [products, stocks])
+  // lowStockSkus 已搬到 AppContext（dashboard 也用同份）
 
   async function handleSaveAlias(draft) {
     if (!draft.alias_name || !draft.alias_name.trim()) { alert(t("alias_name 不能為空")); return }

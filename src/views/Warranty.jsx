@@ -3,9 +3,9 @@ import { useAppContext } from '../context/AppContext.jsx'
 import { useT } from '../i18n.jsx'
 import { Icon } from '../components/Icon.jsx'
 
-export default function WarrantyView({ allWarrantyItems, setSelectedCustomer }) {
+export default function WarrantyView({ setSelectedCustomer }) {
   const { t } = useT()
-  const { setTab } = useAppContext()
+  const { setTab, allWarrantyItems } = useAppContext()
 
   const [visibleWarranty, setVisibleWarranty] = useState(50)
   const [warrantySearch, setWarrantySearch] = useState("")

@@ -2,9 +2,9 @@ import React, { useState } from 'react'
 import { useAppContext } from '../context/AppContext.jsx'
 import { useT } from '../i18n.jsx'
 
-export default function RevenueView({ customerGroups }) {
+export default function RevenueView() {
   const { t } = useT()
-  const { invoices, products, lineItemAliases } = useAppContext()
+  const { invoices, products, lineItemAliases, customerGroups } = useAppContext()
 
   const [revenueRange, setRevenueRange] = useState("12m")
 

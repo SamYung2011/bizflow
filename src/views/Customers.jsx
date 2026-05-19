@@ -8,6 +8,7 @@ import { Input, Select } from '../components/Inputs.jsx'
 import InvoiceEditModal from '../components/InvoiceEditModal.jsx'
 import { suggestEmail } from '../lib/emailSuggest.js'
 import { CAR_BRANDS, PRODUCTS_LIST, REFERRAL_SOURCES } from '../lib/constants.js'
+import { fmtInvNum } from '../lib/invoiceHelpers.js'
 
 // 多值字段拆分（與 App.jsx 內定義同步）
 const splitMulti = v => String(v || "").split(/\n+/).map(s => s.trim()).filter(Boolean);
@@ -94,11 +95,10 @@ export function RollbackModal({
   rollbackTarget, setRollbackTarget,
   rollbackFields, setRollbackFields,
   rollbackBusy,
-  customerGroups,
   handleRollback,
 }) {
   const { t } = useT()
-  const { customers } = useAppContext()
+  const { customers, customerGroups } = useAppContext()
   if (!rollbackOpen) return null
   const { vc, clickedCid } = rollbackOpen;
   const primaryCid = vc.id;
@@ -260,13 +260,13 @@ export function RollbackModal({
 
 export function MergeCandidatesModal({
   mergeCandidatesOpen, setMergeCandidatesOpen,
-  customerGroups,
   mergeAllBusy,
   handleMergeAllPhysical,
   handleUpgradePhysical,
   setSelectedCustomer,
 }) {
   const { t } = useT()
+  const { customerGroups } = useAppContext()
   if (!mergeCandidatesOpen) return null
   const candidates = customerGroups.virtualCustomers
     .filter(v => (v.groupCids || []).length > 1)
@@ -497,11 +497,10 @@ export function CustomersListView({
   search, setSearch,
   setShowAddCustomer,
   setMergeCandidatesOpen,
-  customerGroups,
   Badge,
 }) {
   const { t } = useT()
-  const { invoices } = useAppContext()
+  const { invoices, customerGroups } = useAppContext()
   const [visibleCustomers, setVisibleCustomers] = useState(30)
   const [customerSort, setCustomerSort] = useState("created")
   const [customerSortDir, setCustomerSortDir] = useState("desc")
@@ -691,7 +690,6 @@ export function CustomersDetailView({
   handleMarkPaid,
   openPrintChooser,
   Badge,
-  fmtInvNum,
   formatNotes,
 }) {
   const { t } = useT()

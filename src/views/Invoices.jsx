@@ -6,6 +6,8 @@ import { useAppContext } from '../context/AppContext.jsx'
 import { useT } from '../i18n.jsx'
 import { Icon } from '../components/Icon.jsx'
 import InvoiceEditModal from '../components/InvoiceEditModal.jsx'
+import { fmtInvNum } from '../lib/invoiceHelpers.js'
+import { deriveShippingStatus, isShippingTrackable, isProblematicShipping } from '../lib/shippingHelpers.js'
 
 // 多值字段拆分（與 App.jsx 內定義同步）
 const splitMulti = v => String(v || "").split(/\n+/).map(s => s.trim()).filter(Boolean)
@@ -18,21 +20,11 @@ function mkItem(warehouseId = null) {
   return { id, name: "", qty: 1, price: 0, warehouse_id: warehouseId }
 }
 
-// 物流狀態派生：沒填單號 → 待發貨；否則用 shipping_status（保底）
-const deriveShippingStatus = (inv) => {
-  if (inv.shipping_status) return inv.shipping_status
-  return inv.tracking_number ? '已發貨' : '待發貨'
-}
-const SHIPPING_TRACKING_SINCE = '2026-05-05'
-const isShippingTrackable = (inv) => (inv?.date || '') >= SHIPPING_TRACKING_SINCE
-
 export default function InvoicesView({
   // 共享數據 / 派生
   search, setSearch,
-  customerGroups,
   // App.jsx 留著的工具與 handler
   getCustomer,
-  fmtInvNum,
   formatNotes,
   invoiceSource,
   getPossibleDupId,
@@ -51,6 +43,7 @@ export default function InvoicesView({
     warehouses,
     employees,
     canShip,
+    customerGroups,
   } = useAppContext()
   const queryClient = useQueryClient()
 
@@ -123,7 +116,7 @@ export default function InvoicesView({
         const ss = deriveShippingStatus(inv)
         if (shippingFilter === "pending")    return ss === '待發貨' && isShippingTrackable(inv)
         if (shippingFilter === "in_transit") return ['已發貨','在途','派送中'].includes(ss)
-        if (shippingFilter === "exception")  return ss === '異常'
+        if (shippingFilter === "exception")  return isProblematicShipping(inv) // 異常 OR 超期未簽（>14 天）
         if (shippingFilter === "delivered")  return ss === '已簽收'
         return true
       })
