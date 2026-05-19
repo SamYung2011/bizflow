@@ -553,6 +553,25 @@ function TaskBoard({ emp, data, me, userId, setEditingTask, compact, companyId, 
     return tk ? { ...tk, _fb: fb } : null
   }).filter(Boolean).sort((a, b) => new Date(b._fb.created_at) - new Date(a._fb.created_at))
 
+  // 發布人在任務列表上勾掉自己創建的任務 = 整個 task done。
+  // 替還沒勾的 assignee 一併標完成；如果 task.needs_approval 也順便核驗通過。
+  // 單向：勾掉就是勾掉。要反勾走 EditTaskModal，避免不小心清掉 assignee 自己標的進度。
+  const creatorMarkDone = async (task) => {
+    const list = assigneesByTask.get(task.id) || []
+    const now = new Date().toISOString()
+    const pendingIds = list.filter(a => a.completed_at == null && a.abandoned_at == null).map(a => a.employee_id)
+    if (pendingIds.length > 0) {
+      const { error } = await supabase.from('task_assignees').update({ completed_at: now }).eq('task_id', task.id).in('employee_id', pendingIds)
+      if (error) return alert(error.message)
+    }
+    const patch = { status: 'done', completed_at: now }
+    if (task.needs_approval) { patch.approved_at = now; patch.approved_by = me.id }
+    const { error } = await supabase.from('employee_tasks').update(patch).eq('id', task.id)
+    if (error) return alert(error.message)
+    queryClient.invalidateQueries({ queryKey: ['admin', 'task_assignees'] })
+    queryClient.invalidateQueries({ queryKey: ['admin', 'employee_tasks'] })
+  }
+
   // 標記完成（個人 task_assignees.completed_at toggle）
   const toggleDone = async (task) => {
     const list = assigneesByTask.get(task.id) || []
@@ -576,8 +595,15 @@ function TaskBoard({ emp, data, me, userId, setEditingTask, compact, companyId, 
   const renderCard = (task) => {
     const myRow = (assigneesByTask.get(task.id) || []).find(a => a.employee_id === emp.id)
     const isEmpAssignee = !!myRow
+    const isMeCreator = task.creator_employee_id === me.id
     const isDone = isEmpAssignee ? eDone(task) : task.status === 'done'
     const isAb = isEmpAssignee ? eAb(task) : task.status === 'abandoned'
+    // 列表勾的權限：assignee 雙向 toggle；creator 在未完成時可單向勾掉
+    const canTick = isEmpAssignee || (isMeCreator && !isDone && !isAb)
+    const onTick = () => {
+      if (isEmpAssignee) return toggleDone(task)
+      if (isMeCreator && !isDone && !isAb) return creatorMarkDone(task)
+    }
     const subtasks = tasks.filter(s => s.parent_task_id === task.id)
     const subDone = subtasks.filter(s => s.status === 'done').length
     const fbCount = feedbacks.filter(f => f.task_id === task.id).length
@@ -585,7 +611,7 @@ function TaskBoard({ emp, data, me, userId, setEditingTask, compact, companyId, 
     return (
       <div key={task.id} onClick={(e) => { if (e.target.tagName !== 'INPUT') setEditingTask(task) }} style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.md, padding: '9px 11px', marginBottom: 6, opacity: (isDone || isAb) ? 0.55 : 1, cursor: 'pointer' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-          <input type="checkbox" checked={isDone} disabled={!isEmpAssignee} onChange={() => isEmpAssignee && toggleDone(task)} onClick={e => e.stopPropagation()} style={{ width: 14, height: 14, marginTop: 2, cursor: isEmpAssignee ? 'pointer' : 'not-allowed' }} />
+          <input type="checkbox" checked={isDone} disabled={!canTick} onChange={onTick} onClick={e => e.stopPropagation()} style={{ width: 14, height: 14, marginTop: 2, cursor: canTick ? 'pointer' : 'not-allowed' }} />
           <div style={{ flex: 1, minWidth: 0 }}>
             {task.parent_task_id && (() => {
               const parent = tasks.find(p => p.id === task.parent_task_id)
