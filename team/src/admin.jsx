@@ -553,21 +553,26 @@ function TaskBoard({ emp, data, me, userId, setEditingTask, compact, companyId, 
     return tk ? { ...tk, _fb: fb } : null
   }).filter(Boolean).sort((a, b) => new Date(b._fb.created_at) - new Date(a._fb.created_at))
 
-  // 發布人在任務列表上勾掉自己創建的任務 = 整個 task done。
-  // 替還沒勾的 assignee 一併標完成；如果 task.needs_approval 也順便核驗通過。
-  // 單向：勾掉就是勾掉。要反勾走 EditTaskModal，避免不小心清掉 assignee 自己標的進度。
-  const creatorMarkDone = async (task) => {
-    const list = assigneesByTask.get(task.id) || []
-    const now = new Date().toISOString()
-    const pendingIds = list.filter(a => a.completed_at == null && a.abandoned_at == null).map(a => a.employee_id)
-    if (pendingIds.length > 0) {
-      const { error } = await supabase.from('task_assignees').update({ completed_at: now }).eq('task_id', task.id).in('employee_id', pendingIds)
+  // 發布人在任務列表上 toggle 自己創建的任務。
+  // 勾上：未勾 assignee 一併標完成；task done；needs_approval 時順便核驗通過。
+  // 反勾：只清 task 表狀態，不動 task_assignees，保留 assignee 自己標的進度。
+  const creatorToggleDone = async (task) => {
+    if (task.status === 'done') {
+      const { error } = await supabase.from('employee_tasks').update({ status: 'open', completed_at: null, approved_at: null, approved_by: null }).eq('id', task.id)
+      if (error) return alert(error.message)
+    } else {
+      const list = assigneesByTask.get(task.id) || []
+      const now = new Date().toISOString()
+      const pendingIds = list.filter(a => a.completed_at == null && a.abandoned_at == null).map(a => a.employee_id)
+      if (pendingIds.length > 0) {
+        const { error } = await supabase.from('task_assignees').update({ completed_at: now }).eq('task_id', task.id).in('employee_id', pendingIds)
+        if (error) return alert(error.message)
+      }
+      const patch = { status: 'done', completed_at: now }
+      if (task.needs_approval) { patch.approved_at = now; patch.approved_by = me.id }
+      const { error } = await supabase.from('employee_tasks').update(patch).eq('id', task.id)
       if (error) return alert(error.message)
     }
-    const patch = { status: 'done', completed_at: now }
-    if (task.needs_approval) { patch.approved_at = now; patch.approved_by = me.id }
-    const { error } = await supabase.from('employee_tasks').update(patch).eq('id', task.id)
-    if (error) return alert(error.message)
     queryClient.invalidateQueries({ queryKey: ['admin', 'task_assignees'] })
     queryClient.invalidateQueries({ queryKey: ['admin', 'employee_tasks'] })
   }
@@ -598,11 +603,11 @@ function TaskBoard({ emp, data, me, userId, setEditingTask, compact, companyId, 
     const isMeCreator = task.creator_employee_id === me.id
     const isDone = isEmpAssignee ? eDone(task) : task.status === 'done'
     const isAb = isEmpAssignee ? eAb(task) : task.status === 'abandoned'
-    // 列表勾的權限：assignee 雙向 toggle；creator 在未完成時可單向勾掉
-    const canTick = isEmpAssignee || (isMeCreator && !isDone && !isAb)
+    // 列表勾的權限：assignee 雙向 toggle 自己 row；creator 雙向 toggle 整個 task
+    const canTick = isEmpAssignee || (isMeCreator && !isAb)
     const onTick = () => {
       if (isEmpAssignee) return toggleDone(task)
-      if (isMeCreator && !isDone && !isAb) return creatorMarkDone(task)
+      if (isMeCreator && !isAb) return creatorToggleDone(task)
     }
     const subtasks = tasks.filter(s => s.parent_task_id === task.id)
     const subDone = subtasks.filter(s => s.status === 'done').length
