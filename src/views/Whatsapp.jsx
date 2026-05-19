@@ -28,6 +28,8 @@ export default function WhatsappView() {
   const [waSubTab, setWaSubTab] = useState("settings"); // settings | knowledge | prompt | whitelist | messages | unresolved | reports | logs
   const [waSelectedCustomer, setWaSelectedCustomer] = useState(null);
   const [waSecretUnlocked, setWaSecretUnlocked] = useState(false); // 輸過密碼後這次 session 內放開
+  // 解鎖後從 Edge Function wa-unlock 拿到的 openai_api_key 暫存（不寫進 waSettings/cache，避免持久化進 localStorage）
+  const [unlockedApiKey, setUnlockedApiKey] = useState("");
   // 安裝教程 modal（僅 WhatsApp tab 用，整個搬進來）
   const [showInstallTutorial, setShowInstallTutorial] = useState(false);
 
@@ -118,21 +120,47 @@ export default function WhatsappView() {
     unknown:    { label: t("未知"),                color: "#9ca3af", bg: "#f3f4f6", dot: "○" },
   };
   const stInfo = statusMap[statusCode] || statusMap.unknown;
-  // 敏感字段編輯密碼門檻
-  const ensureUnlocked = () => {
+  // 敏感字段編輯密碼門檻（走 wa-unlock Edge Function、server 端比對 + 拿 openai_api_key）
+  // 修法見 migration 057 + Edge Function wa-unlock：admin_password / openai_api_key 已 column-level lock、前端拿不到明文
+  const ensureUnlocked = async () => {
     if (waSecretUnlocked) return true;
     if (!isWaAdmin) { alert(t("您是只讀帳戶，無法解鎖查看 / 編輯敏感字段（API Key / Boss Prompt 等）。")); return false; }
-    if (!s.admin_password) {
-      const pwd = window.prompt(t("首次設置管理員密碼（用於保護 API Key / Boss Prompt / Model / Base URL 編輯）："));
-      if (!pwd || !pwd.trim()) return false;
-      saveSettings({ admin_password: pwd.trim() });
+    const pwd = window.prompt(t("請輸入管理員密碼："));
+    if (!pwd || !pwd.trim()) return false;
+    try {
+      const r = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/wa-unlock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'unlock', pwd: pwd.trim() }),
+      });
+      const d = await r.json();
+      if (r.status === 401 && d.needsInitialPassword) {
+        // 首次設密碼流程
+        if (!window.confirm(t("尚未設置管理員密碼，是否現在設置？"))) return false;
+        const newPwd = window.prompt(t("設置管理員密碼（用於保護 API Key 編輯）："));
+        if (!newPwd || !newPwd.trim()) return false;
+        const r2 = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/wa-unlock`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'set-initial-password', initialPassword: newPwd.trim() }),
+        });
+        const d2 = await r2.json();
+        if (!r2.ok) { alert(`${t("設置密碼失敗")}：${d2.error || ''}`); return false; }
+        setUnlockedApiKey('');
+        setWaSecretUnlocked(true);
+        return true;
+      }
+      if (!r.ok || !d.ok) {
+        alert(d.error === 'Wrong password' ? t("密碼錯誤") : `${t("解鎖失敗")}：${d.error || ''}`);
+        return false;
+      }
+      setUnlockedApiKey(d.openai_api_key || '');
       setWaSecretUnlocked(true);
       return true;
+    } catch (e) {
+      alert(`${t("解鎖失敗")}：${e.message}`);
+      return false;
     }
-    const pwd = window.prompt(t("請輸入管理員密碼："));
-    if (pwd === s.admin_password) { setWaSecretUnlocked(true); return true; }
-    alert(t("密碼錯誤"));
-    return false;
   };
   const kindLabel = { phone: t("私聊白名單（手機）"), group: t("群聊白名單（精確）"), group_fuzzy: t("群聊白名單（模糊）"), staff: t("客服名單（手機）") };
   const customersMap = new Map();
@@ -266,15 +294,31 @@ export default function WhatsappView() {
               </div>
               <Input label="Base URL" value={s.openai_base_url || ""} onChange={v => setWaSettings({ ...s, openai_base_url: v })} placeholder="https://api.openai.com/v1" readOnly={!waSecretUnlocked} />
               <div style={{ fontSize: 11, color: "#888", marginBottom: 14, marginTop: -8 }}>{t("也支持任何 OpenAI 兼容中轉站 / 本地模型")}</div>
-              <Input label="API Key" value={waSecretUnlocked ? (s.openai_api_key || "") : (s.openai_api_key ? "•".repeat(Math.min(s.openai_api_key.length, 40)) : "")} onChange={v => setWaSettings({ ...s, openai_api_key: v })} placeholder="sk-..." readOnly={!waSecretUnlocked} />
+              <Input label="API Key" value={waSecretUnlocked ? unlockedApiKey : "••••••••••••（解鎖編輯後可見）"} onChange={v => setUnlockedApiKey(v)} placeholder="sk-..." readOnly={!waSecretUnlocked} />
               <Input label="Model" value={s.model || ""} onChange={v => setWaSettings({ ...s, model: v })} placeholder="gpt-4o" readOnly={!waSecretUnlocked} />
               <div style={{ display: "flex", gap: 10 }}>
-                <button disabled={!waSecretUnlocked} onClick={() => saveSettings({ openai_base_url: s.openai_base_url, openai_api_key: s.openai_api_key, model: s.model })} style={{ padding: "9px 18px", background: waSecretUnlocked ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: waSecretUnlocked ? "pointer" : "not-allowed" }}>{t("儲存 API 配置")}</button>
-                <button disabled={!s.openai_base_url || !s.openai_api_key || !s.model} onClick={async () => {
+                <button disabled={!waSecretUnlocked} onClick={async () => {
+                  // 非敏感欄位走普通 saveSettings
+                  await saveSettings({ openai_base_url: s.openai_base_url, model: s.model });
+                  // 敏感 api_key 走 Edge Function wa-unlock save-secrets（需 pwd 二次校驗）
+                  const pwd = window.prompt(t("再次輸入管理員密碼以保存 API Key（敏感操作）："));
+                  if (!pwd || !pwd.trim()) { alert(t("已保存 Base URL / Model，API Key 未更新（需要密碼確認）")); return; }
+                  try {
+                    const r = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/wa-unlock`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'save-secrets', pwd: pwd.trim(), newApiKey: unlockedApiKey }),
+                    });
+                    const d = await r.json();
+                    if (!r.ok || !d.ok) { alert(d.error === 'Wrong password' ? t("密碼錯誤、API Key 未更新") : `${t("保存 API Key 失敗")}：${d.error || ''}`); return; }
+                    alert(t("已保存"));
+                  } catch (e) { alert(`${t("保存 API Key 失敗")}：${e.message}`); }
+                }} style={{ padding: "9px 18px", background: waSecretUnlocked ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: waSecretUnlocked ? "pointer" : "not-allowed" }}>{t("儲存 API 配置")}</button>
+                <button disabled={!s.openai_base_url || !unlockedApiKey || !s.model} onClick={async () => {
                   try {
                     const r = await fetch(s.openai_base_url.replace(/\/+$/, '') + '/chat/completions', {
                       method: 'POST',
-                      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + s.openai_api_key },
+                      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + unlockedApiKey },
                       body: JSON.stringify({ model: s.model, messages: [{ role: 'user', content: 'ping（只需回復 pong）' }], max_tokens: 8192 })
                     });
                     const d = await r.json();
@@ -292,7 +336,7 @@ export default function WhatsappView() {
                   } catch (err) {
                     alert(`✗ ${t("網絡錯誤")}：${err.message}`);
                   }
-                }} style={{ padding: "9px 18px", background: (!s.openai_base_url || !s.openai_api_key || !s.model) ? "#e0e0e0" : "#22c55e", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: (s.openai_base_url && s.openai_api_key && s.model) ? "pointer" : "not-allowed" }}>{t("測試連接")}</button>
+                }} style={{ padding: "9px 18px", background: (!s.openai_base_url || !unlockedApiKey || !s.model) ? "#e0e0e0" : "#22c55e", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: (s.openai_base_url && unlockedApiKey && s.model) ? "pointer" : "not-allowed" }}>{t("測試連接")}</button>
               </div>
             </div>
             <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, padding: 20 }}>
