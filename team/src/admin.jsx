@@ -1091,6 +1091,17 @@ function EditTaskModal({ task: initial, data, me, userId, onClose, ctx }) {
     queryClient.invalidateQueries({ queryKey: ['admin', 'employee_tasks'] })
   }
 
+  const saveTitle = async () => {
+    if (ro) return
+    if ((tk.title || '') === (initial.title || '')) return
+    const patch = { title: tk.title }
+    if (!isCreator) {
+      patch.title_edited_by = me.id
+      patch.title_edited_at = new Date().toISOString()
+    }
+    await updateField(patch)
+  }
+
   const setAssignees = async (newIds) => {
     if (newIds.length === 0) return alert(t('至少需要一個負責人'))
     const cur = tkList.map(a => a.employee_id)
@@ -1166,7 +1177,7 @@ function EditTaskModal({ task: initial, data, me, userId, onClose, ctx }) {
           <button onClick={onClose} style={S.iconBtn}>×</button>
         </div>
 
-        <input value={tk.title || ''} onFocus={ro ? roBlur : undefined} onChange={e => setTk({ ...tk, title: e.target.value })} onBlur={() => updateField({ title: tk.title })} style={{ width: '100%', padding: '8px 0', fontSize: 20, fontWeight: 700, border: 'none', outline: 'none', background: 'transparent', marginBottom: 8, color: c.text }} />
+        <input value={tk.title || ''} onFocus={ro ? roBlur : undefined} onChange={e => setTk({ ...tk, title: e.target.value })} onBlur={saveTitle} style={{ width: '100%', padding: '8px 0', fontSize: 20, fontWeight: 700, border: 'none', outline: 'none', background: 'transparent', marginBottom: 8, color: c.text }} />
 
         {isAwaitingApproval(tk, assigneesByTask) && (
           <div style={{ background: c.amberBg, border: '1px solid #fde68a', borderRadius: radius.sm, padding: '10px 14px', marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
@@ -1247,6 +1258,9 @@ function EditTaskModal({ task: initial, data, me, userId, onClose, ctx }) {
           <span>{t('添加於')} {fmtDateTime(tk.created_at)}</span>
           {tk.status === 'done' && tk.completed_at && <span style={{ color: c.green }}>✓ {t('完成於')} {fmtDateTime(tk.completed_at)}</span>}
           {tk.status === 'abandoned' && tk.completed_at && <span>✗ {t('放棄於')} {fmtDateTime(tk.completed_at)}</span>}
+          {tk.title_edited_at && (
+            <span>{t('標題由 {name} 編輯於 {time}', { name: (employees.find(e => e.id === tk.title_edited_by) || {}).name || '?', time: fmtDateTime(tk.title_edited_at) })}</span>
+          )}
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, paddingTop: 14, borderTop: `1px solid ${c.border}` }}>
