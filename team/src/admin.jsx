@@ -3,8 +3,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from './supabaseClient.js'
 import { c, radius, font, S, fetchAllTable, useIsMobile, useToggleSet, Empty, Field, Section, Pill, fmtShort, fmtDateTime, tcell } from './styles.jsx'
 import { useT } from './i18n.jsx'
-import { UpdateLogView } from './App.jsx'
+import UpdateLogView from './views/UpdateLog.jsx'
 import EditTaskModal from './components/EditTaskModal.jsx'
+import AssigneeChipEditor from './components/AssigneeChipEditor.jsx'
+import CompanyCollapseCard from './components/CompanyCollapseCard.jsx'
 import { isTaskAssignedTo, empDoneFor, empAbandonedFor, isAwaitingApproval, uploadAttachment, getAssigneeRow, empIdsInCompany } from './lib/taskHelpers.js'
 import CompaniesView from './views/Companies.jsx'
 import CommissionView from './views/Commission.jsx'
@@ -767,8 +769,6 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
   const [assigneeIds, setAssigneeIds] = useState(null)  // null = default 用 emp
   const [needsApproval, setNeedsApproval] = useState(false)
   const [dueDate, setDueDate] = useState('')
-  const [assigneeInput, setAssigneeInput] = useState('')
-  const [assigneeOpen, setAssigneeOpen] = useState(false)
   const [files, setFiles] = useState([])
   const [busy, setBusy] = useState(false)
   // 子任務：[{ title, assignees }]。assignees=null 沿用父任務；否則自定義
@@ -800,12 +800,9 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
   let activeEmps = employees.filter(e => e.active !== false && sameCo(e))
   // 選了部門 → 候選再過濾為該部門成員
   if (deptMemberIds) activeEmps = activeEmps.filter(e => deptMemberIds.has(e.id))
-  const q = assigneeInput.replace(/^@/, '').toLowerCase()
   // can_assign_others：沒這個權限 → 候選列表空 + 鎖住現有 assignee 不能刪（強制只能自己）
   const canAssignOthers = ctx?.isSuperAdmin || ctx?.isAdminOfActive || ctx?.hasPermission?.('can_assign_others')
-  const candidates = canAssignOthers
-    ? activeEmps.filter(e => !effective.includes(e.id) && (q === '' || (e.name || '').toLowerCase().includes(q)))
-    : []
+  const candidates = activeEmps.filter(e => !effective.includes(e.id))
 
   const submit = async () => {
     if (!title.trim() || effective.length === 0) return
@@ -902,24 +899,8 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
         </>
       )}
       <div style={{ fontSize: 11, color: c.textMuted, marginBottom: 4 }}>{t('分配給')} · {effective.length}{!canAssignOthers && <span style={{ color: c.textFaint, marginLeft: 6, fontSize: 10 }}>{t('（無權分配他人）')}</span>}</div>
-      <div style={{ position: 'relative', border: `1px solid ${c.border}`, borderRadius: radius.sm, padding: '4px 6px', marginBottom: 8, display: 'flex', flexWrap: 'wrap', gap: 3, minHeight: 28, background: c.card, opacity: canAssignOthers ? 1 : 0.7 }}>
-        {effective.map(id => {
-          const e2 = employees.find(x => x.id === id)
-          return (
-            <span key={id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2, padding: '2px 6px', background: c.accentBg, color: c.accent, borderRadius: 9, fontSize: 10, fontWeight: 600 }}>
-              @{e2?.name || '?'}
-              {canAssignOthers && <button type="button" onClick={() => setAssigneeIds(effective.filter(x => x !== id))} style={{ background: 'none', border: 'none', color: c.accent, cursor: 'pointer', fontSize: 11 }}>×</button>}
-            </span>
-          )
-        })}
-        {canAssignOthers && <input value={assigneeInput} onChange={e => { setAssigneeInput(e.target.value); setAssigneeOpen(true) }} onFocus={() => setAssigneeOpen(true)} onBlur={() => setTimeout(() => setAssigneeOpen(false), 200)} placeholder={t('@ 加成員')} style={{ flex: 1, minWidth: 60, border: 'none', outline: 'none', fontSize: 11, background: 'transparent' }} />}
-        {assigneeOpen && canAssignOthers && candidates.length > 0 && (
-          <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 3, background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.sm, boxShadow: '0 4px 14px rgba(0,0,0,0.1)', padding: 3, width: '100%', maxHeight: 180, overflowY: 'auto', zIndex: 30 }}>
-            {candidates.map(e2 => (
-              <button key={e2.id} type="button" onMouseDown={ev => { ev.preventDefault(); setAssigneeIds([...effective, e2.id]); setAssigneeInput('') }} style={{ display: 'block', width: '100%', textAlign: 'left', padding: '5px 8px', background: 'none', border: 'none', fontSize: 11, color: c.text, cursor: 'pointer', borderRadius: 3 }}>{e2.name}{e2.role && <span style={{ color: c.textFaint, marginLeft: 4, fontSize: 9 }}>{e2.role}</span>}</button>
-            ))}
-          </div>
-        )}
+      <div style={{ marginBottom: 8 }}>
+        <AssigneeChipEditor value={effective} onChange={setAssigneeIds} candidates={candidates} employees={employees} readOnly={!canAssignOthers} placeholder={t('@ 加成員')} />
       </div>
       <label style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 10, fontSize: 11, color: c.textMuted, cursor: 'pointer' }}>
         <input type="checkbox" checked={needsApproval} onChange={e => setNeedsApproval(e.target.checked)} />{t('完成後需我核驗')}
@@ -965,15 +946,9 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
 // NewTaskForm 的子任務一行：title + 獨立 assignee chip editor（默認沿用父）
 function NewSubtaskRow({ index, item, setItem, removeItem, parentEffective, activeEmps, canAssignOthers }) {
   const { t } = useT()
-  const [input, setInput] = useState('')
-  const [open, setOpen] = useState(false)
   const eff = item.assignees ?? parentEffective
   const inherited = item.assignees === null
-  const q = input.replace(/^@/, '').toLowerCase()
-  const cands = activeEmps.filter(e => !eff.includes(e.id) && (q === '' || (e.name || '').toLowerCase().includes(q)))
-  const addAssignee = (id) => { setItem({ ...item, assignees: [...eff, id] }); setInput('') }
-  const removeAssignee = (id) => {
-    const next = eff.filter(x => x !== id)
+  const onChange = (next) => {
     // × 到空 → 回到 null（沿用父任務），避免提交時走 fallback 走得不明顯
     setItem({ ...item, assignees: next.length === 0 ? null : next })
   }
@@ -985,24 +960,8 @@ function NewSubtaskRow({ index, item, setItem, removeItem, parentEffective, acti
         <button type="button" onClick={removeItem} style={{ background: 'none', border: 'none', color: c.textFaint, cursor: 'pointer', fontSize: 13 }}>×</button>
       </div>
       {canAssignOthers && (
-        <div style={{ position: 'relative', border: `1px solid ${c.border}`, borderRadius: radius.sm, padding: '2px 4px', display: 'flex', flexWrap: 'wrap', gap: 3, minHeight: 22, background: c.card, opacity: inherited ? 0.85 : 1 }}>
-          {eff.map(id => {
-            const e2 = activeEmps.find(x => x.id === id)
-            return (
-              <span key={id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2, padding: '1px 5px', background: c.accentBg, color: c.accent, borderRadius: 9, fontSize: 9, fontWeight: 600 }}>
-                @{e2?.name || '?'}
-                <button type="button" onClick={() => removeAssignee(id)} style={{ background: 'none', border: 'none', color: c.accent, cursor: 'pointer', fontSize: 10 }}>×</button>
-              </span>
-            )
-          })}
-          <input value={input} onChange={e => { setInput(e.target.value); setOpen(true) }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 200)} placeholder={inherited ? t('沿用父任務 · @ 改') : t('@ 加')} style={{ flex: 1, minWidth: 50, border: 'none', outline: 'none', fontSize: 10, background: 'transparent' }} />
-          {open && cands.length > 0 && (
-            <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 3, background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.sm, boxShadow: '0 4px 14px rgba(0,0,0,0.1)', padding: 3, width: '100%', maxHeight: 160, overflowY: 'auto', zIndex: 30 }}>
-              {cands.map(e2 => (
-                <button key={e2.id} type="button" onMouseDown={ev => { ev.preventDefault(); addAssignee(e2.id) }} style={{ display: 'block', width: '100%', textAlign: 'left', padding: '4px 7px', background: 'none', border: 'none', fontSize: 10, color: c.text, cursor: 'pointer' }}>{e2.name}</button>
-              ))}
-            </div>
-          )}
+        <div style={{ opacity: inherited ? 0.85 : 1 }}>
+          <AssigneeChipEditor value={eff} onChange={onChange} candidates={activeEmps.filter(e => !eff.includes(e.id))} employees={activeEmps} size="sm" placeholder={inherited ? t('沿用父任務 · @ 改') : t('@ 加')} />
         </div>
       )}
     </div>
@@ -1122,41 +1081,33 @@ function EmployeesView({ data, me, isMobile, ctx }) {
 
       {visibleCompanies.map(co => {
         const coEmps = empsByCompany.get(co.id) || []
-        const isCollapsed = collapsed.has(co.id)
         return (
-          <div key={co.id} style={{ marginBottom: 14, background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.lg, overflow: 'hidden' }}>
-            <div onClick={() => toggle(co.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', cursor: 'pointer', borderBottom: isCollapsed ? 'none' : `1px solid ${c.border}`, background: c.bg }}>
-              <span style={{ fontSize: 11, color: c.textMuted, width: 12 }}>{isCollapsed ? '▶' : '▼'}</span>
-              <span style={{ fontSize: 15, fontWeight: 700 }}>{co.name}</span>
-              <span style={{ fontSize: 11, color: c.textFaint }}>{coEmps.length} {t('人')}</span>
-            </div>
-            {!isCollapsed && (
-              coEmps.length === 0 ? (
-                <div style={{ padding: 18, textAlign: 'center', fontSize: 12, color: c.textFaint }}>{t('該公司暫無員工')}</div>
-              ) : (
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                  <thead>
-                    <tr style={{ borderBottom: `1px solid ${c.border}` }}>
-                      <th style={tcell('left')}>{t('姓名')}</th>
-                      <th style={tcell('left')}>{t('職位')}</th>
-                      <th style={tcell('left')}>{t('公司管理員')}</th>
-                      <th style={tcell('left')}>{t('電話')}</th>
-                      <th style={tcell('left')}>Email</th>
-                      <th style={tcell('left')}>{t('狀態')}</th>
-                      <th style={tcell('right')}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {coEmps.map(e => (
-                      <EmployeeRow key={e.id} emp={e} companies={companies} empCompanies={empCompanies} roles={roles}
-                        companyContext={co.id}
-                        updateField={updateField} updateBinding={updateBinding} removeFromCompany={removeFromCompany} permanentDelete={permanentDelete} me={me} ctx={ctx} />
-                    ))}
-                  </tbody>
-                </table>
-              )
+          <CompanyCollapseCard key={co.id} collapsed={collapsed.has(co.id)} onToggle={() => toggle(co.id)} name={co.name} subLabel={`${coEmps.length} ${t('人')}`} contentPadding={0}>
+            {coEmps.length === 0 ? (
+              <div style={{ padding: 18, textAlign: 'center', fontSize: 12, color: c.textFaint }}>{t('該公司暫無員工')}</div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${c.border}` }}>
+                    <th style={tcell('left')}>{t('姓名')}</th>
+                    <th style={tcell('left')}>{t('職位')}</th>
+                    <th style={tcell('left')}>{t('公司管理員')}</th>
+                    <th style={tcell('left')}>{t('電話')}</th>
+                    <th style={tcell('left')}>Email</th>
+                    <th style={tcell('left')}>{t('狀態')}</th>
+                    <th style={tcell('right')}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {coEmps.map(e => (
+                    <EmployeeRow key={e.id} emp={e} companies={companies} empCompanies={empCompanies} roles={roles}
+                      companyContext={co.id}
+                      updateField={updateField} updateBinding={updateBinding} removeFromCompany={removeFromCompany} permanentDelete={permanentDelete} me={me} ctx={ctx} />
+                  ))}
+                </tbody>
+              </table>
             )}
-          </div>
+          </CompanyCollapseCard>
         )
       })}
 

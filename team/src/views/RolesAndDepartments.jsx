@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabaseClient.js'
 import { c, radius, S, Empty, tcell, useToggleSet } from '../styles.jsx'
+import CompanyCollapseCard from '../components/CompanyCollapseCard.jsx'
 import { useT } from '../i18n.jsx'
 
 // RBAC 權限點清單。新增權限點時，roles 表中已有的 role 沒這個 key → 視為 false。
@@ -109,17 +110,9 @@ function RolesView({ data, ctx }) {
     <div>
       {visibleCompanies.map(co => {
         const coRoles = roles.filter(r => r.company_id === co.id)
-        const isCollapsed = collapsed.has(co.id)
         return (
-          <div key={co.id} style={{ marginBottom: 14, background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.lg, overflow: 'hidden' }}>
-            <div onClick={() => toggleCo(co.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', cursor: 'pointer', borderBottom: isCollapsed ? 'none' : `1px solid ${c.border}`, background: c.bg }}>
-              <span style={{ fontSize: 11, color: c.textMuted, width: 12 }}>{isCollapsed ? '▶' : '▼'}</span>
-              <span style={{ fontSize: 15, fontWeight: 700 }}>{co.name}</span>
-              <span style={{ fontSize: 11, color: c.textFaint }}>{coRoles.length} {t('個職位')}</span>
-            </div>
-            {!isCollapsed && (
-              <div style={{ padding: 14 }}>
-                {coRoles.length === 0 && <Empty>{t('還沒有職位')}</Empty>}
+          <CompanyCollapseCard key={co.id} collapsed={collapsed.has(co.id)} onToggle={() => toggleCo(co.id)} name={co.name} subLabel={`${coRoles.length} ${t('個職位')}`}>
+            {coRoles.length === 0 && <Empty>{t('還沒有職位')}</Empty>}
 
                 {coRoles.map(r => {
                   const isEdit = editingId === r.id
@@ -172,9 +165,7 @@ function RolesView({ data, ctx }) {
                   <button onClick={() => addRole(co.id)} disabled={!(newRoleByCompany[co.id] || '').trim()}
                     style={{ ...S.btnPrimary, opacity: (newRoleByCompany[co.id] || '').trim() ? 1 : 0.4 }}>{t('新增職位')}</button>
                 </div>
-              </div>
-            )}
-          </div>
+          </CompanyCollapseCard>
         )
       })}
     </div>
@@ -253,17 +244,9 @@ function DepartmentsView({ data, ctx }) {
         const coDepts = departments.filter(d => d.company_id === co.id)
         const coEmpIds = new Set(empCompanies.filter(ec => ec.company_id === co.id).map(ec => ec.employee_id))
         const coEmps = employees.filter(e => coEmpIds.has(e.id) && e.active !== false)
-        const isCoCollapsed = collapsedCo.has(co.id)
         return (
-          <div key={co.id} style={{ marginBottom: 14, background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.lg, overflow: 'hidden' }}>
-            <div onClick={() => toggleCo(co.id)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', cursor: 'pointer', borderBottom: isCoCollapsed ? 'none' : `1px solid ${c.border}`, background: c.bg }}>
-              <span style={{ fontSize: 11, color: c.textMuted, width: 12 }}>{isCoCollapsed ? '▶' : '▼'}</span>
-              <span style={{ fontSize: 15, fontWeight: 700 }}>{co.name}</span>
-              <span style={{ fontSize: 11, color: c.textFaint }}>{coDepts.length} {t('個部門')}</span>
-            </div>
-            {!isCoCollapsed && (
-              <div style={{ padding: 14 }}>
-                {coDepts.length === 0 && <Empty>{t('還沒有部門')}</Empty>}
+          <CompanyCollapseCard key={co.id} collapsed={collapsedCo.has(co.id)} onToggle={() => toggleCo(co.id)} name={co.name} subLabel={`${coDepts.length} ${t('個部門')}`}>
+            {coDepts.length === 0 && <Empty>{t('還沒有部門')}</Empty>}
                 {coDepts.map(d => {
                   const memberIds = empDepts.filter(ed => ed.department_id === d.id).map(ed => ed.employee_id)
                   const memberEmps = coEmps.filter(e => memberIds.includes(e.id))
@@ -370,9 +353,7 @@ function DepartmentsView({ data, ctx }) {
                   <button onClick={() => addDept(co.id)} disabled={!(newDeptByCompany[co.id] || '').trim()}
                     style={{ ...S.btnPrimary, opacity: (newDeptByCompany[co.id] || '').trim() ? 1 : 0.4 }}>{t('新增部門')}</button>
                 </div>
-              </div>
-            )}
-          </div>
+          </CompanyCollapseCard>
         )
       })}
     </div>

@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabaseClient.js'
 import { c, radius, S, Pill, fmtDateTime } from '../styles.jsx'
+import AssigneeChipEditor from './AssigneeChipEditor.jsx'
 import { useT } from '../i18n.jsx'
 import {
   isAwaitingApproval,
@@ -240,16 +241,13 @@ export default function EditTaskModal({ task: initial, data, me, userId, onClose
 
 function AssigneeEditor({ tk, tkList, employees, empCompanies = [], canManage, setAssignees, scopeCompanyId, onForbidden = () => {} }) {
   const { t } = useT()
-  const [input, setInput] = useState('')
-  const [open, setOpen] = useState(false)
   const cur = tkList.map(a => a.employee_id)
-  const q = input.replace(/^@/, '').toLowerCase()
   const empIdsInScope = useMemo(
     () => empIdsInCompany(empCompanies, scopeCompanyId),
     [empCompanies, scopeCompanyId]
   )
   const sameCo = (e) => scopeCompanyId ? empIdsInScope.has(e.id) : true
-  const cands = employees.filter(e => e.active !== false && sameCo(e) && !cur.includes(e.id) && (q === '' || (e.name || '').toLowerCase().includes(q)))
+  const cands = employees.filter(e => e.active !== false && sameCo(e) && !cur.includes(e.id))
   return (
     <div style={{ marginTop: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
@@ -259,25 +257,7 @@ function AssigneeEditor({ tk, tkList, employees, empCompanies = [], canManage, s
           return cr ? <span style={{ fontSize: 11, color: c.textMuted, marginLeft: 'auto' }}>{t('發布人:')} <span style={{ color: c.accent, fontWeight: 600 }}>{cr.name}</span></span> : null
         })()}
       </div>
-      <div style={{ position: 'relative', border: `1px solid ${c.border}`, borderRadius: radius.sm, padding: '4px 6px', display: 'flex', flexWrap: 'wrap', gap: 3, minHeight: 28, background: c.card }}>
-        {cur.map(id => {
-          const e2 = employees.find(x => x.id === id)
-          return (
-            <span key={id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2, padding: '2px 6px', background: c.accentBg, color: c.accent, borderRadius: 9, fontSize: 10, fontWeight: 600 }}>
-              @{e2?.name || '?'}
-              <button type="button" onClick={canManage ? (() => setAssignees(cur.filter(x => x !== id))) : onForbidden} style={{ background: 'none', border: 'none', color: c.accent, cursor: 'pointer', fontSize: 11 }}>×</button>
-            </span>
-          )
-        })}
-        <input value={input} onChange={canManage ? (e => { setInput(e.target.value); setOpen(true) }) : undefined} onFocus={canManage ? (() => setOpen(true)) : (e => { e.target.blur(); onForbidden() })} onBlur={() => setTimeout(() => setOpen(false), 200)} placeholder={t('@ 加成員')} style={{ flex: 1, minWidth: 60, border: 'none', outline: 'none', fontSize: 10, background: 'transparent' }} />
-        {canManage && open && cands.length > 0 && (
-          <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 3, background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.sm, boxShadow: '0 4px 14px rgba(0,0,0,0.1)', padding: 3, width: '100%', maxHeight: 180, overflowY: 'auto', zIndex: 30 }}>
-            {cands.map(e2 => (
-              <button key={e2.id} type="button" onMouseDown={ev => { ev.preventDefault(); setAssignees([...cur, e2.id]); setInput('') }} style={{ display: 'block', width: '100%', textAlign: 'left', padding: '5px 8px', background: 'none', border: 'none', fontSize: 11, color: c.text, cursor: 'pointer', borderRadius: 3 }}>{e2.name}</button>
-            ))}
-          </div>
-        )}
-      </div>
+      <AssigneeChipEditor value={cur} onChange={setAssignees} candidates={cands} employees={employees} readOnly={!canManage} onForbidden={onForbidden} placeholder={t('@ 加成員')} />
     </div>
   )
 }
@@ -328,18 +308,15 @@ function SubtaskList({ tk, subtasks, employees, empCompanies = [], feedbacks, as
   const queryClient = useQueryClient()
   const [subTitle, setSubTitle] = useState('')
   const [subAssignees, setSubAssignees] = useState(null)
-  const [subInput, setSubInput] = useState('')
-  const [subOpen, setSubOpen] = useState(false)
 
   const parentAssignees = (assigneesByTask.get(tk.id) || []).map(a => a.employee_id)
   const effectiveSub = subAssignees === null ? parentAssignees : subAssignees
-  const sq = subInput.replace(/^@/, '').toLowerCase()
   const empIdsInScope = useMemo(
     () => empIdsInCompany(empCompanies, scopeCompanyId),
     [empCompanies, scopeCompanyId]
   )
   const sameCo = (e) => scopeCompanyId ? empIdsInScope.has(e.id) : true
-  const subCands = employees.filter(e => e.active !== false && sameCo(e) && !effectiveSub.includes(e.id) && (sq === '' || (e.name || '').toLowerCase().includes(sq)))
+  const subCands = employees.filter(e => e.active !== false && sameCo(e) && !effectiveSub.includes(e.id))
 
   const addSub = async () => {
     const title = subTitle.trim()
@@ -399,24 +376,8 @@ function SubtaskList({ tk, subtasks, employees, empCompanies = [], feedbacks, as
       })}
       <div style={{ marginTop: 8, padding: '8px 10px', border: `1px dashed ${c.border}`, borderRadius: radius.sm, background: c.bg }}>
         <div style={{ fontSize: 10, color: c.textMuted, marginBottom: 3 }}>{t('分配給')}</div>
-        <div style={{ position: 'relative', border: `1px solid ${c.border}`, borderRadius: radius.sm, padding: '3px 5px', marginBottom: 5, display: 'flex', flexWrap: 'wrap', gap: 3, minHeight: 24, background: c.card }}>
-          {effectiveSub.map(id => {
-            const e2 = employees.find(x => x.id === id)
-            return (
-              <span key={id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2, padding: '1px 5px', background: c.accentBg, color: c.accent, borderRadius: 9, fontSize: 9, fontWeight: 600 }}>
-                @{e2?.name || '?'}
-                <button type="button" onClick={canEdit ? (() => setSubAssignees(effectiveSub.filter(x => x !== id))) : onForbidden} style={{ background: 'none', border: 'none', color: c.accent, cursor: 'pointer', fontSize: 10 }}>×</button>
-              </span>
-            )
-          })}
-          <input value={subInput} onChange={canEdit ? (e => { setSubInput(e.target.value); setSubOpen(true) }) : undefined} onFocus={canEdit ? (() => setSubOpen(true)) : (e => { e.target.blur(); onForbidden() })} onBlur={() => setTimeout(() => setSubOpen(false), 200)} placeholder={t('@ 加')} style={{ flex: 1, minWidth: 50, border: 'none', outline: 'none', fontSize: 10, background: 'transparent' }} />
-          {subOpen && canEdit && subCands.length > 0 && (
-            <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 3, background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.sm, boxShadow: '0 4px 14px rgba(0,0,0,0.1)', padding: 3, width: '100%', maxHeight: 160, overflowY: 'auto', zIndex: 30 }}>
-              {subCands.map(e2 => (
-                <button key={e2.id} type="button" onMouseDown={ev => { ev.preventDefault(); setSubAssignees([...effectiveSub, e2.id]); setSubInput('') }} style={{ display: 'block', width: '100%', textAlign: 'left', padding: '4px 7px', background: 'none', border: 'none', fontSize: 10, color: c.text, cursor: 'pointer' }}>{e2.name}</button>
-              ))}
-            </div>
-          )}
+        <div style={{ marginBottom: 5 }}>
+          <AssigneeChipEditor value={effectiveSub} onChange={setSubAssignees} candidates={subCands} employees={employees} readOnly={!canEdit} onForbidden={onForbidden} size="sm" placeholder={t('@ 加')} />
         </div>
         <form onSubmit={e => { e.preventDefault(); if (!canEdit) return onForbidden(); addSub() }}>
           <input value={subTitle} onChange={canEdit ? (e => setSubTitle(e.target.value)) : undefined} onFocus={canEdit ? undefined : (e => { e.target.blur(); onForbidden() })} placeholder={t('＋ 子任務（Enter 確認）')} style={{ width: '100%', padding: '6px 8px', borderRadius: radius.sm, border: `1px solid ${c.border}`, fontSize: 12, outline: 'none', boxSizing: 'border-box' }} />
