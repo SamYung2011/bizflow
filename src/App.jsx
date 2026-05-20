@@ -1444,6 +1444,19 @@ export default function App() {
 
   // handleSaveAlias / handleDeleteAlias / handleVerifyAlias 已搬到 ProductsListView 本地
 
+  // bizflow 主站白名单卡：非白名单 → 自动 signOut + 跳 team.honnmono.top
+  // hook 必须在所有 early return 之前调用（authLoading / !session / loading / loadError 都会提前 return）
+  const isBizflowMainAllowed = isBfAdmin || (currentEmployee && currentEmployee.bizflow_main_access === true);
+  const shouldBlock = currentEmployee && !isBizflowMainAllowed;
+  useEffect(() => {
+    if (shouldBlock) {
+      (async () => {
+        try { await supabase.auth.signOut(); } catch {}
+        window.location.replace("https://team.honnmono.top");
+      })();
+    }
+  }, [shouldBlock]);
+
   // 認證載入中（Supabase 正在讀 session）
   if (authLoading) return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", background: "#f7f8fc" }}>
@@ -1522,21 +1535,9 @@ export default function App() {
     .filter(c => c.version && c.version !== _latestExtVer);
   const _showUpdateToast = _outdatedClients.length > 0 && extUpdateToastDismissedFor !== _latestExtVer;
 
-  // task kind 用戶不能進 bizflow，引導去 team.honnmono.top
-  if (currentEmployee && currentEmployee.kind === "task") {
-    return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", flexDirection: "column", gap: 20, background: "#f7f8fc", padding: 40, fontFamily: "'DM Sans','Helvetica Neue',sans-serif" }}>
-        <div style={{ fontSize: 48 }}>🚧</div>
-        <div style={{ color: "#222", fontSize: 22, fontWeight: 700 }}>{t("此帳號僅可使用團隊任務管理")}</div>
-        <div style={{ color: "#666", fontSize: 14, maxWidth: 460, textAlign: "center", lineHeight: 1.6 }}>
-          {t("你的帳號類型為 task，只能使用 team.honnmono.top 的任務管理功能，無法訪問主業務後台。")}
-        </div>
-        <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
-          <a href="https://team.honnmono.top" style={{ padding: "12px 28px", background: "#6382ff", color: "#fff", borderRadius: 10, textDecoration: "none", fontSize: 14, fontWeight: 700 }}>{t("前往 team.honnmono.top")}</a>
-          <button onClick={async () => { await supabase.auth.signOut(); }} style={{ padding: "12px 28px", background: "#fff", color: "#666", border: "1px solid #e0e0e0", borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>{t("登出")}</button>
-        </div>
-      </div>
-    );
+  // 非白名单 → 空屏等 redirect（useEffect 已在文件上方触发 signOut + 跳走）
+  if (shouldBlock) {
+    return <div style={{ height: "100vh", background: "#f7f8fc" }} />;
   }
 
   return (
