@@ -307,6 +307,25 @@ const DICT_EN = {
   "個部門": "depts",
   "移出": "Remove",
   "加入": "Add",
+
+  // ── 看板/日曆切換 + 任務時間軸（2026-05-20） ──
+  "看板": "Board",
+  "日曆": "Calendar",
+  "僅看我發布的": "Only tasks I created",
+  "起始": "Start",
+  "起始：": "Start: ",
+  "上月": "Prev",
+  "下月": "Next",
+  "今天": "Today",
+  "週一": "Mon",
+  "週二": "Tue",
+  "週三": "Wed",
+  "週四": "Thu",
+  "週五": "Fri",
+  "週六": "Sat",
+  "週日": "Sun",
+  "更多": "more",
+  "未排期": "Unscheduled",
 };
 
 const DICT_FR = {
@@ -611,6 +630,25 @@ const DICT_FR = {
   "個部門": "dépts",
   "移出": "Retirer",
   "加入": "Ajouter",
+
+  // ── 看板/日曆切換 + 任務時間軸（2026-05-20） ──
+  "看板": "Tableau",
+  "日曆": "Calendrier",
+  "僅看我發布的": "Mes tâches créées",
+  "起始": "Début",
+  "起始：": "Début : ",
+  "上月": "Préc.",
+  "下月": "Suiv.",
+  "今天": "Aujourd'hui",
+  "週一": "Lun",
+  "週二": "Mar",
+  "週三": "Mer",
+  "週四": "Jeu",
+  "週五": "Ven",
+  "週六": "Sam",
+  "週日": "Dim",
+  "更多": "de plus",
+  "未排期": "Non planifié",
 };
 
 const I18nContext = createContext({ lang: "zh", setLang: () => {}, t: (s) => s });

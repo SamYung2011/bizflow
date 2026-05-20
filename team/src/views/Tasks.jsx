@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabaseClient.js'
 import { c, radius, S, useToggleSet, Empty, Pill, fmtShort, fmtDateTime } from '../styles.jsx'
@@ -6,6 +6,7 @@ import { useT } from '../i18n.jsx'
 import { isTaskAssignedTo, empDoneFor, empAbandonedFor, isAwaitingApproval, uploadAttachment, empIdsInCompany } from '../lib/taskHelpers.js'
 import EditTaskModal from '../components/EditTaskModal.jsx'
 import AssigneeChipEditor from '../components/AssigneeChipEditor.jsx'
+import CalendarView from '../components/CalendarView.jsx'
 
 // ============================================================
 //  任務模組：員工側欄 + 任務總覽 + 單員工任務看板 + 新建任務表單 + 反饋面板
@@ -25,11 +26,28 @@ export default function TasksView({ data, me, session, isMobile, ctx }) {
     () => allEmployees.filter(e => e.active !== false && empIdsInActive.has(e.id)),
     [allEmployees, empIdsInActive]
   )
-  const tasks = useMemo(
+  const tasksByCompany = useMemo(
     () => allTasks.filter(t => t.company_id === ctx.activeCompanyId),
     [allTasks, ctx.activeCompanyId]
   )
-  // 包裝 data 給子組件用（任務/員工已按公司過濾，其他不變）
+
+  // 視圖模式 + 「僅看我發布的」toggle，sessionStorage 持久化
+  const [viewMode, setViewMode] = useState(() => sessionStorage.getItem('team-tasks-view-mode') || 'board')
+  const [onlyMyCreated, setOnlyMyCreated] = useState(() => sessionStorage.getItem('team-tasks-only-mine') === '1')
+  useEffect(() => { sessionStorage.setItem('team-tasks-view-mode', viewMode) }, [viewMode])
+  useEffect(() => { sessionStorage.setItem('team-tasks-only-mine', onlyMyCreated ? '1' : '0') }, [onlyMyCreated])
+
+  // 「僅看我發布的」toggle → 對所有下游視圖（看板/日曆/總覽）生效
+  const tasks = useMemo(
+    () => onlyMyCreated ? tasksByCompany.filter(tk => tk.creator_employee_id === me.id) : tasksByCompany,
+    [tasksByCompany, onlyMyCreated, me.id]
+  )
+  // 日曆視圖：只看「跟我相關」（assignee=me 或 creator=me）
+  const myRelatedTasks = useMemo(
+    () => tasks.filter(tk => tk.creator_employee_id === me.id || isTaskAssignedTo(tk, me.id, assigneesByTask)),
+    [tasks, me.id, assigneesByTask]
+  )
+  // 包裝 data 給子組件用（任務/員工已按公司過濾 + onlyMyCreated 過濾）
   const scopedData = useMemo(
     () => ({ ...data, tasks, employees }),
     [data, tasks, employees]
@@ -44,9 +62,35 @@ export default function TasksView({ data, me, session, isMobile, ctx }) {
 
   const selectedEmp = selectedEmpId ? employees.find(e => e.id === selectedEmpId) : null
 
+  // 視圖切換 + toggle 控件（看板/日曆共用）
+  const viewHeader = (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14, flexWrap: 'wrap' }}>
+      <div style={{ display: 'inline-flex', background: c.card, borderRadius: radius.sm, border: `1px solid ${c.border}`, overflow: 'hidden' }}>
+        <button onClick={() => setViewMode('board')} style={{ padding: '6px 16px', background: viewMode === 'board' ? c.accent : 'transparent', color: viewMode === 'board' ? '#fff' : c.textMuted, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>{t('看板')}</button>
+        <button onClick={() => setViewMode('calendar')} style={{ padding: '6px 16px', background: viewMode === 'calendar' ? c.accent : 'transparent', color: viewMode === 'calendar' ? '#fff' : c.textMuted, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>{t('日曆')}</button>
+      </div>
+      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: c.textMuted, cursor: 'pointer' }}>
+        <input type="checkbox" checked={onlyMyCreated} onChange={e => setOnlyMyCreated(e.target.checked)} />
+        {t('僅看我發布的')}
+      </label>
+    </div>
+  )
+
+  // 日曆視圖：全寬，不顯示員工側欄
+  if (viewMode === 'calendar') {
+    return (
+      <div>
+        {viewHeader}
+        <CalendarView tasks={myRelatedTasks} employees={visibleEmployees} assigneesByTask={assigneesByTask} me={me} setEditingTask={setEditingTask} />
+        {editingTask && <EditTaskModal task={editingTask} data={scopedData} me={me} userId={userId} onClose={() => setEditingTask(null)} ctx={ctx} />}
+      </div>
+    )
+  }
+
   if (isMobile) {
     return (
       <div>
+        {viewHeader}
         {selectedEmp ? (
           <div>
             <button onClick={() => setSelectedEmpId(null)} style={{ ...S.btnGhostSm, marginBottom: 12 }}>← {t('返回員工列表')}</button>
@@ -61,20 +105,23 @@ export default function TasksView({ data, me, session, isMobile, ctx }) {
   }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 18, minHeight: 'calc(100vh - 80px)' }}>
-      <EmpSidebar
-        employees={visibleEmployees}
-        mode={mode} setMode={setMode} selectedEmpId={selectedEmpId} setSelectedEmpId={setSelectedEmpId}
-        tasks={tasks} assigneesByTask={assigneesByTask} me={me}
-      />
-      <div>
-        {mode === 'overview' ? (
-          <OverviewView employees={visibleEmployees} tasks={tasks} assigneesByTask={assigneesByTask} expanded={overviewExpanded} toggleExpanded={toggleOverviewExpanded} setEditingTask={setEditingTask} />
-        ) : selectedEmp ? (
-          <TaskBoard emp={selectedEmp} data={scopedData} me={me} userId={userId} setEditingTask={setEditingTask} companyId={ctx.activeCompanyId} ctx={ctx} />
-        ) : (
-          <Empty>← {t('從左側選擇員工查看任務看板')}</Empty>
-        )}
+    <div>
+      {viewHeader}
+      <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 18, minHeight: 'calc(100vh - 80px)' }}>
+        <EmpSidebar
+          employees={visibleEmployees}
+          mode={mode} setMode={setMode} selectedEmpId={selectedEmpId} setSelectedEmpId={setSelectedEmpId}
+          tasks={tasks} assigneesByTask={assigneesByTask} me={me}
+        />
+        <div>
+          {mode === 'overview' ? (
+            <OverviewView employees={visibleEmployees} tasks={tasks} assigneesByTask={assigneesByTask} expanded={overviewExpanded} toggleExpanded={toggleOverviewExpanded} setEditingTask={setEditingTask} />
+          ) : selectedEmp ? (
+            <TaskBoard emp={selectedEmp} data={scopedData} me={me} userId={userId} setEditingTask={setEditingTask} companyId={ctx.activeCompanyId} ctx={ctx} />
+          ) : (
+            <Empty>← {t('從左側選擇員工查看任務看板')}</Empty>
+          )}
+        </div>
       </div>
       {editingTask && <EditTaskModal task={editingTask} data={scopedData} me={me} userId={userId} onClose={() => setEditingTask(null)} ctx={ctx} />}
     </div>
@@ -512,6 +559,7 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
   const [note, setNote] = useState('')
   const [assigneeIds, setAssigneeIds] = useState(null)  // null = default 用 emp
   const [needsApproval, setNeedsApproval] = useState(false)
+  const [startDate, setStartDate] = useState('')
   const [dueDate, setDueDate] = useState('')
   const [files, setFiles] = useState([])
   const [busy, setBusy] = useState(false)
@@ -564,6 +612,7 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
         title: title.trim(),
         priority,
         note: note.trim() || null,
+        start_date: startDate || null,
         due_date: dueDate || null,
         company_id: effectiveCompanyId,
         department_id: departmentId || null,
@@ -595,7 +644,7 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
         if (se) { console.error('子任務新增失敗', se); continue }
         await supabase.from('task_assignees').insert(eff.map(eid => ({ task_id: sub.id, employee_id: eid })))
       }
-      setTitle(''); setNote(''); setPriority('low'); setAssigneeIds(null); setNeedsApproval(false); setDueDate(''); setFiles([]); setSubtaskItems([]); setDepartmentId('')
+      setTitle(''); setNote(''); setPriority('low'); setAssigneeIds(null); setNeedsApproval(false); setStartDate(''); setDueDate(''); setFiles([]); setSubtaskItems([]); setDepartmentId('')
       queryClient.invalidateQueries({ queryKey: ['admin', 'employee_tasks'] })
       queryClient.invalidateQueries({ queryKey: ['admin', 'task_assignees'] })
     } catch (e) {
@@ -651,7 +700,9 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
       </label>
       <input value={title} onChange={e => setTitle(e.target.value)} placeholder={t('任務標題...')} style={{ ...S.input, marginBottom: 8 }} />
       <textarea value={note} onChange={e => setNote(e.target.value)} placeholder={t('描述 / 備註（可選）')} style={{ ...S.input, minHeight: 60, resize: 'vertical' }} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, color: c.textMuted }}>{t('起始：')}</span>
+        <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={{ padding: '4px 8px', borderRadius: radius.sm, border: `1px solid ${c.border}`, fontSize: 11 }} />
         <span style={{ fontSize: 11, color: c.textMuted }}>{t('截止：')}</span>
         <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} style={{ padding: '4px 8px', borderRadius: radius.sm, border: `1px solid ${c.border}`, fontSize: 11 }} />
       </div>

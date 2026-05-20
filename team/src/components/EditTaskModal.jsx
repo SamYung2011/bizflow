@@ -146,6 +146,8 @@ export default function EditTaskModal({ task: initial, data, me, userId, onClose
         )}
 
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: c.textMuted }}>{t('起始')}</span>
+          <input type="date" value={tk.start_date || ''} onFocus={ro ? roBlur : undefined} onChange={e => setTk({ ...tk, start_date: e.target.value || null })} onBlur={() => updateField({ start_date: tk.start_date || null })} style={{ padding: '4px 8px', borderRadius: radius.sm, border: `1px solid ${c.border}`, fontSize: 12 }} />
           <span style={{ fontSize: 11, color: c.textMuted }}>{t('截止')}</span>
           <input type="date" value={tk.due_date || ''} onFocus={ro ? roBlur : undefined} onChange={e => setTk({ ...tk, due_date: e.target.value || null })} onBlur={() => updateField({ due_date: tk.due_date || null })} style={{ padding: '4px 8px', borderRadius: radius.sm, border: `1px solid ${c.border}`, fontSize: 12 }} />
           <span style={{ fontSize: 11, color: c.textMuted, marginLeft: 6 }}>{t('發佈範圍')}</span>
