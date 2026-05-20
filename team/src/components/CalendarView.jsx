@@ -135,8 +135,14 @@ export default function CalendarView({ tasks, employees, assigneesByTask, me, se
     return rows
   }, [grid, tasks])
 
-  // 「未排期」抽屜：沒填 start/due 的任務
-  const unscheduled = useMemo(() => tasks.filter(tk => !tk.parent_task_id && !tk.start_date && !tk.due_date), [tasks])
+  // 「未排期」抽屜：沒填 start/due 的進行中任務（已完成 / 已放棄不顯示，避免堆積垃圾）
+  const unscheduled = useMemo(() => tasks.filter(tk => {
+    if (tk.parent_task_id || tk.start_date || tk.due_date) return false
+    const myRow = (assigneesByTask.get(tk.id) || []).find(a => a.employee_id === me.id)
+    const isDone = myRow ? myRow.completed_at != null : tk.status === 'done'
+    const isAb = myRow ? myRow.abandoned_at != null : tk.status === 'abandoned'
+    return !isDone && !isAb
+  }), [tasks, assigneesByTask, me.id])
 
   const prevMonth = () => setAnchor(d => new Date(d.getFullYear(), d.getMonth() - 1, 1))
   const nextMonth = () => setAnchor(d => new Date(d.getFullYear(), d.getMonth() + 1, 1))
