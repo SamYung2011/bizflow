@@ -65,6 +65,8 @@ export function AppProvider({ children }) {
   const qWaHeartbeat = useQuery({ queryKey: ['bf', 'wa_heartbeat'], queryFn: async () => { const { data } = await supabase.from('wa_heartbeat').select('*').eq('id', 1).maybeSingle(); return data }, enabled: !!userId, refetchInterval: 15000, staleTime: 0 })
   const qWaLogs = useQuery({ queryKey: ['bf', 'wa_logs'], queryFn: async () => { const { data } = await supabase.from('wa_logs').select('*').order('created_at', { ascending: false }).limit(500); return data || [] }, enabled: !!userId, refetchInterval: 5000, staleTime: 0 })
   const qWaClients = useQuery({ queryKey: ['bf', 'wa_clients'], queryFn: async () => { const { data } = await supabase.from('wa_clients').select('*').order('last_seen', { ascending: false }); return data || [] }, enabled: !!userId, refetchInterval: 2000, staleTime: 0 })
+  // shopify_settings 不拉 access_token（敏感欄位、走 shopify-settings Edge Function；DB 層 migration 059 已 column-level REVOKE）
+  const qShopifySettings = useQuery({ queryKey: ['bf', 'shopify_settings'], queryFn: async () => { const { data } = await supabase.from('shopify_settings').select('id, shop_domain, api_version, last_synced_at, updated_at').eq('id', 1).maybeSingle(); return data }, enabled: !!userId, refetchInterval: 60000, staleTime: 0 })
 
   const [products, setProducts] = useState([])
   const [warehouses, setWarehouses] = useState([])
@@ -88,6 +90,7 @@ export function AppProvider({ children }) {
   const [waLogs, setWaLogs] = useState([])
   const [waClients, setWaClients] = useState([])
   const [waHeartbeat, setWaHeartbeat] = useState(null)
+  const [shopifySettings, setShopifySettings] = useState(null)
 
   useEffect(() => { if (qProducts.data) setProducts(qProducts.data) }, [qProducts.data])
   useEffect(() => { if (qWarehouses.data) setWarehouses(qWarehouses.data) }, [qWarehouses.data])
@@ -111,6 +114,7 @@ export function AppProvider({ children }) {
   useEffect(() => { if (qWaHeartbeat.data) setWaHeartbeat(qWaHeartbeat.data) }, [qWaHeartbeat.data])
   useEffect(() => { if (qWaLogs.data) setWaLogs(qWaLogs.data) }, [qWaLogs.data])
   useEffect(() => { if (qWaClients.data) setWaClients(qWaClients.data) }, [qWaClients.data])
+  useEffect(() => { if (qShopifySettings.data) setShopifySettings(qShopifySettings.data) }, [qShopifySettings.data])
 
   // 当前登录的 employee 记录（按 user_id 反查 employees 表）
   const currentEmployee = userId ? employees.find(e => e.user_id === userId) : null
@@ -482,6 +486,7 @@ export function AppProvider({ children }) {
     waLogs, setWaLogs,
     waClients, setWaClients,
     waHeartbeat, setWaHeartbeat,
+    shopifySettings, setShopifySettings,
     qProducts, qWarehouses, qStocks, qSuppliers,
     qCustomers, qLineItemAliases,
     qInvoices, qInventory,
@@ -489,6 +494,7 @@ export function AppProvider({ children }) {
     qFeedbacks, qUpdateLogs, qLogComments,
     qWaSettings, qWaWhitelist, qWaMessages, qWaPending, qWaUnresolved,
     qCompanies, qWaReports, qWaHeartbeat, qWaLogs, qWaClients,
+    qShopifySettings,
     qTaskPending,
     // 跨 view 共用的派生 helper
     customerGroups,

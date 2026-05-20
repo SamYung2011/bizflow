@@ -5,6 +5,7 @@ import { isNonWarrantyItem } from '../lib/warranty.js'
 import { useAppContext } from '../context/AppContext.jsx'
 import { useT } from '../i18n.jsx'
 import { Icon } from '../components/Icon.jsx'
+import ShopifySettingsPanel from '../components/ShopifySettingsPanel.jsx'
 
 // LOW_STOCK_THRESHOLD 已搬到 AppContext（lowStockSkus 也已在那裡計算）
 
@@ -459,7 +460,7 @@ export function ProductsListView({
         </div>
         {/* 子 tab：產品列表 / Line Item 映射 */}
         <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: "1px solid #eef0fa" }}>
-          {[["list", t("產品列表")], ["aliases", t("Line Item 映射")]].map(([k, label]) => {
+          {[["list", t("產品列表")], ["aliases", t("Line Item 映射")], ["shopify", t("Shopify API")]].map(([k, label]) => {
             const on = productsSubTab === k;
             return (
               <button key={k} onClick={() => setProductsSubTab(k)} style={{ padding: "8px 16px", background: "transparent", border: "none", borderBottom: on ? "2px solid #6382ff" : "2px solid transparent", color: on ? "#3b58d4" : "#888", fontSize: 13, fontWeight: 700, cursor: "pointer", marginBottom: -1 }}>{label}</button>
@@ -687,6 +688,7 @@ export function ProductsListView({
             </div>
           );
         })()}
+        {productsSubTab === "shopify" && <ShopifySettingsPanel />}
       </div>
 
       {/* 編輯/新增映射 modal */}
