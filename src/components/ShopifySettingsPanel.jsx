@@ -24,7 +24,7 @@ function normalizeDomain(s) {
 
 export default function ShopifySettingsPanel() {
   const { t } = useT()
-  const { shopifySettings, setShopifySettings, isBfAdmin, products, setProducts } = useAppContext()
+  const { shopifySettings, setShopifySettings, isBfAdmin, products, shopifyVariantLinks, setShopifyVariantLinks } = useAppContext()
   const queryClient = useQueryClient()
 
   const [unlocked, setUnlocked] = useState(false)
@@ -153,14 +153,34 @@ export default function ShopifySettingsPanel() {
   // 手动 link：把 Shopify variant 关联到 bizflow 现有 product
   const [linkModal, setLinkModal] = useState(null) // { variant, product } variant 来自 productList
   const [linkSearch, setLinkSearch] = useState('')
+  const [linkQty, setLinkQty] = useState(1)
   const [linking, setLinking] = useState(false)
-  // bizflow products 反查 by shopify_variant_id（用来在表格上显示已关联）
-  const productByVariantId = React.useMemo(() => {
+  // M:N 关联（migration 062）：shopify_variant_id → [{ link, product }]
+  const productById = React.useMemo(() => {
     const m = new Map()
-    for (const p of products || []) if (p.shopify_variant_id) m.set(p.shopify_variant_id, p)
+    for (const p of products || []) m.set(p.id, p)
     return m
   }, [products])
-  async function handleLink(bizflow_product_id) {
+  const productsByVariantId = React.useMemo(() => {
+    const m = new Map()
+    for (const link of shopifyVariantLinks || []) {
+      const p = productById.get(link.bizflow_product_id)
+      if (!p) continue
+      if (!m.has(link.shopify_variant_id)) m.set(link.shopify_variant_id, [])
+      m.get(link.shopify_variant_id).push({ ...p, _linkQty: link.qty, _linkVariantId: link.shopify_variant_id })
+    }
+    return m
+  }, [shopifyVariantLinks, productById])
+  // bizflow product 反查所有它出现在的 Shopify variants（用来在 modal 上判断是否已关联）
+  const variantsByProductId = React.useMemo(() => {
+    const m = new Map()
+    for (const link of shopifyVariantLinks || []) {
+      if (!m.has(link.bizflow_product_id)) m.set(link.bizflow_product_id, new Set())
+      m.get(link.bizflow_product_id).add(link.shopify_variant_id)
+    }
+    return m
+  }, [shopifyVariantLinks])
+  async function handleLink(bizflow_product_id, qty = 1) {
     if (!linkModal || !pwd) return
     setLinking(true)
     try {
@@ -172,27 +192,44 @@ export default function ShopifySettingsPanel() {
         shopify_product_id: product.id,
         shopify_variant_id: variant.id,
         shopify_sku: variant.sku || null,
+        shopify_qty: qty,
       })
-      // 同步本地 products state
-      const newProducts = products.map(p => p.id === bizflow_product_id ? { ...p, shopify_product_id: product.id, shopify_variant_id: variant.id, shopify_sku: variant.sku || null } : p)
-      setProducts(newProducts)
-      queryClient.setQueryData(['bf', 'products'], newProducts)
-      setLinkModal(null)
+      // 同步本地 shopifyVariantLinks（M:N 表，不再写 products.shopify_*）
+      const existing = (shopifyVariantLinks || []).find(l => l.shopify_variant_id === variant.id && l.bizflow_product_id === bizflow_product_id)
+      let newLinks
+      if (existing) {
+        newLinks = shopifyVariantLinks.map(l => l === existing ? { ...l, qty, updated_at: new Date().toISOString() } : l)
+      } else {
+        newLinks = [...(shopifyVariantLinks || []), {
+          id: `tmp-${Date.now()}`, // server 实际会给真 uuid，下次 query refresh 时刷新
+          shopify_variant_id: variant.id,
+          bizflow_product_id,
+          shopify_product_id: product.id,
+          shopify_sku: variant.sku || null,
+          qty,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }]
+      }
+      setShopifyVariantLinks(newLinks)
+      queryClient.setQueryData(['bf', 'shopify_variant_links'], newLinks)
+      // 不关闭 modal，让她可以连续加多个组件到同一套餐
       setLinkSearch('')
+      // qty 保留，万一她要加另一个相同 qty 的组件
     } catch (e) {
       alert(`${t('關聯失敗')}：${e.message}`)
     } finally {
       setLinking(false)
     }
   }
-  async function handleUnlink(bizflow_product_id) {
+  async function handleUnlink(bizflow_product_id, shopify_variant_id) {
     if (!pwd) { alert(t('請先解鎖')); return }
     if (!window.confirm(t('確定解除關聯？'))) return
     try {
-      await callEdge('shopify-products', { action: 'unlink', pwd, bizflow_product_id })
-      const newProducts = products.map(p => p.id === bizflow_product_id ? { ...p, shopify_product_id: null, shopify_variant_id: null, shopify_sku: null } : p)
-      setProducts(newProducts)
-      queryClient.setQueryData(['bf', 'products'], newProducts)
+      await callEdge('shopify-products', { action: 'unlink', pwd, bizflow_product_id, shopify_variant_id })
+      const newLinks = (shopifyVariantLinks || []).filter(l => !(l.bizflow_product_id === bizflow_product_id && l.shopify_variant_id === shopify_variant_id))
+      setShopifyVariantLinks(newLinks)
+      queryClient.setQueryData(['bf', 'shopify_variant_links'], newLinks)
     } catch (e) {
       alert(`${t('解除失敗')}：${e.message}`)
     }
@@ -377,24 +414,25 @@ export default function ShopifySettingsPanel() {
                         <div></div>
                       </div>
                       {p.variants.map(v => {
-                        const linked = productByVariantId.get(v.id)
+                        const linked = productsByVariantId.get(v.id) || []
                         return (
-                          <div key={v.id} style={{ display: "grid", gridTemplateColumns: "44px 2fr 1fr 70px 60px 1.2fr", gap: 8, padding: "6px 12px", alignItems: "center", fontSize: 12, color: "#555" }}>
+                          <div key={v.id} style={{ display: "grid", gridTemplateColumns: "44px 2fr 1fr 70px 60px 1.2fr", gap: 8, padding: "6px 12px", alignItems: "start", fontSize: 12, color: "#555" }}>
                             <div></div>
                             <div style={{ paddingLeft: 12, color: "#666" }}>↳ {v.title === "Default Title" ? p.title : v.title}</div>
                             <div style={{ fontFamily: "monospace", fontSize: 11, color: v.sku ? "#3b58d4" : "#bbb" }}>{v.sku || t("無 SKU")}</div>
                             <div style={{ textAlign: "right", fontFamily: "monospace", fontSize: 11 }}>{v.price ? `HK$${v.price}` : "—"}</div>
                             <div style={{ textAlign: "right", fontFamily: "monospace", fontSize: 11, color: (v.inventoryQuantity ?? 0) > 0 ? "#047857" : "#991b1b" }}>{v.inventoryQuantity ?? "—"}</div>
-                            <div>
-                              {linked ? (
-                                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                                  <span style={{ padding: "2px 6px", background: "#d1fae5", color: "#047857", borderRadius: 4, fontSize: 10, fontWeight: 700 }}>✓</span>
-                                  <span style={{ fontSize: 11, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={linked.name}>{linked.internal_code || linked.name}</span>
-                                  <button onClick={() => handleUnlink(linked.id)} title={t("解除關聯")} style={{ padding: "2px 6px", background: "#fef2f2", color: "#991b1b", border: "none", borderRadius: 4, fontSize: 10, cursor: "pointer" }}>×</button>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                              {linked.map(lp => (
+                                <div key={lp.id} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11 }}>
+                                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lp.name}>
+                                    <span style={{ color: "#047857", fontWeight: 700 }}>✓</span> {lp.internal_code || lp.name}
+                                    {lp._linkQty > 1 && <span style={{ color: "#92400e", fontWeight: 700 }}> ×{lp._linkQty}</span>}
+                                  </span>
+                                  <button onClick={() => handleUnlink(lp.id, lp._linkVariantId)} title={t("解除關聯")} style={{ padding: "1px 5px", background: "#fef2f2", color: "#991b1b", border: "none", borderRadius: 4, fontSize: 10, cursor: "pointer" }}>×</button>
                                 </div>
-                              ) : (
-                                <button onClick={() => { if (!unlocked || !pwd) { alert(t('請先解鎖')); return } setLinkModal({ variant: v, product: p }) }} disabled={!unlocked} style={{ padding: "4px 8px", background: unlocked ? "#eef2ff" : "#f5f5f5", color: unlocked ? "#3b58d4" : "#aaa", border: "none", borderRadius: 4, fontSize: 11, fontWeight: 700, cursor: unlocked ? "pointer" : "not-allowed" }}>+ {t("關聯")}</button>
-                              )}
+                              ))}
+                              <button onClick={() => { if (!unlocked || !pwd) { alert(t('請先解鎖')); return } setLinkModal({ variant: v, product: p }); setLinkQty(1) }} disabled={!unlocked} style={{ padding: "3px 8px", background: unlocked ? (linked.length > 0 ? "transparent" : "#eef2ff") : "#f5f5f5", color: unlocked ? "#3b58d4" : "#aaa", border: linked.length > 0 ? "1px dashed #c6d3ff" : "none", borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: unlocked ? "pointer" : "not-allowed", alignSelf: "flex-start" }}>+ {linked.length > 0 ? t("加多一個") : t("關聯")}</button>
                             </div>
                           </div>
                         )
@@ -496,8 +534,8 @@ export default function ShopifySettingsPanel() {
             </div>
           )}
 
-          {/* 同步區 */}
-          {productList && (
+          {/* 同步區（M:N 模型下 sync 字段覆盖逻辑要重新设计、暂时停用） */}
+          {false && productList && (
             <div style={{ marginTop: 18, paddingTop: 18, borderTop: "1px dashed #e0e6ff" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 12, flexWrap: "wrap" }}>
                 <div>
@@ -593,6 +631,7 @@ export default function ShopifySettingsPanel() {
       {linkModal && (() => {
         const { variant, product } = linkModal
         const q = linkSearch.trim().toLowerCase()
+        const alreadyLinkedToThisVariant = productsByVariantId.get(variant.id) || []
         const all = (products || []).filter(p => p.status !== 'discontinued' && p.category !== '_archived')
         const matches = (p) => !q || (p.name || "").toLowerCase().includes(q) || (p.internal_code || "").toLowerCase().includes(q) || (p.category || "").toLowerCase().includes(q)
         // 按父子分组：父 product（parent_product_id IS NULL）下面挂子（parent_product_id === parent.id）
@@ -620,32 +659,48 @@ export default function ShopifySettingsPanel() {
                 </div>
                 <button onClick={() => { setLinkModal(null); setLinkSearch('') }} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "6px 10px", cursor: "pointer", fontSize: 16 }}>×</button>
               </div>
-              <div style={{ padding: "12px 22px", borderBottom: "1px solid #f0f0f0" }}>
-                <input value={linkSearch} onChange={e => setLinkSearch(e.target.value)} autoFocus placeholder={t("搜尋 bizflow 商品 / internal_code / 類別...")} style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+              {alreadyLinkedToThisVariant.length > 0 && (
+                <div style={{ padding: "10px 22px", borderBottom: "1px solid #f0f0f0", background: "#fafbff", fontSize: 11, color: "#555" }}>
+                  <div style={{ fontWeight: 700, color: "#3b58d4", marginBottom: 4 }}>{t("已關聯到此 variant（套餐 / 組合）")}</div>
+                  {alreadyLinkedToThisVariant.map(lp => (
+                    <div key={lp.id} style={{ display: "inline-block", padding: "3px 8px", background: "#d1fae5", color: "#047857", borderRadius: 4, marginRight: 6, marginTop: 4, fontSize: 11 }}>
+                      {lp.internal_code || lp.name}{lp._linkQty > 1 && ` ×${lp._linkQty}`}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div style={{ padding: "12px 22px", borderBottom: "1px solid #f0f0f0", display: "flex", gap: 10, alignItems: "center" }}>
+                <input value={linkSearch} onChange={e => setLinkSearch(e.target.value)} autoFocus placeholder={t("搜尋 bizflow 商品 / internal_code / 類別...")} style={{ flex: 1, padding: "9px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <label style={{ fontSize: 11, color: "#666", fontWeight: 700 }}>{t("件數")}</label>
+                  <input type="number" min="1" value={linkQty} onChange={e => setLinkQty(Math.max(1, parseInt(e.target.value) || 1))} style={{ width: 60, padding: "9px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", boxSizing: "border-box", textAlign: "center" }} />
+                </div>
               </div>
               <div style={{ flex: 1, overflowY: "auto", padding: "8px 22px" }}>
                 {groups.length === 0 && <div style={{ padding: 40, textAlign: "center", color: "#aaa", fontSize: 12 }}>{t("沒有匹配的 bizflow 商品")}</div>}
                 {groups.map(g => {
                   // 渲染一行（共用样式）
                   const renderRow = (p, isChild) => {
-                    const alreadyLinked = p.shopify_variant_id === variant.id
-                    const linkedToOther = p.shopify_variant_id && p.shopify_variant_id !== variant.id
-                    const disabled = alreadyLinked || linkedToOther
+                    const linkedVariants = variantsByProductId.get(p.id) || new Set()
+                    const alreadyLinkedHere = linkedVariants.has(variant.id)
+                    const linkedToOthersCount = linkedVariants.size - (alreadyLinkedHere ? 1 : 0)
                     return (
-                      <div key={p.id} onClick={() => !disabled && !linking && handleLink(p.id)} style={{ display: "grid", gridTemplateColumns: "120px 1fr 100px", gap: 12, padding: isChild ? "8px 12px 8px 28px" : "10px 12px", borderBottom: "1px solid #f5f5f5", alignItems: "center", cursor: disabled ? "default" : "pointer", fontSize: 13, background: alreadyLinked ? "#f0fdf4" : linkedToOther ? "#fafafa" : "transparent", opacity: linkedToOther ? 0.55 : 1 }}
-                        onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = "#fafbff" }}
-                        onMouseLeave={e => { if (!disabled) e.currentTarget.style.background = "transparent" }}>
+                      <div key={p.id} onClick={() => !alreadyLinkedHere && !linking && handleLink(p.id, linkQty)} style={{ display: "grid", gridTemplateColumns: "120px 1fr 110px", gap: 12, padding: isChild ? "8px 12px 8px 28px" : "10px 12px", borderBottom: "1px solid #f5f5f5", alignItems: "center", cursor: alreadyLinkedHere ? "default" : "pointer", fontSize: 13, background: alreadyLinkedHere ? "#f0fdf4" : "transparent" }}
+                        onMouseEnter={e => { if (!alreadyLinkedHere) e.currentTarget.style.background = "#fafbff" }}
+                        onMouseLeave={e => { if (!alreadyLinkedHere) e.currentTarget.style.background = "transparent" }}>
                         <div style={{ fontFamily: "monospace", fontSize: 11, color: "#666", display: "flex", alignItems: "center", gap: 4 }}>
                           {isChild && <span style={{ color: "#bbb" }}>↳</span>}
                           {p.internal_code || "—"}
                         </div>
                         <div>
                           <div style={{ fontWeight: isChild ? 500 : 700 }}>{p.name}</div>
-                          <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{p.category || t("未分類")} · HK${p.price || 0}</div>
+                          <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
+                            {p.category || t("未分類")} · HK${p.price || 0}
+                            {linkedToOthersCount > 0 && <span style={{ marginLeft: 6, color: "#92400e" }}>· {t("出現在")} {linkedToOthersCount} {t("個其他 variant")}</span>}
+                          </div>
                         </div>
                         <div style={{ textAlign: "right" }}>
-                          {alreadyLinked ? <span style={{ fontSize: 11, color: "#047857", fontWeight: 700 }}>✓ {t("已關聯")}</span> :
-                           linkedToOther ? <span style={{ fontSize: 10, color: "#92400e" }}>{t("已關聯其他")}</span> :
+                          {alreadyLinkedHere ? <span style={{ fontSize: 11, color: "#047857", fontWeight: 700 }}>✓ {t("已在此套餐")}</span> :
                            <span style={{ fontSize: 11, color: "#3b58d4", fontWeight: 700 }}>{t("選擇 →")}</span>}
                         </div>
                       </div>

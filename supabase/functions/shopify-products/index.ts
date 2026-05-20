@@ -27,6 +27,7 @@ interface Payload {
   shopify_product_id?: string;
   shopify_variant_id?: string;
   shopify_sku?: string | null;
+  shopify_qty?: number; // 多对一时这个 bizflow product 在 Shopify variant 中算几件，默认 1
 }
 
 // normalize 用于 alias_name 跟 Shopify variant displayName 文本匹配
@@ -197,57 +198,59 @@ Deno.serve(async (req) => {
   }
 
   // ── action: link ─────────────────────────────────────────────────────────
-  // 手动关联：把 Shopify variant 链接到指定 bizflow product，写 shopify_* 字段
+  // M:N 关联：写 shopify_variant_links 表
+  //   - 同一 (variant_id, bizflow_product_id) 对：UPSERT（再次 link 更新 qty）
+  //   - 不同 variant 用同一 bizflow product：允许（套餐组件复用）
+  //   - 不同 bizflow product 用同一 variant：允许（套餐多组件）
   if (body.action === "link") {
     if (!body.bizflow_product_id) return json({ error: "Missing bizflow_product_id" }, 400);
     if (!body.shopify_variant_id) return json({ error: "Missing shopify_variant_id" }, 400);
-    // 防止同一 variant 关联到多个 bizflow product
-    const { data: existing, error: chkErr } = await supabase
-      .from("products")
-      .select("id, name, internal_code")
-      .eq("shopify_variant_id", body.shopify_variant_id)
-      .neq("id", body.bizflow_product_id);
-    if (chkErr) return json({ error: `Check failed: ${chkErr.message}` }, 500);
-    if (existing && existing.length > 0) {
-      return json({ error: `Variant 已關聯到其他商品：${existing[0].name} (${existing[0].internal_code})`, conflicts: existing }, 409);
-    }
-    const patch = {
-      shopify_product_id: body.shopify_product_id || null,
+    const row = {
       shopify_variant_id: body.shopify_variant_id,
+      bizflow_product_id: body.bizflow_product_id,
+      shopify_product_id: body.shopify_product_id || null,
       shopify_sku: body.shopify_sku || null,
+      qty: typeof body.shopify_qty === "number" && body.shopify_qty > 0 ? body.shopify_qty : 1,
+      updated_at: new Date().toISOString(),
     };
-    const { error } = await supabase.from("products").update(patch).eq("id", body.bizflow_product_id);
+    const { error } = await supabase
+      .from("shopify_variant_links")
+      .upsert(row, { onConflict: "shopify_variant_id,bizflow_product_id" });
     if (error) return json({ error: `Link failed: ${error.message}` }, 500);
     return json({ ok: true });
   }
 
   // ── action: unlink ───────────────────────────────────────────────────────
+  // 删一行 (variant, product) 关联。需要二元定位
   if (body.action === "unlink") {
     if (!body.bizflow_product_id) return json({ error: "Missing bizflow_product_id" }, 400);
-    const { error } = await supabase.from("products").update({
-      shopify_product_id: null,
-      shopify_variant_id: null,
-      shopify_sku: null,
-    }).eq("id", body.bizflow_product_id);
+    if (!body.shopify_variant_id) return json({ error: "Missing shopify_variant_id" }, 400);
+    const { error } = await supabase
+      .from("shopify_variant_links")
+      .delete()
+      .eq("bizflow_product_id", body.bizflow_product_id)
+      .eq("shopify_variant_id", body.shopify_variant_id);
     if (error) return json({ error: `Unlink failed: ${error.message}` }, 500);
     return json({ ok: true });
   }
 
   // ── action: link-from-aliases ────────────────────────────────────────────
   // 通过 line_item_aliases 表倒推：
-  //   alias.alias_name 来自历史订单 line item title，应该跟 Shopify variant 当前 displayName 高度匹配
-  //   → 把 alias 关联的 bizflow product 跟 Shopify variant.id 自动 link
-  // 只处理单品 alias（skip=false + products.length===1），套装/押金/Final Payment 跳过
+  //   alias.alias_name 来自历史订单 line item title，跟 Shopify variant 当前 displayName 匹配
+  //   alias.products 可以是单品（1 行）或套装（多行）→ 每行都 link 到同一个 Shopify variant，带 qty
+  // skip alias（押金/租務/Final Payment）跳过
   if (body.action === "link-from-aliases") {
     const confirm = body.confirm === true;
     try {
-      const [shopifyProducts, aliasResp, prodResp] = await Promise.all([
+      const [shopifyProducts, aliasResp, prodResp, linksResp] = await Promise.all([
         fetchAllProducts(domain, token),
         supabase.from("line_item_aliases").select("id, alias_name, skip, products, verified"),
-        supabase.from("products").select("id, name, internal_code, shopify_variant_id"),
+        supabase.from("products").select("id, name, internal_code"),
+        supabase.from("shopify_variant_links").select("shopify_variant_id, bizflow_product_id"),
       ]);
       if (aliasResp.error) throw new Error(`Read aliases failed: ${aliasResp.error.message}`);
       if (prodResp.error) throw new Error(`Read products failed: ${prodResp.error.message}`);
+      if (linksResp.error) throw new Error(`Read links failed: ${linksResp.error.message}`);
 
       // Shopify variants 索引：normalize(displayName) → variant
       // displayName 形如 "product.title - variant.title"（非 Default Title）或 "product.title"
@@ -269,14 +272,10 @@ Deno.serve(async (req) => {
       const bizById = new Map<string, Record<string, unknown>>();
       for (const p of prodResp.data || []) bizById.set(String(p.id), p);
 
-      // 已被 link 的 bizflow product / Shopify variant
-      const alreadyLinkedBizflow = new Set<string>();
-      const alreadyLinkedVariant = new Set<string>();
-      for (const p of prodResp.data || []) {
-        if (p.shopify_variant_id) {
-          alreadyLinkedBizflow.add(String(p.id));
-          alreadyLinkedVariant.add(String(p.shopify_variant_id));
-        }
+      // 已 link 的 (bizflow_product_id, shopify_variant_id) 对（从 M:N 关联表查）
+      const linkedPairs = new Set<string>();
+      for (const link of linksResp.data || []) {
+        linkedPairs.add(`${link.bizflow_product_id}|${link.shopify_variant_id}`);
       }
 
       interface AliasLinkRow {
@@ -290,49 +289,63 @@ Deno.serve(async (req) => {
         shopify_variant_id?: string;
         shopify_display_name?: string;
         shopify_sku?: string | null;
+        shopify_qty?: number;
+        is_bundle?: boolean;
       }
       const plan: AliasLinkRow[] = [];
 
       for (const a of aliasResp.data || []) {
-        const base: AliasLinkRow = { action: "skip", alias_name: String(a.alias_name) };
+        const aliasName = String(a.alias_name);
+        const base: AliasLinkRow = { action: "skip", alias_name: aliasName };
         if (a.skip === true) { plan.push({ ...base, reason: "alias.skip=true（押金/租務/Final Payment）" }); continue; }
         const ps = Array.isArray(a.products) ? a.products : [];
         if (ps.length === 0) { plan.push({ ...base, reason: "alias.products 空" }); continue; }
-        if (ps.length > 1) { plan.push({ ...base, reason: "套裝（多 product），不自動關聯" }); continue; }
-        const pid = String(ps[0].product_id || "");
-        if (!pid) { plan.push({ ...base, reason: "alias product_id 空" }); continue; }
-        const biz = bizById.get(pid);
-        if (!biz) { plan.push({ ...base, reason: "bizflow product 已刪除" }); continue; }
-        if (alreadyLinkedBizflow.has(pid)) { plan.push({ ...base, bizflow_id: pid, bizflow_name: String(biz.name || ""), reason: "bizflow product 已關聯其他 variant" }); continue; }
 
-        const k = normalize(a.alias_name);
+        // 匹配 Shopify variant by alias_name 文本
+        const k = normalize(aliasName);
         const matches = variantByName.get(k) || [];
-        // 过滤掉已被其他 bizflow product 占用的 variant
-        const usable = matches.filter(m => !alreadyLinkedVariant.has(m.v.id));
-        if (usable.length === 0) {
-          plan.push({ ...base, bizflow_id: pid, bizflow_name: String(biz.name || ""), bizflow_internal_code: String(biz.internal_code || ""), reason: matches.length > 0 ? "Shopify variant 已被其他 bizflow product 關聯" : "Shopify 找不到匹配的 variant title" });
+        if (matches.length === 0) {
+          plan.push({ ...base, reason: "Shopify 找不到匹配的 variant title" });
           continue;
         }
-        if (usable.length > 1) {
-          plan.push({ ...base, bizflow_id: pid, bizflow_name: String(biz.name || ""), bizflow_internal_code: String(biz.internal_code || ""), reason: `匹配到 ${usable.length} 個 Shopify variant（ambiguous，跳過）` });
+        if (matches.length > 1) {
+          plan.push({ ...base, reason: `匹配到 ${matches.length} 個 Shopify variant（ambiguous，跳過）` });
           continue;
         }
-        const m = usable[0];
+        const m = matches[0];
         const isDefault = m.v.title === "Default Title";
-        plan.push({
-          action: "link",
-          alias_name: String(a.alias_name),
-          bizflow_id: pid,
-          bizflow_name: String(biz.name || ""),
-          bizflow_internal_code: String(biz.internal_code || ""),
-          shopify_product_id: m.p.id,
-          shopify_variant_id: m.v.id,
-          shopify_display_name: isDefault ? m.p.title : `${m.p.title} - ${m.v.title}`,
-          shopify_sku: m.v.sku || null,
-        });
-        // 防止后续 alias 重复 link 同一对
-        alreadyLinkedBizflow.add(pid);
-        alreadyLinkedVariant.add(m.v.id);
+        const displayName = isDefault ? m.p.title : `${m.p.title} - ${m.v.title}`;
+        const isBundle = ps.length > 1;
+
+        // alias.products 可以多行（套装）→ 每个 component 一条 link，shopify_qty = component.qty
+        for (const comp of ps) {
+          const pid = String(comp.product_id || "");
+          if (!pid) continue;
+          const biz = bizById.get(pid);
+          if (!biz) {
+            plan.push({ ...base, reason: `bizflow product ${pid.slice(0, 8)} 已刪除`, shopify_display_name: displayName });
+            continue;
+          }
+          const pairKey = `${pid}|${m.v.id}`;
+          if (linkedPairs.has(pairKey)) {
+            plan.push({ ...base, bizflow_id: pid, bizflow_name: String(biz.name || ""), bizflow_internal_code: String(biz.internal_code || ""), shopify_display_name: displayName, reason: "已關聯（跳過）", is_bundle: isBundle });
+            continue;
+          }
+          plan.push({
+            action: "link",
+            alias_name: aliasName,
+            bizflow_id: pid,
+            bizflow_name: String(biz.name || ""),
+            bizflow_internal_code: String(biz.internal_code || ""),
+            shopify_product_id: m.p.id,
+            shopify_variant_id: m.v.id,
+            shopify_display_name: displayName,
+            shopify_sku: m.v.sku || null,
+            shopify_qty: Number(comp.qty) > 0 ? Number(comp.qty) : 1,
+            is_bundle: isBundle,
+          });
+          linkedPairs.add(pairKey);
+        }
       }
 
       const stats = {
@@ -343,16 +356,21 @@ Deno.serve(async (req) => {
 
       if (!confirm) return json({ ok: true, dryRun: true, stats, plan });
 
-      // 实际写
+      // 实际写：INSERT 到 shopify_variant_links（UPSERT 重复对）
       const results = { linked: 0, errors: [] as string[] };
       for (const row of plan) {
         if (row.action !== "link") continue;
-        const patch = {
-          shopify_product_id: row.shopify_product_id,
+        const linkRow = {
           shopify_variant_id: row.shopify_variant_id,
-          shopify_sku: row.shopify_sku,
+          bizflow_product_id: row.bizflow_id,
+          shopify_product_id: row.shopify_product_id || null,
+          shopify_sku: row.shopify_sku || null,
+          qty: row.shopify_qty || 1,
+          updated_at: new Date().toISOString(),
         };
-        const { error } = await supabase.from("products").update(patch).eq("id", row.bizflow_id);
+        const { error } = await supabase
+          .from("shopify_variant_links")
+          .upsert(linkRow, { onConflict: "shopify_variant_id,bizflow_product_id" });
         if (error) { results.errors.push(`link ${row.bizflow_id} ← ${row.shopify_variant_id}: ${error.message}`); continue; }
         results.linked++;
       }
@@ -363,13 +381,15 @@ Deno.serve(async (req) => {
   }
 
   // ── action: sync ─────────────────────────────────────────────────────────
-  // 单向 Shopify → bizflow。按 SKU 匹配现有 bizflow products；
-  //   命中 → UPDATE name/price/image_url/shopify_* 字段；
-  //   没命中 → INSERT 新 product + needs_review=true 等使用者审；
-  //   variant 无 SKU → 跳过（让使用者去 Shopify 补完再 sync）
-  // 不动 inventory_stock（库存逻辑使用者还在想）
-  // confirm=false 走 dry-run 只返回计划、不写 DB
+  // 已废弃：M:N 关联模型下「用 Shopify name/price 覆盖 bizflow product」语义不通
+  // （一个 bizflow product 出现在多个 Shopify variant 里时该用哪个 variant 的字段覆盖？）
+  // 新方向：sync 走库存方向 = Shopify variant 库存按 qty 拆到 bizflow component products
+  // 库存逻辑使用者还在想，暂时停用
   if (body.action === "sync") {
+    return json({ error: "sync action 已停用（M:N 模型下需重新設計）。link 完先用，sync 邏輯之後再加" }, 501);
+  }
+  // 旧 sync 实现保留在 git 历史里以备查（commit 947cefa 前）
+  if (body.action === "sync_old_disabled") {
     const confirm = body.confirm === true;
     try {
       const shopifyProducts = await fetchAllProducts(domain, token);

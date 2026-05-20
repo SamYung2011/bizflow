@@ -1176,6 +1176,12 @@ const DICT_EN = {
   "個規格": "variants",
   "選擇下方規格": "Choose a variant below",
   "已關聯其他": "Linked elsewhere",
+  "加多一個": "+ another",
+  "已關聯到此 variant（套餐 / 組合）": "Already linked to this variant (bundle)",
+  "已在此套餐": "Already in this bundle",
+  "件數": "Qty",
+  "出現在": "Appears in",
+  "個其他 variant": "other variants",
 };
 
 const DICT_FR = {
@@ -2349,6 +2355,12 @@ const DICT_FR = {
   "個規格": "variantes",
   "選擇下方規格": "Choisir une variante ci-dessous",
   "已關聯其他": "Lié ailleurs",
+  "加多一個": "+ ajouter",
+  "已關聯到此 variant（套餐 / 組合）": "Déjà lié à cette variante (lot)",
+  "已在此套餐": "Déjà dans ce lot",
+  "件數": "Qté",
+  "出現在": "Apparaît dans",
+  "個其他 variant": "autres variantes",
 };
 
 const I18nContext = createContext({ lang: "zh", setLang: () => {}, t: (s) => s });
