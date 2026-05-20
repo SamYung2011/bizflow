@@ -551,7 +551,7 @@ function FeedbackThread({ tk, fbList, employees, empCompanies = [], me, userId, 
       })()}
       <form onSubmit={submit} style={{ display: 'flex', gap: 5, position: 'relative' }}>
         <label style={{ display: 'inline-flex', alignItems: 'center', padding: '6px 9px', background: c.amberBg, border: '1px solid #fde68a', borderRadius: radius.sm, fontSize: 13, cursor: 'pointer' }}>
-          📎<input type="file" multiple style={{ display: 'none' }} onChange={e => { setFiles(prev => [...prev, ...Array.from(e.target.files || [])]); e.target.value = '' }} />
+          📎<input type="file" multiple style={{ display: 'none' }} onChange={e => { const picked = Array.from(e.target.files || []); e.target.value = ''; if (picked.length > 0) setFiles(prev => [...prev, ...picked]) }} />
         </label>
         <textarea value={body} onChange={handleChange} onPaste={handlePaste} onKeyDown={e => { if (e.key === 'Escape') setMentionPop({ open: false, query: '', atIdx: -1 }); if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); e.currentTarget.form?.requestSubmit() } }} rows={2} placeholder={t('追加反饋… @ 提醒；可粘貼圖片；Cmd+Enter 發送')} style={{ flex: 1, padding: '7px 9px', borderRadius: radius.sm, border: '1px solid #fde68a', fontSize: 11, outline: 'none', resize: 'vertical', fontFamily: 'inherit' }} />
         <button type="submit" style={{ background: c.amber, color: '#fff', border: 'none', borderRadius: radius.sm, padding: '6px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>{t('發送')}</button>
