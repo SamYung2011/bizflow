@@ -62,9 +62,11 @@ function AdminTopBar({ me, ctx, data, view, setView, isMobile, pendingCount, onP
   const { t, lang, setLang } = useT()
   const isSales = me.role === '銷售'
   // 只 Honnmono 公司可以跳 bizflow 主端（其他公司沒有 bizflow 後台）
+  // 且 employees.bizflow_main_access = true 的人才有入口（白名單，跟主端 RLS 一致）
   // super admin 在任意公司視角看 Honnmono 也算（兜底）
   const isHonnmonoActive = ctx.activeCompany?.name === 'Honnmono'
-  const canGoBizflow = isHonnmonoActive || ctx.isSuperAdmin
+  const isBizflowWhitelisted = me?.bizflow_main_access === true || ctx.isSuperAdmin
+  const canGoBizflow = (isHonnmonoActive || ctx.isSuperAdmin) && isBizflowWhitelisted
   const navs = [
     ['tasks', t('任務'), true],
     ['employees', t('員工管理'), canEmployees],
