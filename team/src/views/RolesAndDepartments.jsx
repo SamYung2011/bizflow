@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabaseClient.js'
-import { c, radius, S, Empty, tcell } from '../styles.jsx'
+import { c, radius, S, Empty, tcell, useToggleSet } from '../styles.jsx'
 import { useT } from '../i18n.jsx'
 
 // RBAC 權限點清單。新增權限點時，roles 表中已有的 role 沒這個 key → 視為 false。
@@ -68,10 +68,7 @@ function RolesView({ data, ctx }) {
   const [newRoleByCompany, setNewRoleByCompany] = useState({})
   const [editingId, setEditingId] = useState(null)
   const [editDraft, setEditDraft] = useState({ name: '', permissions: {} })
-  const [collapsed, setCollapsed] = useState(() => new Set())
-  const toggleCo = (coId) => setCollapsed(prev => {
-    const n = new Set(prev); n.has(coId) ? n.delete(coId) : n.add(coId); return n
-  })
+  const [collapsed, toggleCo] = useToggleSet()
 
   const startEdit = (r) => {
     setEditingId(r.id)
@@ -203,14 +200,8 @@ function DepartmentsView({ data, ctx }) {
   const [editName, setEditName] = useState('')
   const [addMemberFor, setAddMemberFor] = useState(null)
   const [memberQuery, setMemberQuery] = useState('')
-  const [collapsedCo, setCollapsedCo] = useState(() => new Set())
-  const toggleCo = (coId) => setCollapsedCo(prev => {
-    const n = new Set(prev); n.has(coId) ? n.delete(coId) : n.add(coId); return n
-  })
-  const [expandedDept, setExpandedDept] = useState(() => new Set())
-  const toggleDept = (dId) => setExpandedDept(prev => {
-    const n = new Set(prev); n.has(dId) ? n.delete(dId) : n.add(dId); return n
-  })
+  const [collapsedCo, toggleCo] = useToggleSet()
+  const [expandedDept, toggleDept] = useToggleSet()
 
   const addDept = async (companyId) => {
     const name = (newDeptByCompany[companyId] || '').trim()

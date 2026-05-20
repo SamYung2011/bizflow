@@ -1,11 +1,11 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from './supabaseClient.js'
-import { c, radius, font, S, fetchAllTable, useIsMobile, Center, Empty, Field, Section, fmtShort, fmtDateTime, tcell } from './styles.jsx'
+import { c, radius, font, S, fetchAllTable, useIsMobile, useToggleSet, Empty, Field, Section, Pill, fmtShort, fmtDateTime, tcell } from './styles.jsx'
 import { useT } from './i18n.jsx'
 import { UpdateLogView } from './App.jsx'
 import EditTaskModal from './components/EditTaskModal.jsx'
-import { isTaskAssignedTo, empDoneFor, empAbandonedFor, isAwaitingApproval, uploadAttachment } from './lib/taskHelpers.js'
+import { isTaskAssignedTo, empDoneFor, empAbandonedFor, isAwaitingApproval, uploadAttachment, getAssigneeRow, empIdsInCompany } from './lib/taskHelpers.js'
 import CompaniesView from './views/Companies.jsx'
 import CommissionView from './views/Commission.jsx'
 import RolesAndDepartmentsView from './views/RolesAndDepartments.jsx'
@@ -13,8 +13,6 @@ import RolesAndDepartmentsView from './views/RolesAndDepartments.jsx'
 // ============================================================
 //  Admin 視角：員工管理 / 任務看板 / 帳號審核 / 佣金 / 更新日誌
 // ============================================================
-
-const HELEN_EMAIL = 'a1017339632@gmail.com'
 
 // 共享數據 hooks
 function useAdminData() {
@@ -268,13 +266,12 @@ function AdminTopBar({ me, ctx, data, view, setView, isMobile, pendingCount, onP
 // ====================  TASKS VIEW (admin) ====================
 function TasksView({ data, me, session, isMobile, ctx }) {
   const { t } = useT()
-  const { employees: allEmployees, companies, empCompanies, tasks: allTasks, assignees, feedbacks, assigneesByTask } = data
-  const queryClient = useQueryClient()
+  const { employees: allEmployees, empCompanies, tasks: allTasks, assigneesByTask } = data
   const userId = session.user.id
 
   // 按當前活躍公司（ctx.activeCompanyId）過濾員工 + 任務
   const empIdsInActive = useMemo(
-    () => new Set(empCompanies.filter(ec => ec.company_id === ctx.activeCompanyId).map(ec => ec.employee_id)),
+    () => empIdsInCompany(empCompanies, ctx.activeCompanyId),
     [empCompanies, ctx.activeCompanyId]
   )
   const employees = useMemo(
@@ -296,11 +293,7 @@ function TasksView({ data, me, session, isMobile, ctx }) {
   const [mode, setMode] = useState(ctx.isSuperAdmin || ctx.isAdminOfActive ? 'overview' : 'list')
   const [selectedEmpId, setSelectedEmpId] = useState(ctx.isSuperAdmin || ctx.isAdminOfActive ? null : me.id)
   const [editingTask, setEditingTask] = useState(null)
-  const [overviewExpanded, setOverviewExpanded] = useState(new Set())
-
-  // companyFilter 已被頂部公司切換器取代，這裡保留 stub 給子組件兼容
-  const companyFilter = ctx.activeCompanyId
-  const setCompanyFilter = () => {}
+  const [overviewExpanded, toggleOverviewExpanded] = useToggleSet()
 
   const selectedEmp = selectedEmpId ? employees.find(e => e.id === selectedEmpId) : null
 
@@ -313,7 +306,7 @@ function TasksView({ data, me, session, isMobile, ctx }) {
             <TaskBoard emp={selectedEmp} data={scopedData} me={me} userId={userId} setEditingTask={setEditingTask} companyId={ctx.activeCompanyId} ctx={ctx} compact />
           </div>
         ) : (
-          <EmpListMobile employees={visibleEmployees} companies={companies} companyFilter={companyFilter} setCompanyFilter={setCompanyFilter} tasks={tasks} assigneesByTask={assigneesByTask} onSelect={(e) => setSelectedEmpId(e.id)} me={me} />
+          <EmpListMobile employees={visibleEmployees} tasks={tasks} assigneesByTask={assigneesByTask} onSelect={(e) => setSelectedEmpId(e.id)} me={me} />
         )}
         {editingTask && <EditTaskModal task={editingTask} data={scopedData} me={me} userId={userId} onClose={() => setEditingTask(null)} ctx={ctx} />}
       </div>
@@ -323,13 +316,13 @@ function TasksView({ data, me, session, isMobile, ctx }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 18, minHeight: 'calc(100vh - 80px)' }}>
       <EmpSidebar
-        employees={visibleEmployees} companies={companies} companyFilter={companyFilter} setCompanyFilter={setCompanyFilter}
+        employees={visibleEmployees}
         mode={mode} setMode={setMode} selectedEmpId={selectedEmpId} setSelectedEmpId={setSelectedEmpId}
         tasks={tasks} assigneesByTask={assigneesByTask} me={me}
       />
       <div>
         {mode === 'overview' ? (
-          <OverviewView employees={visibleEmployees} tasks={tasks} assigneesByTask={assigneesByTask} expanded={overviewExpanded} setExpanded={setOverviewExpanded} setEditingTask={setEditingTask} />
+          <OverviewView employees={visibleEmployees} tasks={tasks} assigneesByTask={assigneesByTask} expanded={overviewExpanded} toggleExpanded={toggleOverviewExpanded} setEditingTask={setEditingTask} />
         ) : selectedEmp ? (
           <TaskBoard emp={selectedEmp} data={scopedData} me={me} userId={userId} setEditingTask={setEditingTask} companyId={ctx.activeCompanyId} ctx={ctx} />
         ) : (
@@ -342,7 +335,7 @@ function TasksView({ data, me, session, isMobile, ctx }) {
 }
 
 // ====================  員工側欄  ====================
-function EmpSidebar({ employees, companies, companyFilter, setCompanyFilter, mode, setMode, selectedEmpId, setSelectedEmpId, tasks, assigneesByTask, me }) {
+function EmpSidebar({ employees, mode, setMode, selectedEmpId, setSelectedEmpId, tasks, assigneesByTask, me }) {
   const { t } = useT()
   return (
     <aside style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.lg, padding: 14, display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 100px)' }}>
@@ -381,7 +374,7 @@ function EmpSidebar({ employees, companies, companyFilter, setCompanyFilter, mod
   )
 }
 
-function EmpListMobile({ employees, companies, companyFilter, setCompanyFilter, tasks, assigneesByTask, onSelect, me }) {
+function EmpListMobile({ employees, tasks, assigneesByTask, onSelect, me }) {
   const { t } = useT()
   return (
     <div>
@@ -399,7 +392,7 @@ function EmpListMobile({ employees, companies, companyFilter, setCompanyFilter, 
 }
 
 // ====================  TASK OVERVIEW  ====================
-function OverviewView({ employees, tasks, assigneesByTask, expanded, setExpanded, setEditingTask }) {
+function OverviewView({ employees, tasks, assigneesByTask, expanded, toggleExpanded, setEditingTask }) {
   const { t } = useT()
   return (
     <div>
@@ -421,7 +414,7 @@ function OverviewView({ employees, tasks, assigneesByTask, expanded, setExpanded
           ]
           return (
             <div key={e.id} style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.lg }}>
-              <div onClick={() => setExpanded(prev => { const n = new Set(prev); n.has(e.id) ? n.delete(e.id) : n.add(e.id); return n })} style={{ padding: '12px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div onClick={() => toggleExpanded(e.id)} style={{ padding: '12px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12 }}>
                 <span style={{ fontSize: 11, color: c.textMuted, width: 10 }}>{isExp ? '▼' : '▶'}</span>
                 <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'linear-gradient(135deg,#7c9dff,#a78bfa)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700 }}>{(e.name || '?').slice(0, 1)}</div>
                 <div style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>{e.name}</div>
@@ -615,7 +608,7 @@ function TaskBoard({ emp, data, me, userId, setEditingTask, compact, companyId, 
             <div style={{ fontSize: 10, color: c.textFaint, marginTop: 4, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {task.creator_employee_id && task.creator_employee_id !== emp.id && (() => {
                 const cr = employees.find(x => x.id === task.creator_employee_id)
-                return cr ? <span style={{ background: c.accentBg, color: c.accent, padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>{cr.name} {t('分配')}</span> : null
+                return cr ? <Pill>{cr.name} {t('分配')}</Pill> : null
               })()}
               {task.due_date && (() => {
                 const days = Math.ceil((new Date(task.due_date) - new Date()) / 86400000)
@@ -640,11 +633,11 @@ function TaskBoard({ emp, data, me, userId, setEditingTask, compact, companyId, 
               )}
               {isAwaitingApproval(task, assigneesByTask) && (() => {
                 const cr = employees.find(x => x.id === task.creator_employee_id)
-                return <span style={{ background: c.amberBg, color: c.amber, padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>{t('等待')} {cr?.name || t('發布人')} {t('核驗')}</span>
+                return <Pill tone="amber">{t('等待')} {cr?.name || t('發布人')} {t('核驗')}</Pill>
               })()}
               {task.department_id && (() => {
                 const d = (departments || []).find(x => x.id === task.department_id)
-                return d ? <span style={{ background: '#f3e8ff', color: '#7c3aed', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>{d.name} {t('部門')}</span> : null
+                return d ? <Pill tone="purple">{d.name} {t('部門')}</Pill> : null
               })()}
             </div>
           </div>
@@ -726,10 +719,7 @@ function EmpHeader({ emp, me }) {
 // 反饋面板（只看 emp 未完成 task；卡片可展開看全部反饋）
 function FbPanel({ fbList, feedbacks, setEditingTask }) {
   const { t } = useT()
-  const [expanded, setExpanded] = useState(new Set())
-  const toggle = (id) => setExpanded(prev => {
-    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n
-  })
+  const [expanded, toggle] = useToggleSet()
   return (
     <div style={{ background: c.amberBg, border: `1px solid #fde68a`, borderRadius: radius.lg, padding: 12, minHeight: 220 }}>
       <div style={{ fontSize: 13, fontWeight: 700, color: '#a16207', marginBottom: 8 }}>💬 {t('任務反饋記錄')} <span style={{ fontSize: 11, color: '#b88a00' }}>{fbList.length}</span></div>
@@ -803,7 +793,7 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
   const effective = assigneeIds === null ? [emp.id] : assigneeIds
   // 候選限「任務所屬公司」的 binding 成員（跨公司綁定靠 employee_companies，不能用 employees.company_id 老字段）
   const empIdsInScope = useMemo(
-    () => new Set(empCompanies.filter(ec => ec.company_id === taskCompanyId).map(ec => ec.employee_id)),
+    () => empIdsInCompany(empCompanies, taskCompanyId),
     [empCompanies, taskCompanyId]
   )
   const sameCo = (e) => taskCompanyId ? empIdsInScope.has(e.id) : true
@@ -1026,13 +1016,7 @@ function EmployeesView({ data, me, isMobile, ctx }) {
   const queryClient = useQueryClient()
   const [showAdd, setShowAdd] = useState(false)
   // 折疊狀態：存「主動折疊」的公司 id（默認全展開）
-  const [collapsed, setCollapsed] = useState(() => new Set())
-  const toggle = (coId) => setCollapsed(prev => {
-    const n = new Set(prev)
-    if (n.has(coId)) n.delete(coId)
-    else n.add(coId)
-    return n
-  })
+  const [collapsed, toggle] = useToggleSet()
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['admin', 'employees'] })
@@ -1121,7 +1105,7 @@ function EmployeesView({ data, me, isMobile, ctx }) {
   const empsByCompany = useMemo(() => {
     const m = new Map()
     for (const co of visibleCompanies) {
-      const ids = new Set(empCompanies.filter(ec => ec.company_id === co.id).map(ec => ec.employee_id))
+      const ids = empIdsInCompany(empCompanies, co.id)
       m.set(co.id, employees.filter(e => e.active !== false && ids.has(e.id)))
     }
     return m

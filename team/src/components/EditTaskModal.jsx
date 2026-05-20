@@ -1,13 +1,14 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../supabaseClient.js'
-import { c, radius, S, fmtDateTime } from '../styles.jsx'
+import { c, radius, S, Pill, fmtDateTime } from '../styles.jsx'
 import { useT } from '../i18n.jsx'
 import {
   isAwaitingApproval,
   getTaskCompanyId,
   uploadAttachment,
   empDoneFor,
+  empIdsInCompany,
 } from '../lib/taskHelpers.js'
 
 export default function EditTaskModal({ task: initial, data, me, userId, onClose, ctx }) {
@@ -244,7 +245,7 @@ function AssigneeEditor({ tk, tkList, employees, empCompanies = [], canManage, s
   const cur = tkList.map(a => a.employee_id)
   const q = input.replace(/^@/, '').toLowerCase()
   const empIdsInScope = useMemo(
-    () => new Set(empCompanies.filter(ec => ec.company_id === scopeCompanyId).map(ec => ec.employee_id)),
+    () => empIdsInCompany(empCompanies, scopeCompanyId),
     [empCompanies, scopeCompanyId]
   )
   const sameCo = (e) => scopeCompanyId ? empIdsInScope.has(e.id) : true
@@ -334,7 +335,7 @@ function SubtaskList({ tk, subtasks, employees, empCompanies = [], feedbacks, as
   const effectiveSub = subAssignees === null ? parentAssignees : subAssignees
   const sq = subInput.replace(/^@/, '').toLowerCase()
   const empIdsInScope = useMemo(
-    () => new Set(empCompanies.filter(ec => ec.company_id === scopeCompanyId).map(ec => ec.employee_id)),
+    () => empIdsInCompany(empCompanies, scopeCompanyId),
     [empCompanies, scopeCompanyId]
   )
   const sameCo = (e) => scopeCompanyId ? empIdsInScope.has(e.id) : true
@@ -443,7 +444,7 @@ function FeedbackThread({ tk, fbList, employees, empCompanies = [], me, userId, 
   }
 
   const empIdsInScope = useMemo(
-    () => new Set(empCompanies.filter(ec => ec.company_id === scopeCompanyId).map(ec => ec.employee_id)),
+    () => empIdsInCompany(empCompanies, scopeCompanyId),
     [empCompanies, scopeCompanyId]
   )
   const sameCo = (e) => scopeCompanyId ? empIdsInScope.has(e.id) : true

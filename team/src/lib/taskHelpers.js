@@ -43,6 +43,14 @@ export function getTaskCompanyId(task, assigneesByTask, employees) {
   return null
 }
 
+export function getAssigneeRow(task, empId, assigneesByTask) {
+  return (assigneesByTask.get(task.id) || []).find(a => a.employee_id === empId) || null
+}
+
+export function empIdsInCompany(empCompanies, companyId) {
+  return new Set(empCompanies.filter(ec => ec.company_id === companyId).map(ec => ec.employee_id))
+}
+
 export async function uploadAttachment(file, taskId) {
   const ext = (file.name.split('.').pop() || 'bin').toLowerCase()
   const path = `${taskId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`

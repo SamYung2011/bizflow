@@ -47,7 +47,7 @@ export async function fetchAllTable(table, orderCol, ascending = true, filters =
   return data || []
 }
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 export function useIsMobile() {
   const [is, setIs] = useState(() => typeof window !== 'undefined' && window.innerWidth < BREAKPOINT)
   useEffect(() => {
@@ -56,6 +56,28 @@ export function useIsMobile() {
     return () => window.removeEventListener('resize', handler)
   }, [])
   return is
+}
+
+// 返回 [Set, toggle(id)]。toggle 已穩定 reference，可直接放 deps。
+export function useToggleSet(initial) {
+  const [set, setSet] = useState(() => new Set(initial))
+  const toggle = useCallback((id) => setSet(prev => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n
+  }), [])
+  return [set, toggle, setSet]
+}
+
+// 小標籤 chip。tone='accent'|'amber'|'green'|'red'|'purple'，bold 默認 true。
+const PILL_TONES = {
+  accent: { bg: c.accentBg, fg: c.accent },
+  amber: { bg: c.amberBg, fg: c.amber },
+  green: { bg: c.greenBg, fg: c.green },
+  red: { bg: c.redBg, fg: c.red },
+  purple: { bg: '#f3e8ff', fg: '#7c3aed' },
+}
+export const Pill = ({ tone = 'accent', children, style }) => {
+  const { bg, fg } = PILL_TONES[tone] || PILL_TONES.accent
+  return <span style={{ background: bg, color: fg, padding: '1px 6px', borderRadius: 4, fontWeight: 600, fontSize: 11, ...style }}>{children}</span>
 }
 
 export const Center = ({ children }) => <div style={{ minHeight: '100vh', background: c.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 14, padding: 20, fontFamily: font.ui, color: c.text }}>{children}</div>

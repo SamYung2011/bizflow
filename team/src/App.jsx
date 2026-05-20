@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from './supabaseClient.js'
-import { c, radius, font, S, fetchAllTable, Center, Empty, Field, Section, fmtDateTime } from './styles.jsx'
+import { c, radius, font, S, fetchAllTable, useToggleSet, Center, Empty, Field, Section, fmtDateTime } from './styles.jsx'
 import AdminApp from './admin.jsx'
 import MarkdownText from './MarkdownText.jsx'
 import { useT } from './i18n.jsx'
@@ -191,7 +191,7 @@ export function UpdateLogView({ me, session, isMobile }) {
   const [draft, setDraft] = useState({ summary: '', detail: '' })
   const [editingId, setEditingId] = useState(null)
   const [editDraft, setEditDraft] = useState({ summary: '', detail: '' })
-  const [expanded, setExpanded] = useState(new Set())
+  const [expanded, toggleExpanded] = useToggleSet()
   const [cmtDraft, setCmtDraft] = useState({})
 
   const logs = qLogs.data || []
@@ -272,7 +272,7 @@ export function UpdateLogView({ me, session, isMobile }) {
                   </div>
                 ) : (
                   <>
-                    <div onClick={() => setExpanded(p => { const n = new Set(p); n.has(log.id) ? n.delete(log.id) : n.add(log.id); return n })} style={{ cursor: log.detail ? 'pointer' : 'default', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                    <div onClick={() => toggleExpanded(log.id)} style={{ cursor: log.detail ? 'pointer' : 'default', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                       {log.detail && <span style={{ color: c.textFaint, fontSize: 10, marginTop: 5 }}>{exp ? '▼' : '▶'}</span>}
                       <div style={{ fontSize: 14, fontWeight: 500, color: c.text, whiteSpace: MARKDOWN_AUTHORS.has(log.author_user_id) ? 'normal' : 'pre-wrap', flex: 1 }}>
                         {MARKDOWN_AUTHORS.has(log.author_user_id) ? <MarkdownText text={log.summary} fontSize={14} /> : log.summary}
