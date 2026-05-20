@@ -120,7 +120,7 @@ const DICT_EN = {
   "名稱": "Name",
 
   // ── team subapp 補充翻譯（2026-05-15） ──
-  "追加反饋… @ 提醒；Cmd+Enter 發送": "Add comment… @ to mention; Cmd+Enter to send",
+  "追加反饋… @ 提醒；可粘貼圖片；Cmd+Enter 發送": "Add comment… @ to mention; paste images; Cmd+Enter to send",
   "員工不在此任務 assignees": "Employee is not in this task's assignees",
   "請填寫郵箱、密碼、姓名、所屬公司": "Please fill in email, password, name, and company",
   "例如 客服 / 銷售 / 技術": "e.g. Support / Sales / Tech",
@@ -424,7 +424,7 @@ const DICT_FR = {
   "名稱": "Nom",
 
   // ── team subapp 補充翻譯（2026-05-15） ──
-  "追加反饋… @ 提醒；Cmd+Enter 發送": "Ajouter un commentaire… @ pour mentionner ; Cmd+Entrée pour envoyer",
+  "追加反饋… @ 提醒；可粘貼圖片；Cmd+Enter 發送": "Ajouter un commentaire… @ pour mentionner ; coller des images ; Cmd+Entrée pour envoyer",
   "員工不在此任務 assignees": "L'employé n'est pas assigné à cette tâche",
   "請填寫郵箱、密碼、姓名、所屬公司": "Veuillez remplir e-mail, mot de passe, nom et entreprise",
   "例如 客服 / 銷售 / 技術": "ex. Support / Ventes / Technique",

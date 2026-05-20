@@ -395,7 +395,13 @@ function FeedbackThread({ tk, fbList, employees, empCompanies = [], me, userId, 
   const [replying, setReplying] = useState(null)
   const [mentionPop, setMentionPop] = useState({ open: false, query: '', atIdx: -1 })
   const [files, setFiles] = useState([])
+  const [previews, setPreviews] = useState([])  // 與 files 同序，圖片有 object URL，非圖片為 null
   const [editingFb, setEditingFb] = useState(null)  // { id, body } — 正在編輯的反饋本地草稿
+  useEffect(() => {
+    const next = files.map(f => (f.type || '').startsWith('image/') ? URL.createObjectURL(f) : null)
+    setPreviews(next)
+    return () => { next.forEach(u => { if (u) URL.revokeObjectURL(u) }) }
+  }, [files])
   const saveEdit = async () => {
     if (!editingFb || !editingFb.body.trim()) return
     const { error } = await supabase.from('employee_task_feedbacks').update({ body: editingFb.body.trim(), updated_at: new Date().toISOString() }).eq('id', editingFb.id)
@@ -422,6 +428,25 @@ function FeedbackThread({ tk, fbList, employees, empCompanies = [], me, userId, 
     const between = before.slice(atIdx + 1)
     if (/\s/.test(between)) { setMentionPop({ open: false, query: '', atIdx: -1 }); return }
     setMentionPop({ open: true, query: between, atIdx })
+  }
+
+  const handlePaste = (e) => {
+    const items = e.clipboardData?.items
+    if (!items || items.length === 0) return
+    const imgs = []
+    for (const item of items) {
+      if (item.kind === 'file' && (item.type || '').startsWith('image/')) {
+        const blob = item.getAsFile()
+        if (!blob) continue
+        const mime = blob.type || 'image/png'
+        const ext = (mime.split('/')[1] || 'png').split(';')[0].split('+')[0]
+        const renamed = new File([blob], `pasted-${Date.now()}-${imgs.length}.${ext}`, { type: mime })
+        imgs.push(renamed)
+      }
+    }
+    if (imgs.length === 0) return
+    e.preventDefault()
+    setFiles(prev => [...prev, ...imgs])
   }
 
   const selectMention = (emp) => {
@@ -528,7 +553,7 @@ function FeedbackThread({ tk, fbList, employees, empCompanies = [], me, userId, 
         <label style={{ display: 'inline-flex', alignItems: 'center', padding: '6px 9px', background: c.amberBg, border: '1px solid #fde68a', borderRadius: radius.sm, fontSize: 13, cursor: 'pointer' }}>
           📎<input type="file" multiple style={{ display: 'none' }} onChange={e => { setFiles(prev => [...prev, ...Array.from(e.target.files || [])]); e.target.value = '' }} />
         </label>
-        <textarea value={body} onChange={handleChange} onKeyDown={e => { if (e.key === 'Escape') setMentionPop({ open: false, query: '', atIdx: -1 }); if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); e.currentTarget.form?.requestSubmit() } }} rows={2} placeholder={t('追加反饋… @ 提醒；Cmd+Enter 發送')} style={{ flex: 1, padding: '7px 9px', borderRadius: radius.sm, border: '1px solid #fde68a', fontSize: 11, outline: 'none', resize: 'vertical', fontFamily: 'inherit' }} />
+        <textarea value={body} onChange={handleChange} onPaste={handlePaste} onKeyDown={e => { if (e.key === 'Escape') setMentionPop({ open: false, query: '', atIdx: -1 }); if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); e.currentTarget.form?.requestSubmit() } }} rows={2} placeholder={t('追加反饋… @ 提醒；可粘貼圖片；Cmd+Enter 發送')} style={{ flex: 1, padding: '7px 9px', borderRadius: radius.sm, border: '1px solid #fde68a', fontSize: 11, outline: 'none', resize: 'vertical', fontFamily: 'inherit' }} />
         <button type="submit" style={{ background: c.amber, color: '#fff', border: 'none', borderRadius: radius.sm, padding: '6px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>{t('發送')}</button>
         {mentionPop.open && filtered.length > 0 && (
           <div style={{ position: 'absolute', bottom: '100%', left: 36, marginBottom: 4, background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.sm, boxShadow: '0 4px 14px rgba(0,0,0,0.1)', padding: 3, minWidth: 160, maxHeight: 180, overflowY: 'auto', zIndex: 50 }}>
@@ -539,10 +564,22 @@ function FeedbackThread({ tk, fbList, employees, empCompanies = [], me, userId, 
         )}
       </form>
       {files.length > 0 && (
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 5 }}>
-          {files.map((f, i) => (
-            <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 2, padding: '2px 6px', background: '#fff4d6', borderRadius: radius.sm, fontSize: 10, color: '#a16207', border: '1px solid #fde68a' }}>📎 {f.name}<button onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} style={{ background: 'none', border: 'none', color: '#a16207', cursor: 'pointer', fontSize: 11 }}>×</button></span>
-          ))}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 5 }}>
+          {files.map((f, i) => {
+            const url = previews[i]
+            const remove = () => setFiles(prev => prev.filter((_, j) => j !== i))
+            if (url) {
+              return (
+                <span key={i} style={{ position: 'relative', display: 'inline-block', borderRadius: 4, border: '1px solid #fde68a', background: '#fff4d6', padding: 2 }}>
+                  <img src={url} alt={f.name} style={{ display: 'block', maxWidth: 70, maxHeight: 50, borderRadius: 3 }} />
+                  <button type="button" onClick={remove} title={t('移除')} style={{ position: 'absolute', top: -6, right: -6, width: 16, height: 16, borderRadius: '50%', background: '#a16207', color: '#fff', border: '1px solid #fff', cursor: 'pointer', fontSize: 10, lineHeight: 1, padding: 0 }}>×</button>
+                </span>
+              )
+            }
+            return (
+              <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 2, padding: '2px 6px', background: '#fff4d6', borderRadius: radius.sm, fontSize: 10, color: '#a16207', border: '1px solid #fde68a' }}>📎 {f.name}<button type="button" onClick={remove} style={{ background: 'none', border: 'none', color: '#a16207', cursor: 'pointer', fontSize: 11 }}>×</button></span>
+            )
+          })}
         </div>
       )}
       {mentions.length > 0 && (
