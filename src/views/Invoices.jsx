@@ -715,7 +715,7 @@ export default function InvoicesView({
                       <input type="number" min="1" value={item.qty} onChange={e => { const items = [...newInvoice.items]; items[idx].qty = parseInt(e.target.value) || 1; setNewInvoice({...newInvoice, items}); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "center" }} />
                       <input type="number" value={item.price} onChange={e => { const items = [...newInvoice.items]; items[idx].price = parseFloat(e.target.value) || 0; setNewInvoice({...newInvoice, items}); }} placeholder={t("價格")} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
                       <select value={item.warehouse_id || ''} onChange={e => { const items = [...newInvoice.items]; items[idx] = {...item, warehouse_id: e.target.value || null}; setNewInvoice({...newInvoice, items}); }} title={t("扣庫存的倉庫（不顯示在發票/收據上）")} style={{ padding: "9px 6px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", background: "#fff" }}>
-                        {warehouses.map(w => <option key={w.id} value={w.id}>{w.name.replace("分部", "")}</option>)}
+                        {warehouses.map(w => <option key={w.id} value={w.id}>{t(w.name.replace("分部", ""))}</option>)}
                       </select>
                       <button onClick={() => { const items = newInvoice.items.filter(i => i.id !== item.id); setNewInvoice({...newInvoice, items: items.length ? items : [mkItem(warehouses[0]?.id)]}); }} style={{ background: "#fce4ec", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
                     </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabaseClient.js'
 import { isNonWarrantyItem } from '../lib/warranty.js'
@@ -55,7 +55,7 @@ export function ProductEditModal({
         <div style={{ fontSize: 11, color: "#888", marginBottom: 8, marginTop: 8, fontWeight: 700 }}>{t("各倉庫存")}</div>
         {warehouses.map(w => (
           <div key={w.id} style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 12 }}>
-            <label style={{ fontSize: 13, fontWeight: 700, color: "#555", minWidth: 80 }}>{w.name}</label>
+            <label style={{ fontSize: 13, fontWeight: 700, color: "#555", minWidth: 80 }}>{t(w.name)}</label>
             <input type="number" min="0" value={editStocks[w.id] ?? 0}
               onChange={e => setEditStocks(s => ({ ...s, [w.id]: parseInt(e.target.value) || 0 }))}
               style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 16, fontWeight: 700, outline: "none", textAlign: "center" }} />
@@ -549,7 +549,7 @@ export function ProductsListView({
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                     {stockByWarehouse.map(({ warehouse, qty }) => (
                       <span key={warehouse.id} style={{ fontSize: 12 }}>
-                        <span style={{ color: "#888" }}>{warehouse.name.replace("分部", "")}</span>
+                        <span style={{ color: "#888" }}>{t(warehouse.name.replace("分部", ""))}</span>
                         <span style={{ color: qty > 0 ? "#22c55e" : "#ef4444", fontWeight: 700, marginLeft: 4 }}>{qty}</span>
                       </span>
                     ))}
@@ -760,6 +760,28 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
   const queryClient = useQueryClient()
   const [productOrgDraft, setProductOrgDraft] = useState(null)
   const [expandedSkuGroups, setExpandedSkuGroups] = useState(() => new Set())
+
+  // 庫存變動歷史（按 SKU 拉 inventory_movements，含 children）
+  const [movements, setMovements] = useState([])
+  const [movementsLoading, setMovementsLoading] = useState(false)
+  const [movementsLimit, setMovementsLimit] = useState(20)
+  useEffect(() => {
+    if (!selectedProduct) { setMovements([]); return }
+    setMovementsLoading(true)
+    const childIds = products.filter(c => c.parent_product_id === selectedProduct.id).map(c => c.id)
+    const pids = [selectedProduct.id, ...childIds]
+    supabase
+      .from('inventory_movements')
+      .select('*')
+      .in('product_id', pids)
+      .order('created_at', { ascending: false })
+      .limit(200)
+      .then(({ data, error }) => {
+        if (!error) setMovements(data || [])
+        setMovementsLoading(false)
+      })
+    setMovementsLimit(20)
+  }, [selectedProduct?.id, products])
 
           const p = selectedProduct;
           const children = products.filter(c => c.parent_product_id === p.id);
@@ -1061,7 +1083,7 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
                                                     <div style={{ fontSize: 11, color: "#666", marginTop: 3 }}>
                                                       {qtys.map(({ w, qty }) => (
                                                         <span key={w.id} style={{ marginRight: 8 }}>
-                                                          <span style={{ color: "#888" }}>{w.name.replace("分部", "")}</span>
+                                                          <span style={{ color: "#888" }}>{t(w.name.replace("分部", ""))}</span>
                                                           <span style={{ color: qty > 0 ? "#22c55e" : "#ef4444", fontWeight: 700, marginLeft: 3 }}>{qty}</span>
                                                         </span>
                                                       ))}
@@ -1104,7 +1126,7 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
                                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12 }}>
                                   {cStockByW.map(({ w, qty }) => (
                                     <span key={w.id}>
-                                      <span style={{ color: "#888" }}>{w.name.replace("分部", "")}</span>
+                                      <span style={{ color: "#888" }}>{t(w.name.replace("分部", ""))}</span>
                                       <span style={{ color: qty > 0 ? "#22c55e" : "#ef4444", fontWeight: 700, marginLeft: 4 }}>{qty}</span>
                                     </span>
                                   ))}
@@ -1126,7 +1148,7 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
                         const qty = stocks.filter(s => s.product_id === p.id && s.warehouse_id === w.id).reduce((sum, s) => sum + (s.qty || 0), 0);
                         return (
                           <div key={w.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f5f5f5" }}>
-                            <span>{w.name}</span>
+                            <span>{t(w.name)}</span>
                             <span style={{ color: qty > 0 ? "#22c55e" : "#ef4444", fontWeight: 700 }}>{qty} {t("件")}</span>
                           </div>
                         );
@@ -1246,6 +1268,56 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
                     )}
                   </div>
                 </div>
+              </div>
+              {/* 庫存變動歷史 */}
+              <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: 20, marginTop: 20 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                  <div style={{ fontSize: 14, fontWeight: 800 }}>{t("庫存變動歷史")}</div>
+                  {!movementsLoading && movements.length > 0 && (
+                    <div style={{ fontSize: 11, color: "#888" }}>{movements.length} {t("條記錄")}</div>
+                  )}
+                </div>
+                {movementsLoading ? (
+                  <div style={{ textAlign: "center", color: "#888", fontSize: 13, padding: 20 }}>{t("加載中")}…</div>
+                ) : movements.length === 0 ? (
+                  <div style={{ textAlign: "center", color: "#aaa", fontSize: 13, padding: 30 }}>{t("暫無變動記錄")}</div>
+                ) : (
+                  <>
+                    <div style={{ display: "grid", gridTemplateColumns: "160px 90px 100px 80px 1fr 110px", gap: 12, padding: "10px 12px", background: "#fafbfc", borderRadius: 8, fontSize: 11, color: "#666", fontWeight: 600 }}>
+                      <div>{t("時間")}</div>
+                      <div>{t("倉庫")}</div>
+                      <div>{t("類型")}</div>
+                      <div style={{ textAlign: "right" }}>{t("變動")}</div>
+                      <div>{t("原因")}</div>
+                      <div>{t("關聯發票")}</div>
+                    </div>
+                    {movements.slice(0, movementsLimit).map(m => {
+                      const wh = warehouses.find(w => w.id === m.warehouse_id);
+                      const typeLabel = m.type === 'sale' ? t("銷售扣減") : m.type === 'adjust' ? t("手動調整") : (m.type || "—");
+                      const typeColor = m.type === 'sale' ? { bg: "#fef3c7", fg: "#92400e" } : m.type === 'adjust' ? { bg: "#e0e7ff", fg: "#3b58d4" } : { bg: "#f5f5f5", fg: "#888" };
+                      const inv = m.invoice_id ? invoices.find(iv => iv.id === m.invoice_id) : null;
+                      const deltaColor = (m.delta || 0) > 0 ? "#22c55e" : (m.delta || 0) < 0 ? "#ef4444" : "#888";
+                      const deltaPrefix = (m.delta || 0) > 0 ? "+" : "";
+                      return (
+                        <div key={m.id} style={{ display: "grid", gridTemplateColumns: "160px 90px 100px 80px 1fr 110px", gap: 12, padding: "10px 12px", borderBottom: "1px solid #f5f5f5", fontSize: 12, alignItems: "center" }}>
+                          <div style={{ color: "#555" }}>{new Date(m.created_at).toLocaleString('zh-Hant', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
+                          <div style={{ color: "#666" }}>{wh ? t(wh.name.replace("分部", "")) : "—"}</div>
+                          <div>
+                            <span style={{ background: typeColor.bg, color: typeColor.fg, padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600 }}>{typeLabel}</span>
+                          </div>
+                          <div style={{ textAlign: "right", fontWeight: 700, color: deltaColor }}>{deltaPrefix}{m.delta}</div>
+                          <div style={{ color: "#888", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={m.reason || ""}>{m.reason || "—"}</div>
+                          <div style={{ color: inv ? "#6382ff" : "#aaa", fontSize: 11, fontFamily: "monospace" }}>{inv ? `#${inv.invoice_number || inv.id.slice(0, 8)}` : "—"}</div>
+                        </div>
+                      );
+                    })}
+                    {movements.length > movementsLimit && (
+                      <div style={{ textAlign: "center", marginTop: 12 }}>
+                        <button onClick={() => setMovementsLimit(l => l + 30)} style={{ background: "none", border: "1px solid #e0e0e0", borderRadius: 8, padding: "8px 16px", fontSize: 13, color: "#6382ff", cursor: "pointer", fontWeight: 600 }}>{t("載入更多")}</button>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </div>
           );

@@ -160,7 +160,7 @@ export default function InvoiceEditModal({ invoice, onClose, onSaved }) {
               <input type="number" value={item.price} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, price: parseFloat(e.target.value) || 0 }; setEditInvItems(arr); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
               <select value={item.warehouse_id || ''} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, warehouse_id: e.target.value || null }; setEditInvItems(arr); }} title={t("扣庫存的倉庫（不顯示在發票/收據上）")} style={{ padding: "9px 6px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", background: "#fff" }}>
                 <option value="">—</option>
-                {warehouses.map(w => <option key={w.id} value={w.id}>{w.name.replace("分部", "")}</option>)}
+                {warehouses.map(w => <option key={w.id} value={w.id}>{t(w.name.replace("分部", ""))}</option>)}
               </select>
               <button onClick={() => setEditInvItems(editInvItems.filter(i => i.id !== item.id))} style={{ background: "#fce4ec", border: "none", borderRadius: 8, cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
             </div>

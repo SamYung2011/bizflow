@@ -2082,7 +2082,7 @@ export default function App() {
                     {warehouses.map(w => (
                       <button key={w.id} onClick={() => setMarkPaidCtx({ ...markPaidCtx, defaultWh: w.id })}
                         style={{ flex: 1, padding: "9px 12px", borderRadius: 8, border: defaultWh === w.id ? "2px solid #6382ff" : "1px solid #e0e0e0", background: defaultWh === w.id ? "#eef2ff" : "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer", color: defaultWh === w.id ? "#3b58d4" : "#555" }}>
-                        {w.name}
+                        {t(w.name)}
                       </button>
                     ))}
                   </div>
@@ -2099,7 +2099,7 @@ export default function App() {
                       <div key={i} style={{ padding: "9px 12px", fontSize: 12, borderTop: "1px solid #f5f5f5", display: "grid", gridTemplateColumns: "1fr 48px 60px 72px", gap: 6, alignItems: "center", background: p.skip ? "#fafafa" : (p.after < 0 ? "#fff5f5" : "#fff") }}>
                         <div style={{ color: p.skip ? "#999" : "#222", fontStyle: p.skip ? "italic" : "normal" }}>{p.name || t("(空)")}</div>
                         <div style={{ textAlign: "center", color: "#555" }}>{p.qty}</div>
-                        <div style={{ color: "#666", fontSize: 11 }}>{p.skip ? "—" : (wh ? wh.name.replace("分部", "") : t("？"))}</div>
+                        <div style={{ color: "#666", fontSize: 11 }}>{p.skip ? "—" : (wh ? t(wh.name.replace("分部", "")) : t("？"))}</div>
                         <div style={{ textAlign: "right", fontWeight: 700, color: p.skip ? "#999" : (p.after < 0 ? "#e53935" : "#22c55e") }}>
                           {p.skip ? p.reason : `${p.current} → ${p.after}`}
                         </div>
