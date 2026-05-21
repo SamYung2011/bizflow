@@ -995,19 +995,39 @@ export default function App() {
   // lowStockSkus / allWarrantyItems / derivedInventory 已搬到 AppContext 或 Dashboard.jsx
   // fmtInvNum 已搬到 src/lib/invoiceHelpers.js
 
+  // nav 分组结构：4 业务组 + 单项混合（2026-05-21 整合）
+  // type='single': 直接 tab；type='group': 折叠组，children 为子 tab
   const navItems = [
-    { id: "dashboard", label: t("總覽"), icon: "dashboard" },
-    { id: "products", label: t("產品"), icon: "product" },
-    { id: "customers", label: t("客戶"), icon: "customer" },
-    { id: "invoices", label: t("發票"), icon: "invoice" },
-    { id: "warranty", label: t("保修"), icon: "warning" },
-    { id: "revenue", label: t("營收"), icon: "trend_up" },
-    { id: "expense", label: t("報銷"), icon: "money" },
-    { id: "gototeam", label: t("前往 team"), icon: "customer", external: "https://team.honnmono.top" },
-    { id: "suppliers", label: t("供應商"), icon: "product" },
-    { id: "whatsapp", label: t("WhatsApp"), icon: "invoice" },
-    { id: "updatelog", label: t("更新日誌"), icon: "trend_up" },
+    { type: "single", id: "dashboard", label: t("首頁"), icon: "dashboard" },
+    { type: "group", id: "g_products", label: t("產品庫存"), icon: "product", children: [
+      { id: "products", label: t("商品管理"), icon: "product" },
+      { id: "suppliers", label: t("供應商"), icon: "inventory" },
+    ]},
+    { type: "group", id: "g_sales", label: t("訂單銷售"), icon: "invoice", children: [
+      { id: "invoices", label: t("發票訂單"), icon: "invoice" },
+      { id: "revenue", label: t("營收分析"), icon: "trend_up" },
+    ]},
+    { type: "group", id: "g_customers", label: t("客戶售後"), icon: "customer", children: [
+      { id: "customers", label: t("客戶管理"), icon: "customer" },
+      { id: "warranty", label: t("保修提醒"), icon: "warning" },
+    ]},
+    { type: "single", id: "expense", label: t("財務"), icon: "money" },
+    { type: "group", id: "g_collab", label: t("協作工具"), icon: "chat", children: [
+      { id: "whatsapp", label: t("WhatsApp 客服"), icon: "chat" },
+      { id: "updatelog", label: t("更新日誌"), icon: "trend_up" },
+    ]},
+    { type: "single", id: "gototeam", label: t("團隊管理"), icon: "external", external: "https://team.honnmono.top" },
   ];
+
+  // 当前 tab 在哪个 group 内（用于自动展开该 group）
+  const activeGroupId = navItems.find(n => n.type === "group" && n.children.some(c => c.id === tab))?.id || null;
+  const [expandedNavGroups, setExpandedNavGroups] = useState(() => new Set(activeGroupId ? [activeGroupId] : []));
+  // tab 切换时如果新 tab 在某 group 内，自动确保该 group 展开
+  useEffect(() => {
+    if (activeGroupId) {
+      setExpandedNavGroups(prev => prev.has(activeGroupId) ? prev : new Set([...prev, activeGroupId]));
+    }
+  }, [activeGroupId]);
 
   async function handleSaveCustomer() {
     setSaving(true);
@@ -1584,15 +1604,55 @@ export default function App() {
             <div style={{ color: "#fff", fontSize: 12, fontWeight: 600 }}>{warrantyAlerts.length} {t("件保修需跟進")}</div>
           </div>
         )}
-        <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 2 }}>
-          {navItems.map(n => (
-            <button key={n.id} onClick={() => {
-              if (n.external) { window.location.href = n.external; return; }
-              setTab(n.id); setSelectedCustomer(null); setSearch("");
-            }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "none", cursor: "pointer", background: tab === n.id ? "rgba(99,130,255,0.18)" : "transparent", color: tab === n.id ? "#7c9dff" : "#8899cc", fontSize: 14, fontWeight: tab === n.id ? 700 : 500, textAlign: "left" }}>
-              <Icon name={n.icon} size={17} />{n.label}
-            </button>
-          ))}
+        <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 2, overflowY: "auto" }}>
+          {navItems.map(n => {
+            // 单项：直接渲染按钮
+            if (n.type !== "group") {
+              const isActive = tab === n.id;
+              return (
+                <button key={n.id} onClick={() => {
+                  if (n.external) { window.location.href = n.external; return; }
+                  setTab(n.id); setSelectedCustomer(null); setSearch("");
+                }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "none", cursor: "pointer", background: isActive ? "rgba(99,130,255,0.18)" : "transparent", color: isActive ? "#7c9dff" : "#8899cc", fontSize: 14, fontWeight: isActive ? 700 : 500, textAlign: "left" }}>
+                  <Icon name={n.icon} size={17} />{n.label}
+                </button>
+              );
+            }
+            // 分组：可折叠 + 子项缩进
+            const isExpanded = expandedNavGroups.has(n.id);
+            const hasActiveChild = n.children.some(c => c.id === tab);
+            return (
+              <div key={n.id}>
+                <button onClick={() => {
+                  setExpandedNavGroups(prev => {
+                    const next = new Set(prev);
+                    if (next.has(n.id)) next.delete(n.id); else next.add(n.id);
+                    return next;
+                  });
+                }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "none", cursor: "pointer", background: hasActiveChild && !isExpanded ? "rgba(99,130,255,0.1)" : "transparent", color: hasActiveChild ? "#7c9dff" : "#8899cc", fontSize: 14, fontWeight: hasActiveChild ? 700 : 500, textAlign: "left", width: "100%" }}>
+                  <Icon name={n.icon} size={17} />
+                  <span style={{ flex: 1 }}>{n.label}</span>
+                  <span style={{ display: "inline-flex", transition: "transform 0.18s", transform: isExpanded ? "rotate(0deg)" : "rotate(-90deg)" }}>
+                    <Icon name="chevron_down" size={14} />
+                  </span>
+                </button>
+                <div style={{ overflow: "hidden", maxHeight: isExpanded ? `${n.children.length * 38 + 4}px` : 0, opacity: isExpanded ? 1 : 0, transition: "max-height 0.22s ease-out, opacity 0.18s ease-out" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 2, marginLeft: 4, paddingLeft: 16, borderLeft: "1px solid rgba(99,130,255,0.15)" }}>
+                    {n.children.map(c => {
+                      const childActive = tab === c.id;
+                      return (
+                        <button key={c.id} onClick={() => {
+                          setTab(c.id); setSelectedCustomer(null); setSearch("");
+                        }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 8, border: "none", cursor: "pointer", background: childActive ? "rgba(99,130,255,0.18)" : "transparent", color: childActive ? "#7c9dff" : "#8899cc", fontSize: 13, fontWeight: childActive ? 700 : 500, textAlign: "left" }}>
+                          <Icon name={c.icon} size={14} />{c.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </nav>
         <div style={{ padding: "14px 12px", borderTop: "1px solid rgba(255,255,255,0.07)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "rgba(99,130,255,0.1)", borderRadius: 10 }}>
