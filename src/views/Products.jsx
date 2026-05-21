@@ -764,7 +764,7 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
   // 庫存變動歷史（按 SKU 拉 inventory_movements，含 children）
   const [movements, setMovements] = useState([])
   const [movementsLoading, setMovementsLoading] = useState(false)
-  const [movementsLimit, setMovementsLimit] = useState(20)
+  const [movementsLimit, setMovementsLimit] = useState(10)
   useEffect(() => {
     if (!selectedProduct) { setMovements([]); return }
     setMovementsLoading(true)
@@ -780,7 +780,7 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
         if (!error) setMovements(data || [])
         setMovementsLoading(false)
       })
-    setMovementsLimit(20)
+    setMovementsLimit(10)
   }, [selectedProduct?.id, products])
 
           const p = selectedProduct;

@@ -17,6 +17,7 @@ import InvoicesView from "./views/Invoices.jsx";
 import WarrantyView from "./views/Warranty.jsx";
 import RevenueView from "./views/Revenue.jsx";
 import SuppliersView from "./views/Suppliers.jsx";
+import { PendingDeductionView } from "./views/PendingDeduction.jsx";
 import WhatsappView from "./views/Whatsapp.jsx";
 import UpdateLogView from "./views/UpdateLog.jsx";
 import Dashboard from "./views/Dashboard.jsx";
@@ -1002,6 +1003,7 @@ export default function App() {
     { type: "group", id: "g_products", label: t("產品庫存"), icon: "product", children: [
       { id: "products", label: t("商品管理"), icon: "product" },
       { id: "suppliers", label: t("供應商"), icon: "inventory" },
+      { id: "pendingDeduction", label: t("待扣庫存"), icon: "warning" },
     ]},
     { type: "group", id: "g_sales", label: t("訂單銷售"), icon: "invoice", children: [
       { id: "invoices", label: t("發票訂單"), icon: "invoice" },
@@ -1055,7 +1057,9 @@ export default function App() {
   }
 
   function handleMarkPaid(inv) {
-    if ((inv.status || "").trim().toLowerCase() === "paid") return;
+    // 2026-05-21：撕掉「已 Paid 跳過」攔截 — 支持已 Paid 補扣場景（Phase 1 人工審核期）
+    // 已 Paid 補扣的判斷：UI 層 PendingDeductionView 只列「沒扣過」的單，發票詳情頁「補扣庫存」
+    // 按鈕也只在沒扣過時顯示。所以走到這裡都應該開審核 modal。
     const dupId = getPossibleDupId(inv);
     if (dupId) {
       const ok = window.confirm(`${t("此發票疑似與發票")} ${dupId} ${t("重複（2 天內 / 同 email / 同 phone / 同產品）")}\n\n${t("確認標 Paid 並扣庫存？")}\n${t("（如果確認重複請改用編輯刪除此單，避免重複扣庫存）")}`);
@@ -1084,34 +1088,34 @@ export default function App() {
       // 沒有 alias 映射 → 退回到「products.name 直接匹配」（兼容手動發票）
       if (!alias) {
         const prod = products.find(p => p.name === it.name);
-        if (!prod) { plan.push({ name: it.name, qty: itemQty, skip: true, reason: t("未配 line item 映射") }); continue; }
-        if (prod.is_virtual === true) { plan.push({ name: it.name, qty: itemQty, skip: true, reason: t("虛擬產品") }); continue; }
-        if (prod.category === '_archived') { plan.push({ name: it.name, qty: itemQty, skip: true, reason: t("已歸檔老產品") }); continue; }
-        if (parentIds.has(prod.id)) { plan.push({ name: it.name, qty: itemQty, skip: true, reason: t("父 SKU 不扣") }); continue; }
+        if (!prod) { plan.push({ name: it.name, source_item_name: it.name, qty: itemQty, skip: true, reason: t("未配 line item 映射") }); continue; }
+        if (prod.is_virtual === true) { plan.push({ name: it.name, source_item_name: it.name, qty: itemQty, skip: true, reason: t("虛擬產品") }); continue; }
+        if (prod.category === '_archived') { plan.push({ name: it.name, source_item_name: it.name, qty: itemQty, skip: true, reason: t("已歸檔老產品") }); continue; }
+        if (parentIds.has(prod.id)) { plan.push({ name: it.name, source_item_name: it.name, qty: itemQty, skip: true, reason: t("父 SKU 不扣") }); continue; }
         const wid = it.warehouse_id || defaultWh;
-        if (!wid) { plan.push({ name: it.name, qty: itemQty, skip: true, reason: t("無倉庫") }); continue; }
+        if (!wid) { plan.push({ name: it.name, source_item_name: it.name, qty: itemQty, skip: true, reason: t("無倉庫") }); continue; }
         const stock = stocks.find(s => s.product_id === prod.id && s.warehouse_id === wid);
         const current = stock?.qty || 0;
-        plan.push({ product_id: prod.id, warehouse_id: wid, name: it.name, qty: itemQty, current, after: current - itemQty });
+        plan.push({ product_id: prod.id, warehouse_id: wid, name: it.name, source_item_name: it.name, qty: itemQty, current, after: current - itemQty });
         continue;
       }
       // alias.skip=true → 押金/運費/Final Payment/租務，不扣
-      if (alias.skip === true) { plan.push({ name: it.name, qty: itemQty, skip: true, reason: alias.note || t("alias 標記為不扣") }); continue; }
+      if (alias.skip === true) { plan.push({ name: it.name, source_item_name: it.name, qty: itemQty, skip: true, reason: alias.note || t("alias 標記為不扣") }); continue; }
       // alias.products 是 [{product_id, qty}] 數組，套裝的話多條
       const aliasProducts = Array.isArray(alias.products) ? alias.products : [];
-      if (aliasProducts.length === 0) { plan.push({ name: it.name, qty: itemQty, skip: true, reason: t("alias 未配產品") }); continue; }
+      if (aliasProducts.length === 0) { plan.push({ name: it.name, source_item_name: it.name, qty: itemQty, skip: true, reason: t("alias 未配產品") }); continue; }
       for (const ap of aliasProducts) {
         const prod = products.find(p => p.id === ap.product_id);
-        if (!prod) { plan.push({ name: `${it.name} → ?`, qty: 0, skip: true, reason: t("alias 引用的產品已刪除") }); continue; }
-        if (prod.category === '_archived') { plan.push({ name: `${it.name} → ${prod.name}`, qty: 0, skip: true, reason: t("已歸檔老產品") }); continue; }
-        if (parentIds.has(prod.id)) { plan.push({ name: `${it.name} → ${prod.name}`, qty: 0, skip: true, reason: t("父 SKU 不扣") }); continue; }
+        if (!prod) { plan.push({ name: `${it.name} → ?`, source_item_name: it.name, qty: 0, skip: true, reason: t("alias 引用的產品已刪除") }); continue; }
+        if (prod.category === '_archived') { plan.push({ name: `${it.name} → ${prod.name}`, source_item_name: it.name, qty: 0, skip: true, reason: t("已歸檔老產品") }); continue; }
+        if (parentIds.has(prod.id)) { plan.push({ name: `${it.name} → ${prod.name}`, source_item_name: it.name, qty: 0, skip: true, reason: t("父 SKU 不扣") }); continue; }
         const wid = it.warehouse_id || defaultWh;
-        if (!wid) { plan.push({ name: `${it.name} → ${prod.name}`, qty: 0, skip: true, reason: t("無倉庫") }); continue; }
+        if (!wid) { plan.push({ name: `${it.name} → ${prod.name}`, source_item_name: it.name, qty: 0, skip: true, reason: t("無倉庫") }); continue; }
         const perUnitQty = Number(ap.qty) || 1;
         const totalDeduct = perUnitQty * itemQty;
         const stock = stocks.find(s => s.product_id === prod.id && s.warehouse_id === wid);
         const current = stock?.qty || 0;
-        plan.push({ product_id: prod.id, warehouse_id: wid, name: `${it.name} → ${prod.name}`, qty: totalDeduct, current, after: current - totalDeduct });
+        plan.push({ product_id: prod.id, warehouse_id: wid, name: `${it.name} → ${prod.name}`, source_item_name: it.name, qty: totalDeduct, current, after: current - totalDeduct });
       }
     }
     return plan;
@@ -1121,6 +1125,7 @@ export default function App() {
     if (!markPaidCtx) return;
     const { inv, defaultWh, channel } = markPaidCtx;
     const isBroadway = channel === "broadway";
+    const isAlreadyPaid = (inv.status || "").trim().toLowerCase() === "paid";  // 補扣場景：status 已是 Paid
 
     // 百老匯渠道：notes 加 __BROADWAY__ 標記（防重複追加）+ 跳過所有扣減
     let nextNotes = inv.notes || "";
@@ -1130,7 +1135,8 @@ export default function App() {
 
     const plan = isBroadway ? [] : buildDeductionPlan(inv, defaultWh);
     const deductions = plan.filter(p => !p.skip && p.qty > 0);
-    // 扣減 + 流水（百老匯渠道走不到這裡，deductions 為空）
+
+    // 扣減 + 流水
     for (const d of deductions) {
       await supabase.from("inventory_stock").upsert({
         product_id: d.product_id,
@@ -1143,11 +1149,43 @@ export default function App() {
         warehouse_id: d.warehouse_id,
         delta: -d.qty,
         type: 'sale',
-        reason: `發票 #${inv.invoice_number || inv.id} 標記已付款`,
+        reason: isAlreadyPaid ? `發票 #${inv.invoice_number || inv.id} 補扣庫存` : `發票 #${inv.invoice_number || inv.id} 標記已付款`,
         invoice_id: inv.id,
       });
     }
-    // 佣金 snapshot：標 Paid 時按當前規則 + 銷售人 算一次寫入。後續改規則不追溯
+
+    // audit 記錄（Phase 1 人工審核期）：所有 plan 項都記，含 skip 的
+    // 一個月後統計 item_name → mapped_product_id 高頻映射，切 Phase 2 全自動
+    if (!isBroadway && plan.length > 0) {
+      const auditRows = plan.map(p => ({
+        invoice_id: inv.id,
+        item_name: p.source_item_name || p.name,
+        mapped_product_id: p.product_id || null,
+        mapped_qty: p.qty || 0,
+        warehouse_id: p.warehouse_id || null,
+        decision: p.skip ? 'skip' : 'confirm',
+        audited_by: currentEmployee?.id || null,
+      }));
+      const { error: auditErr } = await supabase.from("stock_deduction_audit").insert(auditRows);
+      if (auditErr) console.warn('[audit] insert failed:', auditErr.message);
+    }
+
+    // 補扣場景：不重算 commission / 不改 status（已是 Paid）
+    if (isAlreadyPaid && !isBroadway) {
+      setStocks(prev => {
+        const map = new Map(prev.map(s => [`${s.product_id}|${s.warehouse_id}`, s]));
+        for (const d of deductions) {
+          const k = `${d.product_id}|${d.warehouse_id}`;
+          const existing = map.get(k);
+          map.set(k, existing ? { ...existing, qty: d.after } : { product_id: d.product_id, warehouse_id: d.warehouse_id, qty: d.after });
+        }
+        return [...map.values()];
+      });
+      setMarkPaidCtx(null);
+      return;
+    }
+
+    // 首次 Mark Paid：佣金 snapshot + status update
     const commissionAmount = computeCommissionFor(isBroadway ? { ...inv, notes: nextNotes } : inv, inv.salesperson_id, { products, lineItemAliases });
     const baseUpdates = { status: "Paid", commission_amount: commissionAmount };
     const updates = isBroadway ? { ...baseUpdates, notes: nextNotes } : baseUpdates;
@@ -1772,6 +1810,8 @@ export default function App() {
 
         {/* SUPPLIERS — 供應商管理 */}
         {tab === "suppliers" && <SuppliersView />}
+
+        {tab === "pendingDeduction" && <PendingDeductionView handleMarkPaid={handleMarkPaid} />}
 
         {tab === "whatsapp" && <WhatsappView />}
 
