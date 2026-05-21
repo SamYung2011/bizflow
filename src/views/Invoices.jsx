@@ -6,7 +6,7 @@ import { useAppContext } from '../context/AppContext.jsx'
 import { useT } from '../i18n.jsx'
 import { Icon } from '../components/Icon.jsx'
 import InvoiceEditModal from '../components/InvoiceEditModal.jsx'
-import { fmtInvNum } from '../lib/invoiceHelpers.js'
+import { fmtInvNum, invoiceSource, formatNotes } from '../lib/invoiceHelpers.js'
 import { deriveShippingStatus, isShippingTrackable, isProblematicShipping } from '../lib/shippingHelpers.js'
 
 // 多值字段拆分（與 App.jsx 內定義同步）
@@ -25,8 +25,6 @@ export default function InvoicesView({
   search, setSearch,
   // App.jsx 留著的工具與 handler
   getCustomer,
-  formatNotes,
-  invoiceSource,
   getPossibleDupId,
   handleMarkPaid,
   openPrintChooser,
@@ -417,7 +415,7 @@ export default function InvoicesView({
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 800, fontSize: 15, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     {fmtInvNum(inv)}
-                    {(() => { const s = invoiceSource(inv); return <span style={{ fontSize: 10, fontWeight: 700, color: s.color, background: s.bg, padding: "2px 7px", borderRadius: 6 }}>{s.label}</span>; })()}
+                    {(() => { const s = invoiceSource(inv); return <span style={{ fontSize: 10, fontWeight: 700, color: s.color, background: s.bg, padding: "2px 7px", borderRadius: 6 }}>{t(s.key)}</span>; })()}
                     {inv.salesperson_id && (() => {
                       const sp = employees.find(e => e.id === inv.salesperson_id)
                       if (!sp) return null

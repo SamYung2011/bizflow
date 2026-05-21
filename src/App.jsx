@@ -970,33 +970,12 @@ export default function App() {
   }, [tab]); // 故意只監聽 tab —— outOfStockSkus 變動不重彈，避免騷擾
 
   // notes 里的 ISO 时间戳 (UTC) 自动转成 HK 时间显示
-  const formatNotes = (notes) => {
-    if (!notes) return "";
-    // 隱藏內部 marker：__FORMS_BUY__ / __PENDING_MERGE__:cid 等（雙下劃線包圍的全大寫詞，可帶 :id 後綴）
-    let out = notes.replace(/__[A-Z_]+__(?::[\w-]+)?\s*/g, "");
-    out = out.replace(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?Z/g, (_, y, mo, d, h, mi) => {
-      const utc = new Date(Date.UTC(+y, +mo - 1, +d, +h, +mi));
-      const hk = new Date(utc.getTime() + 8 * 60 * 60 * 1000);
-      const pad = (n) => String(n).padStart(2, "0");
-      return `${hk.getUTCFullYear()}-${pad(hk.getUTCMonth() + 1)}-${pad(hk.getUTCDate())} ${pad(hk.getUTCHours())}:${pad(hk.getUTCMinutes())}`;
-    });
-    return out.trim();
-  };
+  // formatNotes 已搬到 src/lib/invoiceHelpers.js（跨 view 共用）
 
   const getProduct = (id) => products.find(p => p.id === id);
   const getCustomer = (id) => customers.find(c => c.id === id);
-  // fmtInvNum 已搬到 src/lib/invoiceHelpers.js（跨 view 共用，純函數放 lib 更乾淨）
-  // 推斷發票來源（Shopify 直接訂單 / Framer 表單 / 百老匯 / 手動）
-  const invoiceSource = (inv) => {
-    const notes = inv?.notes || "";
-    if (notes.includes("__BROADWAY__")) return { label: t("百老匯"), color: "#dc2626", bg: "#fee2e2" };
-    if (notes.includes("__FORMS_BUY__")) return { label: "Framer", color: "#6382ff", bg: "#eef2ff" };
-    // notes 空 + invoice_number 純數字 → 大概率 Shopify 同步進來的
-    if (inv?.invoice_number && /^\d+$/.test(String(inv.invoice_number))) {
-      return { label: "Shopify", color: "#16a34a", bg: "#dcfce7" };
-    }
-    return { label: t("手動"), color: "#888", bg: "#f5f5f5" };
-  };
+  // fmtInvNum / invoiceSource 已搬到 src/lib/invoiceHelpers.js（跨 view 共用）
+  // invoiceSource 現在回 { key, color, bg }，調用方自己 t(key) 顯示
   // 從 notes 抽 __POSSIBLE_DUP__:{id} 標記（forms-buy 寫的，可能跟現有 Shopify 訂單重複）
   const getPossibleDupId = (inv) => {
     const m = (inv?.notes || "").match(/__POSSIBLE_DUP__:([\w-]+)/);
@@ -1117,6 +1096,7 @@ export default function App() {
       for (const ap of aliasProducts) {
         const prod = products.find(p => p.id === ap.product_id);
         if (!prod) { plan.push({ name: `${it.name} → ?`, source_item_name: it.name, qty: 0, skip: true, reason: t("alias 引用的產品已刪除") }); continue; }
+        if (prod.is_virtual === true) { plan.push({ name: `${it.name} → ${prod.name}`, source_item_name: it.name, qty: 0, skip: true, reason: t("虛擬產品") }); continue; }
         if (prod.category === '_archived') { plan.push({ name: `${it.name} → ${prod.name}`, source_item_name: it.name, qty: 0, skip: true, reason: t("已歸檔老產品") }); continue; }
         if (parentIds.has(prod.id)) { plan.push({ name: `${it.name} → ${prod.name}`, source_item_name: it.name, qty: 0, skip: true, reason: t("父 SKU 不扣") }); continue; }
         const wid = it.warehouse_id || defaultWh;
@@ -1185,6 +1165,61 @@ export default function App() {
       }));
       const { error: auditErr } = await supabase.from("stock_deduction_audit").insert(auditRows);
       if (auditErr) console.warn('[audit] insert failed:', auditErr.message);
+
+      // 同步寫入 line_item_aliases：把人工映射沉澱下來，下次同名 item 進來不用再人工改
+      // 按 source_item_name 聚合 plan 行（套裝會多行同名）
+      const itemQtyByName = new Map(itemsArr.map(it => [it.name, Number(it.qty) || 1]));
+      const groups = new Map();
+      for (const p of plan) {
+        const key = p.source_item_name || p.name;
+        if (!key) continue;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(p);
+      }
+      const aliasUpserts = [];
+      for (const [alias_name, rows] of groups) {
+        const itQty = itemQtyByName.get(alias_name) || 1;
+        const allSkipped = rows.every(r => r.skip);
+        if (allSkipped) {
+          aliasUpserts.push({ alias_name, skip: true, products: [], verified: true, note: t('人工審核標記為跳過') });
+        } else {
+          const aliasProducts = rows
+            .filter(r => !r.skip && r.product_id)
+            .map(r => ({
+              product_id: r.product_id,
+              // per-unit qty = plan.qty / item.qty（套裝按比例還原；單品 1:1）
+              qty: itQty > 0 ? +((Number(r.qty) || 0) / itQty).toFixed(2) : (Number(r.qty) || 1),
+            }));
+          if (aliasProducts.length > 0) {
+            aliasUpserts.push({ alias_name, skip: false, products: aliasProducts, verified: true });
+          }
+        }
+      }
+      if (aliasUpserts.length > 0) {
+        const { error: aliasErr } = await supabase.from('line_item_aliases').upsert(aliasUpserts, { onConflict: 'alias_name' });
+        if (aliasErr) {
+          console.warn('[alias] upsert failed:', aliasErr.message);
+        } else {
+          // 本地 state + react-query cache 同步，避免下次 buildDeductionPlan 還用舊 alias
+          setLineItemAliases(prev => {
+            const map = new Map(prev.map(a => [a.alias_name, a]));
+            for (const u of aliasUpserts) {
+              const existing = map.get(u.alias_name);
+              map.set(u.alias_name, { ...existing, ...u, id: existing?.id, updated_at: new Date().toISOString() });
+            }
+            return [...map.values()];
+          });
+          queryClient.setQueryData(['bf', 'line_item_aliases'], (old) => {
+            if (!Array.isArray(old)) return old;
+            const map = new Map(old.map(a => [a.alias_name, a]));
+            for (const u of aliasUpserts) {
+              const existing = map.get(u.alias_name);
+              map.set(u.alias_name, { ...existing, ...u, id: existing?.id, updated_at: new Date().toISOString() });
+            }
+            return [...map.values()];
+          });
+        }
+      }
     }
 
     // 補扣場景：不重算 commission / 不改 status（已是 Paid）
@@ -1780,7 +1815,6 @@ export default function App() {
             handleMarkPaid={handleMarkPaid}
             openPrintChooser={openPrintChooser}
             Badge={Badge}
-            formatNotes={formatNotes}
           />
         )}
 
@@ -1789,8 +1823,6 @@ export default function App() {
           <InvoicesView
             search={search} setSearch={setSearch}
             getCustomer={getCustomer}
-            formatNotes={formatNotes}
-            invoiceSource={invoiceSource}
             getPossibleDupId={getPossibleDupId}
             handleMarkPaid={handleMarkPaid}
             openPrintChooser={openPrintChooser}
@@ -2122,7 +2154,7 @@ export default function App() {
         const insufficient = planWithLive.filter(p => !p.skip && p.after < 0);
         return (
           <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }}>
-            <div style={{ background: "#fff", borderRadius: 16, padding: 24, width: 520, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ background: "#fff", borderRadius: 16, padding: 24, width: 640, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
               <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 4 }}>{t("標記已付款")}</div>
               <div style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>#{inv.invoice_number || inv.id} · {isBroadway ? t("百老匯渠道：不扣本地庫存") : t("將從庫存扣除對應數量")}</div>
 
@@ -2177,7 +2209,7 @@ export default function App() {
                         </div>
                         {/* product / qty / warehouse / after */}
                         {!p.skip && (
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 56px 90px 90px", gap: 6, alignItems: "center", fontSize: 11 }}>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 64px 110px 110px", gap: 8, alignItems: "center", fontSize: 11 }}>
                             <select value={p.product_id || ""} onChange={e => updateRow({ product_id: e.target.value || null })}
                               style={{ padding: "5px 6px", border: "1px solid #d4d4d8", borderRadius: 6, fontSize: 11, fontFamily: "inherit", background: "#fff" }}>
                               <option value="">{t("(未映射)")}</option>

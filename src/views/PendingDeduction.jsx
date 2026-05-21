@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabaseClient.js'
 import { useAppContext } from '../context/AppContext.jsx'
 import { useT } from '../i18n.jsx'
 import { Icon } from '../components/Icon.jsx'
-import { fmtInvNum } from '../lib/invoiceHelpers.js'
+import { fmtInvNum, invoiceSource, formatNotes } from '../lib/invoiceHelpers.js'
 import InvoiceEditModal from '../components/InvoiceEditModal.jsx'
 
 /**
@@ -73,40 +73,40 @@ export function PendingDeductionView({ handleMarkPaid }) {
           <div style={{ marginTop: 12 }}>{t('無待處理扣減')}</div>
         </div>
       ) : (
-        <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #f0f0f0', overflow: 'hidden' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '110px 120px 1fr 180px 100px 120px', gap: 12, padding: '12px 16px', background: '#fafbfc', fontSize: 11, color: '#666', fontWeight: 600, borderBottom: '1px solid #f0f0f0' }}>
-            <div>{t('發票號')}</div>
-            <div>{t('日期')}</div>
-            <div>{t('產品')}</div>
-            <div>{t('客戶')}</div>
-            <div style={{ textAlign: 'right' }}>{t('金額')}</div>
-            <div style={{ textAlign: 'right' }}>{t('動作')}</div>
-          </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {pending.map(inv => {
-            const itemsStr = Array.isArray(inv.items)
-              ? inv.items.map(it => it?.name || '?').filter(Boolean).join(' / ')
-              : '—'
             const cust = inv.customer_id ? customerById.get(inv.customer_id) : null
             const custName = cust?.name || inv.customer_name_snapshot || '—'
+            const custPhone = cust?.phone || cust?.phone_mainland || ''
+            const src = invoiceSource(inv)
             return (
-              <div key={inv.id} style={{ display: 'grid', gridTemplateColumns: '110px 120px 1fr 180px 100px 120px', gap: 12, padding: '12px 16px', borderBottom: '1px solid #f5f5f5', alignItems: 'center', fontSize: 13 }}>
-                <div>
-                  <button
-                    onClick={() => setViewingInvoice(inv)}
-                    title={t('查看發票詳情')}
-                    style={{ background: 'none', border: 'none', padding: 0, fontFamily: 'monospace', fontSize: 13, color: '#6382ff', cursor: 'pointer', textDecoration: 'underline' }}
-                  >
-                    {fmtInvNum(inv)}
-                  </button>
+              <div key={inv.id} style={{ background: '#fff', borderRadius: 14, padding: '18px 22px', border: '1px solid #f0f0f0', boxShadow: '0 2px 8px rgba(0,0,0,0.03)', display: 'flex', alignItems: 'center', gap: 18 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <button
+                      onClick={() => setViewingInvoice(inv)}
+                      title={t('查看發票詳情')}
+                      style={{ background: 'none', border: 'none', padding: 0, fontFamily: 'monospace', fontSize: 15, fontWeight: 800, color: '#6382ff', cursor: 'pointer', textDecoration: 'underline' }}
+                    >
+                      {fmtInvNum(inv)}
+                    </button>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: src.color, background: src.bg, padding: '2px 7px', borderRadius: 6 }}>{t(src.key)}</span>
+                  </div>
+                  <div style={{ fontSize: 13, color: '#888', marginTop: 2 }}>
+                    {custPhone ? `${custPhone} · ` : ''}{custName} · {inv.date || t('日期未知')}{formatNotes(inv.notes) ? ` · ${formatNotes(inv.notes)}` : ''}
+                  </div>
+                  {Array.isArray(inv.items) && inv.items.slice(0, 2).map((item, i) => (
+                    <div key={i} style={{ fontSize: 12, color: '#999' }}>{item.name} ×{item.qty}</div>
+                  ))}
+                  {Array.isArray(inv.items) && inv.items.length > 2 && (
+                    <div style={{ fontSize: 11, color: '#bbb', fontStyle: 'italic' }}>... {t('還有')} {inv.items.length - 2} {t('項')}</div>
+                  )}
                 </div>
-                <div style={{ color: '#666', fontSize: 12 }}>{inv.date || '—'}</div>
-                <div style={{ color: '#333', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={itemsStr}>{itemsStr}</div>
-                <div style={{ color: '#666', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{custName}</div>
-                <div style={{ textAlign: 'right', color: '#555', fontWeight: 600 }}>HK${Number(inv.total || 0).toLocaleString()}</div>
-                <div style={{ textAlign: 'right' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0 }}>
+                  <div style={{ fontSize: 18, fontWeight: 800 }}>HKD${Number(inv.total || 0).toLocaleString()}</div>
                   <button
                     onClick={() => handleMarkPaid(inv)}
-                    style={{ background: '#6382ff', color: '#fff', border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                    style={{ background: '#6382ff', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
                   >
                     {t('審核扣減')}
                   </button>

@@ -8,7 +8,7 @@ import { Input, Select } from '../components/Inputs.jsx'
 import InvoiceEditModal from '../components/InvoiceEditModal.jsx'
 import { suggestEmail } from '../lib/emailSuggest.js'
 import { CAR_BRANDS, PRODUCTS_LIST, REFERRAL_SOURCES } from '../lib/constants.js'
-import { fmtInvNum } from '../lib/invoiceHelpers.js'
+import { fmtInvNum, formatNotes } from '../lib/invoiceHelpers.js'
 
 // 多值字段拆分（與 App.jsx 內定義同步）
 const splitMulti = v => String(v || "").split(/\n+/).map(s => s.trim()).filter(Boolean);
@@ -690,7 +690,6 @@ export function CustomersDetailView({
   handleMarkPaid,
   openPrintChooser,
   Badge,
-  formatNotes,
 }) {
   const { t } = useT()
   const { invoices, products } = useAppContext()
