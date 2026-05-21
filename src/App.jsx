@@ -721,6 +721,16 @@ export default function App() {
   }
 
   const [markPaidCtx, setMarkPaidCtx] = useState(null); // { inv, defaultWh } —— 標記已付款彈窗
+  // 可編輯的扣減 plan（Phase 1 人工審核期：每行 product / qty / warehouse / skip 可改）
+  const [markPaidPlan, setMarkPaidPlan] = useState([]);
+  // markPaidCtx / channel / defaultWh 變化時重置 plan（人工 override 會被丟，這是 by design：
+  // 切渠道或預設倉庫等於重新算 baseline）
+  useEffect(() => {
+    if (!markPaidCtx) { setMarkPaidPlan([]); return; }
+    const { inv, defaultWh, channel } = markPaidCtx;
+    const plan = channel === 'broadway' ? [] : buildDeductionPlan(inv, defaultWh);
+    setMarkPaidPlan(plan);
+  }, [markPaidCtx?.inv?.id, markPaidCtx?.defaultWh, markPaidCtx?.channel]);
   const [stockToast, setStockToast] = useState(null); // { items: [name] } —— 右下角庫存不足 toast
   const [editingProduct, setEditingProduct] = useState(null);
   const [editStock, setEditStock] = useState(0);
@@ -1133,8 +1143,15 @@ export default function App() {
       nextNotes = nextNotes ? `${nextNotes}\n__BROADWAY__` : "__BROADWAY__";
     }
 
-    const plan = isBroadway ? [] : buildDeductionPlan(inv, defaultWh);
-    const deductions = plan.filter(p => !p.skip && p.qty > 0);
+    // Phase 1：用人工審核後的 plan（state），可能含 user override 的 product / qty / warehouse
+    const plan = isBroadway ? [] : markPaidPlan.map(p => {
+      // 實時補 current/after（修改後可能 stale）
+      if (p.skip || !p.product_id || !p.warehouse_id) return p;
+      const stock = stocks.find(s => s.product_id === p.product_id && s.warehouse_id === p.warehouse_id);
+      const current = stock?.qty || 0;
+      return { ...p, current, after: current - (Number(p.qty) || 0) };
+    });
+    const deductions = plan.filter(p => !p.skip && p.qty > 0 && p.product_id && p.warehouse_id);
 
     // 扣減 + 流水
     for (const d of deductions) {
@@ -2086,12 +2103,23 @@ export default function App() {
       {markPaidCtx && (() => {
         const { inv, defaultWh, channel } = markPaidCtx;
         const isBroadway = channel === "broadway";
-        const plan = isBroadway ? [] : buildDeductionPlan(inv, defaultWh);
+        const plan = markPaidPlan;  // 用 state 替代每次 render 重算
         let itemsArr = inv.items;
         if (typeof itemsArr === "string") { try { itemsArr = JSON.parse(itemsArr); } catch { itemsArr = []; } }
         if (!Array.isArray(itemsArr)) itemsArr = [];
         const anyMissing = !isBroadway && itemsArr.some(it => !it.warehouse_id);
-        const insufficient = plan.filter(p => !p.skip && p.after < 0);
+        // 可選 product 列表：active + 非 archived + 非 virtual + 非 parent SKU
+        const parentIdSet = new Set(products.filter(x => x.parent_product_id).map(x => x.parent_product_id));
+        const selectableProducts = products.filter(pp => pp.category !== '_archived' && pp.is_virtual !== true && !parentIdSet.has(pp.id))
+          .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        // 實時算每行 current/after（用最新 product_id + warehouse_id 從 stocks 查）
+        const planWithLive = plan.map(p => {
+          if (p.skip || !p.product_id || !p.warehouse_id) return p;
+          const stock = stocks.find(s => s.product_id === p.product_id && s.warehouse_id === p.warehouse_id);
+          const current = stock?.qty || 0;
+          return { ...p, current, after: current - (Number(p.qty) || 0) };
+        });
+        const insufficient = planWithLive.filter(p => !p.skip && p.after < 0);
         return (
           <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }}>
             <div style={{ background: "#fff", borderRadius: 16, padding: 24, width: 520, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
@@ -2130,19 +2158,46 @@ export default function App() {
               )}
               {!isBroadway && (
                 <div style={{ border: "1px solid #eef0fa", borderRadius: 10, overflow: "hidden", marginBottom: 14 }}>
-                  <div style={{ background: "#fafbff", padding: "8px 12px", fontSize: 11, color: "#888", display: "grid", gridTemplateColumns: "1fr 48px 60px 72px", gap: 6 }}>
-                    <div>{t("產品")}</div><div style={{ textAlign: "center" }}>{t("數量")}</div><div>{t("倉庫")}</div><div style={{ textAlign: "right" }}>{t("扣後")}</div>
+                  <div style={{ background: "#fafbff", padding: "8px 12px", fontSize: 10, color: "#888" }}>
+                    {t("人工審核：可改產品 / 數量 / 倉庫，或勾「跳過」不扣")}
                   </div>
-                  {plan.map((p, i) => {
-                    const wh = warehouses.find(w => w.id === p.warehouse_id);
+                  {planWithLive.map((p, i) => {
+                    const updateRow = (patch) => setMarkPaidPlan(prev => prev.map((x, j) => j === i ? { ...x, ...patch } : x));
                     return (
-                      <div key={i} style={{ padding: "9px 12px", fontSize: 12, borderTop: "1px solid #f5f5f5", display: "grid", gridTemplateColumns: "1fr 48px 60px 72px", gap: 6, alignItems: "center", background: p.skip ? "#fafafa" : (p.after < 0 ? "#fff5f5" : "#fff") }}>
-                        <div style={{ color: p.skip ? "#999" : "#222", fontStyle: p.skip ? "italic" : "normal" }}>{p.name || t("(空)")}</div>
-                        <div style={{ textAlign: "center", color: "#555" }}>{p.qty}</div>
-                        <div style={{ color: "#666", fontSize: 11 }}>{p.skip ? "—" : (wh ? t(wh.name.replace("分部", "")) : t("？"))}</div>
-                        <div style={{ textAlign: "right", fontWeight: 700, color: p.skip ? "#999" : (p.after < 0 ? "#e53935" : "#22c55e") }}>
-                          {p.skip ? p.reason : `${p.current} → ${p.after}`}
+                      <div key={i} style={{ padding: "10px 12px", borderTop: "1px solid #f5f5f5", background: p.skip ? "#fafafa" : (p.after < 0 ? "#fff5f5" : "#fff") }}>
+                        {/* 原始 item name + 跳過勾框 */}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                          <div style={{ fontSize: 12, color: p.skip ? "#999" : "#333", fontWeight: 600, fontStyle: p.skip ? "italic" : "normal", flex: 1, marginRight: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.source_item_name || p.name}>
+                            {p.source_item_name || p.name || t("(空)")}
+                          </div>
+                          <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#888", cursor: "pointer", flexShrink: 0 }}>
+                            <input type="checkbox" checked={p.skip === true} onChange={e => updateRow({ skip: e.target.checked, reason: e.target.checked ? t("人工跳過") : undefined })} />
+                            {t("跳過")}
+                          </label>
                         </div>
+                        {/* product / qty / warehouse / after */}
+                        {!p.skip && (
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 56px 90px 90px", gap: 6, alignItems: "center", fontSize: 11 }}>
+                            <select value={p.product_id || ""} onChange={e => updateRow({ product_id: e.target.value || null })}
+                              style={{ padding: "5px 6px", border: "1px solid #d4d4d8", borderRadius: 6, fontSize: 11, fontFamily: "inherit", background: "#fff" }}>
+                              <option value="">{t("(未映射)")}</option>
+                              {selectableProducts.map(pp => <option key={pp.id} value={pp.id}>{pp.name}</option>)}
+                            </select>
+                            <input type="number" min="0" value={p.qty || 0} onChange={e => updateRow({ qty: parseInt(e.target.value) || 0 })}
+                              style={{ padding: "5px 6px", border: "1px solid #d4d4d8", borderRadius: 6, fontSize: 11, textAlign: "center", fontFamily: "inherit" }} />
+                            <select value={p.warehouse_id || ""} onChange={e => updateRow({ warehouse_id: e.target.value || null })}
+                              style={{ padding: "5px 6px", border: "1px solid #d4d4d8", borderRadius: 6, fontSize: 11, fontFamily: "inherit", background: "#fff" }}>
+                              <option value="">{t("選倉")}</option>
+                              {warehouses.map(w => <option key={w.id} value={w.id}>{t(w.name.replace("分部", ""))}</option>)}
+                            </select>
+                            <div style={{ textAlign: "right", fontWeight: 700, color: p.after < 0 ? "#e53935" : "#22c55e", fontSize: 12 }}>
+                              {p.product_id && p.warehouse_id ? `${p.current} → ${p.after}` : "—"}
+                            </div>
+                          </div>
+                        )}
+                        {p.skip && (
+                          <div style={{ fontSize: 11, color: "#999", fontStyle: "italic" }}>{p.reason || t("已跳過")}</div>
+                        )}
                       </div>
                     );
                   })}
