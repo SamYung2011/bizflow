@@ -202,6 +202,68 @@ async function callOpenAI(opts: {
   return data.choices?.[0]?.message?.content || "";
 }
 
+// ─── Meta Cloud API 出站（wa_outbound_mode='meta-cloud' 时启用）───
+// E.164 手机号（带或不带 +）→ 不带 + 的纯数字（Meta API 要求格式）
+function normalizeMetaPhone(raw: string): string {
+  return String(raw || "").replace(/[^0-9]/g, "");
+}
+
+// POST 一条消息到 Meta Graph API。返回 wamid 字符串（成功）或 throw（失败）
+async function metaPostMessage(opts: {
+  graphVersion: string;
+  phoneNumberId: string;
+  accessToken: string;
+  payload: Record<string, unknown>;
+}): Promise<string> {
+  const url = `https://graph.facebook.com/${opts.graphVersion}/${opts.phoneNumberId}/messages`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + opts.accessToken,
+    },
+    body: JSON.stringify(opts.payload),
+  });
+  const txt = await res.text();
+  if (!res.ok) throw new Error(`Meta ${res.status}: ${txt.slice(0, 300)}`);
+  try {
+    const data = JSON.parse(txt);
+    return data.messages?.[0]?.id || "";
+  } catch {
+    return "";
+  }
+}
+
+// 把一条 reply 的多段 segments 串行发到 Meta。返回所有 wamid 数组。
+async function sendViaMetaCloud(opts: {
+  to: string;
+  segments: { type: string; content: string }[];
+  graphVersion: string;
+  phoneNumberId: string;
+  accessToken: string;
+}): Promise<string[]> {
+  const to = normalizeMetaPhone(opts.to);
+  if (!to) throw new Error("to 为空，无法发 Meta");
+  const wamids: string[] = [];
+  for (let i = 0; i < opts.segments.length; i++) {
+    const seg = opts.segments[i];
+    // 段间小延时（200ms）模拟节奏，不像 extension 那样按字数算
+    if (i > 0) await new Promise(r => setTimeout(r, 200));
+    const payload: Record<string, unknown> =
+      seg.type === "image"
+        ? { messaging_product: "whatsapp", to, type: "text", text: { body: "[图片] " + (seg.content || "") } }
+        : { messaging_product: "whatsapp", to, type: "text", text: { body: String(seg.content || "") } };
+    const wamid = await metaPostMessage({
+      graphVersion: opts.graphVersion,
+      phoneNumberId: opts.phoneNumberId,
+      accessToken: opts.accessToken,
+      payload,
+    });
+    if (wamid) wamids.push(wamid);
+  }
+  return wamids;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS_HEADERS });
 
@@ -335,15 +397,8 @@ Deno.serve(async (req) => {
         messages,
       });
 
-      // 解析 + 寫 wa_replies + wa_messages
+      // 解析回复（不论走哪条路 wa_messages 都写、未解决都标）
       const segments = splitSegments(reply);
-      const replyIns = await sb.from("wa_replies").insert({
-        customer_id: p.customer_id,
-        chat_name: p.chat_name,
-        is_group: p.is_group,
-        segments: JSON.stringify(segments),
-        pending_id: p.id,
-      }).select("id").single();
 
       await sb.from("wa_messages").insert({
         customer_id: p.customer_id,
@@ -351,7 +406,6 @@ Deno.serve(async (req) => {
         content: reply,
       });
 
-      // 未解決標記
       if (reply.includes("[UNRESOLVED]")) {
         await sb.from("wa_unresolved").insert({
           customer_id: p.customer_id,
@@ -360,16 +414,76 @@ Deno.serve(async (req) => {
         });
       }
 
+      // ─── 出站派发 ───
+      // wa_outbound_mode='meta-cloud' + 私聊 + Meta 配置齐 → 直接调 Graph API 发，跳过 wa_replies 表
+      // 否则（extension 模式 / 群聊 / Meta 配置缺失）→ 走 wa_replies，让 Chrome 扩展拉走自己发
+      const outboundMode = (settings.wa_outbound_mode as string) || "extension";
+      const metaToken = (settings.meta_access_token as string) || "";
+      const metaPhoneId = (settings.meta_phone_number_id as string) || "";
+      const metaGraphVer = (settings.meta_graph_version as string) || "v25.0";
+      const canMeta = outboundMode === "meta-cloud" && !p.is_group && metaToken && metaPhoneId;
+
+      let replyId: number | null = null;
+      let deliveryNote = "";
+
+      if (canMeta) {
+        try {
+          const wamids = await sendViaMetaCloud({
+            to: p.customer_id,
+            segments,
+            graphVersion: metaGraphVer,
+            phoneNumberId: metaPhoneId,
+            accessToken: metaToken,
+          });
+          // 仍写 wa_replies 留审计，但 delivered_at 立即标记
+          const replyIns = await sb.from("wa_replies").insert({
+            customer_id: p.customer_id,
+            chat_name: p.chat_name,
+            is_group: p.is_group,
+            segments: JSON.stringify(segments),
+            pending_id: p.id,
+            delivered_at: new Date().toISOString(),
+            delivery_meta: { via: "meta-cloud", wamids },
+          }).select("id").single();
+          replyId = replyIns.data?.id || null;
+          deliveryNote = `via Meta ${wamids.length} wamid`;
+        } catch (metaErr) {
+          // Meta 调用失败 → 回退到 wa_replies 路径让扩展兜底
+          cloudLog(sb, "错误", `Meta 出站失败回退扩展队列 pending#${p.id}：${(metaErr as Error).message.slice(0, 200)}`);
+          const replyIns = await sb.from("wa_replies").insert({
+            customer_id: p.customer_id,
+            chat_name: p.chat_name,
+            is_group: p.is_group,
+            segments: JSON.stringify(segments),
+            pending_id: p.id,
+            delivery_meta: { via: "extension-fallback-after-meta-error", error: (metaErr as Error).message.slice(0, 200) },
+          }).select("id").single();
+          replyId = replyIns.data?.id || null;
+          deliveryNote = "via extension (Meta 失败回退)";
+        }
+      } else {
+        // 默认路径：写 wa_replies 让 Chrome 扩展拉走
+        const replyIns = await sb.from("wa_replies").insert({
+          customer_id: p.customer_id,
+          chat_name: p.chat_name,
+          is_group: p.is_group,
+          segments: JSON.stringify(segments),
+          pending_id: p.id,
+        }).select("id").single();
+        replyId = replyIns.data?.id || null;
+        deliveryNote = p.is_group ? "via extension (群聊 Meta 不支持)" : "via extension";
+      }
+
       await sb.from("wa_pending_replies").update({
         status: "replied",
         replied_at: new Date().toISOString(),
-        reply_id: replyIns.data?.id,
+        reply_id: replyId,
       }).eq("id", p.id);
 
       const unresolvedMark = reply.includes("[UNRESOLVED]") ? " [UNRESOLVED]" : "";
-      cloudLog(sb, "回复", `pending#${p.id} ${chatLabel} → ${segments.length} 段，${reply.length} 字${unresolvedMark}`);
+      cloudLog(sb, "回复", `pending#${p.id} ${chatLabel} → ${segments.length} 段，${reply.length} 字 ${deliveryNote}${unresolvedMark}`);
 
-      results.push({ id: p.id, action: "replied", reply_id: replyIns.data?.id });
+      results.push({ id: p.id, action: "replied", reply_id: replyId, delivery: deliveryNote });
     } catch (err) {
       const errMsg = (err as Error).message || String(err);
       await sb.from("wa_pending_replies").update({
