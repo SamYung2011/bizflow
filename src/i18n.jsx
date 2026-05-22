@@ -435,6 +435,14 @@ const DICT_EN = {
   "金額": "Amount",
   "明細": "Items",
   "此操作會同時還原對應的庫存狀態（Sold → In Stock），不可撤銷。": "This will also restore the related inventory status (Sold → In Stock). Cannot be undone.",
+  "查詢扣庫存記錄失敗": "Failed to query stock deduction records",
+  "將返還 SKU 庫存": "Will restore SKU stock for",
+  "將還原序號庫存": "Will restore serial-number inventory for",
+  "、": ", ",
+  "不可撤銷。": "Cannot be undone.",
+  "此發票未關聯庫存記錄，可直接刪除。": "This invoice has no related stock records and can be deleted directly.",
+  "返還 SKU 庫存失敗": "Failed to restore SKU stock",
+  "刪除返還": "deletion restore",
 
   // ── Warranty ──
   "已過期": "Expired",
@@ -1660,6 +1668,14 @@ const DICT_FR = {
   "金額": "Montant",
   "明細": "Détails",
   "此操作會同時還原對應的庫存狀態（Sold → In Stock），不可撤銷。": "Cette action restaurera également le statut du stock correspondant (Vendu → En stock). Irréversible.",
+  "查詢扣庫存記錄失敗": "Échec de la requête des enregistrements de déduction de stock",
+  "將返還 SKU 庫存": "Restaurera le stock SKU pour",
+  "將還原序號庫存": "Restaurera le stock par numéro de série pour",
+  "、": ", ",
+  "不可撤銷。": "Irréversible.",
+  "此發票未關聯庫存記錄，可直接刪除。": "Cette facture n'a pas d'enregistrements de stock associés et peut être supprimée directement.",
+  "返還 SKU 庫存失敗": "Échec de la restauration du stock SKU",
+  "刪除返還": "restauration par suppression",
 
   // ── Warranty ──
   "已過期": "Expirée",

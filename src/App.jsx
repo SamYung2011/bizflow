@@ -1117,6 +1117,11 @@ export default function App() {
     const isBroadway = channel === "broadway";
     const isAlreadyPaid = (inv.status || "").trim().toLowerCase() === "paid";  // 補扣場景：status 已是 Paid
 
+    // 解析 items（後面 alias 沉澱步驟需要按 item.name 取原始 qty）
+    let itemsArr = inv.items;
+    if (typeof itemsArr === "string") { try { itemsArr = JSON.parse(itemsArr); } catch { itemsArr = []; } }
+    if (!Array.isArray(itemsArr)) itemsArr = [];
+
     // 百老匯渠道：notes 加 __BROADWAY__ 標記（防重複追加）+ 跳過所有扣減
     let nextNotes = inv.notes || "";
     if (isBroadway && !nextNotes.includes("__BROADWAY__")) {

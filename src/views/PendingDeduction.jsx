@@ -12,7 +12,8 @@ import InvoiceEditModal from '../components/InvoiceEditModal.jsx'
  * 列出所有「應扣但沒扣」的發票（含已 Paid 進來的 Shopify 同步單、補錄歷史單等）。
  * 點條目 → 觸發 handleMarkPaid → 彈現有 mark paid modal → 用戶看扣減計劃審核。
  *
- * 條件：legacy_skip_deduct != true AND status='Paid' AND 沒有對應 inventory_movements
+ * 條件：legacy_skip_deduct != true AND 非百老匯 AND status='Paid' AND 沒有對應 inventory_movements
+ * （百老匯渠道發票不扣本地庫存，永遠不會有 movements 記錄，列出來只會死循環）
  *
  * Props: handleMarkPaid — App.jsx 傳入，撕掉了「已 Paid 跳過」攔截後可重用
  */
@@ -42,6 +43,7 @@ export function PendingDeductionView({ handleMarkPaid }) {
     return invoices
       .filter(inv => {
         if (inv.legacy_skip_deduct === true) return false
+        if ((inv.notes || '').includes('__BROADWAY__')) return false
         if ((inv.status || '').trim().toLowerCase() !== 'paid') return false
         if (deductedIds.has(inv.id)) return false
         return true

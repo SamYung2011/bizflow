@@ -341,6 +341,39 @@ export default function InvoicesView({
     const itemsLine = itemsArr.length > 0
       ? itemsArr.map(it => `  • ${it.name || t("(未命名)")} × ${it.qty || 1}`).join("\n")
       : "  " + t("(無明細)")
+
+    // 1. 查 SKU 庫存扣減記錄（新庫存系統：inventory_movements.type='sale'）
+    //    delta 為負數，取絕對值聚合後 upsert 回 inventory_stock
+    const { data: saleMovs, error: movFetchErr } = await supabase
+      .from("inventory_movements")
+      .select("id, product_id, warehouse_id, delta")
+      .eq("invoice_id", inv.id)
+      .eq("type", "sale")
+    if (movFetchErr) { alert(`${t("查詢扣庫存記錄失敗")}：${movFetchErr.message}`); return }
+    const stockReturns = new Map() // key: `${product_id}|${warehouse_id}` → qty
+    if (Array.isArray(saleMovs)) {
+      for (const m of saleMovs) {
+        if (!m.product_id || !m.warehouse_id) continue
+        const returnQty = -Number(m.delta || 0)
+        if (returnQty <= 0) continue
+        const k = `${m.product_id}|${m.warehouse_id}`
+        stockReturns.set(k, (stockReturns.get(k) || 0) + returnQty)
+      }
+    }
+
+    // 2. 查老 inventory（IMEI 序號制）
+    const { data: relatedInv, error: fetchErr } = await supabase
+      .from("inventory").select("id").eq("invoice_id", inv.id)
+    if (fetchErr) { alert(`${t("查詢關聯庫存失敗")}：${fetchErr.message}`); return }
+
+    // 3. 拼 confirm 文案：根據實際涉及哪些庫存動態顯示
+    const stockMsgParts = []
+    if (stockReturns.size > 0) stockMsgParts.push(`${t("將返還 SKU 庫存")} ${stockReturns.size} ${t("項")}`)
+    if (relatedInv && relatedInv.length > 0) stockMsgParts.push(`${t("將還原序號庫存")} ${relatedInv.length} ${t("件")}`)
+    const stockMsg = stockMsgParts.length > 0
+      ? `\n${stockMsgParts.join(t("、"))}，${t("不可撤銷。")}`
+      : `\n${t("此發票未關聯庫存記錄，可直接刪除。")}`
+
     const msg =
       `⚠️ ${t("確認刪除以下發票？")}\n\n` +
       `${t("發票號")}：DC${String(inv.invoice_number || inv.id).replace(/^DC/i, "")}\n` +
@@ -348,21 +381,52 @@ export default function InvoicesView({
       `${t("日期")}：${inv.date || "-"}\n` +
       `${t("金額")}：HKD$${inv.total || 0}\n` +
       `${t("狀態")}：${inv.status || "-"}\n` +
-      `${t("明細")}：\n${itemsLine}\n\n` +
-      t("此操作會同時還原對應的庫存狀態（Sold → In Stock），不可撤銷。")
+      `${t("明細")}：\n${itemsLine}\n` +
+      stockMsg
     const confirmed = window.confirm(msg)
     if (!confirmed) return
-    const { data: relatedInv, error: fetchErr } = await supabase
-      .from("inventory").select("id").eq("invoice_id", inv.id)
-    if (fetchErr) { alert(`${t("查詢關聯庫存失敗")}：${fetchErr.message}`); return }
+
+    // 4. 返還 SKU 庫存：先 upsert inventory_stock，再寫一筆 sale_reverse movement 留痕
+    for (const [k, qty] of stockReturns) {
+      const [product_id, warehouse_id] = k.split("|")
+      const { data: stockRow, error: stockErr } = await supabase
+        .from("inventory_stock")
+        .select("qty")
+        .eq("product_id", product_id)
+        .eq("warehouse_id", warehouse_id)
+        .maybeSingle()
+      if (stockErr) { alert(`${t("返還 SKU 庫存失敗")}：${stockErr.message}`); return }
+      const current = Number(stockRow?.qty || 0)
+      const { error: upsertErr } = await supabase.from("inventory_stock").upsert({
+        product_id,
+        warehouse_id,
+        qty: current + qty,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'product_id,warehouse_id' })
+      if (upsertErr) { alert(`${t("返還 SKU 庫存失敗")}：${upsertErr.message}`); return }
+      await supabase.from("inventory_movements").insert({
+        product_id,
+        warehouse_id,
+        delta: qty,
+        type: 'sale_reverse',
+        reason: `${t("發票")} #${inv.invoice_number || inv.id} ${t("刪除返還")}`,
+        invoice_id: inv.id,
+      })
+    }
+
+    // 5. 還原老 inventory（IMEI 序號制）
     if (relatedInv && relatedInv.length > 0) {
       const { error: restoreErr } = await supabase.from("inventory")
         .update({ status: "In Stock", customer_id: null, sold_date: null, warranty_end: null, invoice_id: null })
         .eq("invoice_id", inv.id)
       if (restoreErr) { alert(`${t("還原庫存失敗")}：${restoreErr.message}`); return }
     }
+
+    // 6. 刪發票（FK：inventory_movements.invoice_id SET NULL / stock_deduction_audit CASCADE）
     const { error: delErr } = await supabase.from("invoices").delete().eq("id", inv.id)
     if (delErr) { alert(`${t("刪除發票失敗")}：${delErr.message}`); return }
+
+    // 7. 更新 local state
     setInvoices(prev => prev.filter(i => i.id !== inv.id))
     if (relatedInv && relatedInv.length > 0) {
       const ids = new Set(relatedInv.map(r => r.id))
