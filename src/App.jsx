@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo, Suspense, lazy } from "react";
 // 報銷模組：lazy load 防內存爆。切到「報銷」tab 才下載這 chunk
 const ExpenseView = lazy(() => import("./views/Expense.jsx"));
 const OcppMonitorView = lazy(() => import("./views/OcppMonitor.jsx"));
+const OcppStationsView = lazy(() => import("./views/OcppStations.jsx"));
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase, fetchAllTable } from "./lib/supabaseClient.js";
 import { isNonWarrantyItem, itemWarrantyMonths } from "./lib/warranty.js";
@@ -1008,6 +1009,7 @@ export default function App() {
       { id: "whatsapp", label: t("WhatsApp 客服"), icon: "chat" },
       { id: "updatelog", label: t("更新日誌"), icon: "trend_up" },
       ...(isBfAdmin ? [{ id: "ocppMonitor", label: t("OCPP 監控"), icon: "charger" }] : []),
+      ...(isBfAdmin ? [{ id: "ocppStations", label: t("OCPP 站點"), icon: "charger" }] : []),
     ]},
     { type: "single", id: "gototeam", label: t("團隊管理"), icon: "external", external: "https://team.honnmono.top" },
   ];
@@ -1878,6 +1880,17 @@ export default function App() {
         {tab === "ocppMonitor" && (
           <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入 OCPP 監控…")}</div>}>
             <OcppMonitorView
+              supabase={supabase}
+              session={session}
+              isAdmin={isBfAdmin}
+            />
+          </Suspense>
+        )}
+
+        {/* OCPP STATIONS — admin-only chargecms read-only station list via ocpp-admin edge function */}
+        {tab === "ocppStations" && (
+          <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入 OCPP 站點…")}</div>}>
+            <OcppStationsView
               supabase={supabase}
               session={session}
               isAdmin={isBfAdmin}
