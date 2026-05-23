@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, Suspense, lazy } from "react";
 
 // 報銷模組：lazy load 防內存爆。切到「報銷」tab 才下載這 chunk
 const ExpenseView = lazy(() => import("./views/Expense.jsx"));
+const OcppMonitorView = lazy(() => import("./views/OcppMonitor.jsx"));
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase, fetchAllTable } from "./lib/supabaseClient.js";
 import { isNonWarrantyItem, itemWarrantyMonths } from "./lib/warranty.js";
@@ -1006,6 +1007,7 @@ export default function App() {
     { type: "group", id: "g_collab", label: t("協作工具"), icon: "chat", children: [
       { id: "whatsapp", label: t("WhatsApp 客服"), icon: "chat" },
       { id: "updatelog", label: t("更新日誌"), icon: "trend_up" },
+      ...(isBfAdmin ? [{ id: "ocppMonitor", label: t("OCPP 監控"), icon: "charger" }] : []),
     ]},
     { type: "single", id: "gototeam", label: t("團隊管理"), icon: "external", external: "https://team.honnmono.top" },
   ];
@@ -1871,6 +1873,17 @@ export default function App() {
 
         {/* UPDATE LOG — 從員工管理 logs sub-tab 抽出來的獨立頂級板塊（沿用 employee_update_logs 表 + 同款 UI） */}
         {tab === "updatelog" && <UpdateLogView />}
+
+        {/* OCPP MONITOR — admin-only preview module through ocpp-proxy */}
+        {tab === "ocppMonitor" && (
+          <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入 OCPP 監控…")}</div>}>
+            <OcppMonitorView
+              supabase={supabase}
+              session={session}
+              isAdmin={isBfAdmin}
+            />
+          </Suspense>
+        )}
 
         {/* 帳號審核已移至 team 子應用：https://team.honnmono.top */}
       </main>
