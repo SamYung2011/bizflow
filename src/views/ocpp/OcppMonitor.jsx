@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useT } from "../i18n.jsx";
+import { useT } from "../../i18n.jsx";
 
 // OCPP 監控 — bizflow 主站獨立模塊
 // 數據通路：bizflow → Supabase Edge Function `ocpp-proxy` → OCPP 8082 server

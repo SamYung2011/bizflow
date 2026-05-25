@@ -1,45 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useT } from "../i18n.jsx";
+import { useT } from "../../i18n.jsx";
+import { callOcppAdmin, fmtUnixTs } from "../../lib/ocppAdmin.js";
 
 // OCPP 站點管理 — bizflow 主站 admin-only 視圖
 // 數據通路：bizflow → Supabase Edge Function `ocpp-admin` → ECS `chargecms-readapi` (8084) → chargecms MySQL（只讀）
 // 權限：employees.is_admin = true 才能進（前端 nav gate + view 二次兜底 + Edge Function server-side guard 三層）
 // Phase 1：read-only list + detail，0 寫操作 / 0 命令下發
 
-const PROXY_PATH = "/ocpp-admin";
-
-async function callOcppAdmin(subPath, { accessToken } = {}) {
-  const base = import.meta.env.VITE_SUPABASE_URL;
-  const anon = import.meta.env.VITE_SUPABASE_ANON_KEY;
-  if (!base || !anon) throw new Error("Supabase env missing");
-  if (!accessToken) throw new Error("Missing access token");
-  const res = await fetch(`${base}/functions/v1${PROXY_PATH}${subPath}`, {
-    method: "GET",
-    headers: {
-      apikey: anon,
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-  const text = await res.text();
-  let parsed;
-  try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
-  if (!res.ok) {
-    // supabase 邊緣 runtime 錯誤用 `msg` 字段（如 InvalidWorkerCreation 表示 function 未部署）；
-    // 自家 edge function 返 flat `{ error: "..." }`。兩種都兜底，避免顯示 "Unknown error" 沒幫助
-    const detail = parsed && typeof parsed === "object" ? (parsed.error ?? parsed.msg) : parsed;
-    throw new Error(`HTTP ${res.status}: ${detail ?? "Unknown error"}`);
-  }
-  return parsed;
-}
-
-function fmtTs(ts) {
-  if (!ts) return "—";
-  try {
-    const d = new Date(Number(ts) * 1000); // chargecms 用 Unix timestamp（秒）
-    if (Number.isNaN(d.getTime())) return String(ts);
-    return d.toISOString().slice(0, 10);
-  } catch { return String(ts); }
-}
+const fmtTs = (ts) => fmtUnixTs(ts, { dateOnly: true });
 
 function StatusChip({ status, t }) {
   const palette = {

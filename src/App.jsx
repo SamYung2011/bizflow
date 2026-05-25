@@ -2,8 +2,8 @@ import React, { useState, useEffect, useMemo, Suspense, lazy } from "react";
 
 // 報銷模組：lazy load 防內存爆。切到「報銷」tab 才下載這 chunk
 const ExpenseView = lazy(() => import("./views/Expense.jsx"));
-const OcppMonitorView = lazy(() => import("./views/OcppMonitor.jsx"));
-const OcppStationsView = lazy(() => import("./views/OcppStations.jsx"));
+const OcppMonitorView = lazy(() => import("./views/ocpp/OcppMonitor.jsx"));
+const OcppChargingView = lazy(() => import("./views/ocpp/OcppCharging.jsx"));
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase, fetchAllTable } from "./lib/supabaseClient.js";
 import { isNonWarrantyItem, itemWarrantyMonths } from "./lib/warranty.js";
@@ -1008,9 +1008,11 @@ export default function App() {
     { type: "group", id: "g_collab", label: t("協作工具"), icon: "chat", children: [
       { id: "whatsapp", label: t("WhatsApp 客服"), icon: "chat" },
       { id: "updatelog", label: t("更新日誌"), icon: "trend_up" },
-      ...(isBfAdmin ? [{ id: "ocppMonitor", label: t("OCPP 監控"), icon: "charger" }] : []),
-      ...(isBfAdmin ? [{ id: "ocppStations", label: t("OCPP 站點"), icon: "charger" }] : []),
     ]},
+    ...(isBfAdmin ? [{ type: "group", id: "g_ocpp", label: t("OCPP 充電"), icon: "charger", children: [
+      { id: "ocppMonitor", label: t("OCPP 監控"), icon: "charger" },
+      { id: "ocppCharging", label: t("OCPP 充電站"), icon: "charger" },
+    ]}] : []),
     { type: "single", id: "gototeam", label: t("團隊管理"), icon: "external", external: "https://team.honnmono.top" },
   ];
 
@@ -1887,10 +1889,10 @@ export default function App() {
           </Suspense>
         )}
 
-        {/* OCPP STATIONS — admin-only chargecms read-only station list via ocpp-admin edge function */}
-        {tab === "ocppStations" && (
-          <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入 OCPP 站點…")}</div>}>
-            <OcppStationsView
+        {/* OCPP CHARGING — admin-only hub 含 4 sub-tab：公共桩 / 私人桩 / 充電站 / 報警信息 */}
+        {tab === "ocppCharging" && (
+          <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入 OCPP 充電站…")}</div>}>
+            <OcppChargingView
               supabase={supabase}
               session={session}
               isAdmin={isBfAdmin}
