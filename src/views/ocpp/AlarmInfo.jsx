@@ -12,6 +12,7 @@ export default function AlarmInfo({ session, isAdmin }) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [search, setSearch] = useState("");
+  const [sinceHours, setSinceHours] = useState(24);
   const aliveRef = useRef(true);
   const accessToken = session?.access_token;
 
@@ -22,6 +23,7 @@ export default function AlarmInfo({ session, isAdmin }) {
     try {
       const qs = new URLSearchParams({ limit: "200" });
       if (search.trim()) qs.set("q", search.trim());
+      qs.set("since", sinceHours === 0 ? "all" : String(sinceHours));
       const res = await callOcppAdmin(`/alarms?${qs}`, { accessToken });
       if (!aliveRef.current) return;
       setAlarms(res?.data || []);
@@ -31,21 +33,32 @@ export default function AlarmInfo({ session, isAdmin }) {
     } finally {
       if (aliveRef.current) setLoading(false);
     }
-  }, [isAdmin, accessToken, search]);
+  }, [isAdmin, accessToken, search, sinceHours]);
 
   useEffect(() => {
     aliveRef.current = true;
     refresh();
     return () => { aliveRef.current = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdmin, accessToken]);
+  }, [isAdmin, accessToken, sinceHours]);
 
   if (!isAdmin) return null;
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
         <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{t("報警信息")}</h3>
+        <select
+          value={sinceHours}
+          onChange={(e) => setSinceHours(Number(e.target.value))}
+          aria-label={t("時間範圍")}
+          style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #ddd", fontSize: 13, background: "#fff" }}
+        >
+          <option value={24}>{t("最近 24 小時")}</option>
+          <option value={168}>{t("最近 7 天")}</option>
+          <option value={720}>{t("最近 30 天")}</option>
+          <option value={0}>{t("全部")}</option>
+        </select>
         <input
           type="text"
           value={search}

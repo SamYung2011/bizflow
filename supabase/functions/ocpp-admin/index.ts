@@ -6,6 +6,8 @@
 //   GET /ocpp-admin/private-piles
 //   GET /ocpp-admin/alarms
 //   GET /ocpp-admin/operators
+//   GET /ocpp-admin/orders
+//   GET /ocpp-admin/orders/{userId}/{orderId}
 //
 // Auth:
 //   1. Validate caller JWT via Supabase auth/v1/user.
@@ -147,6 +149,8 @@ function mapPath(pathname: string) {
   if (pathname === "/private-piles") return "/api/private-piles";
   if (pathname === "/alarms") return "/api/alarms";
   if (pathname === "/operators") return "/api/operators";
+  if (pathname === "/orders") return "/api/orders";
+  if (/^\/orders\/\d+\/\d+$/.test(pathname)) return `/api${pathname}`;
   return "";
 }
 
