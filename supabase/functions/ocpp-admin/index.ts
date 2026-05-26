@@ -33,8 +33,20 @@ type GuardResult = { ok: true } | { ok: false; status: number; error: string };
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    headers: {
+      ...CORS_HEADERS,
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+    },
   });
+}
+
+function isAllowedUpstream(url: URL): boolean {
+  return (
+    url.protocol === "http:" &&
+    url.hostname === "172.18.0.1" &&
+    url.port === "8084"
+  );
 }
 
 function stripFunctionPrefix(pathname: string) {
@@ -48,13 +60,20 @@ function bearerToken(req: Request) {
 }
 
 function requireEnv() {
-  return Boolean(
-    SUPABASE_URL &&
-      SUPABASE_ANON_KEY &&
-      SUPABASE_SERVICE_ROLE_KEY &&
-      READAPI_BASE_URL &&
-      INTERNAL_TOKEN.length >= 32
-  );
+  if (
+    !SUPABASE_URL ||
+    !SUPABASE_ANON_KEY ||
+    !SUPABASE_SERVICE_ROLE_KEY ||
+    !READAPI_BASE_URL ||
+    INTERNAL_TOKEN.length < 32
+  ) {
+    return false;
+  }
+  try {
+    return isAllowedUpstream(new URL(READAPI_BASE_URL));
+  } catch {
+    return false;
+  }
 }
 
 async function fetchJson(url: string, init: RequestInit, timeoutMs: number, deadline?: AbortSignal) {
@@ -149,21 +168,31 @@ Deno.serve(async (req) => {
   for (const [key, value] of url.searchParams.entries()) {
     upstreamUrl.searchParams.append(key, value);
   }
+  if (!isAllowedUpstream(upstreamUrl)) return json({ error: "Server misconfigured" }, 500);
 
+  let upstream: Response;
+  let text: string;
   try {
     const readApiController = new AbortController();
     const readApiTimeout = setTimeout(() => readApiController.abort(), READAPI_TIMEOUT_MS);
     deadline.addEventListener("abort", () => readApiController.abort(), { once: true });
-    const upstream = await fetch(upstreamUrl, {
+    upstream = await fetch(upstreamUrl, {
       headers: { "X-Internal-Token": INTERNAL_TOKEN },
       signal: readApiController.signal,
     }).finally(() => clearTimeout(readApiTimeout));
-
-    const text = await upstream.text();
-    const body = text ? JSON.parse(text) : null;
-    if (upstream.status === 403 || upstream.status === 404) return json({ error: "Read service unavailable" }, 502);
-    return json(body, upstream.status);
+    text = await upstream.text();
   } catch {
     return json({ error: "Read service timeout" }, 504);
   }
+
+  let body: unknown = null;
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      return json({ error: "Read service invalid response" }, 502);
+    }
+  }
+  if (upstream.status === 403 || upstream.status === 404) return json({ error: "Read service unavailable" }, 502);
+  return json(body, upstream.status);
 });

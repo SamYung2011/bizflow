@@ -8,6 +8,21 @@ import { callOcppAdmin } from "../../lib/ocppAdmin.js";
 // 故障突顯：fault_connector_count > 0 或 online_status = 0 用紅色 highlight，配合 alarm tab
 
 const FAULT_STATE_THRESHOLD = 6;
+const STATION_DETAIL_CONCURRENCY = 4;
+
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const idx = cursor++;
+      if (idx >= items.length) return;
+      results[idx] = await fn(items[idx], idx);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
 
 function PileStatusChip({ onlineStatus, faultCount, t }) {
   if (onlineStatus === 0) {
@@ -43,12 +58,10 @@ export default function PublicPiles({ session, isAdmin }) {
     try {
       const stationsRes = await callOcppAdmin("/stations?limit=200", { accessToken });
       const stations = stationsRes?.data || [];
-      const details = await Promise.all(
-        stations.map((s) =>
-          callOcppAdmin(`/stations/${s.stationId}`, { accessToken }).then(
-            (res) => ({ station: s, detail: res?.data }),
-            (e) => ({ station: s, error: String(e?.message || e) })
-          )
+      const details = await mapWithConcurrency(stations, STATION_DETAIL_CONCURRENCY, (s) =>
+        callOcppAdmin(`/stations/${s.stationId}`, { accessToken }).then(
+          (res) => ({ station: s, detail: res?.data }),
+          (e) => ({ station: s, error: String(e?.message || e) })
         )
       );
       if (!aliveRef.current) return;

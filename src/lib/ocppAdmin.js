@@ -27,11 +27,26 @@ export async function callOcppAdmin(subPath, { accessToken } = {}) {
   return parsed;
 }
 
+const HK_TS_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Hong_Kong",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
 export function fmtUnixTs(ts, { dateOnly = false } = {}) {
   if (!ts) return "—";
   try {
     const d = new Date(Number(ts) * 1000); // chargecms 用 Unix timestamp（秒）
     if (Number.isNaN(d.getTime())) return String(ts);
-    return dateOnly ? d.toISOString().slice(0, 10) : d.toISOString().replace("T", " ").slice(0, 19);
+    const parts = HK_TS_FORMATTER.formatToParts(d);
+    const get = (type) => parts.find((p) => p.type === type)?.value || "";
+    const date = `${get("year")}-${get("month")}-${get("day")}`;
+    if (dateOnly) return date;
+    return `${date} ${get("hour")}:${get("minute")}:${get("second")}`;
   } catch { return String(ts); }
 }
