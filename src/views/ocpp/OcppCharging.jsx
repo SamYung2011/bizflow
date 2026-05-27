@@ -64,6 +64,7 @@ export default function OcppCharging(props) {
         {subTab === "privatePiles" && <PrivatePiles {...props} />}
         {subTab === "stations" && <Stations {...props} />}
         {subTab === "orders" && <OcppOrders {...props} />}
+        {subTab === "commandLogs" && <CommandLogs {...props} />}
         {subTab === "alarms" && <AlarmInfo {...props} />}
       </Suspense>
     </div>
