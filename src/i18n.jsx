@@ -1392,6 +1392,23 @@ const DICT_EN = {
   "時": "h",
   "分": "min",
   "秒": "s",
+  // ── OCPP charging hub / command-logs sub-tab ──
+  "命令日誌": "Command logs",
+  "命令日誌 · 演示階段": "Command logs · Preview",
+  "此列表讀 chargecms 表 rc_operate_command_logs；目前 vendor PHP 端不寫此表，生產資料為 0 條。入口已搭好，後續 BizFlow 自帶命令模塊時再接寫入即可。只讀,零寫入。": "This list reads chargecms's rc_operate_command_logs table. Vendor PHP doesn't currently write to this table, so production data is 0 rows. The entry is in place — when BizFlow ships its own command module, hook the writes there. Read-only, zero write.",
+  "命令名（如 Reset）": "Command name (e.g. Reset)",
+  "全部命令": "All commands",
+  "全部結果": "All results",
+  "成功": "Success",
+  "超時": "Timeout",
+  "結果": "Result",
+  "命令": "Command",
+  "查看回包": "View response",
+  "收起": "Collapse",
+  "回包數據": "Response data",
+  "無回包數據": "No response data",
+  "樁編號 / 命令 / 回包": "Pile no / command / response",
+  "無命令日誌數據": "No command log data",
 };
 
 const DICT_FR = {
@@ -2781,6 +2798,23 @@ const DICT_FR = {
   "時": "h",
   "分": "min",
   "秒": "s",
+  // ── OCPP charging hub / command-logs sub-tab ──
+  "命令日誌": "Journaux de commande",
+  "命令日誌 · 演示階段": "Journaux de commande · Aperçu",
+  "此列表讀 chargecms 表 rc_operate_command_logs；目前 vendor PHP 端不寫此表，生產資料為 0 條。入口已搭好，後續 BizFlow 自帶命令模塊時再接寫入即可。只讀,零寫入。": "Cette liste lit la table rc_operate_command_logs de chargecms. Le PHP vendor n'écrit actuellement pas dans cette table, donc les données de production sont 0 ligne. L'entrée est en place — lorsque BizFlow livrera son propre module de commandes, brancher les écritures là. Lecture seule, zéro écriture.",
+  "命令名（如 Reset）": "Nom de commande (ex. Reset)",
+  "全部命令": "Toutes les commandes",
+  "全部結果": "Tous les résultats",
+  "成功": "Succès",
+  "超時": "Délai dépassé",
+  "結果": "Résultat",
+  "命令": "Commande",
+  "查看回包": "Voir la réponse",
+  "收起": "Réduire",
+  "回包數據": "Données de réponse",
+  "無回包數據": "Aucune donnée de réponse",
+  "樁編號 / 命令 / 回包": "N° de borne / commande / réponse",
+  "無命令日誌數據": "Aucun journal de commande",
 };
 
 const I18nContext = createContext({ lang: "zh", setLang: () => {}, t: (s) => s });
