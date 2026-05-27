@@ -312,21 +312,31 @@ function TaskBoard({ emp, data, me, userId, setEditingTask, compact, companyId, 
     abandoned: allEmpTasks.filter(tk => showInAb(tk) && within180(tk) && showInTerminal(tk)),
   }
 
-  // 反饋（僅顯示 emp 未完成的 task；每個 task 取最近一條作摘要，展開後看全部）
+  // 反饋：emp 未完成的 assignee task + emp 被 @ 但不是 assignee 的 task；每個 task 取最近一條作摘要，展開後看全部。
   const empTaskIds = new Set(tasks.filter(tk =>
     isTaskAssignedTo(tk, emp.id, assigneesByTask)
     && !empDoneFor(tk, emp.id, assigneesByTask)
     && !empAbandonedFor(tk, emp.id, assigneesByTask)
   ).map(tk => tk.id))
+  const taskById = new Map(tasks.map(tk => [tk.id, tk]))
   const fbByTask = new Map()
   for (const fb of feedbacks) {
-    if (!empTaskIds.has(fb.task_id)) continue
+    const tk = taskById.get(fb.task_id)
+    if (!tk) continue
+    const isOwnOpenTask = empTaskIds.has(fb.task_id)
+    const mentionedIds = Array.isArray(fb.mentioned_user_ids) ? fb.mentioned_user_ids : []
+    const isMentionedTask = !!emp.user_id
+      && mentionedIds.includes(emp.user_id)
+      && !(assigneesByTask.get(fb.task_id) || []).some(a => a.employee_id === emp.id)
+    if (!isOwnOpenTask && !isMentionedTask) continue
     const cur = fbByTask.get(fb.task_id)
-    if (!cur || new Date(fb.created_at) > new Date(cur.created_at)) fbByTask.set(fb.task_id, fb)
+    if (!cur || new Date(fb.created_at) > new Date(cur.fb.created_at)) {
+      fbByTask.set(fb.task_id, { fb, source: isOwnOpenTask ? 'task' : 'mention' })
+    }
   }
-  const fbList = Array.from(fbByTask.entries()).map(([tid, fb]) => {
-    const tk = tasks.find(x => x.id === tid)
-    return tk ? { ...tk, _fb: fb } : null
+  const fbList = Array.from(fbByTask.entries()).map(([tid, item]) => {
+    const tk = taskById.get(tid)
+    return tk ? { ...tk, _fb: item.fb, _fbSource: item.source } : null
   }).filter(Boolean).sort((a, b) => new Date(b._fb.created_at) - new Date(a._fb.created_at))
 
   // 發布人在任務列表上 toggle 自己創建的任務。
@@ -509,13 +519,14 @@ function EmpHeader({ emp, me }) {
   )
 }
 
-// 反饋面板（只看 emp 未完成 task；卡片可展開看全部反饋）
+// 反饋面板（emp 未完成 task + @ 提到 task；卡片可展開看全部反饋）
 function FbPanel({ fbList, feedbacks, setEditingTask }) {
   const { t } = useT()
   const [expanded, toggle] = useToggleSet()
   return (
-    <div style={{ background: c.amberBg, border: `1px solid #fde68a`, borderRadius: radius.lg, padding: 12, minHeight: 220 }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: '#a16207', marginBottom: 8 }}>💬 {t('任務反饋記錄')} <span style={{ fontSize: 11, color: '#b88a00' }}>{fbList.length}</span></div>
+    <div style={{ background: c.amberBg, border: `1px solid #fde68a`, borderRadius: radius.lg, padding: 12, height: 320, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: '#a16207', marginBottom: 8, flexShrink: 0 }}>💬 {t('任務反饋記錄')} <span style={{ fontSize: 11, color: '#b88a00' }}>{fbList.length}</span></div>
+      <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
       {fbList.length === 0 ? (
         <div style={{ fontSize: 11, color: '#b88a00', fontStyle: 'italic' }}>{t('暫無反饋')}</div>
       ) : fbList.map(tk => {
@@ -526,6 +537,7 @@ function FbPanel({ fbList, feedbacks, setEditingTask }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
               <button type="button" onClick={() => toggle(tk.id)} title={isExp ? t('收起') : t('展開全部反饋')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#b88a00', fontSize: 10, padding: 0, width: 12, lineHeight: 1 }}>{isExp ? '▼' : '▶'}</button>
               <span onClick={() => setEditingTask(tk)} style={{ fontSize: 12, fontWeight: 600, flex: 1, cursor: 'pointer' }}>{tk.title}</span>
+              {tk._fbSource === 'mention' && <Pill tone="purple" style={{ fontSize: 10, padding: '1px 5px' }}>{t('@ 提到')}</Pill>}
               {allFbs.length > 1 && <span style={{ fontSize: 10, color: '#b88a00' }}>{allFbs.length}</span>}
             </div>
             {!isExp ? (
@@ -546,6 +558,7 @@ function FbPanel({ fbList, feedbacks, setEditingTask }) {
           </div>
         )
       })}
+      </div>
     </div>
   )
 }
