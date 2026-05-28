@@ -1450,6 +1450,7 @@ const DICT_EN = {
   "下一頁": "Next",
   "無用戶數據": "No user data",
   "用戶ID / 手機 / 郵箱 / 暱稱": "User ID / mobile / email / nickname",
+  "用戶ID / 郵箱 / 暱稱": "User ID / email / nickname",
   "載入用戶信息…": "Loading users…",
 };
 
@@ -2898,6 +2899,7 @@ const DICT_FR = {
   "下一頁": "Suivant",
   "無用戶數據": "Aucune donnée utilisateur",
   "用戶ID / 手機 / 郵箱 / 暱稱": "ID / mobile / email / pseudo",
+  "用戶ID / 郵箱 / 暱稱": "ID / email / pseudo",
   "載入用戶信息…": "Chargement des utilisateurs…",
 };
 

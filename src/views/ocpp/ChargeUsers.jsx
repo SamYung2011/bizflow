@@ -4,8 +4,9 @@ import { callOcppAdmin, fmtUnixTs } from "../../lib/ocppAdmin.js";
 
 // 用戶信息 (ChargeUsers) — chargecms rc_user 主表 + rc_user_1..10 分表（list 唯讀）
 // 零寫入 / 不發 OCPP 命令 / 不動 vendor 8081 / 不動 chargecms PHP
-// 公司內部後台 admin only：用戶業務字段全明文顯示（煊煊拍板）；
-// 認證憑證 password/salt/token/verification 後端不返（安全紅線，非脫敏）
+// 公司內部後台 admin only：用戶業務字段全明文（煊煊拍板）；認證憑證後端不返
+// chargecms 用戶體系靠 user_id(openid) + email + 暱稱 標識，不收集 mobile/operator_id
+// （這倆字段全表幾乎全空，chargecms PHP 後台 searchFields 也只用 user_id,email）→ 列表不展示
 // 1556 用戶 → 分頁 UI（limit 50 翻頁）
 
 const PAGE_LIMIT = 50;
@@ -59,10 +60,8 @@ function DetailRow({ label, children }) {
 export default function ChargeUsers({ session, isAdmin }) {
   const { t } = useT();
   const [rows, setRows] = useState([]);
-  const [operators, setOperators] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
-  const [filterOperatorId, setFilterOperatorId] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterQ, setFilterQ] = useState("");
   const [searchInput, setSearchInput] = useState("");
@@ -79,7 +78,6 @@ export default function ChargeUsers({ session, isAdmin }) {
     setErr("");
     try {
       const qs = new URLSearchParams();
-      if (filterOperatorId) qs.set("operatorId", filterOperatorId);
       if (filterStatus) qs.set("status", filterStatus);
       if (filterQ) qs.set("q", filterQ);
       qs.set("limit", String(PAGE_LIMIT));
@@ -94,33 +92,16 @@ export default function ChargeUsers({ session, isAdmin }) {
     } finally {
       if (aliveRef.current) setLoading(false);
     }
-  }, [isAdmin, accessToken, filterOperatorId, filterStatus, filterQ, offset]);
-
-  const loadOperators = useCallback(async () => {
-    if (!isAdmin || !accessToken) return;
-    try {
-      const data = await callOcppAdmin("/operators?limit=200", { accessToken });
-      if (aliveRef.current) setOperators(Array.isArray(data?.data) ? data.data : []);
-    } catch {
-      // operator dropdown is optional; swallow
-    }
-  }, [isAdmin, accessToken]);
+  }, [isAdmin, accessToken, filterStatus, filterQ, offset]);
 
   useEffect(() => {
     aliveRef.current = true;
-    loadOperators();
     return () => { aliveRef.current = false; };
-  }, [loadOperators]);
+  }, []);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
-
-  // filter 改變時回到第一頁
-  const onFilterChange = (setter) => (value) => {
-    setOffset(0);
-    setter(value);
-  };
 
   if (!isAdmin) {
     return (
@@ -139,14 +120,7 @@ export default function ChargeUsers({ session, isAdmin }) {
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
         <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{t("用戶信息")}</h3>
 
-        <select value={filterOperatorId} onChange={(e) => onFilterChange(setFilterOperatorId)(e.target.value)} style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #ddd", fontSize: 13 }}>
-          <option value="">{t("全部運營商")}</option>
-          {operators.map((o) => (
-            <option key={o.operatorId} value={o.operatorId}>{o.name || `#${o.operatorId}`}</option>
-          ))}
-        </select>
-
-        <select value={filterStatus} onChange={(e) => onFilterChange(setFilterStatus)(e.target.value)} style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #ddd", fontSize: 13 }}>
+        <select value={filterStatus} onChange={(e) => { setOffset(0); setFilterStatus(e.target.value); }} style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #ddd", fontSize: 13 }}>
           {STATUS_OPTIONS.map(([value, label]) => (
             <option key={value} value={value}>{t(label)}</option>
           ))}
@@ -159,7 +133,7 @@ export default function ChargeUsers({ session, isAdmin }) {
           <input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder={t("用戶ID / 手機 / 郵箱 / 暱稱")}
+            placeholder={t("用戶ID / 郵箱 / 暱稱")}
             style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #ddd", fontSize: 13, width: 220 }}
           />
           <button type="submit" style={{ padding: "4px 14px", borderRadius: 6, border: "1px solid #1976d2", background: "#1976d2", color: "#fff", fontSize: 13, cursor: "pointer" }}>
@@ -194,7 +168,7 @@ export default function ChargeUsers({ session, isAdmin }) {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: "#fafafa", textAlign: "left" }}>
-                  {[t("用戶ID"), t("運營商"), t("手機"), t("暱稱"), t("餘額"), t("狀態"), t("操作")].map((h) => (
+                  {[t("用戶ID"), t("郵箱"), t("暱稱"), t("餘額"), t("狀態"), t("操作")].map((h) => (
                     <th key={h} style={{ padding: "8px 10px", borderBottom: "1px solid #eee", fontWeight: 600, color: "#555" }}>{h}</th>
                   ))}
                 </tr>
@@ -206,8 +180,7 @@ export default function ChargeUsers({ session, isAdmin }) {
                     <React.Fragment key={r.userId || r.rowId}>
                       <tr style={{ borderBottom: open ? "none" : "1px solid #f3f4f6" }}>
                         <td style={{ padding: "8px 10px", fontFamily: "monospace", fontSize: 12 }}>{r.userId || "—"}</td>
-                        <td style={{ padding: "8px 10px" }}>{r.operatorName || "—"}</td>
-                        <td style={{ padding: "8px 10px", fontFamily: "monospace", fontSize: 12 }}>{r.mobile || "—"}</td>
+                        <td style={{ padding: "8px 10px" }}>{r.email || "—"}</td>
                         <td style={{ padding: "8px 10px" }}>{r.nickname || r.username || "—"}</td>
                         <td style={{ padding: "8px 10px", textAlign: "right" }}>HK$ {fmtMoney(r.money)}</td>
                         <td style={{ padding: "8px 10px" }}><StatusChip status={r.status} t={t} /></td>
@@ -222,12 +195,10 @@ export default function ChargeUsers({ session, isAdmin }) {
                       </tr>
                       {open && (
                         <tr style={{ borderBottom: "1px solid #f3f4f6", background: "#fcfcfd" }}>
-                          <td colSpan={7} style={{ padding: "12px 16px" }}>
+                          <td colSpan={6} style={{ padding: "12px 16px" }}>
                             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "2px 24px" }}>
-                              <DetailRow label={t("郵箱")}>{r.email || "—"}</DetailRow>
                               <DetailRow label={t("用戶名")}>{r.username || "—"}</DetailRow>
                               <DetailRow label="tagid">{r.tagid || "—"}</DetailRow>
-                              <DetailRow label={t("地區碼")}>{r.zone || "—"}</DetailRow>
                               <DetailRow label={t("用戶組")}>{r.groupName || "—"}</DetailRow>
                               <DetailRow label={t("等級")}>{r.level ?? 0}</DetailRow>
                               <DetailRow label={t("性別")}>{fmtGender(r.gender, t)}</DetailRow>
