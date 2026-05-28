@@ -13,6 +13,7 @@ import { useAppContext } from "./context/AppContext.jsx";
 import { Icon } from "./components/Icon.jsx";
 import { Input, Select } from "./components/Inputs.jsx";
 import { suggestEmail } from "./lib/emailSuggest.js";
+import { isValidImeiCode, splitImeiCodes } from "./lib/imei.js";
 import { CAR_BRANDS, PRODUCTS_LIST, REFERRAL_SOURCES } from "./lib/constants.js";
 import { computeCommissionFor } from "./lib/commission.js";
 import { ProductEditModal, ProductNewModal, ProductsListView, ProductsDetailView, emptyNewProduct } from "./views/Products.jsx";
@@ -330,6 +331,12 @@ export default function App() {
       if (Array.isArray(arr) && arr.length > 0) return arr.slice();
       return loadMultiField(src[singleKey]);
     };
+    const pickImeiMulti = () => {
+      const arr = src.allImeiCodes;
+      const sources = Array.isArray(arr) && arr.length > 0 ? arr : [src.imei_code];
+      const values = [...new Set(sources.flatMap(v => splitImeiCodes(v)))];
+      return values.length > 0 ? values : [""];
+    };
     // 物理合并的别名：parent_id = src.id 的子记录 name。同名合并成一行避免用户看到重复
     const physicalChildren = (allCustomers || []).filter(c => c.parent_id === src.id);
     const aliasNameToCids = new Map(); // 保留顺序：Map 默认按 insert 顺序
@@ -349,7 +356,7 @@ export default function App() {
       phoneMainlands: pickMulti('allPhoneMainlands', 'phone_mainland'),
       emails: pickMulti('allEmails', 'email'),
       addresses: pickMulti('allAddresses', 'address'),
-      imeiCodes: pickMulti('allImeiCodes', 'imei_code'),
+      imeiCodes: pickImeiMulti(),
       carMakes: pickMulti('allCarMakes', 'car_make'),
       carModels: pickMulti('allCarModels', 'car_model'),
       type: src.type || "Regular",
@@ -502,13 +509,22 @@ export default function App() {
     if (!editingCustomer || !editCustCid) { console.log("[SAVE] early return"); return; }
     setEditCustSaving(true);
     const joinArr = arr => (arr || []).map(s => String(s).trim()).filter(Boolean).join("\n") || null;
+    const joinImeiArr = arr => (arr || []).flatMap(v => splitImeiCodes(v)).filter(Boolean).join("\n") || null;
+    const invalidImei = (editCustForm.imeiCodes || [])
+      .flatMap(v => splitImeiCodes(v))
+      .filter(code => !isValidImeiCode(code));
+    if (invalidImei.length > 0) {
+      setEditCustSaving(false);
+      alert(`${t("IMEI 格式不正確")}：${invalidImei.slice(0, 3).join(", ")}\n${t("IMEI 必須為 15 位數字")}`);
+      return;
+    }
     const patch = {
       name: editCustForm.name.trim() || null,
       phone: joinArr(editCustForm.phones),
       phone_mainland: joinArr(editCustForm.phoneMainlands),
       email: joinArr(editCustForm.emails),
       address: joinArr(editCustForm.addresses),
-      imei_code: joinArr(editCustForm.imeiCodes),
+      imei_code: joinImeiArr(editCustForm.imeiCodes),
       car_make: joinArr(editCustForm.carMakes),
       car_model: joinArr(editCustForm.carModels),
       type: editCustForm.type || "Regular",
@@ -542,9 +558,11 @@ export default function App() {
       if (!sib) continue;
       const sibPatch = {};
       for (const { formKey, dbKey } of MULTI_FIELDS) {
-        const newValues = (editCustForm[formKey] || []).map(s => String(s).trim()).filter(Boolean);
+        const newValues = dbKey === "imei_code"
+          ? (editCustForm[formKey] || []).flatMap(v => splitImeiCodes(v))
+          : (editCustForm[formKey] || []).map(s => String(s).trim()).filter(Boolean);
         const newSet = new Set(newValues);
-        const sibCurrent = splitMulti(sib[dbKey]);
+        const sibCurrent = dbKey === "imei_code" ? splitImeiCodes(sib[dbKey]) : splitMulti(sib[dbKey]);
         const filtered = sibCurrent.filter(v => newSet.has(v));
         if (filtered.length !== sibCurrent.length) {
           sibPatch[dbKey] = filtered.length > 0 ? filtered.join("\n") : null;
@@ -1035,6 +1053,12 @@ export default function App() {
 
   async function handleSaveCustomer() {
     setSaving(true);
+    const invalidImei = splitImeiCodes(newCustomer.imei_code).filter(code => !isValidImeiCode(code));
+    if (invalidImei.length > 0) {
+      setSaving(false);
+      alert(`${t("IMEI 格式不正確")}：${invalidImei.slice(0, 3).join(", ")}\n${t("IMEI 必須為 15 位數字")}`);
+      return;
+    }
     const { data, error } = await supabase.from("customers").insert([{
       name: newCustomer.name,
       email: newCustomer.email,
@@ -1042,7 +1066,7 @@ export default function App() {
       phone_mainland: newCustomer.phone_mainland,
       car_make: newCustomer.car_make,
       car_model: newCustomer.car_model,
-      imei_code: newCustomer.imei_code,
+      imei_code: splitImeiCodes(newCustomer.imei_code).join("\n") || null,
       address: newCustomer.address,
       interest_products: newCustomer.interest_products,
       referral: newCustomer.referral,

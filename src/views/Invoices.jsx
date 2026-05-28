@@ -8,6 +8,7 @@ import { Icon } from '../components/Icon.jsx'
 import InvoiceEditModal from '../components/InvoiceEditModal.jsx'
 import { fmtInvNum, invoiceSource, formatNotes } from '../lib/invoiceHelpers.js'
 import { deriveShippingStatus, isShippingTrackable, isProblematicShipping } from '../lib/shippingHelpers.js'
+import { appendCustomerImeiCodes, collectImeiCodesFromItems, collectInvalidImeiCodesFromItems, isDcAdaptorProLineItem } from '../lib/imei.js'
 
 // 多值字段拆分（與 App.jsx 內定義同步）
 const splitMulti = v => String(v || "").split(/\n+/).map(s => s.trim()).filter(Boolean)
@@ -36,7 +37,9 @@ export default function InvoicesView({
   const {
     invoices, setInvoices,
     customers,
+    setCustomers,
     products,
+    lineItemAliases,
     inventory, setInventory,
     warehouses,
     employees,
@@ -173,6 +176,12 @@ export default function InvoicesView({
     if (newInvoice.discount?.enabled && Number(newInvoice.discount.amount)) {
       finalItems.push({ id: mkItem().id, name: "優惠", qty: 1, price: -Number(newInvoice.discount.amount) })
     }
+    const invalidImei = collectInvalidImeiCodesFromItems(finalItems, { products, lineItemAliases })
+    if (invalidImei.length > 0) {
+      alert(`${t("IMEI 格式不正確")}：${invalidImei.slice(0, 3).join(", ")}\n${t("IMEI 必須為 15 位數字")}`)
+      setSaving(false)
+      return
+    }
     const { data, error } = await supabase.from("invoices").insert([{
       invoice_number: invNumber,
       customer_id: newInvoice.customerId || null,
@@ -192,6 +201,18 @@ export default function InvoicesView({
       const virtual = gid ? customerGroups.virtualCustomers.find(v => v.id === gid) : null
       const effective = { ...(virtual || customer), ...(newInvoice.fieldOverrides || {}) }
       enterPrintFlow(data[0], effective, finalItems, products)
+
+      const imeiSync = await appendCustomerImeiCodes({
+        supabase,
+        queryClient,
+        customers,
+        setCustomers,
+        customerId: newInvoice.customerId,
+        imeiCodes: collectImeiCodesFromItems(finalItems, { products, lineItemAliases }),
+      })
+      if (imeiSync.error) {
+        alert(`${t("發票已生成")} (#${data[0].invoice_number})，${t("但 IMEI 未能同步到客戶資料")}：${imeiSync.error.message}`)
+      }
 
       // Auto-create warranty: update inventory items with warranty_end dates
       const invoiceDate = new Date()
@@ -722,65 +743,77 @@ export default function InvoicesView({
                 <div style={{ marginBottom: 14 }}>
                   <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 8 }}>{t("商品項目")}</label>
                   {newInvoice.items.map((item, idx) => (
-                    <div key={item.id} style={{ display: "grid", gridTemplateColumns: "1fr 56px 82px 72px auto", gap: 6, marginBottom: 8, alignItems: "start" }}>
-                      <div style={{ position: "relative" }}>
-                        <input
-                          value={item.name}
-                          onChange={e => { const items = [...newInvoice.items]; items[idx] = {...item, name: e.target.value}; setNewInvoice({...newInvoice, items}); }}
-                          onFocus={() => setProductPickerOpenId(item.id)}
-                          onBlur={() => setTimeout(() => setProductPickerOpenId(cur => cur === item.id ? null : cur), 150)}
-                          placeholder={t("產品 / 服務（輸入關鍵字）")}
-                          style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", width: "100%", boxSizing: "border-box" }}
-                        />
-                        {productPickerOpenId === item.id && (() => {
-                          const q = (item.name || "").toLowerCase().trim()
-                          const parentIds = new Set(products.filter(x => x.parent_product_id).map(x => x.parent_product_id))
-                          const matched = products.filter(p => {
-                            if (!p.name) return false
-                            if (p.category === '_archived') return false
-                            if (parentIds.has(p.id)) return false
-                            if (!q) return true
-                            return p.name.toLowerCase().includes(q) || (p.code || "").toLowerCase().includes(q) || (p.category || "").toLowerCase().includes(q)
-                          })
-                          const top = matched.slice(0, 10)
-                          if (top.length === 0) return null
-                          return (
-                            <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, width: 360, maxWidth: "calc(100vw - 80px)", maxHeight: 240, overflowY: "auto", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 10, boxShadow: "0 4px 16px rgba(0,0,0,0.08)", zIndex: 100 }}>
-                              {top.map(p => (
-                                <div
-                                  key={p.id}
-                                  onMouseDown={() => {
-                                    const items = [...newInvoice.items]
-                                    items[idx] = {...item, name: p.name, price: Number(p.price) || item.price}
-                                    setNewInvoice({...newInvoice, items})
-                                    setProductPickerOpenId(null)
-                                  }}
-                                  style={{ padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid #f5f5f5" }}
-                                  onMouseEnter={e => e.currentTarget.style.background = "#f8f9ff"}
-                                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                                >
-                                  <div style={{ fontSize: 13, fontWeight: 600 }}>{p.name}</div>
-                                  <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
-                                    HK${p.price ?? "—"}{p.category ? ` · ${p.category}` : ""}{p.stock != null ? ` · ${t("庫存")} ${p.stock}` : ""}
+                    <React.Fragment key={item.id}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 56px 82px 72px auto", gap: 6, marginBottom: isDcAdaptorProLineItem(item, { products, lineItemAliases }) ? 6 : 8, alignItems: "start" }}>
+                        <div style={{ position: "relative" }}>
+                          <input
+                            value={item.name}
+                            onChange={e => { const items = [...newInvoice.items]; items[idx] = {...item, name: e.target.value}; setNewInvoice({...newInvoice, items}); }}
+                            onFocus={() => setProductPickerOpenId(item.id)}
+                            onBlur={() => setTimeout(() => setProductPickerOpenId(cur => cur === item.id ? null : cur), 150)}
+                            placeholder={t("產品 / 服務（輸入關鍵字）")}
+                            style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", width: "100%", boxSizing: "border-box" }}
+                          />
+                          {productPickerOpenId === item.id && (() => {
+                            const q = (item.name || "").toLowerCase().trim()
+                            const parentIds = new Set(products.filter(x => x.parent_product_id).map(x => x.parent_product_id))
+                            const matched = products.filter(p => {
+                              if (!p.name) return false
+                              if (p.category === '_archived') return false
+                              if (parentIds.has(p.id)) return false
+                              if (!q) return true
+                              return p.name.toLowerCase().includes(q) || (p.code || "").toLowerCase().includes(q) || (p.category || "").toLowerCase().includes(q)
+                            })
+                            const top = matched.slice(0, 10)
+                            if (top.length === 0) return null
+                            return (
+                              <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, width: 360, maxWidth: "calc(100vw - 80px)", maxHeight: 240, overflowY: "auto", background: "#fff", border: "1px solid #e0e0e0", borderRadius: 10, boxShadow: "0 4px 16px rgba(0,0,0,0.08)", zIndex: 100 }}>
+                                {top.map(p => (
+                                  <div
+                                    key={p.id}
+                                    onMouseDown={() => {
+                                      const items = [...newInvoice.items]
+                                      items[idx] = {...item, name: p.name, price: Number(p.price) || item.price}
+                                      setNewInvoice({...newInvoice, items})
+                                      setProductPickerOpenId(null)
+                                    }}
+                                    style={{ padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid #f5f5f5" }}
+                                    onMouseEnter={e => e.currentTarget.style.background = "#f8f9ff"}
+                                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                                  >
+                                    <div style={{ fontSize: 13, fontWeight: 600 }}>{p.name}</div>
+                                    <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
+                                      HK${p.price ?? "—"}{p.category ? ` · ${p.category}` : ""}{p.stock != null ? ` · ${t("庫存")} ${p.stock}` : ""}
+                                    </div>
                                   </div>
-                                </div>
-                              ))}
-                              {matched.length > 10 && (
-                                <div style={{ padding: "6px 12px", fontSize: 10, color: "#999", background: "#fafafa", textAlign: "center" }}>
-                                  {t("還有")} {matched.length - 10} {t("個產品，繼續輸入縮小範圍")}
-                                </div>
-                              )}
-                            </div>
-                          )
-                        })()}
+                                ))}
+                                {matched.length > 10 && (
+                                  <div style={{ padding: "6px 12px", fontSize: 10, color: "#999", background: "#fafafa", textAlign: "center" }}>
+                                    {t("還有")} {matched.length - 10} {t("個產品，繼續輸入縮小範圍")}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })()}
+                        </div>
+                        <input type="number" min="1" value={item.qty} onChange={e => { const items = [...newInvoice.items]; items[idx].qty = parseInt(e.target.value) || 1; setNewInvoice({...newInvoice, items}); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "center" }} />
+                        <input type="number" value={item.price} onChange={e => { const items = [...newInvoice.items]; items[idx].price = parseFloat(e.target.value) || 0; setNewInvoice({...newInvoice, items}); }} placeholder={t("價格")} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
+                        <select value={item.warehouse_id || ''} onChange={e => { const items = [...newInvoice.items]; items[idx] = {...item, warehouse_id: e.target.value || null}; setNewInvoice({...newInvoice, items}); }} title={t("扣庫存的倉庫（不顯示在發票/收據上）")} style={{ padding: "9px 6px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", background: "#fff" }}>
+                          {warehouses.map(w => <option key={w.id} value={w.id}>{t(w.name.replace("分部", ""))}</option>)}
+                        </select>
+                        <button onClick={() => { const items = newInvoice.items.filter(i => i.id !== item.id); setNewInvoice({...newInvoice, items: items.length ? items : [mkItem(warehouses[0]?.id)]}); }} style={{ background: "#fce4ec", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
                       </div>
-                      <input type="number" min="1" value={item.qty} onChange={e => { const items = [...newInvoice.items]; items[idx].qty = parseInt(e.target.value) || 1; setNewInvoice({...newInvoice, items}); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "center" }} />
-                      <input type="number" value={item.price} onChange={e => { const items = [...newInvoice.items]; items[idx].price = parseFloat(e.target.value) || 0; setNewInvoice({...newInvoice, items}); }} placeholder={t("價格")} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
-                      <select value={item.warehouse_id || ''} onChange={e => { const items = [...newInvoice.items]; items[idx] = {...item, warehouse_id: e.target.value || null}; setNewInvoice({...newInvoice, items}); }} title={t("扣庫存的倉庫（不顯示在發票/收據上）")} style={{ padding: "9px 6px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", background: "#fff" }}>
-                        {warehouses.map(w => <option key={w.id} value={w.id}>{t(w.name.replace("分部", ""))}</option>)}
-                      </select>
-                      <button onClick={() => { const items = newInvoice.items.filter(i => i.id !== item.id); setNewInvoice({...newInvoice, items: items.length ? items : [mkItem(warehouses[0]?.id)]}); }} style={{ background: "#fce4ec", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
-                    </div>
+                      {isDcAdaptorProLineItem(item, { products, lineItemAliases }) && (
+                        <div style={{ margin: "0 0 10px 0", paddingLeft: 0 }}>
+                          <input
+                            value={item.imei_code || ""}
+                            onChange={e => { const items = [...newInvoice.items]; items[idx] = { ...item, imei_code: e.target.value }; setNewInvoice({ ...newInvoice, items }); }}
+                            placeholder={t("IMEI 辨識碼")}
+                            style={{ width: "100%", padding: "9px 12px", borderRadius: 10, border: "1px solid #d8e0ff", background: "#f8faff", fontSize: 14, outline: "none", boxSizing: "border-box" }}
+                          />
+                        </div>
+                      )}
+                    </React.Fragment>
                   ))}
                   <button onClick={() => setNewInvoice({...newInvoice, items: [...newInvoice.items, mkItem(warehouses[0]?.id)]})} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", width: "100%" }}>+ {t("新增項目")}</button>
                 </div>

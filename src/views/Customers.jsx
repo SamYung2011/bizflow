@@ -9,6 +9,7 @@ import InvoiceEditModal from '../components/InvoiceEditModal.jsx'
 import { suggestEmail } from '../lib/emailSuggest.js'
 import { CAR_BRANDS, PRODUCTS_LIST, REFERRAL_SOURCES } from '../lib/constants.js'
 import { fmtInvNum, formatNotes } from '../lib/invoiceHelpers.js'
+import { splitImeiCodes } from '../lib/imei.js'
 
 // 多值字段拆分（與 App.jsx 內定義同步）
 const splitMulti = v => String(v || "").split(/\n+/).map(s => s.trim()).filter(Boolean);
@@ -126,6 +127,7 @@ export function RollbackModal({
     { dbKey: "phone_mainland", label: t("內地電話") },
     { dbKey: "email", label: t("郵箱") },
     { dbKey: "address", label: t("地址") },
+    { dbKey: "imei_code", label: t("IMEI 辨識碼") },
     { dbKey: "car_make", label: t("車品牌") },
     { dbKey: "car_model", label: t("車型") },
   ];
@@ -433,6 +435,9 @@ export function EditCustomerModal({
         <div style={{ marginBottom: 18 }}>
           {multiFld(t("地址 Address"), "addresses", t("請輸入完整地址"), t("新增地址"))}
         </div>
+        <div style={{ marginBottom: 18 }}>
+          {multiFld(t("IMEI 辨識碼"), "imeiCodes", t("例：DC Adaptor Pro IMEI"), t("新增 IMEI"))}
+        </div>
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
           <button disabled={editCustSaving} onClick={() => setEditingCustomer(null)} style={{ background: "#f5f5f5", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: editCustSaving ? "not-allowed" : "pointer" }}>{t("取消")}</button>
           <button disabled={editCustSaving} onClick={handleSaveCustomerEdit} style={{ background: editCustSaving ? "#ccc" : "#6382ff", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", fontWeight: 700, cursor: editCustSaving ? "not-allowed" : "pointer" }}>
@@ -466,6 +471,7 @@ export function AddCustomerModal({
           <Input label={t("內地電話")} value={newCustomer.phone_mainland} onChange={v => setNewCustomer({...newCustomer, phone_mainland: v})} placeholder="+86" />
           <Select label={t("汽車品牌 Car Brand")} value={newCustomer.car_make} onChange={v => setNewCustomer({...newCustomer, car_make: v})} options={CAR_BRANDS} />
           <Input label={t("型號 Car Model")} value={newCustomer.car_model} onChange={v => setNewCustomer({...newCustomer, car_model: v})} placeholder="e.g. Model 3, Han EV" />
+          <Input label={t("IMEI 辨識碼")} value={newCustomer.imei_code} onChange={v => setNewCustomer({...newCustomer, imei_code: v})} placeholder={t("例：DC Adaptor Pro IMEI")} />
           <Select label={t("客戶狀態")} value={newCustomer.type} onChange={v => setNewCustomer({...newCustomer, type: v})} options={["Lead","Regular","VIP"]} />
           <Select label={t("客戶來源")} value={newCustomer.referral} onChange={v => setNewCustomer({...newCustomer, referral: v})} options={REFERRAL_SOURCES} />
         </div>
@@ -548,7 +554,8 @@ export function CustomersListView({
         }
       }
     }
-    const q = search.toLowerCase();
+    const q = search.toLowerCase().trim();
+    const qCompact = q.replace(/[\s-]+/g, "");
     return customerGroups.virtualCustomers.filter(c => {
       // 至少一個 email 或 phone 有值
       if (c.allEmails.length === 0 && c.allPhones.length === 0) return false;
@@ -556,6 +563,10 @@ export function CustomersListView({
         const hit = c.allNames.some(n => n.toLowerCase().includes(q))
           || c.allEmails.some(e => e.toLowerCase().includes(q))
           || c.allPhones.some(p => p.toLowerCase().includes(q))
+          || (c.allImeiCodes || []).some(code => {
+            const codeText = String(code || "").toLowerCase();
+            return codeText.includes(q) || (!!qCompact && codeText.replace(/[\s-]+/g, "").includes(qCompact));
+          })
           || (c.car_make || "").toLowerCase().includes(q)
           || (c.car_model || "").toLowerCase().includes(q);
         if (!hit) return false;
@@ -608,7 +619,7 @@ export function CustomersListView({
 
             <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
               <Icon name="search" size={15} />
-              <input placeholder={t("搜尋客戶...")} value={search} onChange={e => { setSearch(e.target.value); setVisibleCustomers(30); }} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
+              <input placeholder={t("搜尋客戶 / 電話 / IMEI...")} value={search} onChange={e => { setSearch(e.target.value); setVisibleCustomers(30); }} style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%" }} />
             </div>
             <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
               <span style={{ fontSize: 13, color: "#888", marginRight: 4 }}>{t("排序")}：</span>
@@ -655,6 +666,7 @@ export function CustomersListView({
                           </div>
                           <div style={{ fontSize: 13, color: "#666" }}>
                             {c.phone || "—"}
+                            {c.imei_code && <span style={{ color: "#555", marginLeft: 8 }}>{t("IMEI")}：{splitImeiCodes(c.imei_code)[0]}</span>}
                             {c.car_make && <span style={{ color: "#aaa", marginLeft: 8 }}>🚗 {c.car_make} {c.car_model}</span>}
                           </div>
                         </div>
@@ -754,6 +766,8 @@ export function CustomersDetailView({
                     const phoneMainlands = [...new Set(pmSrc.flatMap(v => splitMulti(v)))];
                     const addrSrc = (selectedCustomer.allAddresses && selectedCustomer.allAddresses.length > 0) ? selectedCustomer.allAddresses : (selectedCustomer.address ? [selectedCustomer.address] : []);
                     const addresses = [...new Set(addrSrc.flatMap(a => splitMulti(a)))];
+                    const imeiSrc = (selectedCustomer.allImeiCodes && selectedCustomer.allImeiCodes.length > 0) ? selectedCustomer.allImeiCodes : (selectedCustomer.imei_code ? [selectedCustomer.imei_code] : []);
+                    const imeiCodes = [...new Set(imeiSrc.flatMap(v => splitImeiCodes(v)))];
                     const makes = splitMulti(selectedCustomer.car_make);
                     const models = splitMulti(selectedCustomer.car_model);
                     const carN = Math.max(makes.length, models.length);
@@ -774,6 +788,7 @@ export function CustomersDetailView({
                           {blk(emails, v => <>📧 {v}</>)}
                           {blk(phones, v => <>📱 {t("香港")}：{v}</>)}
                           {blk(phoneMainlands, v => <>📱 {t("內地")}：{v}</>)}
+                          {blk(imeiCodes, v => <>{t("IMEI")}：{v}</>)}
                           {blk(cars, v => <>🚗 {v}</>)}
                           {selectedCustomer.referral && <div>🔗 {t("來源")}：{selectedCustomer.referral}</div>}
                         </div>

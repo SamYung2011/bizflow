@@ -6,6 +6,7 @@ import { useAppContext } from '../context/AppContext.jsx'
 import { useT } from '../i18n.jsx'
 import { Icon } from './Icon.jsx'
 import { computeCommissionFor } from '../lib/commission.js'
+import { appendCustomerImeiCodes, collectImeiCodesFromItems, collectInvalidImeiCodesFromItems, isDcAdaptorProLineItem } from '../lib/imei.js'
 
 // 發票明細行的空白模板 —— id 用 randomUUID 確保 React key 穩定
 function mkItem(warehouseId = null) {
@@ -29,6 +30,8 @@ export default function InvoiceEditModal({ invoice, onClose, onSaved }) {
   const { t } = useT()
   const {
     setInvoices,
+    customers,
+    setCustomers,
     products,
     warehouses,
     employees,
@@ -58,7 +61,7 @@ export default function InvoiceEditModal({ invoice, onClose, onSaved }) {
       if (name === "押金") { extras.deposit = { enabled: true, amount: p }; continue }
       if (name === "優惠") { extras.discount = { enabled: true, amount: Math.abs(p) }; continue }
       if (name === "手續費") { extras.surcharge = { enabled: true, amount: p }; continue }
-      normalItems.push({ id: it.id || mkItem().id, name, qty: Number(it.qty) || 1, price: p })
+      normalItems.push({ id: it.id || mkItem().id, name, qty: Number(it.qty) || 1, price: p, warehouse_id: it.warehouse_id || null, imei_code: it.imei_code || "" })
     }
     setEditInvItems(normalItems.length > 0 ? normalItems : [mkItem()])
     setEditInvExtras(extras)
@@ -92,6 +95,11 @@ export default function InvoiceEditModal({ invoice, onClose, onSaved }) {
     if (editInvExtras.discount?.enabled && Number(editInvExtras.discount.amount)) {
       finalItems.push({ id: mkItem().id, name: "優惠", qty: 1, price: -Number(editInvExtras.discount.amount) })
     }
+    const invalidImei = collectInvalidImeiCodesFromItems(finalItems, { products, lineItemAliases })
+    if (invalidImei.length > 0) {
+      alert(`${t("IMEI 格式不正確")}：${invalidImei.slice(0, 3).join(", ")}\n${t("IMEI 必須為 15 位數字")}`)
+      return
+    }
     const itemsSum = finalItems.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 0), 0)
     const finalTotal = editInvTotalOverride === "" ? itemsSum : (Number(editInvTotalOverride) || 0)
     const newSalespersonId = editInvSalespersonId || null
@@ -102,6 +110,17 @@ export default function InvoiceEditModal({ invoice, onClose, onSaved }) {
     }
     const { error } = await supabase.from("invoices").update(updates).eq("id", invoice.id)
     if (error) { alert(`${t("儲存失敗")}：${error.message}`); return }
+    const imeiSync = await appendCustomerImeiCodes({
+      supabase,
+      queryClient,
+      customers,
+      setCustomers,
+      customerId: invoice.customer_id,
+      imeiCodes: collectImeiCodesFromItems(finalItems, { products, lineItemAliases }),
+    })
+    if (imeiSync.error) {
+      alert(`${t("儲存修改已完成")}，${t("但 IMEI 未能同步到客戶資料")}：${imeiSync.error.message}`)
+    }
     const updatedInv = { ...invoice, ...updates }
     setInvoices(prev => prev.map(i => i.id === invoice.id ? { ...i, ...updates } : i))
     queryClient.setQueryData(["bf", "invoices"], (old) => Array.isArray(old) ? old.map(i => i.id === invoice.id ? { ...i, ...updates } : i) : old)
@@ -154,16 +173,26 @@ export default function InvoiceEditModal({ invoice, onClose, onSaved }) {
             <div>{t("產品名稱")}</div><div style={{ textAlign: "center" }}>{t("數量")}</div><div>{t("單價 HKD")}</div><div>{t("倉庫")}</div><div></div>
           </div>
           {editInvItems.map((item, idx) => (
-            <div key={item.id} style={{ display: "grid", gridTemplateColumns: "1fr 56px 90px 72px 36px", gap: 6, marginBottom: 8 }}>
-              <input value={item.name} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, name: e.target.value }; setEditInvItems(arr); }} placeholder={t("產品名")} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
-              <input type="number" value={item.qty} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, qty: parseInt(e.target.value) || 0 }; setEditInvItems(arr); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "center" }} />
-              <input type="number" value={item.price} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, price: parseFloat(e.target.value) || 0 }; setEditInvItems(arr); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
-              <select value={item.warehouse_id || ''} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, warehouse_id: e.target.value || null }; setEditInvItems(arr); }} title={t("扣庫存的倉庫（不顯示在發票/收據上）")} style={{ padding: "9px 6px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", background: "#fff" }}>
-                <option value="">—</option>
-                {warehouses.map(w => <option key={w.id} value={w.id}>{t(w.name.replace("分部", ""))}</option>)}
-              </select>
-              <button onClick={() => setEditInvItems(editInvItems.filter(i => i.id !== item.id))} style={{ background: "#fce4ec", border: "none", borderRadius: 8, cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
-            </div>
+            <React.Fragment key={item.id}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 56px 90px 72px 36px", gap: 6, marginBottom: isDcAdaptorProLineItem(item, { products, lineItemAliases }) ? 6 : 8 }}>
+                <input value={item.name} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, name: e.target.value }; setEditInvItems(arr); }} placeholder={t("產品名")} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
+                <input type="number" value={item.qty} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, qty: parseInt(e.target.value) || 0 }; setEditInvItems(arr); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "center" }} />
+                <input type="number" value={item.price} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, price: parseFloat(e.target.value) || 0 }; setEditInvItems(arr); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
+                <select value={item.warehouse_id || ''} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, warehouse_id: e.target.value || null }; setEditInvItems(arr); }} title={t("扣庫存的倉庫（不顯示在發票/收據上）")} style={{ padding: "9px 6px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", background: "#fff" }}>
+                  <option value="">—</option>
+                  {warehouses.map(w => <option key={w.id} value={w.id}>{t(w.name.replace("分部", ""))}</option>)}
+                </select>
+                <button onClick={() => setEditInvItems(editInvItems.filter(i => i.id !== item.id))} style={{ background: "#fce4ec", border: "none", borderRadius: 8, cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
+              </div>
+              {isDcAdaptorProLineItem(item, { products, lineItemAliases }) && (
+                <input
+                  value={item.imei_code || ""}
+                  onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, imei_code: e.target.value }; setEditInvItems(arr); }}
+                  placeholder={t("IMEI 辨識碼")}
+                  style={{ width: "100%", padding: "9px 12px", borderRadius: 10, border: "1px solid #d8e0ff", background: "#f8faff", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 10 }}
+                />
+              )}
+            </React.Fragment>
           ))}
           <button onClick={() => setEditInvItems([...editInvItems, mkItem(warehouses[0]?.id)])} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", width: "100%", marginTop: 4 }}>+ {t("新增項目")}</button>
         </div>
