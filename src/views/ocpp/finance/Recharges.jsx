@@ -13,14 +13,17 @@ import {
 
 const PAGE_LIMIT = 50;
 
-// chargecms PHP 充值列表只展示 status=1（成功充值）→ 1=成功，其餘原樣展示數字
+// chargecms PHP 老後台只展示 status=1（成功）；此頁默認全部 → 0=未支付（廢單）/ 1=成功
 const STATUS_OPTIONS = [
   ["all", "全部狀態"],
   ["1", "成功"],
+  ["0", "未支付"],
 ];
 
 function RechargeStatusChip({ status, t }) {
-  if (Number(status) === 1) return <Chip label={t("成功")} tone="green" />;
+  const s = Number(status);
+  if (s === 1) return <Chip label={t("成功")} tone="green" />;
+  if (s === 0) return <Chip label={t("未支付")} tone="gray" />;
   return <Chip label={String(status ?? 0)} tone="gray" />;
 }
 
