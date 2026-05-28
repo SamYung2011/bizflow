@@ -193,7 +193,7 @@ export default function OcppStations({ supabase, session, isAdmin }) {
   const loadOperators = useCallback(async () => {
     if (!isAdmin || !accessToken) return;
     try {
-      const data = await callOcppAdmin("/operators", { accessToken });
+      const data = await callOcppAdmin("/operators?limit=200", { accessToken });
       if (aliveRef.current) setOperators(Array.isArray(data?.data) ? data.data : []);
     } catch {
       // operators dropdown is optional; swallow error

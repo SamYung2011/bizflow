@@ -1409,6 +1409,21 @@ const DICT_EN = {
   "無回包數據": "No response data",
   "樁編號 / 命令 / 回包": "Pile no / command / response",
   "無命令日誌數據": "No command log data",
+  // ── OCPP charging hub / operators sub-tab ──
+  "全部狀態": "All statuses",
+  "正常": "Normal",
+  "隱藏": "Hidden",
+  "公司": "Company",
+  "聯絡人": "Contact",
+  "站數": "Stations",
+  "公司 ID": "Company ID",
+  "賬戶餘額": "Balance",
+  "凍結金額": "Frozen amount",
+  "分成比例": "Profit share",
+  "創建時間": "Created",
+  "更新時間": "Updated",
+  "無運營商數據": "No operator data",
+  "運營商 / 公司 / 聯絡人": "Operator / company / contact",
 };
 
 const DICT_FR = {
@@ -2815,6 +2830,21 @@ const DICT_FR = {
   "無回包數據": "Aucune donnée de réponse",
   "樁編號 / 命令 / 回包": "N° de borne / commande / réponse",
   "無命令日誌數據": "Aucun journal de commande",
+  // ── OCPP charging hub / operators sub-tab ──
+  "全部狀態": "Tous les statuts",
+  "正常": "Normal",
+  "隱藏": "Masqué",
+  "公司": "Société",
+  "聯絡人": "Contact",
+  "站數": "Stations",
+  "公司 ID": "ID société",
+  "賬戶餘額": "Solde",
+  "凍結金額": "Montant gelé",
+  "分成比例": "Part des bénéfices",
+  "創建時間": "Créé le",
+  "更新時間": "Mis à jour le",
+  "無運營商數據": "Aucune donnée d'opérateur",
+  "運營商 / 公司 / 聯絡人": "Opérateur / société / contact",
 };
 
 const I18nContext = createContext({ lang: "zh", setLang: () => {}, t: (s) => s });

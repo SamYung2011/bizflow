@@ -195,7 +195,7 @@ export default function OcppOrders({ session, isAdmin }) {
     if (!isAdmin || !accessToken) return;
     try {
       const [opsRes, stationsRes] = await Promise.all([
-        callOcppAdmin("/operators", { accessToken }).catch(() => null),
+        callOcppAdmin("/operators?limit=200", { accessToken }).catch(() => null),
         callOcppAdmin("/stations?limit=200", { accessToken }).catch(() => null),
       ]);
       if (!aliveRef.current) return;
