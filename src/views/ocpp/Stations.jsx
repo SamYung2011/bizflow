@@ -154,7 +154,7 @@ function StationDetailModal({ stationId, accessToken, onClose, t }) {
   );
 }
 
-export default function OcppStations({ supabase, session, isAdmin }) {
+export default function OcppStations({ supabase, session, isAdmin, active = true }) {
   const { t } = useT();
   const [rows, setRows] = useState([]);
   const [operators, setOperators] = useState([]);
@@ -166,10 +166,11 @@ export default function OcppStations({ supabase, session, isAdmin }) {
   const [searchInput, setSearchInput] = useState("");
   const [selectedStationId, setSelectedStationId] = useState(null);
   const aliveRef = useRef(true);
+  const wasActiveRef = useRef(active);
 
   const accessToken = session?.access_token;
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ force = false } = {}) => {
     if (!isAdmin || !accessToken) return;
     setLoading(true);
     setErr("");
@@ -179,7 +180,7 @@ export default function OcppStations({ supabase, session, isAdmin }) {
       if (filterStatus && filterStatus !== "normal") qs.set("status", filterStatus);
       if (filterQ) qs.set("q", filterQ);
       qs.set("limit", "100");
-      const data = await callOcppAdmin(`/stations?${qs}`, { accessToken });
+      const data = await callOcppAdmin(`/stations?${qs}`, { accessToken, force });
       if (!aliveRef.current) return;
       setRows(Array.isArray(data?.data) ? data.data : []);
     } catch (e) {
@@ -193,7 +194,7 @@ export default function OcppStations({ supabase, session, isAdmin }) {
   const loadOperators = useCallback(async () => {
     if (!isAdmin || !accessToken) return;
     try {
-      const data = await callOcppAdmin("/operators?limit=200", { accessToken });
+      const data = await callOcppAdmin("/operators?limit=200", { accessToken, ttlMs: 300_000 });
       if (aliveRef.current) setOperators(Array.isArray(data?.data) ? data.data : []);
     } catch {
       // operators dropdown is optional; swallow error
@@ -209,6 +210,11 @@ export default function OcppStations({ supabase, session, isAdmin }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (active && !wasActiveRef.current) refresh();
+    wasActiveRef.current = active;
+  }, [active, refresh]);
 
   if (!isAdmin) {
     return (
@@ -258,7 +264,7 @@ export default function OcppStations({ supabase, session, isAdmin }) {
           </button>
         </form>
 
-        <button onClick={refresh} disabled={loading} style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #ddd", background: loading ? "#f3f4f6" : "#fff", cursor: loading ? "default" : "pointer", fontSize: 13 }}>
+        <button onClick={() => refresh({ force: true })} disabled={loading} style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid #ddd", background: loading ? "#f3f4f6" : "#fff", cursor: loading ? "default" : "pointer", fontSize: 13 }}>
           {loading ? t("載入中…") : t("手動刷新")}
         </button>
 

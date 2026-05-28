@@ -1,4 +1,4 @@
-import React, { useState, lazy, Suspense } from "react";
+import React, { useEffect, useState, lazy, Suspense } from "react";
 import { useT } from "../../i18n.jsx";
 
 // OCPP 充電站 hub — 7 sub-tab 容器
@@ -25,6 +25,16 @@ export default function OcppCharging(props) {
   const { t } = useT();
   const { isAdmin } = props;
   const [subTab, setSubTab] = useState("publicPiles");
+  const [visitedTabs, setVisitedTabs] = useState(() => new Set(["publicPiles"]));
+
+  useEffect(() => {
+    setVisitedTabs((prev) => {
+      if (prev.has(subTab)) return prev;
+      const next = new Set(prev);
+      next.add(subTab);
+      return next;
+    });
+  }, [subTab]);
 
   if (!isAdmin) {
     return (
@@ -62,13 +72,13 @@ export default function OcppCharging(props) {
       </div>
 
       <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#888" }}>{t("載入中…")}</div>}>
-        {subTab === "publicPiles" && <PublicPiles {...props} />}
-        {subTab === "privatePiles" && <PrivatePiles {...props} />}
-        {subTab === "stations" && <Stations {...props} />}
-        {subTab === "orders" && <OcppOrders {...props} />}
-        {subTab === "commandLogs" && <CommandLogs {...props} />}
-        {subTab === "alarms" && <AlarmInfo {...props} />}
-        {subTab === "operators" && <Operators {...props} />}
+        {visitedTabs.has("publicPiles") && <div style={{ display: subTab === "publicPiles" ? "block" : "none" }}><PublicPiles {...props} active={subTab === "publicPiles"} /></div>}
+        {visitedTabs.has("privatePiles") && <div style={{ display: subTab === "privatePiles" ? "block" : "none" }}><PrivatePiles {...props} active={subTab === "privatePiles"} /></div>}
+        {visitedTabs.has("stations") && <div style={{ display: subTab === "stations" ? "block" : "none" }}><Stations {...props} active={subTab === "stations"} /></div>}
+        {visitedTabs.has("orders") && <div style={{ display: subTab === "orders" ? "block" : "none" }}><OcppOrders {...props} active={subTab === "orders"} /></div>}
+        {visitedTabs.has("commandLogs") && <div style={{ display: subTab === "commandLogs" ? "block" : "none" }}><CommandLogs {...props} active={subTab === "commandLogs"} /></div>}
+        {visitedTabs.has("alarms") && <div style={{ display: subTab === "alarms" ? "block" : "none" }}><AlarmInfo {...props} active={subTab === "alarms"} /></div>}
+        {visitedTabs.has("operators") && <div style={{ display: subTab === "operators" ? "block" : "none" }}><Operators {...props} active={subTab === "operators"} /></div>}
       </Suspense>
     </div>
   );

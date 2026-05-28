@@ -3,6 +3,7 @@
 // Phase 1 routes:
 //   GET /ocpp-admin/stations
 //   GET /ocpp-admin/stations/{id}
+//   GET /ocpp-admin/public-piles
 //   GET /ocpp-admin/private-piles
 //   GET /ocpp-admin/alarms
 //   GET /ocpp-admin/operators
@@ -148,6 +149,7 @@ async function verifyAdmin(req: Request, deadline: AbortSignal): Promise<GuardRe
 function mapPath(pathname: string) {
   if (pathname === "/stations") return "/api/stations";
   if (/^\/stations\/[1-9]\d*$/.test(pathname)) return `/api${pathname}`;
+  if (pathname === "/public-piles") return "/api/public-piles";
   if (pathname === "/private-piles") return "/api/private-piles";
   if (pathname === "/alarms") return "/api/alarms";
   if (pathname === "/operators") return "/api/operators";

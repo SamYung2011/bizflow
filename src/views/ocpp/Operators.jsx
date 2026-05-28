@@ -45,7 +45,7 @@ function DetailRow({ label, children }) {
   );
 }
 
-export default function Operators({ session, isAdmin }) {
+export default function Operators({ session, isAdmin, active = true }) {
   const { t } = useT();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -55,10 +55,11 @@ export default function Operators({ session, isAdmin }) {
   const [searchInput, setSearchInput] = useState("");
   const [expandedId, setExpandedId] = useState(null);
   const aliveRef = useRef(true);
+  const wasActiveRef = useRef(active);
 
   const accessToken = session?.access_token;
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ force = false } = {}) => {
     if (!isAdmin || !accessToken) return;
     setLoading(true);
     setErr("");
@@ -67,7 +68,7 @@ export default function Operators({ session, isAdmin }) {
       if (filterStatus) qs.set("status", filterStatus);
       if (filterQ) qs.set("q", filterQ);
       qs.set("limit", "200");
-      const data = await callOcppAdmin(`/operators?${qs}`, { accessToken });
+      const data = await callOcppAdmin(`/operators?${qs}`, { accessToken, force });
       if (!aliveRef.current) return;
       setRows(Array.isArray(data?.data) ? data.data : []);
     } catch (e) {
@@ -86,6 +87,11 @@ export default function Operators({ session, isAdmin }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (active && !wasActiveRef.current) refresh();
+    wasActiveRef.current = active;
+  }, [active, refresh]);
 
   if (!isAdmin) {
     return (
@@ -123,7 +129,7 @@ export default function Operators({ session, isAdmin }) {
           </button>
         </form>
 
-        <button onClick={refresh} disabled={loading} style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #ddd", background: loading ? "#f3f4f6" : "#fff", cursor: loading ? "default" : "pointer", fontSize: 13 }}>
+        <button onClick={() => refresh({ force: true })} disabled={loading} style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #ddd", background: loading ? "#f3f4f6" : "#fff", cursor: loading ? "default" : "pointer", fontSize: 13 }}>
           {loading ? t("載入中…") : t("刷新")}
         </button>
 

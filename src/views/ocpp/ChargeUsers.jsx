@@ -72,7 +72,7 @@ export default function ChargeUsers({ session, isAdmin }) {
 
   const accessToken = session?.access_token;
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ force = false } = {}) => {
     if (!isAdmin || !accessToken) return;
     setLoading(true);
     setErr("");
@@ -82,7 +82,7 @@ export default function ChargeUsers({ session, isAdmin }) {
       if (filterQ) qs.set("q", filterQ);
       qs.set("limit", String(PAGE_LIMIT));
       qs.set("offset", String(offset));
-      const data = await callOcppAdmin(`/charge-users?${qs}`, { accessToken });
+      const data = await callOcppAdmin(`/charge-users?${qs}`, { accessToken, force });
       if (!aliveRef.current) return;
       setRows(Array.isArray(data?.data) ? data.data : []);
       setHasMore(Boolean(data?.page?.hasMore));
@@ -141,7 +141,7 @@ export default function ChargeUsers({ session, isAdmin }) {
           </button>
         </form>
 
-        <button onClick={refresh} disabled={loading} style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #ddd", background: loading ? "#f3f4f6" : "#fff", cursor: loading ? "default" : "pointer", fontSize: 13 }}>
+        <button onClick={() => refresh({ force: true })} disabled={loading} style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #ddd", background: loading ? "#f3f4f6" : "#fff", cursor: loading ? "default" : "pointer", fontSize: 13 }}>
           {loading ? t("載入中…") : t("刷新")}
         </button>
 

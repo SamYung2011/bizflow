@@ -2,27 +2,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useT } from "../../i18n.jsx";
 import { callOcppAdmin } from "../../lib/ocppAdmin.js";
 
-// 公共充電桩 — 扁平桩列表（HK 13 + 屯門 2 = 15 桩）
-// v0.1：前端聚合 /api/stations 列表 + 各 station detail 拿 piles
-// 後期如果加站點變多，可請澄川加專用 /api/public-piles endpoint
+// 公共充電桩 — 扁平桩列表，由 readapi 聚合站點 / 桩 / 槍口狀態。
 // 故障突顯：fault_connector_count > 0 或 online_status = 0 用紅色 highlight，配合 alarm tab
-
-const FAULT_STATE_THRESHOLD = 6;
-const STATION_DETAIL_CONCURRENCY = 4;
-
-async function mapWithConcurrency(items, limit, fn) {
-  const results = new Array(items.length);
-  let cursor = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (true) {
-      const idx = cursor++;
-      if (idx >= items.length) return;
-      results[idx] = await fn(items[idx], idx);
-    }
-  });
-  await Promise.all(workers);
-  return results;
-}
 
 function PileStatusChip({ onlineStatus, faultCount, t }) {
   if (onlineStatus === 0) {
@@ -42,45 +23,24 @@ function chipStyle(bg, color, border) {
   };
 }
 
-export default function PublicPiles({ session, isAdmin }) {
+export default function PublicPiles({ session, isAdmin, active = true }) {
   const { t } = useT();
   const [piles, setPiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [search, setSearch] = useState("");
   const aliveRef = useRef(true);
+  const wasActiveRef = useRef(active);
   const accessToken = session?.access_token;
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ force = false } = {}) => {
     if (!isAdmin || !accessToken) return;
     setLoading(true);
     setErr("");
     try {
-      const stationsRes = await callOcppAdmin("/stations?limit=200", { accessToken });
-      const stations = stationsRes?.data || [];
-      const details = await mapWithConcurrency(stations, STATION_DETAIL_CONCURRENCY, (s) =>
-        callOcppAdmin(`/stations/${s.stationId}`, { accessToken }).then(
-          (res) => ({ station: s, detail: res?.data }),
-          (e) => ({ station: s, error: String(e?.message || e) })
-        )
-      );
+      const res = await callOcppAdmin("/public-piles?limit=200", { accessToken, force });
       if (!aliveRef.current) return;
-      const flat = [];
-      for (const item of details) {
-        const stationPiles = item.detail?.piles || [];
-        for (const p of stationPiles) {
-          const faultCount = (p.connectors || []).filter((c) => (c.state ?? 0) >= FAULT_STATE_THRESHOLD).length;
-          flat.push({
-            ...p,
-            stationId: item.station.stationId,
-            stationName: item.station.name,
-            operatorName: item.station.operatorName,
-            faultConnectorCount: faultCount,
-            connectorCount: (p.connectors || []).length,
-          });
-        }
-      }
-      setPiles(flat);
+      setPiles(res?.data || []);
     } catch (e) {
       if (!aliveRef.current) return;
       setErr(String(e?.message || e));
@@ -94,6 +54,11 @@ export default function PublicPiles({ session, isAdmin }) {
     refresh();
     return () => { aliveRef.current = false; };
   }, [refresh]);
+
+  useEffect(() => {
+    if (active && !wasActiveRef.current) refresh();
+    wasActiveRef.current = active;
+  }, [active, refresh]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -119,7 +84,7 @@ export default function PublicPiles({ session, isAdmin }) {
           placeholder={t("搜索桩編號 / 名稱 / 品牌 / 站點")}
           style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #ddd", fontSize: 13, minWidth: 280 }}
         />
-        <button onClick={refresh} disabled={loading} style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #ddd", background: loading ? "#f3f4f6" : "#fff", cursor: loading ? "default" : "pointer", fontSize: 13 }}>
+        <button onClick={() => refresh({ force: true })} disabled={loading} style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #ddd", background: loading ? "#f3f4f6" : "#fff", cursor: loading ? "default" : "pointer", fontSize: 13 }}>
           {loading ? t("載入中…") : t("刷新")}
         </button>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "#888" }}>
@@ -160,9 +125,9 @@ export default function PublicPiles({ session, isAdmin }) {
                   <td style={{ padding: "8px 10px" }}>{p.stationName || "—"}</td>
                   <td style={{ padding: "8px 10px" }}>{p.operatorName || "—"}</td>
                   <td style={{ padding: "8px 10px" }}>
-                    <PileStatusChip onlineStatus={p.onlineStatus} faultCount={p.faultConnectorCount} t={t} />
+                    <PileStatusChip onlineStatus={p.onlineStatus} faultCount={p.faultConnectorTotal ?? p.faultConnectorCount ?? 0} t={t} />
                   </td>
-                  <td style={{ padding: "8px 10px" }}>{p.connectorCount}</td>
+                  <td style={{ padding: "8px 10px" }}>{p.connectorTotal ?? p.connectorCount ?? "—"}</td>
                 </tr>
               ))}
             </tbody>

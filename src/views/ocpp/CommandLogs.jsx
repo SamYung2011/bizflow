@@ -65,7 +65,7 @@ function CallbackBlock({ data, t }) {
   );
 }
 
-export default function CommandLogs({ session, isAdmin }) {
+export default function CommandLogs({ session, isAdmin, active = true }) {
   const { t } = useT();
   const [rows, setRows] = useState([]);
   const [stations, setStations] = useState([]);
@@ -81,10 +81,11 @@ export default function CommandLogs({ session, isAdmin }) {
   const [searchInput, setSearchInput] = useState("");
   const [expandedId, setExpandedId] = useState(null);
   const aliveRef = useRef(true);
+  const wasActiveRef = useRef(active);
 
   const accessToken = session?.access_token;
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ force = false } = {}) => {
     if (!isAdmin || !accessToken) return;
     setLoading(true);
     setErr("");
@@ -104,7 +105,7 @@ export default function CommandLogs({ session, isAdmin }) {
       }
       if (filterQ) qs.set("q", filterQ);
       qs.set("limit", "100");
-      const data = await callOcppAdmin(`/command-logs?${qs}`, { accessToken });
+      const data = await callOcppAdmin(`/command-logs?${qs}`, { accessToken, force });
       if (!aliveRef.current) return;
       setRows(Array.isArray(data?.data) ? data.data : []);
     } catch (e) {
@@ -118,7 +119,7 @@ export default function CommandLogs({ session, isAdmin }) {
   const loadFilters = useCallback(async () => {
     if (!isAdmin || !accessToken) return;
     try {
-      const stationsRes = await callOcppAdmin("/stations?limit=200", { accessToken }).catch(() => null);
+      const stationsRes = await callOcppAdmin("/stations?limit=200", { accessToken, ttlMs: 300_000 }).catch(() => null);
       if (!aliveRef.current) return;
       setStations(Array.isArray(stationsRes?.data) ? stationsRes.data : []);
     } catch {
@@ -135,6 +136,11 @@ export default function CommandLogs({ session, isAdmin }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (active && !wasActiveRef.current) refresh();
+    wasActiveRef.current = active;
+  }, [active, refresh]);
 
   if (!isAdmin) {
     return (
@@ -209,7 +215,7 @@ export default function CommandLogs({ session, isAdmin }) {
           </button>
         </form>
 
-        <button onClick={refresh} disabled={loading} style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #ddd", background: loading ? "#f3f4f6" : "#fff", cursor: loading ? "default" : "pointer", fontSize: 13 }}>
+        <button onClick={() => refresh({ force: true })} disabled={loading} style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #ddd", background: loading ? "#f3f4f6" : "#fff", cursor: loading ? "default" : "pointer", fontSize: 13 }}>
           {loading ? t("載入中…") : t("刷新")}
         </button>
 

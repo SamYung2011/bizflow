@@ -24,23 +24,24 @@ function chipStyle(bg, color, border) {
   };
 }
 
-export default function PrivatePiles({ session, isAdmin }) {
+export default function PrivatePiles({ session, isAdmin, active = true }) {
   const { t } = useT();
   const [piles, setPiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [search, setSearch] = useState("");
   const aliveRef = useRef(true);
+  const wasActiveRef = useRef(active);
   const accessToken = session?.access_token;
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ force = false } = {}) => {
     if (!isAdmin || !accessToken) return;
     setLoading(true);
     setErr("");
     try {
       const qs = new URLSearchParams({ limit: "200" });
       if (search.trim()) qs.set("q", search.trim());
-      const res = await callOcppAdmin(`/private-piles?${qs}`, { accessToken });
+      const res = await callOcppAdmin(`/private-piles?${qs}`, { accessToken, force });
       if (!aliveRef.current) return;
       setPiles(res?.data || []);
     } catch (e) {
@@ -58,6 +59,11 @@ export default function PrivatePiles({ session, isAdmin }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, accessToken]);
 
+  useEffect(() => {
+    if (active && !wasActiveRef.current) refresh();
+    wasActiveRef.current = active;
+  }, [active, refresh]);
+
   if (!isAdmin) return null;
 
   return (
@@ -72,7 +78,7 @@ export default function PrivatePiles({ session, isAdmin }) {
           placeholder={t("搜索桩編號 / 名稱 / 序列號")}
           style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #ddd", fontSize: 13, minWidth: 280 }}
         />
-        <button onClick={refresh} disabled={loading} style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #ddd", background: loading ? "#f3f4f6" : "#fff", cursor: loading ? "default" : "pointer", fontSize: 13 }}>
+        <button onClick={() => refresh({ force: true })} disabled={loading} style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #ddd", background: loading ? "#f3f4f6" : "#fff", cursor: loading ? "default" : "pointer", fontSize: 13 }}>
           {loading ? t("載入中…") : t("刷新")}
         </button>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "#888" }}>

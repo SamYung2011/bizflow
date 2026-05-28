@@ -6,7 +6,7 @@ import { callOcppAdmin, fmtUnixTs } from "../../lib/ocppAdmin.js";
 // Reads `/api/alarms` through the admin-only ocpp-admin Edge Function.
 // v0.1：只讀 rc_alarm 歷史告警；當下實時故障在 PublicPiles / PrivatePiles 用 status chip 突顯
 
-export default function AlarmInfo({ session, isAdmin }) {
+export default function AlarmInfo({ session, isAdmin, active = true }) {
   const { t } = useT();
   const [alarms, setAlarms] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -14,9 +14,10 @@ export default function AlarmInfo({ session, isAdmin }) {
   const [search, setSearch] = useState("");
   const [sinceHours, setSinceHours] = useState(24);
   const aliveRef = useRef(true);
+  const wasActiveRef = useRef(active);
   const accessToken = session?.access_token;
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async ({ force = false } = {}) => {
     if (!isAdmin || !accessToken) return;
     setLoading(true);
     setErr("");
@@ -24,7 +25,7 @@ export default function AlarmInfo({ session, isAdmin }) {
       const qs = new URLSearchParams({ limit: "200" });
       if (search.trim()) qs.set("q", search.trim());
       qs.set("since", sinceHours === 0 ? "all" : String(sinceHours));
-      const res = await callOcppAdmin(`/alarms?${qs}`, { accessToken });
+      const res = await callOcppAdmin(`/alarms?${qs}`, { accessToken, force });
       if (!aliveRef.current) return;
       setAlarms(res?.data || []);
     } catch (e) {
@@ -41,6 +42,11 @@ export default function AlarmInfo({ session, isAdmin }) {
     return () => { aliveRef.current = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, accessToken, sinceHours]);
+
+  useEffect(() => {
+    if (active && !wasActiveRef.current) refresh();
+    wasActiveRef.current = active;
+  }, [active, refresh]);
 
   if (!isAdmin) return null;
 
@@ -67,7 +73,7 @@ export default function AlarmInfo({ session, isAdmin }) {
           placeholder={t("搜索樁編號 / 報警內容 / 站點")}
           style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #ddd", fontSize: 13, minWidth: 280 }}
         />
-        <button onClick={refresh} disabled={loading} style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #ddd", background: loading ? "#f3f4f6" : "#fff", cursor: loading ? "default" : "pointer", fontSize: 13 }}>
+        <button onClick={() => refresh({ force: true })} disabled={loading} style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #ddd", background: loading ? "#f3f4f6" : "#fff", cursor: loading ? "default" : "pointer", fontSize: 13 }}>
           {loading ? t("載入中…") : t("刷新")}
         </button>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "#888" }}>
