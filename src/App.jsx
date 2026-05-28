@@ -5,6 +5,7 @@ const ExpenseView = lazy(() => import("./views/Expense.jsx"));
 const OcppMonitorView = lazy(() => import("./views/ocpp/OcppMonitor.jsx"));
 const OcppChargingView = lazy(() => import("./views/ocpp/OcppCharging.jsx"));
 const ChargeUsersView = lazy(() => import("./views/ocpp/ChargeUsers.jsx"));
+const OcppFinanceView = lazy(() => import("./views/ocpp/finance/OcppFinance.jsx"));
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase, fetchAllTable } from "./lib/supabaseClient.js";
 import { isNonWarrantyItem, itemWarrantyMonths } from "./lib/warranty.js";
@@ -348,6 +349,7 @@ export default function App() {
       phoneMainlands: pickMulti('allPhoneMainlands', 'phone_mainland'),
       emails: pickMulti('allEmails', 'email'),
       addresses: pickMulti('allAddresses', 'address'),
+      imeiCodes: pickMulti('allImeiCodes', 'imei_code'),
       carMakes: pickMulti('allCarMakes', 'car_make'),
       carModels: pickMulti('allCarModels', 'car_model'),
       type: src.type || "Regular",
@@ -385,7 +387,7 @@ export default function App() {
     if (rollbackTarget === "mergeTo" && !rollbackMergeTo) { alert(t("請選擇要合併到的客戶")); return; }
     if (rollbackTarget === "mergeTo" && affected.includes(rollbackMergeTo)) { alert(t("不能合併到自己")); return; }
     setRollbackBusy(true);
-    const MULTI_DB = ["phone", "phone_mainland", "email", "address", "car_make", "car_model"];
+    const MULTI_DB = ["phone", "phone_mainland", "email", "address", "imei_code", "car_make", "car_model"];
     const patches = new Map(); // cid -> patch
     for (const cid of affected) {
       const rec = customers.find(c => c.id === cid);
@@ -506,6 +508,7 @@ export default function App() {
       phone_mainland: joinArr(editCustForm.phoneMainlands),
       email: joinArr(editCustForm.emails),
       address: joinArr(editCustForm.addresses),
+      imei_code: joinArr(editCustForm.imeiCodes),
       car_make: joinArr(editCustForm.carMakes),
       car_model: joinArr(editCustForm.carModels),
       type: editCustForm.type || "Regular",
@@ -523,6 +526,7 @@ export default function App() {
       { formKey: "phoneMainlands", dbKey: "phone_mainland" },
       { formKey: "emails", dbKey: "email" },
       { formKey: "addresses", dbKey: "address" },
+      { formKey: "imeiCodes", dbKey: "imei_code" },
       { formKey: "carMakes", dbKey: "car_make" },
       { formKey: "carModels", dbKey: "car_model" },
     ];
@@ -748,7 +752,7 @@ export default function App() {
 
   const [newCustomer, setNewCustomer] = useState({
     name: "", email: "", phone: "", phone_mainland: "",
-    car_make: "", car_model: "", address: "",
+    car_make: "", car_model: "", address: "", imei_code: "",
     interest_products: [], referral: "", type: "Lead", notes: ""
   });
 
@@ -763,8 +767,8 @@ export default function App() {
     if (!fresh || fresh.id !== selectedCustomer.id) return;
     const snapshot = v => JSON.stringify([
       v.allCids, v.allAddresses, v.allPhones, v.allEmails, v.allNames,
-      v.allPhoneMainlands, v.allCarMakes, v.allCarModels,
-      v.name, v.phone, v.email, v.address, v.car_make, v.car_model
+      v.allPhoneMainlands, v.allImeiCodes, v.allCarMakes, v.allCarModels,
+      v.name, v.phone, v.email, v.address, v.imei_code, v.car_make, v.car_model
     ]);
     if (snapshot(fresh) !== snapshot(selectedCustomer)) {
       setSelectedCustomer(fresh);
@@ -1014,6 +1018,7 @@ export default function App() {
       { id: "ocppMonitor", label: t("OCPP 監控"), icon: "charger" },
       { id: "ocppCharging", label: t("OCPP 充電站"), icon: "charger" },
       { id: "chargeUsers", label: t("用戶信息"), icon: "charger" },
+      { id: "ocppFinance", label: t("OCPP 財務"), icon: "charger" },
     ]}] : []),
     { type: "single", id: "gototeam", label: t("團隊管理"), icon: "external", external: "https://team.honnmono.top" },
   ];
@@ -1037,6 +1042,7 @@ export default function App() {
       phone_mainland: newCustomer.phone_mainland,
       car_make: newCustomer.car_make,
       car_model: newCustomer.car_model,
+      imei_code: newCustomer.imei_code,
       address: newCustomer.address,
       interest_products: newCustomer.interest_products,
       referral: newCustomer.referral,
@@ -1046,7 +1052,7 @@ export default function App() {
     if (!error && data) {
       setCustomers(prev => [...prev, ...data]);
       setShowAddCustomer(false);
-      setNewCustomer({ name: "", email: "", phone: "", phone_mainland: "", car_make: "", car_model: "", address: "", interest_products: [], referral: "", type: "Lead", notes: "" });
+      setNewCustomer({ name: "", email: "", phone: "", phone_mainland: "", car_make: "", car_model: "", address: "", imei_code: "", interest_products: [], referral: "", type: "Lead", notes: "" });
     } else if (error) {
       alert(`${t("新增客戶失敗")}：${error.message}`);
     }
@@ -1905,6 +1911,15 @@ export default function App() {
         {tab === "chargeUsers" && (
           <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入用戶信息…")}</div>}>
             <ChargeUsersView
+              session={session}
+              isAdmin={isBfAdmin}
+            />
+          </Suspense>
+        )}
+
+        {tab === "ocppFinance" && (
+          <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入 OCPP 財務…")}</div>}>
+            <OcppFinanceView
               session={session}
               isAdmin={isBfAdmin}
             />
