@@ -140,8 +140,12 @@ const TH_STYLE = { padding: "8px 10px", borderBottom: "1px solid #eee", fontWeig
 export function TableHead({ columns }) {
   return (
     <thead>
-      <tr style={{ background: "#fafafa", textAlign: "left" }}>
-        {columns.map((h) => <th key={h} style={TH_STYLE}>{h}</th>)}
+      <tr style={{ background: "#fafafa" }}>
+        {columns.map((col) => {
+          const label = typeof col === "string" ? col : col.label;
+          const align = typeof col === "string" ? "left" : (col.align || "left");
+          return <th key={label} style={{ ...TH_STYLE, textAlign: align }}>{label}</th>;
+        })}
       </tr>
     </thead>
   );

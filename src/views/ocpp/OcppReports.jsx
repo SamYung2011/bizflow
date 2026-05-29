@@ -123,7 +123,14 @@ export default function OcppReports({ session, isAdmin }) {
         <>
           <div style={TABLE_WRAP_STYLE}>
             <table style={TABLE_STYLE}>
-              <TableHead columns={[t("週期"), t("運營商"), t("站點"), t("充電次數"), t("度數kWh"), t("金額")]} />
+              <TableHead columns={[
+                t("週期"),
+                t("運營商"),
+                t("站點"),
+                { label: t("充電次數"), align: "right" },
+                { label: t("度數kWh"), align: "right" },
+                { label: t("金額"), align: "right" },
+              ]} />
               <tbody>
                 {rows.map((r) => (
                   <tr key={`${r.periodKey}-${r.operatorId}-${r.stationId}`} style={{ borderBottom: "1px solid #f3f4f6" }}>
