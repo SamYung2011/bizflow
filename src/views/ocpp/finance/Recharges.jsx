@@ -7,24 +7,64 @@ import {
   TABLE_WRAP_STYLE, TABLE_STYLE, TD_STYLE, MONO_TD_STYLE,
 } from "./financeShared.jsx";
 
-// 充值訂單 (Recharges) — chargecms rc_orders_recharge（list 唯讀，857 條）
+// 充值訂單 (Recharges) — chargecms rc_orders_recharge（list 唯讀）
 // 支付方式名走後端 COALESCE(rc_payment.name, rc_finance_payment_method.name)
 // chargecms PHP 後台只顯示 status=1（成功），此處默認看全部 + 狀態 filter
 
 const PAGE_LIMIT = 50;
 
-// chargecms PHP 老後台只展示 status=1（成功）；此頁默認全部 → 0=未支付（廢單）/ 1=成功
+// chargecms PHP 老後台只展示 status=1（成功）；此頁默認全部 → 0=未完成待支付 / 1=成功
 const STATUS_OPTIONS = [
   ["all", "全部狀態"],
   ["1", "成功"],
-  ["0", "未支付"],
+  ["0", "未完成待支付"],
 ];
 
 function RechargeStatusChip({ status, t }) {
   const s = Number(status);
   if (s === 1) return <Chip label={t("成功")} tone="green" />;
-  if (s === 0) return <Chip label={t("未支付")} tone="gray" />;
+  if (s === 0) return <Chip label={t("未完成待支付")} tone="gray" />;
   return <Chip label={String(status ?? 0)} tone="gray" />;
+}
+
+function pct(value, total) {
+  if (!total) return "0.0%";
+  return `${((value / total) * 100).toFixed(1)}%`;
+}
+
+function SummaryCard({ label, value, detail, tone = "neutral" }) {
+  const styles = {
+    neutral: { bg: "#f9fafb", border: "#e5e7eb", value: "#111827" },
+    green: { bg: "#f0fdf4", border: "#bbf7d0", value: "#047857" },
+    gray: { bg: "#f8fafc", border: "#e2e8f0", value: "#475569" },
+  }[tone] || { bg: "#f9fafb", border: "#e5e7eb", value: "#111827" };
+  return (
+    <div style={{ minWidth: 160, flex: "1 1 160px", padding: "12px 14px", borderRadius: 8, border: `1px solid ${styles.border}`, background: styles.bg }}>
+      <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 5 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: styles.value, lineHeight: 1 }}>{value}</div>
+      {detail && <div style={{ fontSize: 12, color: "#6b7280", marginTop: 6 }}>{detail}</div>}
+    </div>
+  );
+}
+
+function RechargeSummary({ t, summary }) {
+  if (!summary) return null;
+  const total = Number(summary.total ?? 0);
+  const success = Number(summary.success ?? 0);
+  const pending = Number(summary.pending ?? 0);
+  if (!Number.isFinite(total) || total <= 0) return null;
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+        <SummaryCard label={t("總單數")} value={total} tone="neutral" />
+        <SummaryCard label={t("成功")} value={success} detail={pct(success, total)} tone="green" />
+        <SummaryCard label={t("未完成待支付")} value={pending} detail={pct(pending, total)} tone="gray" />
+      </div>
+      <div style={{ padding: "8px 12px", borderRadius: 8, background: "#fff7ed", border: "1px solid #fed7aa", color: "#9a3412", fontSize: 13 }}>
+        {t("未完成待支付包含重複嘗試、離開付款頁或未完成回調的訂單，不代表付款被拒或扣款異常。")}
+      </div>
+    </div>
+  );
 }
 
 export default function Recharges({ session, isAdmin, active = true }) {
@@ -37,6 +77,7 @@ export default function Recharges({ session, isAdmin, active = true }) {
   const [searchInput, setSearchInput] = useState("");
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  const [summary, setSummary] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
   const aliveRef = useRef(true);
   const wasActiveRef = useRef(active);
@@ -57,6 +98,7 @@ export default function Recharges({ session, isAdmin, active = true }) {
       if (!aliveRef.current) return;
       setRows(Array.isArray(data?.data) ? data.data : []);
       setHasMore(Boolean(data?.page?.hasMore));
+      setSummary(data?.summary && typeof data.summary === "object" ? data.summary : null);
     } catch (e) {
       if (!aliveRef.current) return;
       setErr(String(e?.message || e));
@@ -85,6 +127,8 @@ export default function Recharges({ session, isAdmin, active = true }) {
 
   return (
     <div>
+      <RechargeSummary t={t} summary={summary} />
+
       <FilterBar title={t("充值訂單")} onRefresh={refresh} loading={loading} count={rows.length}>
         <Select value={filterStatus} options={STATUS_OPTIONS} onChange={(v) => { setOffset(0); setFilterStatus(v); }} />
         <SearchBox
