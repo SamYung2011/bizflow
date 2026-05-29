@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useT } from "../../i18n.jsx";
 import { callOcppAdmin, fmtUnixTs } from "../../lib/ocppAdmin.js";
+import { TableHead } from "./finance/financeShared.jsx";
 
 // OCPP 站點管理 — bizflow 主站 admin-only 視圖
 // 數據通路：bizflow → Supabase Edge Function `ocpp-admin` → ECS `chargecms-readapi` (8084) → chargecms MySQL（只讀）
@@ -288,13 +289,7 @@ export default function OcppStations({ supabase, session, isAdmin, active = true
       {rows.length > 0 && (
         <div style={{ overflowX: "auto", border: "1px solid #eee", borderRadius: 8 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead>
-              <tr style={{ background: "#fafafa", textAlign: "left" }}>
-                {[t("ID"), t("站名"), t("運營商"), t("地址"), t("樁數"), t("槍數"), t("在線/可用/故障"), t("狀態"), t("更新"), t("操作")].map((h) => (
-                  <th key={h} style={{ padding: "8px 10px", borderBottom: "1px solid #eee", fontWeight: 600, color: "#555" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
+            <TableHead columns={[t("ID"), t("站名"), t("運營商"), t("地址"), { label: t("樁數"), align: "right" }, { label: t("槍數"), align: "right" }, t("在線/可用/故障"), t("狀態"), t("更新"), t("操作")]} />
             <tbody>
               {rows.map((r) => (
                 <tr key={r.stationId} style={{ borderBottom: "1px solid #f3f4f6" }}>

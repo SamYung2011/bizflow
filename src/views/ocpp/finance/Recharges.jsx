@@ -146,7 +146,7 @@ export default function Recharges({ session, isAdmin, active = true }) {
         <>
           <div style={TABLE_WRAP_STYLE}>
             <table style={TABLE_STYLE}>
-              <TableHead columns={[t("訂單號"), t("用戶"), t("金額"), t("支付方式"), t("狀態"), t("時間"), t("操作")]} />
+              <TableHead columns={[t("訂單號"), t("用戶"), { label: t("金額"), align: "right" }, t("支付方式"), t("狀態"), t("時間"), t("操作")]} />
               <tbody>
                 {rows.map((r) => {
                   const open = expandedId === r.rechargeId;

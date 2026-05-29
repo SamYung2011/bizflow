@@ -105,7 +105,7 @@ export default function UserMoneyLogs({ session, isAdmin, active = true }) {
         <>
           <div style={TABLE_WRAP_STYLE}>
             <table style={TABLE_STYLE}>
-              <TableHead columns={[t("類型"), t("用戶"), t("金額"), t("變動後餘額"), t("備註"), t("時間"), t("操作")]} />
+              <TableHead columns={[t("類型"), t("用戶"), { label: t("金額"), align: "right" }, { label: t("變動後餘額"), align: "right" }, t("備註"), t("時間"), t("操作")]} />
               <tbody>
                 {rows.map((r) => {
                   const open = expandedId === r.logId;

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useT } from "../../i18n.jsx";
 import { callOcppAdmin, fmtUnixTs } from "../../lib/ocppAdmin.js";
+import { TableHead } from "./finance/financeShared.jsx";
 
 // 用戶信息 (ChargeUsers) — chargecms rc_user 主表 + rc_user_1..10 分表（list 唯讀）
 // 零寫入 / 不發 OCPP 命令 / 不動 vendor 8081 / 不動 chargecms PHP
@@ -166,13 +167,7 @@ export default function ChargeUsers({ session, isAdmin }) {
         <>
           <div style={{ overflowX: "auto", border: "1px solid #eee", borderRadius: 8 }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ background: "#fafafa", textAlign: "left" }}>
-                  {[t("用戶ID"), t("郵箱"), t("暱稱"), t("餘額"), t("狀態"), t("操作")].map((h) => (
-                    <th key={h} style={{ padding: "8px 10px", borderBottom: "1px solid #eee", fontWeight: 600, color: "#555" }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
+              <TableHead columns={[t("用戶ID"), t("郵箱"), t("暱稱"), { label: t("餘額"), align: "right" }, t("狀態"), t("操作")]} />
               <tbody>
                 {rows.map((r) => {
                   const open = expandedId === r.userId;

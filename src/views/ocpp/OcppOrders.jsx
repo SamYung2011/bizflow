@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useT } from "../../i18n.jsx";
 import { callOcppAdmin, fmtUnixTs } from "../../lib/ocppAdmin.js";
+import { TableHead } from "./finance/financeShared.jsx";
 
 // 充電訂單 — chargecms 主表 rc_orders（list）+ chargeorders.rc_orders_<N> 分表（detail）
 // 只讀，零寫入 / 不發 OCPP 命令 / 不動 vendor 8081
@@ -305,13 +306,7 @@ export default function OcppOrders({ session, isAdmin, active = true }) {
       {rows.length > 0 && (
         <div style={{ overflowX: "auto", border: "1px solid #eee", borderRadius: 8 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead>
-              <tr style={{ background: "#fafafa", textAlign: "left" }}>
-                {[t("時間"), t("訂單號"), t("用戶 ID"), t("運營商"), t("站點"), t("樁編號"), t("槍號"), t("充電量"), t("金額"), t("操作")].map((h) => (
-                  <th key={h} style={{ padding: "8px 10px", borderBottom: "1px solid #eee", fontWeight: 600, color: "#555" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
+            <TableHead columns={[t("時間"), t("訂單號"), t("用戶 ID"), t("運營商"), t("站點"), t("樁編號"), t("槍號"), { label: t("充電量"), align: "right" }, { label: t("金額"), align: "right" }, t("操作")]} />
             <tbody>
               {rows.map((r) => (
                 <tr key={`${r.userId}-${r.orderId}`} style={{ borderBottom: "1px solid #f3f4f6" }}>
