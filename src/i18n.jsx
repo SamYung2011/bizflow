@@ -1467,8 +1467,16 @@ const DICT_EN = {
 
   // ── OCPP 財務模塊（OcppFinance hub + 5 sub-tab）──
   "OCPP 財務": "OCPP Finance",
+  "充電報表": "Charging Reports",
   "本頁": "This page",
   "載入 OCPP 財務…": "Loading OCPP finance…",
+  "載入充電報表…": "Loading charging reports…",
+  "月報": "Monthly Report",
+  "年報": "Yearly Report",
+  "充電次數": "Sessions",
+  "度數kWh": "kWh",
+  "無報表數據": "No report data",
+  "未分配站點": "Unassigned station",
   "充值訂單": "Recharge Orders",
   "用戶錢包": "User Wallet",
   "運營商流水": "Operator Ledger",
@@ -2972,8 +2980,16 @@ const DICT_FR = {
 
   // ── OCPP 財務模塊（OcppFinance hub + 5 sub-tab）──
   "OCPP 財務": "Finances OCPP",
+  "充電報表": "Rapports de recharge",
   "本頁": "Cette page",
   "載入 OCPP 財務…": "Chargement des finances OCPP…",
+  "載入充電報表…": "Chargement des rapports de recharge…",
+  "月報": "Rapport mensuel",
+  "年報": "Rapport annuel",
+  "充電次數": "Sessions",
+  "度數kWh": "kWh",
+  "無報表數據": "Aucune donnée de rapport",
+  "未分配站點": "Station non assignée",
   "充值訂單": "Commandes de recharge",
   "用戶錢包": "Portefeuille",
   "運營商流水": "Journal opérateur",

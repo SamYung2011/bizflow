@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo, Suspense, lazy } from "react";
 const ExpenseView = lazy(() => import("./views/Expense.jsx"));
 const OcppMonitorView = lazy(() => import("./views/ocpp/OcppMonitor.jsx"));
 const OcppChargingView = lazy(() => import("./views/ocpp/OcppCharging.jsx"));
+const OcppReportsView = lazy(() => import("./views/ocpp/OcppReports.jsx"));
 const ChargeUsersView = lazy(() => import("./views/ocpp/ChargeUsers.jsx"));
 const OcppFinanceView = lazy(() => import("./views/ocpp/finance/OcppFinance.jsx"));
 import { useQueryClient } from "@tanstack/react-query";
@@ -1035,6 +1036,7 @@ export default function App() {
     ...(isBfAdmin ? [{ type: "group", id: "g_ocpp", label: t("OCPP 充電"), icon: "charger", children: [
       { id: "ocppMonitor", label: t("OCPP 監控"), icon: "charger" },
       { id: "ocppCharging", label: t("OCPP 充電站"), icon: "charger" },
+      { id: "ocppReports", label: t("充電報表"), icon: "charger" },
       { id: "chargeUsers", label: t("用戶信息"), icon: "charger" },
       { id: "ocppFinance", label: t("OCPP 財務"), icon: "charger" },
     ]}] : []),
@@ -1926,6 +1928,15 @@ export default function App() {
           <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入 OCPP 充電站…")}</div>}>
             <OcppChargingView
               supabase={supabase}
+              session={session}
+              isAdmin={isBfAdmin}
+            />
+          </Suspense>
+        )}
+
+        {tab === "ocppReports" && (
+          <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入充電報表…")}</div>}>
+            <OcppReportsView
               session={session}
               isAdmin={isBfAdmin}
             />

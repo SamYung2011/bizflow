@@ -16,6 +16,7 @@
 //   GET /ocpp-admin/finance/operator-money-logs
 //   GET /ocpp-admin/finance/platform-money-logs
 //   GET /ocpp-admin/finance/withdrawals
+//   GET /ocpp-admin/reports/charging
 //
 // Auth:
 //   1. Validate caller JWT via Supabase auth/v1/user.
@@ -167,6 +168,7 @@ function mapPath(pathname: string) {
   if (pathname === "/finance/operator-money-logs") return "/api/finance/operator-money-logs";
   if (pathname === "/finance/platform-money-logs") return "/api/finance/platform-money-logs";
   if (pathname === "/finance/withdrawals") return "/api/finance/withdrawals";
+  if (pathname === "/reports/charging") return "/api/reports/charging";
   return "";
 }
 
