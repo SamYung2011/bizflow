@@ -18,6 +18,9 @@ interface LocationPayload {
   lng: number;
   placeName?: string;
   address?: string;
+  source?: string;
+  originalUrl?: string;
+  resolvedUrl?: string;
 }
 
 interface MessagePayload {
@@ -56,24 +59,160 @@ function isSystemMessage(content: string): boolean {
 // 從文本中嘗試解析 Google Maps 鏈接抠 lat/lng（兜底 content.js 不識別「粘貼的鏈接」場景）
 // content.js parseLocationFromEl 只認 WhatsApp 原生位置卡片的 DOM 結構（staticmap?markers=...）
 // 但客戶常複製 Google Maps 鏈接過來（普通文字消息）→ location=null → EPD 查不到
-function parseLocationFromText(content: string): LocationPayload | null {
-  if (!content) return null;
-  // 三種常見格式：?q=lat,lng / @lat,lng / /lat,lng
-  const patterns = [
-    /maps\.google\.[^\s]*[?&]q=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/i,
-    /maps\.google\.[^\s]*@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/i,
-    /maps\.google\.[^\s]*\/(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)(?:[,\/]|$)/i,
+function decodeUrlPart(value: string): string {
+  try { return decodeURIComponent(value.replace(/\+/g, " ")); } catch (_) { return value; }
+}
+
+function isValidCoordinate(lat: number, lng: number): boolean {
+  return !isNaN(lat) && !isNaN(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && (lat !== 0 || lng !== 0);
+}
+
+function buildParsedLocation(
+  latRaw: string,
+  lngRaw: string,
+  source: string,
+  extra: Partial<LocationPayload> = {},
+): LocationPayload | null {
+  const lat = parseFloat(latRaw);
+  const lng = parseFloat(lngRaw);
+  if (!isValidCoordinate(lat, lng)) return null;
+  return { lat, lng, source, ...extra };
+}
+
+function buildParsedLocationLngLat(
+  lngRaw: string,
+  latRaw: string,
+  source: string,
+  extra: Partial<LocationPayload> = {},
+): LocationPayload | null {
+  return buildParsedLocation(latRaw, lngRaw, source, extra);
+}
+
+function extractGoogleMapsUrls(content: string): string[] {
+  const matches = String(content || "").match(/https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl\/maps|(?:www\.)?google\.[^\s/]+\/maps|maps\.google\.[^\s/]+|uri\.amap\.com|surl\.amap\.com|(?:www\.|m\.)?amap\.com)[^\s)）]*/gi) || [];
+  return Array.from(new Set(matches)).slice(0, 3);
+}
+
+function isGoogleMapsShortUrl(url: string): boolean {
+  return /^https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl\/maps)\//i.test(url);
+}
+
+function isShortMapUrl(url: string): boolean {
+  return isGoogleMapsShortUrl(url) || /^https?:\/\/surl\.amap\.com\//i.test(url);
+}
+
+function parseGooglePlaceName(url: string): string | undefined {
+  const m = String(url || "").match(/\/maps\/place\/([^/@?#]+)/i);
+  return m ? decodeUrlPart(m[1]).trim() || undefined : undefined;
+}
+
+function parseQueryParam(url: string, name: string): string | null {
+  const m = String(url || "").match(new RegExp(`[?&]${name}=([^&#]+)`, "i"));
+  return m ? decodeUrlPart(m[1]) : null;
+}
+
+function parseAmapPlaceName(url: string): string | undefined {
+  const name = parseQueryParam(url, "name") || parseQueryParam(url, "poiname");
+  if (name) return name.split(",").slice(2).join(",").trim() || name.trim() || undefined;
+  const to = parseQueryParam(url, "to");
+  if (to) {
+    const parts = to.split(",");
+    if (parts.length >= 3) return parts.slice(2).join(",").trim() || undefined;
+  }
+  return undefined;
+}
+
+function parseAmapCoordinates(content: string, extra: Partial<LocationPayload> = {}): LocationPayload | null {
+  const normalized = String(content || "").replace(/%2C/gi, ",");
+  const patterns: { source: string; re: RegExp }[] = [
+    { source: "amap_to", re: /[?&]to=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)(?:,[^&#]*)?/i },
+    { source: "amap_position", re: /[?&]position=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/i },
+    { source: "amap_dest", re: /[?&](?:dest|location|center)=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/i },
+    { source: "amap_marker", re: /[?&]markers=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)(?:,[^|&#]*)?/i },
+    { source: "amap_scheme_navi", re: /[?&]lon=(-?\d+(?:\.\d+)?)[^#]*[?&]lat=(-?\d+(?:\.\d+)?)/i },
+    { source: "amap_scheme_navi", re: /[?&]lat=(-?\d+(?:\.\d+)?)[^#]*[?&]lon=(-?\d+(?:\.\d+)?)/i },
   ];
-  for (const re of patterns) {
-    const m = content.match(re);
-    if (m) {
-      const lat = parseFloat(m[1]), lng = parseFloat(m[2]);
-      if (!isNaN(lat) && !isNaN(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && (lat !== 0 || lng !== 0)) {
-        return { lat, lng };
-      }
-    }
+  for (const { source, re } of patterns) {
+    const m = normalized.match(re);
+    if (!m) continue;
+    const parsed = source === "amap_scheme_navi" && re.source.includes("[?&]lat=")
+      ? buildParsedLocation(m[1], m[2], source, extra)
+      : buildParsedLocationLngLat(m[1], m[2], source, extra);
+    if (parsed) return parsed;
   }
   return null;
+}
+
+function parseCoordinatesFromText(content: string, extra: Partial<LocationPayload> = {}): LocationPayload | null {
+  if (!content) return null;
+  const amap = parseAmapCoordinates(content, {
+    placeName: parseAmapPlaceName(content),
+    ...extra,
+  });
+  if (amap) return amap;
+
+  const normalized = String(content).replace(/%2C/gi, ",");
+  const patterns: { source: string; re: RegExp }[] = [
+    // Google place URL 的精確 POI 坐標，優先於 @lat,lng 視窗中心。
+    { source: "google_place_data", re: /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/i },
+    { source: "google_query", re: /[?&](?:q|query|destination|daddr|center|ll)=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/i },
+    { source: "google_static_marker", re: /[?&]markers=(?:[^&|]*\|)?(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/i },
+    { source: "google_viewport", re: /@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/i },
+    { source: "plain_coordinates", re: /(?:^|[^\d.-])(-?\d{1,2}\.\d{3,}),\s*(-?\d{2,3}\.\d{3,})(?:[^\d.]|$)/i },
+  ];
+  for (const { source, re } of patterns) {
+    const m = normalized.match(re);
+    if (!m) continue;
+    const parsed = buildParsedLocation(m[1], m[2], source, extra);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+async function resolveGoogleMapsShortUrl(url: string): Promise<string | null> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 3000);
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      redirect: "follow",
+      signal: ctl.signal,
+      headers: { "User-Agent": "Mozilla/5.0 Honnmono WhatsApp Location Resolver" },
+    });
+    return res.url || null;
+  } catch (_) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function parseLocationFromText(content: string): Promise<LocationPayload | null> {
+  const direct = parseCoordinatesFromText(content);
+  if (direct) return direct;
+
+  for (const url of extractGoogleMapsUrls(content)) {
+    const directFromUrl = parseCoordinatesFromText(url, {
+      originalUrl: url,
+      placeName: parseGooglePlaceName(url) || parseAmapPlaceName(url),
+    });
+    if (directFromUrl) return directFromUrl;
+
+    if (!isShortMapUrl(url)) continue;
+    const resolved = await resolveGoogleMapsShortUrl(url);
+    if (!resolved) continue;
+    const parsed = parseCoordinatesFromText(resolved, {
+      originalUrl: url,
+      resolvedUrl: resolved,
+      placeName: parseGooglePlaceName(resolved) || parseAmapPlaceName(resolved),
+    });
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function hasGoogleMapsLink(content: string): boolean {
+  return extractGoogleMapsUrls(content).length > 0;
 }
 
 // 同步寫 wa_logs。channel='meta' 用 [Meta API] 前綴；'extension' / 兜底用 [云] 前綴。
@@ -142,10 +281,14 @@ Deno.serve(async (req) => {
 
   // 客戶端未傳 location（v1.2 只認 WhatsApp 原生位置卡片）→ 從文本兜底解析 Google Maps 鏈接
   if (!body.location) {
-    const parsed = parseLocationFromText(body.content);
+    const parsed = await parseLocationFromText(body.content);
     if (parsed) {
       body.location = parsed;
-      cloudLog(sb, "收到", `${chatLabel} 從文本解析位置 lat=${parsed.lat.toFixed(5)}, lng=${parsed.lng.toFixed(5)}（粘貼的 Maps 鏈接）`, channel);
+      const resolvedNote = parsed.resolvedUrl ? "，已展開短鏈" : "";
+      const placeNote = parsed.placeName ? `，${parsed.placeName}` : "";
+      cloudLog(sb, "收到", `${chatLabel} 從文本解析位置 lat=${parsed.lat.toFixed(5)}, lng=${parsed.lng.toFixed(5)}（${parsed.source || "maps"}${resolvedNote}${placeNote}）`, channel);
+    } else if (hasGoogleMapsLink(body.content)) {
+      cloudLog(sb, "收到", `${chatLabel} 含 Maps 鏈接但未解析到經緯度，交由 AI 引導客戶發送 WhatsApp 位置`, channel);
     }
   } else {
     cloudLog(sb, "收到", `${chatLabel} 位置消息 lat=${body.location.lat.toFixed(5)}, lng=${body.location.lng.toFixed(5)}${body.location.placeName ? " (" + body.location.placeName + ")" : ""}`, channel);

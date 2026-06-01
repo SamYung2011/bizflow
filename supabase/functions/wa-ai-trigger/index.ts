@@ -262,6 +262,10 @@ function shouldSendMetaTextReply(opts: {
   return /位置|地址|在哪|喺邊|邊度|哪里|哪裡|导航|導航|路線|路线|google maps|maps\.google|充電|充电|充電樁|充电桩|charger|charging|附近|空位|停車場|停车场|car park/i.test(haystack);
 }
 
+function hasMapLink(text: string): boolean {
+  return /https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl\/maps|(?:www\.)?google\.[^\s/]+\/maps|maps\.google\.|uri\.amap\.com|surl\.amap\.com|(?:www\.|m\.)?amap\.com)/i.test(String(text || ""));
+}
+
 // 同步寫 wa_logs。channel='meta' 用 [Meta API] 前綴；'extension' / 兜底用 [云] 前綴。
 // dashboard 按 channel 字段过滤展示。失敗吞掉，不阻擋主流程。
 async function cloudLog(
@@ -544,10 +548,12 @@ Deno.serve(async (req) => {
       // ─── EPD 充電樁注入 ───
       // 先看當前 pending 自己帶 location；沒有就拉同 customer LOCATION_TTL_MIN 分鐘內最近一次有 location 的 pending
       let location: { lat: number; lng: number; placeName?: string } | null = null;
+      const currentHasMapsLink = hasMapLink(p.content || "");
       if (p.location && typeof p.location === "object" && (p.location as any).lat) {
         location = p.location as any;
-      } else {
+      } else if (!currentHasMapsLink) {
         // 只查當前 pending 之前的 location，避免拉到「之後才發來的位置」造成多個 pending 都注入同一個 location 答重複充電樁
+        // 當前消息自己有 Maps 鏈接但解析失敗時，不沿用舊 location，避免把歷史地址當成新地址。
         const locCutoff = new Date(Date.now() - LOCATION_TTL_MIN * 60 * 1000).toISOString();
         let locQuery = sb.from("wa_pending_replies")
           .select("location")
@@ -567,12 +573,15 @@ Deno.serve(async (req) => {
       }
 
       let locationHint = "";
+      let unparsedMapsHint = "";
       if (location) {
         const stations = await getEpdStations();
         const nearby = findNearestStations(location.lat, location.lng, stations, 5);
         const tmpl = (settings.location_hint_prompt as string) || LOCATION_HINT_TEMPLATE_DEFAULT;
         locationHint = buildLocationContextHint(location, nearby, tmpl);
         cloudLog(sb, "位置-注入", `pending#${p.id} ${chatLabel} 注入 ${nearby.length} 個附近站（EPD 總 ${stations.length}）`, channel);
+      } else if (currentHasMapsLink) {
+        unparsedMapsHint = "\n\n【系统提示：客户当前消息包含地图链接，但系统没有解析到经纬度。不要根据对话历史、短链接文字或自己的猜测判断客户在哪个城市/地区；请简短说明当前链接无法读取实时坐标，并引导客户发送 WhatsApp 当前位置，或复制包含经纬度的完整地图链接。】\n";
       }
 
       const sendMetaText = shouldSendMetaTextReply({
@@ -591,6 +600,9 @@ Deno.serve(async (req) => {
       ];
       if (locationHint) {
         messages.push({ role: "system", content: locationHint });
+      }
+      if (unparsedMapsHint) {
+        messages.push({ role: "system", content: unparsedMapsHint });
       }
       if (applyMetaTtsPrompt) {
         messages.push({ role: "system", content: metaTtsPrompt });
