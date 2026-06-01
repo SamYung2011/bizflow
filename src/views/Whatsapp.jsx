@@ -39,6 +39,7 @@ export default function WhatsappView() {
     { id: "settings",   label: t("設置 / 模式") },
     { id: "knowledge",  label: t("知識庫") },
     { id: "chargers",   label: t("充電樁 Prompt") },
+    { id: "ttsPrompt",  label: t("TTS Prompt") },
     { id: "prompt",     label: "Boss Prompt" },
     { id: "whitelist",  label: t("白名單") },
     { id: "messages",   label: t("對話歷史") },
@@ -455,6 +456,33 @@ export default function WhatsappView() {
                   {localLh.includes("{STATIONS_OR_EMPTY}") ? <span style={{ color: "#22c55e", marginLeft: 6 }}>✓ {"{STATIONS_OR_EMPTY}"}</span> : <span style={{ color: "#c0392b", marginLeft: 6 }}>✗ {t("缺")} {"{STATIONS_OR_EMPTY}"}</span>}
                 </div>
               </div>
+            </div>
+          );
+        })()}
+
+        {/* Meta API TTS PROMPT（只在语音回复时追加，知识库和主 prompt 仍共用） */}
+        {waSubTab === "ttsPrompt" && (() => {
+          const serverTtsPrompt = qWaSettings.data?.meta_tts_prompt || "";
+          const localTtsPrompt = s.meta_tts_prompt || "";
+          const ttsDirty = localTtsPrompt !== serverTtsPrompt;
+          return (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 12, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 13, color: "#888", lineHeight: 1.6 }}>
+                  {t("這裡只調整 Meta API 語音回覆的人設和說話方式；主 prompt、知識庫與充電樁 prompt 仍沿用雲端配置。")}
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  {ttsDirty && <span style={{ fontSize: 11, color: "#f59e0b", fontWeight: 600 }}>● {t("未儲存")}</span>}
+                  <button disabled={!ttsDirty} onClick={() => saveSettings({ meta_tts_prompt: localTtsPrompt })} style={{ padding: "7px 18px", background: ttsDirty ? "#22c55e" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: ttsDirty ? "pointer" : "not-allowed" }}>{t("儲存 TTS Prompt")}</button>
+                  {ttsDirty && <button onClick={() => setWaSettings({ ...s, meta_tts_prompt: serverTtsPrompt })} style={{ padding: "7px 14px", background: "#f5f5f5", color: "#666", border: "none", borderRadius: 8, fontSize: 12, cursor: "pointer" }}>{t("取消")}</button>}
+                </div>
+              </div>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#333", marginBottom: 6 }}>{t("語音人設提示詞")}</div>
+              <div style={{ fontSize: 11, color: "#888", lineHeight: 1.6, marginBottom: 8 }}>
+                {t("只在 Meta API 回覆會發語音時追加；位置、導航、充電樁問題仍發文字，不使用這段。")}
+              </div>
+              <textarea value={localTtsPrompt} onChange={e => setWaSettings({ ...s, meta_tts_prompt: e.target.value })} style={{ width: "100%", minHeight: "46vh", padding: 16, borderRadius: 10, border: "1px solid " + (ttsDirty ? "#f59e0b" : "#e0e0e0"), fontSize: 13, outline: "none", fontFamily: "ui-monospace, monospace", resize: "vertical", boxSizing: "border-box" }} />
+              <div style={{ fontSize: 11, color: "#aaa", marginTop: 8 }}>{localTtsPrompt.length} {t("字符")}{ttsDirty ? t("（與雲端不同，點「儲存 TTS Prompt」才生效）") : " · " + t("已同步")}</div>
             </div>
           );
         })()}

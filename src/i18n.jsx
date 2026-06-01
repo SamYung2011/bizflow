@@ -1075,6 +1075,13 @@ const DICT_EN = {
   " 和 ": " and ",
   "（保存時會檢查，缺一個就用默認模板兜底）": " (validated on save; falls back to default template if either is missing)",
   "缺": "missing",
+  // ── WhatsApp Meta API TTS Prompt 子 tab ──
+  "TTS Prompt": "TTS Prompt",
+  "這裡只調整 Meta API 語音回覆的人設和說話方式；主 prompt、知識庫與充電樁 prompt 仍沿用雲端配置。": "This only adjusts the persona and speaking style for Meta API voice replies. The main prompt, knowledge base, and charger prompt still use the shared cloud configuration.",
+  "儲存 TTS Prompt": "Save TTS Prompt",
+  "語音人設提示詞": "Voice Persona Prompt",
+  "只在 Meta API 回覆會發語音時追加；位置、導航、充電樁問題仍發文字，不使用這段。": "Appended only when a Meta API reply will be sent as voice. Location, navigation, and charger questions still send text and do not use this prompt.",
+  "（與雲端不同，點「儲存 TTS Prompt」才生效）": " (differs from cloud; click \"Save TTS Prompt\" to apply)",
   // ── 扩展更新 toast ──
   "扩展有新版本": "Extension update available",
   "個在線客戶端使用舊版（": " online client(s) on old version (",
@@ -2608,6 +2615,13 @@ const DICT_FR = {
   " 和 ": " et ",
   "（保存時會檢查，缺一個就用默認模板兜底）": " (vérifié à l'enregistrement ; revient au modèle par défaut s'il en manque un)",
   "缺": "manquant",
+  // ── WhatsApp Meta API TTS Prompt 子 tab ──
+  "TTS Prompt": "Prompt TTS",
+  "這裡只調整 Meta API 語音回覆的人設和說話方式；主 prompt、知識庫與充電樁 prompt 仍沿用雲端配置。": "Ceci ajuste seulement la persona et le style oral des réponses vocales Meta API. Le prompt principal, la base de connaissances et le prompt des bornes restent ceux de la configuration cloud partagée.",
+  "儲存 TTS Prompt": "Enregistrer le prompt TTS",
+  "語音人設提示詞": "Prompt de persona vocale",
+  "只在 Meta API 回覆會發語音時追加；位置、導航、充電樁問題仍發文字，不使用這段。": "Ajouté seulement quand une réponse Meta API sera envoyée en vocal. Les questions de position, navigation et bornes restent en texte et n'utilisent pas ce prompt.",
+  "（與雲端不同，點「儲存 TTS Prompt」才生效）": " (différent du cloud ; cliquez sur « Enregistrer le prompt TTS » pour appliquer)",
   // ── 扩展更新 toast ──
   "扩展有新版本": "Mise à jour de l'extension disponible",
   "個在線客戶端使用舊版（": " client(s) en ligne sur ancienne version (",
