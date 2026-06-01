@@ -174,11 +174,10 @@ function splitSegments(text: string): { type: string; content: string }[] {
 
 function shouldSendMetaTextReply(opts: {
   incomingText: string;
-  replyText: string;
   hasLocation: boolean;
 }): boolean {
   if (opts.hasLocation) return true;
-  const haystack = `${opts.incomingText || ""}\n${opts.replyText || ""}`.toLowerCase();
+  const haystack = `${opts.incomingText || ""}`.toLowerCase();
   return /位置|地址|在哪|喺邊|邊度|哪里|哪裡|导航|導航|路線|路线|google maps|maps\.google|充電|充电|充電樁|充电桩|charger|charging|附近|空位|停車場|停车场|car park/i.test(haystack);
 }
 
@@ -514,7 +513,6 @@ Deno.serve(async (req) => {
       const canMeta = channel === "meta" && !p.is_group && metaToken && metaPhoneId;
       const sendMetaText = shouldSendMetaTextReply({
         incomingText: p.content || "",
-        replyText: cleanedReply,
         hasLocation: Boolean(location),
       });
 
