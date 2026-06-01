@@ -31,6 +31,41 @@ export function mergeImeiCodes(existing, additions) {
   return merged.join("\n") || null
 }
 
+function uniqueValidImeis(values) {
+  const seen = new Set()
+  const out = []
+  for (const code of values.flatMap(v => splitImeiCodes(v, { validOnly: true }))) {
+    const key = compactCode(code)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    out.push(key)
+  }
+  return out
+}
+
+export function customerDeviceRowsFor(customerDevices = [], customerOrIds) {
+  const ids = Array.isArray(customerOrIds)
+    ? customerOrIds
+    : (customerOrIds?.allCids || customerOrIds?.groupCids || (customerOrIds?.id ? [customerOrIds.id] : []))
+  const idSet = new Set(ids.filter(Boolean).map(String))
+  if (idSet.size === 0) return []
+  return (customerDevices || [])
+    .filter(row => row?.customer_id && idSet.has(String(row.customer_id)))
+    .sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")))
+}
+
+export function customerDeviceImeisFor(customerDevices = [], customerOrIds) {
+  const seen = new Set()
+  const out = []
+  for (const row of customerDeviceRowsFor(customerDevices, customerOrIds)) {
+    const imei = compactCode(row.imei)
+    if (!imei || seen.has(imei)) continue
+    seen.add(imei)
+    out.push(imei)
+  }
+  return out
+}
+
 export function isDcAdaptorProProduct(product) {
   const raw = normText([product?.name, product?.internal_code, product?.code, product?.category].filter(Boolean).join(" "))
   if (!raw) return false
@@ -92,30 +127,91 @@ export function collectInvalidImeiCodesFromItems(items, options = {}) {
 export async function appendCustomerImeiCodes({
   supabase,
   queryClient,
-  customers,
-  setCustomers,
+  customerDevices = [],
+  setCustomerDevices,
   customerId,
   imeiCodes,
 }) {
-  const additions = imeiCodes.flatMap(v => splitImeiCodes(v, { validOnly: true }))
+  const additions = uniqueValidImeis(imeiCodes)
   if (!customerId || additions.length === 0) return { updated: false }
-  const current = customers.find(c => c.id === customerId)
-  if (!current) return { updated: false }
 
-  const nextImei = mergeImeiCodes(current.imei_code, additions)
-  if ((current.imei_code || null) === nextImei) return { updated: false }
+  const rows = additions.map(imei => ({
+    customer_id: customerId,
+    imei,
+    device_type: "adapter_pro",
+  }))
 
   const { error } = await supabase
-    .from("customers")
-    .update({ imei_code: nextImei })
-    .eq("id", customerId)
+    .from("customer_devices")
+    .upsert(rows, { onConflict: "imei" })
+    .select()
   if (error) return { updated: false, error }
 
-  setCustomers(prev => prev.map(c => c.id === customerId ? { ...c, imei_code: nextImei } : c))
-  queryClient?.setQueryData?.(["bf", "customers"], (old) => (
+  const { data } = await supabase
+    .from("customer_devices")
+    .select("*")
+    .in("imei", additions)
+  const savedRows = data || rows
+  const savedImeis = new Set(additions)
+  const mergeRows = old => (
     Array.isArray(old)
-      ? old.map(c => c.id === customerId ? { ...c, imei_code: nextImei } : c)
-      : old
+      ? [...old.filter(r => !savedImeis.has(compactCode(r.imei))), ...savedRows]
+      : savedRows
+  )
+  setCustomerDevices?.(mergeRows)
+  queryClient?.setQueryData?.(["bf", "customer_devices"], mergeRows)
+  return { updated: true, imei_codes: additions }
+}
+
+export async function replaceCustomerDeviceImeis({
+  supabase,
+  queryClient,
+  customerDevices = [],
+  setCustomerDevices,
+  customerId,
+  imeiCodes,
+  deviceType = "adapter_pro",
+}) {
+  if (!customerId) return { updated: false }
+  const nextImeis = uniqueValidImeis(imeiCodes)
+  const existing = (customerDevices || []).filter(row => (
+    String(row?.customer_id || "") === String(customerId) && (row.device_type || "adapter_pro") === deviceType
   ))
-  return { updated: true, imei_code: nextImei }
+  const nextSet = new Set(nextImeis)
+  const staleImeis = existing
+    .map(row => compactCode(row.imei))
+    .filter(imei => imei && !nextSet.has(imei))
+
+  if (staleImeis.length > 0) {
+    const { error } = await supabase
+      .from("customer_devices")
+      .delete()
+      .in("imei", staleImeis)
+    if (error) return { updated: false, error }
+  }
+
+  let savedRows = []
+  if (nextImeis.length > 0) {
+    const rows = nextImeis.map(imei => ({
+      customer_id: customerId,
+      imei,
+      device_type: deviceType,
+    }))
+    const { data, error } = await supabase
+      .from("customer_devices")
+      .upsert(rows, { onConflict: "imei" })
+      .select()
+    if (error) return { updated: false, error }
+    savedRows = data || rows
+  }
+
+  const removeImeis = new Set([...staleImeis, ...nextImeis])
+  const mergeRows = old => (
+    Array.isArray(old)
+      ? [...old.filter(r => !removeImeis.has(compactCode(r.imei))), ...savedRows]
+      : savedRows
+  )
+  setCustomerDevices?.(mergeRows)
+  queryClient?.setQueryData?.(["bf", "customer_devices"], mergeRows)
+  return { updated: true, imei_codes: nextImeis }
 }

@@ -420,6 +420,8 @@ const DICT_EN = {
   "地址": "Address",
   "IMEI": "IMEI",
   "IMEI 辨識碼": "IMEI Code",
+  "設備": "Device",
+  "設備保存失敗": "Failed to save device",
   "IMEI 格式不正確": "Invalid IMEI format",
   "IMEI 必須為 15 位數字": "IMEI must be 15 digits",
   "感興趣產品": "Interested Products",
@@ -929,10 +931,12 @@ const DICT_EN = {
   "請先選擇客戶": "Please select a customer first",
   "生成發票並列印 PDF": "Generate Invoice & Print PDF",
   "發票已生成": "Invoice generated",
+  "新增客戶已完成": "Customer created",
   "但部分庫存更新失敗": "but some inventory updates failed",
   "請在庫存頁手動核對。": "Please verify manually on the Inventory page.",
   "發票生成失敗": "Failed to generate invoice",
   "但 IMEI 未能同步到客戶資料": "but IMEI could not be synced to the customer record",
+  "但設備未能保存": "but the device could not be saved",
   "儲存修改已完成": "Changes saved",
 
   // ── WhatsApp status labels ──
@@ -1933,6 +1937,8 @@ const DICT_FR = {
   "地址": "Adresse",
   "IMEI": "IMEI",
   "IMEI 辨識碼": "Code IMEI",
+  "設備": "Appareil",
+  "設備保存失敗": "Échec de l'enregistrement de l'appareil",
   "IMEI 格式不正確": "Format IMEI invalide",
   "IMEI 必須為 15 位數字": "L'IMEI doit comporter 15 chiffres",
   "感興趣產品": "Produits d'intérêt",
@@ -2442,10 +2448,12 @@ const DICT_FR = {
   "請先選擇客戶": "Veuillez d'abord sélectionner un client",
   "生成發票並列印 PDF": "Générer la facture et imprimer le PDF",
   "發票已生成": "Facture générée",
+  "新增客戶已完成": "Client créé",
   "但部分庫存更新失敗": "mais certaines mises à jour de stock ont échoué",
   "請在庫存頁手動核對。": "Veuillez vérifier manuellement sur la page Stock.",
   "發票生成失敗": "Échec de la génération de la facture",
   "但 IMEI 未能同步到客戶資料": "mais l'IMEI n'a pas pu être synchronisé avec la fiche client",
+  "但設備未能保存": "mais l'appareil n'a pas pu être enregistré",
   "儲存修改已完成": "Modifications enregistrées",
 
   // ── WhatsApp status labels ──

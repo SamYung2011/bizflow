@@ -3,7 +3,6 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase, fetchAllTable } from '../lib/supabaseClient.js'
 import { isNonWarrantyItem, itemWarrantyMonths } from '../lib/warranty.js'
 import { fmtInvNum } from '../lib/invoiceHelpers.js'
-import { splitImeiCodes } from '../lib/imei.js'
 
 // 庫存預警閾值（活 SKU 合計 < 50 視為低庫存）
 const LOW_STOCK_THRESHOLD = 50
@@ -40,6 +39,7 @@ export function AppProvider({ children }) {
   // 批 2：customers / line_item_aliases
   // customers 高頻：staleTime: 0 → F5 立刻 hydrate 老 cache 顯示 + 同時 background refetch 拿最新
   const qCustomers = useQuery({ queryKey: ['bf', 'customers'], queryFn: () => fetchAllTable('customers', 'name'), enabled: !!userId, staleTime: 0 })
+  const qCustomerDevices = useQuery({ queryKey: ['bf', 'customer_devices'], queryFn: () => fetchAllTable('customer_devices', 'created_at'), enabled: !!userId, staleTime: 0 })
   const qLineItemAliases = useQuery({ queryKey: ['bf', 'line_item_aliases'], queryFn: () => fetchAllTable('line_item_aliases', 'alias_name'), enabled: !!userId })
 
   // 批 3：invoices / inventory
@@ -76,6 +76,7 @@ export function AppProvider({ children }) {
   const [stocks, setStocks] = useState([])
   const [suppliers, setSuppliers] = useState([])
   const [customers, setCustomers] = useState([])
+  const [customerDevices, setCustomerDevices] = useState([])
   const [lineItemAliases, setLineItemAliases] = useState([])
   const [invoices, setInvoices] = useState([])
   const [inventory, setInventory] = useState([])
@@ -101,6 +102,7 @@ export function AppProvider({ children }) {
   useEffect(() => { if (qStocks.data) setStocks(qStocks.data) }, [qStocks.data])
   useEffect(() => { if (qSuppliers.data) setSuppliers(qSuppliers.data) }, [qSuppliers.data])
   useEffect(() => { if (qCustomers.data) setCustomers(qCustomers.data) }, [qCustomers.data])
+  useEffect(() => { if (qCustomerDevices.data) setCustomerDevices(qCustomerDevices.data) }, [qCustomerDevices.data])
   useEffect(() => { if (qLineItemAliases.data) setLineItemAliases(qLineItemAliases.data) }, [qLineItemAliases.data])
   useEffect(() => { if (qInvoices.data) setInvoices(qInvoices.data) }, [qInvoices.data])
   useEffect(() => { if (qInventory.data) setInventory(qInventory.data) }, [qInventory.data])
@@ -256,7 +258,6 @@ export function AppProvider({ children }) {
       splitLines(c.phone).forEach(v => g.phones.add(v))
       splitLines(c.email).forEach(v => g.emails.add(v))
       splitLines(c.address).forEach(v => g.addresses.add(v))
-      splitImeiCodes(c.imei_code).forEach(v => g.imeiCodes.add(v))
       splitLines(c.phone_mainland).forEach(v => g.phoneMainlands.add(v))
       splitLines(c.car_make).forEach(v => g.carMakes.add(v))
       splitLines(c.car_model).forEach(v => g.carModels.add(v))
@@ -265,7 +266,7 @@ export function AppProvider({ children }) {
       const root = find(c.id)
       if (!groupInfo.has(root)) groupInfo.set(root, {
         cids: [], childCids: [], names: new Set(), phones: new Set(), emails: new Set(), addresses: new Set(),
-        imeiCodes: new Set(), phoneMainlands: new Set(), carMakes: new Set(), carModels: new Set(),
+        phoneMainlands: new Set(), carMakes: new Set(), carModels: new Set(),
       })
       const g = groupInfo.get(root)
       g.cids.push(c.id)
@@ -311,7 +312,6 @@ export function AppProvider({ children }) {
       const allPhones = Array.from(info.phones)
       const allEmails = Array.from(info.emails)
       const allAddresses = Array.from(info.addresses)
-      const allImeiCodes = Array.from(info.imeiCodes)
       const allPhoneMainlands = Array.from(info.phoneMainlands)
       const allCarMakes = Array.from(info.carMakes)
       const allCarModels = Array.from(info.carModels)
@@ -325,7 +325,6 @@ export function AppProvider({ children }) {
         allPhones,
         allEmails,
         allAddresses,
-        allImeiCodes,
         allPhoneMainlands,
         allCarMakes,
         allCarModels,
@@ -333,7 +332,6 @@ export function AppProvider({ children }) {
         phone: (primary.phone || "").trim() || allPhones[0] || "",
         email: (primary.email || "").trim() || allEmails[0] || "",
         address: (primary.address || "").trim() || allAddresses[0] || "",
-        imei_code: allImeiCodes.join("\n") || primary.imei_code || "",
         phone_mainland: allPhoneMainlands.join("\n") || primary.phone_mainland || "",
         car_make: allCarMakes.join("\n") || primary.car_make || "",
         car_model: allCarModels.join("\n") || primary.car_model || "",
@@ -478,6 +476,7 @@ export function AppProvider({ children }) {
     stocks, setStocks,
     suppliers, setSuppliers,
     customers, setCustomers,
+    customerDevices, setCustomerDevices,
     lineItemAliases, setLineItemAliases,
     invoices, setInvoices,
     inventory, setInventory,
@@ -498,7 +497,7 @@ export function AppProvider({ children }) {
     shopifySettings, setShopifySettings,
     shopifyVariantLinks, setShopifyVariantLinks,
     qProducts, qWarehouses, qStocks, qSuppliers,
-    qCustomers, qLineItemAliases,
+    qCustomers, qCustomerDevices, qLineItemAliases,
     qInvoices, qInventory,
     qEmployees, qTasks, qTaskAssignees,
     qFeedbacks, qUpdateLogs, qLogComments,

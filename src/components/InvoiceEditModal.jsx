@@ -30,8 +30,8 @@ export default function InvoiceEditModal({ invoice, onClose, onSaved }) {
   const { t } = useT()
   const {
     setInvoices,
-    customers,
-    setCustomers,
+    customerDevices,
+    setCustomerDevices,
     products,
     warehouses,
     employees,
@@ -113,8 +113,8 @@ export default function InvoiceEditModal({ invoice, onClose, onSaved }) {
     const imeiSync = await appendCustomerImeiCodes({
       supabase,
       queryClient,
-      customers,
-      setCustomers,
+      customerDevices,
+      setCustomerDevices,
       customerId: invoice.customer_id,
       imeiCodes: collectImeiCodesFromItems(finalItems, { products, lineItemAliases }),
     })

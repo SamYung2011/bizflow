@@ -14,7 +14,7 @@ import { useAppContext } from "./context/AppContext.jsx";
 import { Icon } from "./components/Icon.jsx";
 import { Input, Select } from "./components/Inputs.jsx";
 import { suggestEmail } from "./lib/emailSuggest.js";
-import { isValidImeiCode, splitImeiCodes } from "./lib/imei.js";
+import { customerDeviceImeisFor, isValidImeiCode, replaceCustomerDeviceImeis, splitImeiCodes } from "./lib/imei.js";
 import { CAR_BRANDS, PRODUCTS_LIST, REFERRAL_SOURCES } from "./lib/constants.js";
 import { computeCommissionFor } from "./lib/commission.js";
 import { ProductEditModal, ProductNewModal, ProductsListView, ProductsDetailView, emptyNewProduct } from "./views/Products.jsx";
@@ -247,6 +247,7 @@ export default function App() {
     stocks, setStocks,
     suppliers, setSuppliers,
     customers, setCustomers,
+    customerDevices, setCustomerDevices,
     lineItemAliases, setLineItemAliases,
     invoices, setInvoices,
     inventory, setInventory,
@@ -333,9 +334,7 @@ export default function App() {
       return loadMultiField(src[singleKey]);
     };
     const pickImeiMulti = () => {
-      const arr = src.allImeiCodes;
-      const sources = Array.isArray(arr) && arr.length > 0 ? arr : [src.imei_code];
-      const values = [...new Set(sources.flatMap(v => splitImeiCodes(v)))];
+      const values = customerDeviceImeisFor(customerDevices, src);
       return values.length > 0 ? values : [""];
     };
     // 物理合并的别名：parent_id = src.id 的子记录 name。同名合并成一行避免用户看到重复
@@ -395,7 +394,7 @@ export default function App() {
     if (rollbackTarget === "mergeTo" && !rollbackMergeTo) { alert(t("請選擇要合併到的客戶")); return; }
     if (rollbackTarget === "mergeTo" && affected.includes(rollbackMergeTo)) { alert(t("不能合併到自己")); return; }
     setRollbackBusy(true);
-    const MULTI_DB = ["phone", "phone_mainland", "email", "address", "imei_code", "car_make", "car_model"];
+    const MULTI_DB = ["phone", "phone_mainland", "email", "address", "car_make", "car_model"];
     const patches = new Map(); // cid -> patch
     for (const cid of affected) {
       const rec = customers.find(c => c.id === cid);
@@ -510,7 +509,6 @@ export default function App() {
     if (!editingCustomer || !editCustCid) { console.log("[SAVE] early return"); return; }
     setEditCustSaving(true);
     const joinArr = arr => (arr || []).map(s => String(s).trim()).filter(Boolean).join("\n") || null;
-    const joinImeiArr = arr => (arr || []).flatMap(v => splitImeiCodes(v)).filter(Boolean).join("\n") || null;
     const invalidImei = (editCustForm.imeiCodes || [])
       .flatMap(v => splitImeiCodes(v))
       .filter(code => !isValidImeiCode(code));
@@ -525,7 +523,6 @@ export default function App() {
       phone_mainland: joinArr(editCustForm.phoneMainlands),
       email: joinArr(editCustForm.emails),
       address: joinArr(editCustForm.addresses),
-      imei_code: joinImeiArr(editCustForm.imeiCodes),
       car_make: joinArr(editCustForm.carMakes),
       car_model: joinArr(editCustForm.carModels),
       type: editCustForm.type || "Regular",
@@ -535,6 +532,15 @@ export default function App() {
     const { data: updData, error, status: updStatus } = await supabase.from("customers").update(patch).eq("id", editCustCid).select();
     console.log("[SAVE] update result", { updData, error, updStatus });
     if (error) { setEditCustSaving(false); alert(t("保存失敗：") + error.message); return; }
+    const deviceSync = await replaceCustomerDeviceImeis({
+      supabase,
+      queryClient,
+      customerDevices,
+      setCustomerDevices,
+      customerId: editCustCid,
+      imeiCodes: editCustForm.imeiCodes,
+    });
+    if (deviceSync.error) { setEditCustSaving(false); alert(t("設備保存失敗") + "：" + deviceSync.error.message); return; }
     // 多值字段「反向清理」：form 裡被刪除的值，合并组内其他成員（rule 1 獨立 + 物理子）
     // 對應字段也要移除，否則 customerGroups 聚合會把被刪的值從其他成員裡拉回來。
     const splitMulti = v => String(v || "").split(/\n+/).map(s => s.trim()).filter(Boolean);
@@ -543,7 +549,6 @@ export default function App() {
       { formKey: "phoneMainlands", dbKey: "phone_mainland" },
       { formKey: "emails", dbKey: "email" },
       { formKey: "addresses", dbKey: "address" },
-      { formKey: "imeiCodes", dbKey: "imei_code" },
       { formKey: "carMakes", dbKey: "car_make" },
       { formKey: "carModels", dbKey: "car_model" },
     ];
@@ -559,11 +564,9 @@ export default function App() {
       if (!sib) continue;
       const sibPatch = {};
       for (const { formKey, dbKey } of MULTI_FIELDS) {
-        const newValues = dbKey === "imei_code"
-          ? (editCustForm[formKey] || []).flatMap(v => splitImeiCodes(v))
-          : (editCustForm[formKey] || []).map(s => String(s).trim()).filter(Boolean);
+        const newValues = (editCustForm[formKey] || []).map(s => String(s).trim()).filter(Boolean);
         const newSet = new Set(newValues);
-        const sibCurrent = dbKey === "imei_code" ? splitImeiCodes(sib[dbKey]) : splitMulti(sib[dbKey]);
+        const sibCurrent = splitMulti(sib[dbKey]);
         const filtered = sibCurrent.filter(v => newSet.has(v));
         if (filtered.length !== sibCurrent.length) {
           sibPatch[dbKey] = filtered.length > 0 ? filtered.join("\n") : null;
@@ -771,7 +774,7 @@ export default function App() {
 
   const [newCustomer, setNewCustomer] = useState({
     name: "", email: "", phone: "", phone_mainland: "",
-    car_make: "", car_model: "", address: "", imei_code: "",
+    car_make: "", car_model: "", address: "", imei_input: "",
     interest_products: [], referral: "", type: "Lead", notes: ""
   });
 
@@ -786,8 +789,8 @@ export default function App() {
     if (!fresh || fresh.id !== selectedCustomer.id) return;
     const snapshot = v => JSON.stringify([
       v.allCids, v.allAddresses, v.allPhones, v.allEmails, v.allNames,
-      v.allPhoneMainlands, v.allImeiCodes, v.allCarMakes, v.allCarModels,
-      v.name, v.phone, v.email, v.address, v.imei_code, v.car_make, v.car_model
+      v.allPhoneMainlands, v.allCarMakes, v.allCarModels,
+      v.name, v.phone, v.email, v.address, v.car_make, v.car_model
     ]);
     if (snapshot(fresh) !== snapshot(selectedCustomer)) {
       setSelectedCustomer(fresh);
@@ -1055,7 +1058,7 @@ export default function App() {
 
   async function handleSaveCustomer() {
     setSaving(true);
-    const invalidImei = splitImeiCodes(newCustomer.imei_code).filter(code => !isValidImeiCode(code));
+    const invalidImei = splitImeiCodes(newCustomer.imei_input).filter(code => !isValidImeiCode(code));
     if (invalidImei.length > 0) {
       setSaving(false);
       alert(`${t("IMEI 格式不正確")}：${invalidImei.slice(0, 3).join(", ")}\n${t("IMEI 必須為 15 位數字")}`);
@@ -1068,7 +1071,6 @@ export default function App() {
       phone_mainland: newCustomer.phone_mainland,
       car_make: newCustomer.car_make,
       car_model: newCustomer.car_model,
-      imei_code: splitImeiCodes(newCustomer.imei_code).join("\n") || null,
       address: newCustomer.address,
       interest_products: newCustomer.interest_products,
       referral: newCustomer.referral,
@@ -1077,8 +1079,20 @@ export default function App() {
     }]).select();
     if (!error && data) {
       setCustomers(prev => [...prev, ...data]);
+      const created = data[0];
+      const deviceSync = await replaceCustomerDeviceImeis({
+        supabase,
+        queryClient,
+        customerDevices,
+        setCustomerDevices,
+        customerId: created.id,
+        imeiCodes: [newCustomer.imei_input],
+      });
+      if (deviceSync.error) {
+        alert(`${t("新增客戶已完成")}，${t("但設備未能保存")}：${deviceSync.error.message}`);
+      }
       setShowAddCustomer(false);
-      setNewCustomer({ name: "", email: "", phone: "", phone_mainland: "", car_make: "", car_model: "", address: "", imei_code: "", interest_products: [], referral: "", type: "Lead", notes: "" });
+      setNewCustomer({ name: "", email: "", phone: "", phone_mainland: "", car_make: "", car_model: "", address: "", imei_input: "", interest_products: [], referral: "", type: "Lead", notes: "" });
     } else if (error) {
       alert(`${t("新增客戶失敗")}：${error.message}`);
     }

@@ -9,7 +9,7 @@ import InvoiceEditModal from '../components/InvoiceEditModal.jsx'
 import { suggestEmail } from '../lib/emailSuggest.js'
 import { CAR_BRANDS, PRODUCTS_LIST, REFERRAL_SOURCES } from '../lib/constants.js'
 import { fmtInvNum, formatNotes } from '../lib/invoiceHelpers.js'
-import { splitImeiCodes } from '../lib/imei.js'
+import { customerDeviceImeisFor } from '../lib/imei.js'
 
 // 多值字段拆分（與 App.jsx 內定義同步）
 const splitMulti = v => String(v || "").split(/\n+/).map(s => s.trim()).filter(Boolean);
@@ -127,7 +127,6 @@ export function RollbackModal({
     { dbKey: "phone_mainland", label: t("內地電話") },
     { dbKey: "email", label: t("郵箱") },
     { dbKey: "address", label: t("地址") },
-    { dbKey: "imei_code", label: t("IMEI 辨識碼") },
     { dbKey: "car_make", label: t("車品牌") },
     { dbKey: "car_model", label: t("車型") },
   ];
@@ -471,7 +470,7 @@ export function AddCustomerModal({
           <Input label={t("內地電話")} value={newCustomer.phone_mainland} onChange={v => setNewCustomer({...newCustomer, phone_mainland: v})} placeholder="+86" />
           <Select label={t("汽車品牌 Car Brand")} value={newCustomer.car_make} onChange={v => setNewCustomer({...newCustomer, car_make: v})} options={CAR_BRANDS} />
           <Input label={t("型號 Car Model")} value={newCustomer.car_model} onChange={v => setNewCustomer({...newCustomer, car_model: v})} placeholder="e.g. Model 3, Han EV" />
-          <Input label={t("IMEI 辨識碼")} value={newCustomer.imei_code} onChange={v => setNewCustomer({...newCustomer, imei_code: v})} placeholder={t("例：DC Adaptor Pro IMEI")} />
+          <Input label={t("IMEI 辨識碼")} value={newCustomer.imei_input} onChange={v => setNewCustomer({...newCustomer, imei_input: v})} placeholder={t("例：DC Adaptor Pro IMEI")} />
           <Select label={t("客戶狀態")} value={newCustomer.type} onChange={v => setNewCustomer({...newCustomer, type: v})} options={["Lead","Regular","VIP"]} />
           <Select label={t("客戶來源")} value={newCustomer.referral} onChange={v => setNewCustomer({...newCustomer, referral: v})} options={REFERRAL_SOURCES} />
         </div>
@@ -506,7 +505,7 @@ export function CustomersListView({
   Badge,
 }) {
   const { t } = useT()
-  const { invoices, customerGroups } = useAppContext()
+  const { invoices, customerGroups, customerDevices } = useAppContext()
   const [visibleCustomers, setVisibleCustomers] = useState(30)
   const [customerSort, setCustomerSort] = useState("created")
   const [customerSortDir, setCustomerSortDir] = useState("desc")
@@ -557,13 +556,14 @@ export function CustomersListView({
     const q = search.toLowerCase().trim();
     const qCompact = q.replace(/[\s-]+/g, "");
     return customerGroups.virtualCustomers.filter(c => {
+      const imeiCodes = customerDeviceImeisFor(customerDevices, c)
       // 至少一個 email 或 phone 有值
       if (c.allEmails.length === 0 && c.allPhones.length === 0) return false;
       if (q) {
         const hit = c.allNames.some(n => n.toLowerCase().includes(q))
           || c.allEmails.some(e => e.toLowerCase().includes(q))
           || c.allPhones.some(p => p.toLowerCase().includes(q))
-          || (c.allImeiCodes || []).some(code => {
+          || imeiCodes.some(code => {
             const codeText = String(code || "").toLowerCase();
             return codeText.includes(q) || (!!qCompact && codeText.replace(/[\s-]+/g, "").includes(qCompact));
           })
@@ -586,7 +586,7 @@ export function CustomersListView({
       if (!vb) return -1;
       return vb.localeCompare(va) * dir;
     });
-  }, [customerGroups, invoices, search, customerSort, customerSortDir, customerTimeRange, customerSourceFilter, customerSourceMap]);
+  }, [customerGroups, invoices, customerDevices, search, customerSort, customerSortDir, customerTimeRange, customerSourceFilter, customerSourceMap]);
 
   return (
           <div>
@@ -643,6 +643,7 @@ export function CustomersListView({
               {filteredCustomers.slice(0, visibleCustomers).map(c => {
                 const cids = c.allCids || c.groupCids || [c.id];
                 const custInvoices = invoices.filter(i => cids.includes(i.customer_id));
+                const imeiCodes = customerDeviceImeisFor(customerDevices, c);
                 const total = custInvoices.reduce((s, i) => s + (i.total || 0), 0);
                 return (
                       <div key={c.id} onClick={() => setSelectedCustomer(c)} style={{ background: "#fff", borderRadius: 14, padding: "18px 22px", border: "1px solid #f0f0f0", boxShadow: "0 2px 8px rgba(0,0,0,0.03)", display: "flex", alignItems: "center", gap: 18, cursor: "pointer" }}
@@ -666,7 +667,7 @@ export function CustomersListView({
                           </div>
                           <div style={{ fontSize: 13, color: "#666" }}>
                             {c.phone || "—"}
-                            {c.imei_code && <span style={{ color: "#555", marginLeft: 8 }}>{t("IMEI")}：{splitImeiCodes(c.imei_code)[0]}</span>}
+                            {imeiCodes.length > 0 && <span style={{ color: "#555", marginLeft: 8 }}>{t("IMEI")}：{imeiCodes[0]}</span>}
                             {c.car_make && <span style={{ color: "#aaa", marginLeft: 8 }}>🚗 {c.car_make} {c.car_model}</span>}
                           </div>
                         </div>
@@ -704,7 +705,7 @@ export function CustomersDetailView({
   Badge,
 }) {
   const { t } = useT()
-  const { invoices, products } = useAppContext()
+  const { invoices, products, customerDevices } = useAppContext()
   // 客戶詳情頁本地的「編輯發票 modal」狀態 —— 零跨 view 通信
   const [editingInvFromCustomer, setEditingInvFromCustomer] = useState(null)
   return (
@@ -766,8 +767,7 @@ export function CustomersDetailView({
                     const phoneMainlands = [...new Set(pmSrc.flatMap(v => splitMulti(v)))];
                     const addrSrc = (selectedCustomer.allAddresses && selectedCustomer.allAddresses.length > 0) ? selectedCustomer.allAddresses : (selectedCustomer.address ? [selectedCustomer.address] : []);
                     const addresses = [...new Set(addrSrc.flatMap(a => splitMulti(a)))];
-                    const imeiSrc = (selectedCustomer.allImeiCodes && selectedCustomer.allImeiCodes.length > 0) ? selectedCustomer.allImeiCodes : (selectedCustomer.imei_code ? [selectedCustomer.imei_code] : []);
-                    const imeiCodes = [...new Set(imeiSrc.flatMap(v => splitImeiCodes(v)))];
+                    const imeiCodes = customerDeviceImeisFor(customerDevices, selectedCustomer);
                     const makes = splitMulti(selectedCustomer.car_make);
                     const models = splitMulti(selectedCustomer.car_model);
                     const carN = Math.max(makes.length, models.length);
@@ -788,7 +788,7 @@ export function CustomersDetailView({
                           {blk(emails, v => <>📧 {v}</>)}
                           {blk(phones, v => <>📱 {t("香港")}：{v}</>)}
                           {blk(phoneMainlands, v => <>📱 {t("內地")}：{v}</>)}
-                          {blk(imeiCodes, v => <>{t("IMEI")}：{v}</>)}
+                          {blk(imeiCodes, v => <>{t("設備")}：{v}</>)}
                           {blk(cars, v => <>🚗 {v}</>)}
                           {selectedCustomer.referral && <div>🔗 {t("來源")}：{selectedCustomer.referral}</div>}
                         </div>

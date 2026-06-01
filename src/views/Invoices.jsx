@@ -37,7 +37,8 @@ export default function InvoicesView({
   const {
     invoices, setInvoices,
     customers,
-    setCustomers,
+    customerDevices,
+    setCustomerDevices,
     products,
     lineItemAliases,
     inventory, setInventory,
@@ -205,8 +206,8 @@ export default function InvoicesView({
       const imeiSync = await appendCustomerImeiCodes({
         supabase,
         queryClient,
-        customers,
-        setCustomers,
+        customerDevices,
+        setCustomerDevices,
         customerId: newInvoice.customerId,
         imeiCodes: collectImeiCodesFromItems(finalItems, { products, lineItemAliases }),
       })
