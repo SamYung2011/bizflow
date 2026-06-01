@@ -95,7 +95,14 @@ async function forwardToWaMessage(
     const inter = msg.interactive as Record<string, unknown>;
     const btn = inter.button_reply as Record<string, unknown> | undefined;
     const list = inter.list_reply as Record<string, unknown> | undefined;
-    content = (btn?.title || list?.title || "[交互回复]") as string;
+    const choiceId = String(btn?.id || list?.id || "");
+    const title = String(btn?.title || list?.title || "[交互回复]");
+    const mapChoice = choiceId.match(/^hm_map:([-0-9.]+),([-0-9.]+)$/);
+    if (mapChoice) {
+      content = `我想導航到：${title}\nhttps://maps.google.com/maps?daddr=${mapChoice[1]},${mapChoice[2]}`;
+    } else {
+      content = title;
+    }
   } else if (type === "reaction") {
     // 表情反应消息，不入处理流程，仅记日志后丢弃
     return { ok: true };

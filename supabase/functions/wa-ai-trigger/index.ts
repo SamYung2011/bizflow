@@ -187,6 +187,72 @@ function splitSegments(text: string): { type: string; content: string }[] {
   return parts.map(p => ({ type: "text", content: p }));
 }
 
+type MetaStationChoice = {
+  id: string;
+  title: string;
+  description: string;
+  url: string;
+};
+
+function compactText(s: string, max: number): string {
+  const oneLine = String(s || "").replace(/\s+/g, " ").trim();
+  if (oneLine.length <= max) return oneLine;
+  return oneLine.slice(0, Math.max(0, max - 1)).trimEnd() + "…";
+}
+
+function extractCoordsFromMapsUrl(url: string): string | null {
+  const m = String(url || "").match(/[?&]daddr=([-0-9.]+),([-0-9.]+)/i);
+  if (!m) return null;
+  return `${m[1]},${m[2]}`;
+}
+
+function extractMetaStationChoices(text: string): MetaStationChoice[] {
+  const lines = String(text || "").split(/\r?\n/);
+  const choices: MetaStationChoice[] = [];
+  let current: { title: string; details: string[] } | null = null;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const heading = line.match(/^\[(\d+)\]\s*(.+)$/);
+    if (heading) {
+      current = { title: heading[2], details: [] };
+      continue;
+    }
+    if (!current) continue;
+
+    const urlMatch = line.match(/https:\/\/maps\.google\.com\/maps\?daddr=[^\s)）]+/i);
+    if (urlMatch) {
+      const url = urlMatch[0];
+      const coords = extractCoordsFromMapsUrl(url);
+      if (coords) {
+        const description = current.details
+          .filter(d => !/^https?:\/\//i.test(d))
+          .slice(0, 2)
+          .join(" · ");
+        choices.push({
+          id: `hm_map:${coords}`,
+          title: compactText(current.title.replace(/[（(](免費|收費)[）)]/g, ""), 24) || "充電站",
+          description: compactText(description || "打開 Google Maps 導航", 72),
+          url,
+        });
+      }
+      current = null;
+      continue;
+    }
+    current.details.push(line);
+  }
+
+  const seen = new Set<string>();
+  return choices
+    .filter(c => {
+      if (seen.has(c.id)) return false;
+      seen.add(c.id);
+      return true;
+    })
+    .slice(0, 10);
+}
+
 function shouldSendMetaTextReply(opts: {
   incomingText: string;
   hasLocation: boolean;
@@ -288,6 +354,44 @@ async function sendViaMetaCloud(opts: {
     if (wamid) wamids.push(wamid);
   }
   return wamids;
+}
+
+async function sendMetaStationList(opts: {
+  to: string;
+  choices: MetaStationChoice[];
+  graphVersion: string;
+  phoneNumberId: string;
+  accessToken: string;
+}): Promise<string> {
+  const to = normalizeMetaPhone(opts.to);
+  if (!to || opts.choices.length === 0) return "";
+  const payload: Record<string, unknown> = {
+    messaging_product: "whatsapp",
+    to,
+    type: "interactive",
+    interactive: {
+      type: "list",
+      body: { text: "想直接導航，可以喺下面揀一個充電站：" },
+      footer: { text: "Honnmono 即時充電站" },
+      action: {
+        button: "選擇充電站",
+        sections: [{
+          title: "附近有位充電站",
+          rows: opts.choices.map(c => ({
+            id: c.id,
+            title: c.title,
+            description: c.description,
+          })),
+        }],
+      },
+    },
+  };
+  return await metaPostMessage({
+    graphVersion: opts.graphVersion,
+    phoneNumberId: opts.phoneNumberId,
+    accessToken: opts.accessToken,
+    payload,
+  });
 }
 
 // Meta 通道语音出站：Edge Function 不跑 ffmpeg，交给内网 wa-tts-relay 做
@@ -553,8 +657,29 @@ Deno.serve(async (req) => {
               phoneNumberId: metaPhoneId,
               accessToken: metaToken,
             });
-            deliveryMeta = { via: "meta-cloud", reason: "location_or_navigation_text", wamids };
-            deliveryNote = `via Meta text (位置/導航) ${wamids.length} wamid`;
+            const stationChoices = extractMetaStationChoices(cleanedReply);
+            let listWamid = "";
+            if (stationChoices.length >= 2) {
+              listWamid = await sendMetaStationList({
+                to: p.customer_id,
+                choices: stationChoices,
+                graphVersion: metaGraphVer,
+                phoneNumberId: metaPhoneId,
+                accessToken: metaToken,
+              });
+              if (listWamid) wamids.push(listWamid);
+            }
+            deliveryMeta = {
+              via: "meta-cloud",
+              reason: "location_or_navigation_text",
+              wamids,
+              interactiveList: stationChoices.length >= 2 ? {
+                type: "station_navigation",
+                count: stationChoices.length,
+                wamid: listWamid || null,
+              } : null,
+            };
+            deliveryNote = `via Meta text (位置/導航) ${wamids.length} wamid${listWamid ? " + station list" : ""}`;
           } else if (ttsEnabled && ttsRelayUrl && ttsRelayToken) {
             try {
               const tts = await sendViaMetaTtsRelay({
