@@ -11,7 +11,7 @@ const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || "";
 
 const DEFAULTS = {
   minimaxEndpoint: process.env.MINIMAX_TTS_ENDPOINT || "https://api.minimax.io/v1/t2a_v2",
-  minimaxModel: process.env.MINIMAX_TTS_MODEL || "speech-2.8-turbo",
+  minimaxModel: process.env.MINIMAX_TTS_MODEL || "speech-2.8-hd",
   minimaxVoiceId: process.env.MINIMAX_VOICE_ID || "Cantonese_GentleLady",
   languageBoost: process.env.MINIMAX_LANGUAGE_BOOST || "Chinese,Yue",
   graphVersion: process.env.META_GRAPH_VERSION || "v25.0",
