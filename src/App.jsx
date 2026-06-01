@@ -752,13 +752,16 @@ export default function App() {
   const [markPaidCtx, setMarkPaidCtx] = useState(null); // { inv, defaultWh } —— 標記已付款彈窗
   // 可編輯的扣減 plan（Phase 1 人工審核期：每行 product / qty / warehouse / skip 可改）
   const [markPaidPlan, setMarkPaidPlan] = useState([]);
+  const [markPaidLoading, setMarkPaidLoading] = useState(false);
+  const [markPaidLockSkipAliases, setMarkPaidLockSkipAliases] = useState(() => new Set());
   // markPaidCtx / channel / defaultWh 變化時重置 plan（人工 override 會被丟，這是 by design：
   // 切渠道或預設倉庫等於重新算 baseline）
   useEffect(() => {
-    if (!markPaidCtx) { setMarkPaidPlan([]); return; }
+    if (!markPaidCtx) { setMarkPaidPlan([]); setMarkPaidLockSkipAliases(new Set()); return; }
     const { inv, defaultWh, channel } = markPaidCtx;
     const plan = channel === 'broadway' ? [] : buildDeductionPlan(inv, defaultWh);
     setMarkPaidPlan(plan);
+    setMarkPaidLockSkipAliases(new Set());
   }, [markPaidCtx?.inv?.id, markPaidCtx?.defaultWh, markPaidCtx?.channel]);
   const [stockToast, setStockToast] = useState(null); // { items: [name] } —— 右下角庫存不足 toast
   const [editingProduct, setEditingProduct] = useState(null);
@@ -1165,136 +1168,190 @@ export default function App() {
     return plan;
   }
 
-  async function executeMarkPaid() {
-    if (!markPaidCtx) return;
-    const { inv, defaultWh, channel } = markPaidCtx;
-    const isBroadway = channel === "broadway";
-    const isAlreadyPaid = (inv.status || "").trim().toLowerCase() === "paid";  // 補扣場景：status 已是 Paid
+  function stockKey(row) {
+    return `${row.product_id}|${row.warehouse_id}`;
+  }
 
-    // 解析 items（後面 alias 沉澱步驟需要按 item.name 取原始 qty）
-    let itemsArr = inv.items;
-    if (typeof itemsArr === "string") { try { itemsArr = JSON.parse(itemsArr); } catch { itemsArr = []; } }
-    if (!Array.isArray(itemsArr)) itemsArr = [];
-
-    // 百老匯渠道：notes 加 __BROADWAY__ 標記（防重複追加）+ 跳過所有扣減
-    let nextNotes = inv.notes || "";
-    if (isBroadway && !nextNotes.includes("__BROADWAY__")) {
-      nextNotes = nextNotes ? `${nextNotes}\n__BROADWAY__` : "__BROADWAY__";
-    }
-
-    // Phase 1：用人工審核後的 plan（state），可能含 user override 的 product / qty / warehouse
-    const plan = isBroadway ? [] : markPaidPlan.map(p => {
-      // 實時補 current/after（修改後可能 stale）
-      if (p.skip || !p.product_id || !p.warehouse_id) return p;
-      const stock = stocks.find(s => s.product_id === p.product_id && s.warehouse_id === p.warehouse_id);
-      const current = stock?.qty || 0;
-      return { ...p, current, after: current - (Number(p.qty) || 0) };
-    });
-    const deductions = plan.filter(p => !p.skip && p.qty > 0 && p.product_id && p.warehouse_id);
-
-    // 扣減 + 流水
-    for (const d of deductions) {
-      await supabase.from("inventory_stock").upsert({
-        product_id: d.product_id,
-        warehouse_id: d.warehouse_id,
-        qty: d.after,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'product_id,warehouse_id' });
-      await supabase.from("inventory_movements").insert({
-        product_id: d.product_id,
-        warehouse_id: d.warehouse_id,
-        delta: -d.qty,
-        type: 'sale',
-        reason: isAlreadyPaid ? `發票 #${inv.invoice_number || inv.id} 補扣庫存` : `發票 #${inv.invoice_number || inv.id} 標記已付款`,
-        invoice_id: inv.id,
-      });
-    }
-
-    // audit 記錄（Phase 1 人工審核期）：所有 plan 項都記，含 skip 的
-    // 一個月後統計 item_name → mapped_product_id 高頻映射，切 Phase 2 全自動
-    if (!isBroadway && plan.length > 0) {
-      const auditRows = plan.map(p => ({
-        invoice_id: inv.id,
-        item_name: p.source_item_name || p.name,
-        mapped_product_id: p.product_id || null,
-        mapped_qty: p.qty || 0,
-        warehouse_id: p.warehouse_id || null,
-        decision: p.skip ? 'skip' : 'confirm',
-        audited_by: currentEmployee?.id || null,
-      }));
-      const { error: auditErr } = await supabase.from("stock_deduction_audit").insert(auditRows);
-      if (auditErr) console.warn('[audit] insert failed:', auditErr.message);
-
-      // 同步寫入 line_item_aliases：把人工映射沉澱下來，下次同名 item 進來不用再人工改
-      // 按 source_item_name 聚合 plan 行（套裝會多行同名）
-      const itemQtyByName = new Map(itemsArr.map(it => [it.name, Number(it.qty) || 1]));
-      const groups = new Map();
-      for (const p of plan) {
-        const key = p.source_item_name || p.name;
-        if (!key) continue;
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(p);
+  function applyStockDeductionsToState(deductions) {
+    const updater = prev => {
+      const map = new Map((Array.isArray(prev) ? prev : []).map(s => [stockKey(s), s]));
+      for (const d of deductions) {
+        const k = stockKey(d);
+        const existing = map.get(k);
+        map.set(k, existing ? { ...existing, qty: d.after } : {
+          product_id: d.product_id,
+          warehouse_id: d.warehouse_id,
+          qty: d.after,
+        });
       }
-      const aliasUpserts = [];
-      for (const [alias_name, rows] of groups) {
-        const itQty = itemQtyByName.get(alias_name) || 1;
-        const allSkipped = rows.every(r => r.skip);
-        if (allSkipped) {
-          aliasUpserts.push({ alias_name, skip: true, products: [], verified: true, note: t('人工審核標記為跳過') });
-        } else {
-          const aliasProducts = rows
-            .filter(r => !r.skip && r.product_id)
-            .map(r => ({
-              product_id: r.product_id,
-              // per-unit qty = plan.qty / item.qty（套裝按比例還原；單品 1:1）
-              qty: itQty > 0 ? +((Number(r.qty) || 0) / itQty).toFixed(2) : (Number(r.qty) || 1),
-            }));
-          if (aliasProducts.length > 0) {
-            aliasUpserts.push({ alias_name, skip: false, products: aliasProducts, verified: true });
+      return [...map.values()];
+    };
+    setStocks(updater);
+    queryClient.setQueryData(["bf", "inventory_stock"], updater);
+  }
+
+  function auditDecisionForPlanRow(row, baselineRow) {
+    if (row.skip) return "skip";
+    if (!row.product_id || !row.warehouse_id) return "failed_no_warehouse";
+    if (!baselineRow || baselineRow.skip) return "manual_override";
+    const sameProduct = String(row.product_id || "") === String(baselineRow.product_id || "");
+    const sameWarehouse = String(row.warehouse_id || "") === String(baselineRow.warehouse_id || "");
+    const sameQty = Number(row.qty || 0) === Number(baselineRow.qty || 0);
+    return sameProduct && sameWarehouse && sameQty ? "confirm" : "manual_override";
+  }
+
+  async function executeMarkPaid() {
+    if (!markPaidCtx || markPaidLoading) return;
+    setMarkPaidLoading(true);
+    try {
+      const { inv, defaultWh, channel } = markPaidCtx;
+      const isBroadway = channel === "broadway";
+      const isAlreadyPaid = (inv.status || "").trim().toLowerCase() === "paid";  // 補扣場景：status 已是 Paid
+
+      // 解析 items（後面 alias 沉澱步驟需要按 item.name 取原始 qty）
+      let itemsArr = inv.items;
+      if (typeof itemsArr === "string") { try { itemsArr = JSON.parse(itemsArr); } catch { itemsArr = []; } }
+      if (!Array.isArray(itemsArr)) itemsArr = [];
+
+      // 百老匯渠道：notes 加 __BROADWAY__ 標記（防重複追加）+ 跳過所有扣減
+      let nextNotes = inv.notes || "";
+      if (isBroadway && !nextNotes.includes("__BROADWAY__")) {
+        nextNotes = nextNotes ? `${nextNotes}\n__BROADWAY__` : "__BROADWAY__";
+      }
+
+      // Phase 1：用人工審核後的 plan（state），可能含 user override 的 product / qty / warehouse
+      const plan = isBroadway ? [] : markPaidPlan.map(p => {
+        // 實時補 current/after（修改後可能 stale）
+        if (p.skip || !p.product_id || !p.warehouse_id) return p;
+        const stock = stocks.find(s => s.product_id === p.product_id && s.warehouse_id === p.warehouse_id);
+        const current = stock?.qty || 0;
+        return { ...p, current, after: current - (Number(p.qty) || 0) };
+      });
+      const deductions = plan.filter(p => !p.skip && p.qty > 0 && p.product_id && p.warehouse_id);
+      const incompleteDeductions = plan.filter(p => !p.skip && Number(p.qty || 0) > 0 && (!p.product_id || !p.warehouse_id));
+      if (incompleteDeductions.length > 0) {
+        alert(`${t("有項目缺少產品或倉庫，無法扣庫存")}：${incompleteDeductions.length} ${t("件")}\n${t("請先補齊產品和倉庫，或勾選跳過。")}`);
+        return;
+      }
+
+      if (isAlreadyPaid && !isBroadway && deductions.length > 0) {
+        const { data: existingMovements, error: movementErr } = await supabase
+          .from("inventory_movements")
+          .select("id, delta")
+          .eq("invoice_id", inv.id)
+          .eq("type", "sale");
+        if (movementErr) { alert(`${t("扣庫存記錄檢查失敗")}：${movementErr.message}`); return; }
+        const deductedQty = (existingMovements || []).reduce((sum, row) => sum + Math.abs(Number(row.delta || 0)), 0);
+        if (deductedQty > 0) {
+          const ok = window.confirm(
+            `${t("此發票已有庫存扣減記錄")}：${deductedQty} ${t("件")}\n\n` +
+            t("再次確認會重複扣庫存，是否繼續？")
+          );
+          if (!ok) return;
+        }
+      }
+
+      // 扣減 + 流水
+      for (const d of deductions) {
+        const { error: stockErr } = await supabase.from("inventory_stock").upsert({
+          product_id: d.product_id,
+          warehouse_id: d.warehouse_id,
+          qty: d.after,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'product_id,warehouse_id' });
+        if (stockErr) { alert(`${t("庫存扣減失敗")}：${stockErr.message}`); return; }
+        const { error: movementInsertErr } = await supabase.from("inventory_movements").insert({
+          product_id: d.product_id,
+          warehouse_id: d.warehouse_id,
+          delta: -d.qty,
+          type: 'sale',
+          reason: isAlreadyPaid ? `發票 #${inv.invoice_number || inv.id} 補扣庫存` : `發票 #${inv.invoice_number || inv.id} 標記已付款`,
+          invoice_id: inv.id,
+        });
+        if (movementInsertErr) { alert(`${t("庫存流水寫入失敗")}：${movementInsertErr.message}`); return; }
+      }
+
+      // audit 記錄（Phase 1 人工審核期）：所有 plan 項都記，含 skip 的
+      // 一個月後統計 item_name → mapped_product_id 高頻映射，切 Phase 2 全自動
+      if (!isBroadway && plan.length > 0) {
+        const baselinePlan = buildDeductionPlan(inv, defaultWh);
+        const auditRows = plan.map((p, idx) => ({
+          invoice_id: inv.id,
+          item_name: p.source_item_name || p.name,
+          mapped_product_id: p.product_id || null,
+          mapped_qty: p.qty || 0,
+          warehouse_id: p.warehouse_id || null,
+          decision: auditDecisionForPlanRow(p, baselinePlan[idx]),
+          audited_by: currentEmployee?.id || null,
+        }));
+        const { error: auditErr } = await supabase.from("stock_deduction_audit").insert(auditRows);
+        if (auditErr) console.warn('[audit] insert failed:', auditErr.message);
+
+        // 同步寫入 line_item_aliases：把人工映射沉澱下來，下次同名 item 進來不用再人工改
+        // 按 source_item_name 聚合 plan 行（套裝會多行同名）
+        // skip=true 不再自動沉澱；只有操作員點「鎖定此 alias 永不扣」才寫入。
+        const itemQtyByName = new Map(itemsArr.map(it => [it.name, Number(it.qty) || 1]));
+        const groups = new Map();
+        for (const p of plan) {
+          const key = p.source_item_name || p.name;
+          if (!key) continue;
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push(p);
+        }
+        const aliasUpserts = [];
+        for (const [alias_name, rows] of groups) {
+          const itQty = itemQtyByName.get(alias_name) || 1;
+          const allSkipped = rows.every(r => r.skip);
+          if (allSkipped) {
+            if (markPaidLockSkipAliases.has(alias_name)) {
+              aliasUpserts.push({ alias_name, skip: true, products: [], verified: true, note: t('人工審核標記為跳過') });
+            }
+          } else {
+            const aliasProducts = rows
+              .filter(r => !r.skip && r.product_id)
+              .map(r => ({
+                product_id: r.product_id,
+                // per-unit qty = plan.qty / item.qty（套裝按比例還原；單品 1:1）
+                qty: itQty > 0 ? +((Number(r.qty) || 0) / itQty).toFixed(2) : (Number(r.qty) || 1),
+              }));
+            if (aliasProducts.length > 0) {
+              aliasUpserts.push({ alias_name, skip: false, products: aliasProducts, verified: true });
+            }
           }
         }
-      }
-      if (aliasUpserts.length > 0) {
-        const { error: aliasErr } = await supabase.from('line_item_aliases').upsert(aliasUpserts, { onConflict: 'alias_name' });
-        if (aliasErr) {
-          console.warn('[alias] upsert failed:', aliasErr.message);
-        } else {
-          // 本地 state + react-query cache 同步，避免下次 buildDeductionPlan 還用舊 alias
-          setLineItemAliases(prev => {
-            const map = new Map(prev.map(a => [a.alias_name, a]));
-            for (const u of aliasUpserts) {
-              const existing = map.get(u.alias_name);
-              map.set(u.alias_name, { ...existing, ...u, id: existing?.id, updated_at: new Date().toISOString() });
-            }
-            return [...map.values()];
-          });
-          queryClient.setQueryData(['bf', 'line_item_aliases'], (old) => {
-            if (!Array.isArray(old)) return old;
-            const map = new Map(old.map(a => [a.alias_name, a]));
-            for (const u of aliasUpserts) {
-              const existing = map.get(u.alias_name);
-              map.set(u.alias_name, { ...existing, ...u, id: existing?.id, updated_at: new Date().toISOString() });
-            }
-            return [...map.values()];
-          });
+        if (aliasUpserts.length > 0) {
+          const { error: aliasErr } = await supabase.from('line_item_aliases').upsert(aliasUpserts, { onConflict: 'alias_name' });
+          if (aliasErr) {
+            console.warn('[alias] upsert failed:', aliasErr.message);
+          } else {
+            // 本地 state + react-query cache 同步，避免下次 buildDeductionPlan 還用舊 alias
+            setLineItemAliases(prev => {
+              const map = new Map(prev.map(a => [a.alias_name, a]));
+              for (const u of aliasUpserts) {
+                const existing = map.get(u.alias_name);
+                map.set(u.alias_name, { ...existing, ...u, id: existing?.id, updated_at: new Date().toISOString() });
+              }
+              return [...map.values()];
+            });
+            queryClient.setQueryData(['bf', 'line_item_aliases'], (old) => {
+              if (!Array.isArray(old)) return old;
+              const map = new Map(old.map(a => [a.alias_name, a]));
+              for (const u of aliasUpserts) {
+                const existing = map.get(u.alias_name);
+                map.set(u.alias_name, { ...existing, ...u, id: existing?.id, updated_at: new Date().toISOString() });
+              }
+              return [...map.values()];
+            });
+          }
         }
-      }
     }
 
     // 補扣場景：不重算 commission / 不改 status（已是 Paid）
-    if (isAlreadyPaid && !isBroadway) {
-      setStocks(prev => {
-        const map = new Map(prev.map(s => [`${s.product_id}|${s.warehouse_id}`, s]));
-        for (const d of deductions) {
-          const k = `${d.product_id}|${d.warehouse_id}`;
-          const existing = map.get(k);
-          map.set(k, existing ? { ...existing, qty: d.after } : { product_id: d.product_id, warehouse_id: d.warehouse_id, qty: d.after });
-        }
-        return [...map.values()];
-      });
-      setMarkPaidCtx(null);
-      return;
-    }
+      if (isAlreadyPaid && !isBroadway) {
+        applyStockDeductionsToState(deductions);
+        setMarkPaidCtx(null);
+        return;
+      }
 
     // 首次 Mark Paid：佣金 snapshot + status update
     const commissionAmount = computeCommissionFor(isBroadway ? { ...inv, notes: nextNotes } : inv, inv.salesperson_id, { products, lineItemAliases });
@@ -1304,16 +1361,11 @@ export default function App() {
     if (error) { alert(`${t("標記失敗")}：${error.message}`); return; }
     setInvoices(prev => prev.map(i => i.id === inv.id ? { ...i, ...updates } : i));
     queryClient.setQueryData(["bf", "invoices"], (old) => Array.isArray(old) ? old.map(i => i.id === inv.id ? { ...i, ...updates } : i) : old);
-    setStocks(prev => {
-      const map = new Map(prev.map(s => [`${s.product_id}|${s.warehouse_id}`, s]));
-      for (const d of deductions) {
-        const k = `${d.product_id}|${d.warehouse_id}`;
-        const existing = map.get(k);
-        map.set(k, existing ? { ...existing, qty: d.after } : { product_id: d.product_id, warehouse_id: d.warehouse_id, qty: d.after });
-      }
-      return [...map.values()];
-    });
-    setMarkPaidCtx(null);
+      applyStockDeductionsToState(deductions);
+      setMarkPaidCtx(null);
+    } finally {
+      setMarkPaidLoading(false);
+    }
   }
 
   async function handleDeleteCustomer(c) {
@@ -2336,7 +2388,25 @@ export default function App() {
                           </div>
                         )}
                         {p.skip && (
-                          <div style={{ fontSize: 11, color: "#999", fontStyle: "italic" }}>{p.reason || t("已跳過")}</div>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                            <div style={{ fontSize: 11, color: "#999", fontStyle: "italic" }}>{p.reason || t("已跳過")}</div>
+                            {(() => {
+                              const aliasName = p.source_item_name || p.name;
+                              if (!aliasName) return null;
+                              const locked = markPaidLockSkipAliases.has(aliasName);
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => setMarkPaidLockSkipAliases(prev => new Set([...prev, aliasName]))}
+                                  disabled={locked}
+                                  style={{ padding: "4px 8px", borderRadius: 7, border: "1px solid #d8c4f4", background: locked ? "#f5f0ff" : "#fff", color: locked ? "#7c3aed" : "#6d28d9", fontSize: 10, fontWeight: 700, cursor: locked ? "default" : "pointer", whiteSpace: "nowrap" }}
+                                  title={t("只有明確鎖定後，未來同名 line item 才會自動跳過扣庫存")}
+                                >
+                                  {locked ? t("已鎖定永不扣") : t("鎖定此 alias 永不扣")}
+                                </button>
+                              );
+                            })()}
+                          </div>
                         )}
                       </div>
                     );
@@ -2357,8 +2427,8 @@ export default function App() {
                 </div>
               )}
               <div style={{ display: "flex", gap: 10 }}>
-                <button onClick={() => setMarkPaidCtx(null)} style={{ flex: 1, padding: 10, background: "#f5f5f5", color: "#555", border: "none", borderRadius: 10, fontWeight: 700, cursor: "pointer" }}>{t("取消")}</button>
-                <button onClick={executeMarkPaid} disabled={anyMissing && !defaultWh} style={{ flex: 2, padding: 10, background: (anyMissing && !defaultWh) ? "#e0e0e0" : (isBroadway ? "#dc2626" : "#22c55e"), color: "#fff", border: "none", borderRadius: 10, fontWeight: 800, cursor: (anyMissing && !defaultWh) ? "not-allowed" : "pointer" }}>{isBroadway ? t("確認付款") : t("確認付款並扣庫存")}</button>
+                <button onClick={() => setMarkPaidCtx(null)} disabled={markPaidLoading} style={{ flex: 1, padding: 10, background: "#f5f5f5", color: "#555", border: "none", borderRadius: 10, fontWeight: 700, cursor: markPaidLoading ? "not-allowed" : "pointer" }}>{t("取消")}</button>
+                <button onClick={executeMarkPaid} disabled={markPaidLoading || (anyMissing && !defaultWh)} style={{ flex: 2, padding: 10, background: (markPaidLoading || (anyMissing && !defaultWh)) ? "#e0e0e0" : (isBroadway ? "#dc2626" : "#22c55e"), color: "#fff", border: "none", borderRadius: 10, fontWeight: 800, cursor: (markPaidLoading || (anyMissing && !defaultWh)) ? "not-allowed" : "pointer" }}>{markPaidLoading ? t("處理中...") : (isBroadway ? t("確認付款") : t("確認付款並扣庫存"))}</button>
               </div>
             </div>
           </div>
