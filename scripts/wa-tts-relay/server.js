@@ -128,6 +128,7 @@ function convertToOggOpus(audioBuffer, inputFormat) {
       "-y",
       "-i", inputPath,
       "-vn",
+      "-map_metadata", "-1",
       "-ac", "1",
       "-ar", "48000",
       "-c:a", "libopus",
@@ -151,7 +152,7 @@ function convertToOggOpus(audioBuffer, inputFormat) {
 async function uploadMetaMedia(audioBuffer, options) {
   const form = new FormData();
   form.append("messaging_product", "whatsapp");
-  form.append("file", new Blob([audioBuffer], { type: "audio/ogg" }), `minimax-tts-${Date.now()}.ogg`);
+  form.append("file", new Blob([audioBuffer], { type: "audio/ogg; codecs=opus" }), `minimax-tts-${Date.now()}.ogg`);
 
   const data = await checkedFetch(
     `https://graph.facebook.com/${options.graphVersion}/${options.phoneNumberId}/media`,
