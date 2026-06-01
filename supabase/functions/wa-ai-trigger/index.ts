@@ -266,6 +266,52 @@ async function sendViaMetaCloud(opts: {
   return wamids;
 }
 
+// Meta 通道语音出站：Edge Function 不跑 ffmpeg，交给内网 wa-tts-relay 做
+// MiniMax TTS → OGG/Opus → Meta media upload → audio.voice=true。
+async function sendViaMetaTtsRelay(opts: {
+  relayUrl: string;
+  relayToken: string;
+  to: string;
+  text: string;
+  graphVersion: string;
+  phoneNumberId: string;
+  accessToken: string;
+  voiceId?: string;
+  language?: string;
+}): Promise<Record<string, unknown>> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 90_000);
+  try {
+    const res = await fetch(opts.relayUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-relay-token": opts.relayToken,
+      },
+      body: JSON.stringify({
+        to: opts.to,
+        text: opts.text,
+        graphVersion: opts.graphVersion,
+        metaPhoneNumberId: opts.phoneNumberId,
+        metaAccessToken: opts.accessToken,
+        voiceId: opts.voiceId || undefined,
+        language: opts.language || undefined,
+      }),
+      signal: ctl.signal,
+    });
+    const txt = await res.text();
+    let data: Record<string, unknown> = {};
+    try { data = JSON.parse(txt); } catch (_) { /* handled below */ }
+    if (!res.ok || data.ok === false) {
+      const msg = typeof data.error === "string" ? data.error : txt.slice(0, 300);
+      throw new Error(`TTS relay ${res.status}: ${msg}`);
+    }
+    return data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS_HEADERS });
 
@@ -450,6 +496,11 @@ Deno.serve(async (req) => {
       const metaToken = (settings.meta_access_token as string) || "";
       const metaPhoneId = (settings.meta_phone_number_id as string) || "";
       const metaGraphVer = (settings.meta_graph_version as string) || "v25.0";
+      const ttsEnabled = settings.meta_tts_enabled !== false;
+      const ttsRelayUrl = (settings.meta_tts_relay_url as string) || "";
+      const ttsRelayToken = (settings.meta_tts_relay_token as string) || "";
+      const ttsVoiceId = (settings.meta_tts_voice_id as string) || "";
+      const ttsLanguage = (settings.meta_tts_language_boost as string) || "";
       const canMeta = channel === "meta" && !p.is_group && metaToken && metaPhoneId;
 
       let replyId: number | null = null;
@@ -457,13 +508,64 @@ Deno.serve(async (req) => {
 
       if (canMeta) {
         try {
-          const wamids = await sendViaMetaCloud({
-            to: p.customer_id,
-            segments,
-            graphVersion: metaGraphVer,
-            phoneNumberId: metaPhoneId,
-            accessToken: metaToken,
-          });
+          let deliveryMeta: Record<string, unknown>;
+          let wamids: string[];
+
+          if (ttsEnabled && ttsRelayUrl && ttsRelayToken) {
+            try {
+              const tts = await sendViaMetaTtsRelay({
+                relayUrl: ttsRelayUrl,
+                relayToken: ttsRelayToken,
+                to: p.customer_id,
+                text: cleanedReply,
+                graphVersion: metaGraphVer,
+                phoneNumberId: metaPhoneId,
+                accessToken: metaToken,
+                voiceId: ttsVoiceId,
+                language: ttsLanguage,
+              });
+              wamids = typeof tts.wamid === "string" && tts.wamid ? [tts.wamid] : [];
+              deliveryMeta = {
+                via: "meta-tts-relay",
+                wamids,
+                mediaId: tts.mediaId || null,
+                traceId: tts.traceId || null,
+                voiceNote: true,
+                textLength: cleanedReply.length,
+              };
+              deliveryNote = `via Meta TTS ${wamids.length} wamid`;
+            } catch (ttsErr) {
+              cloudLog(sb, "错误", `Meta TTS 失败，改发文字 pending#${p.id}：${(ttsErr as Error).message.slice(0, 200)}`, channel);
+              wamids = await sendViaMetaCloud({
+                to: p.customer_id,
+                segments,
+                graphVersion: metaGraphVer,
+                phoneNumberId: metaPhoneId,
+                accessToken: metaToken,
+              });
+              deliveryMeta = {
+                via: "meta-cloud",
+                fallbackFrom: "meta-tts-relay",
+                fallbackError: (ttsErr as Error).message.slice(0, 200),
+                wamids,
+              };
+              deliveryNote = `via Meta text fallback ${wamids.length} wamid`;
+            }
+          } else {
+            if (ttsEnabled) {
+              cloudLog(sb, "等待", `Meta TTS relay 未配置 pending#${p.id}，改发文字`, channel);
+            }
+            wamids = await sendViaMetaCloud({
+              to: p.customer_id,
+              segments,
+              graphVersion: metaGraphVer,
+              phoneNumberId: metaPhoneId,
+              accessToken: metaToken,
+            });
+            deliveryMeta = { via: "meta-cloud", wamids };
+            deliveryNote = `via Meta ${wamids.length} wamid`;
+          }
+
           const replyIns = await sb.from("wa_replies").insert({
             customer_id: p.customer_id,
             chat_name: p.chat_name,
@@ -471,11 +573,10 @@ Deno.serve(async (req) => {
             segments: JSON.stringify(segments),
             pending_id: p.id,
             delivered_at: new Date().toISOString(),
-            delivery_meta: { via: "meta-cloud", wamids },
+            delivery_meta: deliveryMeta,
             channel: "meta",
           }).select("id").single();
           replyId = replyIns.data?.id || null;
-          deliveryNote = `via Meta ${wamids.length} wamid`;
         } catch (metaErr) {
           // Meta 调用失败：只留审计，不放进 Chrome 扩展待发送队列（扩展接不到这个 Meta 客户）。
           cloudLog(sb, "错误", `Meta 出站失败 pending#${p.id}：${(metaErr as Error).message.slice(0, 200)}`, channel);
