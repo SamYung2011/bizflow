@@ -1,5 +1,5 @@
-// wa-ai-trigger: pg_cron 每 30s 調，處理 wa_pending_replies 中超過 60s 還沒被真人接手的消息
-// 流程：掃 pending → 拉 history + settings → 調 OpenAI 兼容 API → 寫 wa_replies + 標 pending replied
+// wa-ai-trigger: pg_cron 每 30s 調，並由 wa-message 對 meta 通道即時觸發。
+// 流程：掃 pending → 拉 history + settings → 調 OpenAI 兼容 API → Meta 出站或寫 wa_replies → 標 pending replied
 // 環境變量自動注入：SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -156,7 +156,7 @@ const LOCATION_TTL_MIN = 5;
 
 function splitSegments(text: string): { type: string; content: string }[] {
   // 簡單分段：按 200 字 + 換行切，避免 WhatsApp 一條消息過長
-  const cleaned = text.replace(/\[UNRESOLVED\]/g, "").trim();
+  const cleaned = text.replace(/\[UNRESOLVED\]/g, "").trim() || "我幫您問一下同事，確認後回覆您。";
   if (cleaned.length <= 200) return [{ type: "text", content: cleaned }];
   const parts: string[] = [];
   let buf = "";
@@ -172,14 +172,16 @@ function splitSegments(text: string): { type: string; content: string }[] {
   return parts.map(p => ({ type: "text", content: p }));
 }
 
-// 同步寫 wa_logs，跟本地 server.js 用同一張表 + 同一套 category 名（dashboard 共享顏色）。
-// 加 [云] 前綴方便 dashboard 一眼分辨來源。失敗吞掉，不阻擋主流程。
+// 同步寫 wa_logs。channel='meta' 用 [Meta API] 前綴；'extension' / 兜底用 [云] 前綴。
+// dashboard 按 channel 字段过滤展示。失敗吞掉，不阻擋主流程。
 async function cloudLog(
   sb: ReturnType<typeof createClient>,
   category: string,
   message: string,
+  channel: "extension" | "meta" = "extension",
 ) {
-  try { await sb.from("wa_logs").insert({ category, message: "[云] " + message }); } catch (_) { /* swallow */ }
+  const prefix = channel === "meta" ? "[Meta API] " : "[云] ";
+  try { await sb.from("wa_logs").insert({ category, message: prefix + message, channel }); } catch (_) { /* swallow */ }
 }
 
 async function callOpenAI(opts: {
@@ -280,20 +282,31 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ error: "openai not configured" }), { status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
   }
 
-  // 2. 掃 pending（合併窗口結束 + 過了真人搶答倒計時還沒被取消的）
-  // 流程：客戶發第一條消息 → 7s 合併窗口開放收容後續消息 → 窗口關閉 → reply_delay_base 秒抢答倒計時 → 處理
-  // reply_delay_base 從 wa_settings 讀，bizflow 上改了立即生效，無需 redeploy
+  // 2. 掃 pending — 分兩批：
+  //   • channel='meta'：秒回，无延迟（wa-message 写完会 fire-and-forget POST 触发本函数）
+  //   • channel='extension' / NULL：合併窗口 + 真人搶答倒計時
+  //     流程：客戶發第一條消息 → 7s 合併窗口開放收容後續消息 → 窗口關閉 → reply_delay_base 秒抢答倒計時 → 處理
+  //     reply_delay_base 從 wa_settings 讀，bizflow 上改了立即生效，無需 redeploy
   const replyDelaySec = (settings.reply_delay_base as number) || REPLY_DELAY_SECONDS_DEFAULT;
-  const totalWaitSec = MERGE_WINDOW_SECONDS + replyDelaySec;
-  const cutoff = new Date(Date.now() - totalWaitSec * 1000).toISOString();
-  const pendingRes = await sb.from("wa_pending_replies")
-    .select("*")
-    .eq("status", "pending")
-    .lt("received_at", cutoff)
-    .order("received_at", { ascending: true })
-    .limit(MAX_PROCESS_PER_RUN);
+  const extCutoff = new Date(Date.now() - (MERGE_WINDOW_SECONDS + replyDelaySec) * 1000).toISOString();
 
-  const pending = pendingRes.data || [];
+  const [metaRes, extRes] = await Promise.all([
+    sb.from("wa_pending_replies")
+      .select("*")
+      .eq("status", "pending")
+      .eq("channel", "meta")
+      .order("received_at", { ascending: true })
+      .limit(MAX_PROCESS_PER_RUN),
+    sb.from("wa_pending_replies")
+      .select("*")
+      .eq("status", "pending")
+      .or("channel.eq.extension,channel.is.null")
+      .lt("received_at", extCutoff)
+      .order("received_at", { ascending: true })
+      .limit(MAX_PROCESS_PER_RUN),
+  ]);
+
+  const pending = [...(metaRes.data || []), ...(extRes.data || [])].slice(0, MAX_PROCESS_PER_RUN);
   if (pending.length === 0) {
     return new Response(JSON.stringify({ ok: true, processed: 0 }), { headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
   }
@@ -302,6 +315,7 @@ Deno.serve(async (req) => {
   const results: unknown[] = [];
 
   for (const p of pending) {
+    const channel: "extension" | "meta" = p.channel === "meta" ? "meta" : "extension";
     const chatLabel = p.is_group ? `群:${p.chat_name || p.customer_id}` : `客戶:${p.customer_id}`;
     try {
       // 標 processing 防止重複處理
@@ -312,37 +326,45 @@ Deno.serve(async (req) => {
         .select("id");
       if (!claim.data || claim.data.length === 0) continue; // 被別的 cron 跑搶走了
 
-      // 再次檢查冷卻（這 60s 內可能真人剛接手）
+      // 再次檢查冷卻（這 60s 內可能真人剛接手；meta 通道理论上无人抢答，但留 check 不影响）
       const chatId = p.is_group ? (p.chat_name || p.customer_id) : p.customer_id;
       const cd = await sb.from("wa_cooldowns").select("cooled_until").eq("chat_id", chatId).maybeSingle();
       if (cd.data && new Date(cd.data.cooled_until) > new Date()) {
         await sb.from("wa_pending_replies").update({ status: "cancelled", cancelled_reason: "cooldown" }).eq("id", p.id);
-        cloudLog(sb, "跳过", `pending#${p.id} ${chatLabel} 冷卻期內，取消`);
+        cloudLog(sb, "跳过", `pending#${p.id} ${chatLabel} 冷卻期內，取消`, channel);
         results.push({ id: p.id, action: "cancelled_cooldown" });
         continue;
       }
 
-      // 限流：每分鐘最多 max_replies_per_min 條
+      // 限流：每分鐘最多 max_replies_per_min 條。同一 customer 的 extension/meta 分开计，避免两个通道互相误伤。
       const rateLimit = (settings.max_replies_per_min as number) || 3;
       const sinceMin = new Date(Date.now() - 60 * 1000).toISOString();
-      const recentCount = await sb.from("wa_replies")
+      let recentQuery = sb.from("wa_replies")
         .select("id", { count: "exact", head: true })
         .eq("customer_id", p.customer_id)
         .gte("created_at", sinceMin);
+      recentQuery = channel === "meta"
+        ? recentQuery.eq("channel", "meta")
+        : recentQuery.or("channel.eq.extension,channel.is.null");
+      const recentCount = await recentQuery;
       if ((recentCount.count || 0) >= rateLimit) {
         await sb.from("wa_pending_replies").update({ status: "cancelled", cancelled_reason: "rate_limit" }).eq("id", p.id);
-        cloudLog(sb, "限流", `pending#${p.id} ${chatLabel}（60s 內已 ${recentCount.count}/${rateLimit} 條）`);
+        cloudLog(sb, "限流", `pending#${p.id} ${chatLabel}（60s 內已 ${recentCount.count}/${rateLimit} 條）`, channel);
         results.push({ id: p.id, action: "rate_limited" });
         continue;
       }
 
       // 拉最近 N 條對話（max_history 從 wa_settings 讀，bizflow 改了立即生效）
       const maxHist = (settings.max_history as number) || MAX_HISTORY_DEFAULT;
-      const histRes = await sb.from("wa_messages")
+      let histQuery = sb.from("wa_messages")
         .select("role,content")
         .eq("customer_id", p.customer_id)
         .order("created_at", { ascending: false })
         .limit(maxHist);
+      histQuery = channel === "meta"
+        ? histQuery.eq("channel", "meta")
+        : histQuery.or("channel.eq.extension,channel.is.null");
+      const histRes = await histQuery;
       const history = (histRes.data || []).reverse();
 
       // ─── EPD 充電樁注入 ───
@@ -353,15 +375,18 @@ Deno.serve(async (req) => {
       } else {
         // 只查當前 pending 之前的 location，避免拉到「之後才發來的位置」造成多個 pending 都注入同一個 location 答重複充電樁
         const locCutoff = new Date(Date.now() - LOCATION_TTL_MIN * 60 * 1000).toISOString();
-        const locRow = await sb.from("wa_pending_replies")
+        let locQuery = sb.from("wa_pending_replies")
           .select("location")
           .eq("customer_id", p.customer_id)
           .not("location", "is", null)
           .gte("received_at", locCutoff)
           .lte("received_at", p.received_at)
           .order("received_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+          .limit(1);
+        locQuery = channel === "meta"
+          ? locQuery.eq("channel", "meta")
+          : locQuery.or("channel.eq.extension,channel.is.null");
+        const locRow = await locQuery.maybeSingle();
         if (locRow.data?.location && (locRow.data.location as any).lat) {
           location = locRow.data.location as any;
         }
@@ -373,7 +398,7 @@ Deno.serve(async (req) => {
         const nearby = findNearestStations(location.lat, location.lng, stations, 5);
         const tmpl = (settings.location_hint_prompt as string) || LOCATION_HINT_TEMPLATE_DEFAULT;
         locationHint = buildLocationContextHint(location, nearby, tmpl);
-        cloudLog(sb, "位置-注入", `pending#${p.id} ${chatLabel} 注入 ${nearby.length} 個附近站（EPD 總 ${stations.length}）`);
+        cloudLog(sb, "位置-注入", `pending#${p.id} ${chatLabel} 注入 ${nearby.length} 個附近站（EPD 總 ${stations.length}）`, channel);
       }
 
       // 構造 messages
@@ -387,7 +412,7 @@ Deno.serve(async (req) => {
         messages.push({ role: "system", content: locationHint });
       }
 
-      cloudLog(sb, "生成", `pending#${p.id} ${chatLabel}，history=${history.length} 條${location ? "（含位置）" : ""}`);
+      cloudLog(sb, "生成", `pending#${p.id} ${chatLabel}，history=${history.length} 條${location ? "（含位置）" : ""}`, channel);
 
       // 調 OpenAI
       const reply = await callOpenAI({
@@ -397,13 +422,17 @@ Deno.serve(async (req) => {
         messages,
       });
 
-      // 解析回复（不论走哪条路 wa_messages 都写、未解决都标）
-      const segments = splitSegments(reply);
+      // 解析回复：meta 通道不分段（官方 bot 整段发 + 用户期待秒回），extension 通道按 200 字分段
+      const cleanedReply = reply.replace(/\[UNRESOLVED\]/g, "").trim() || "我幫您問一下同事，確認後回覆您。";
+      const segments = channel === "meta"
+        ? [{ type: "text", content: cleanedReply }]
+        : splitSegments(reply);
 
       await sb.from("wa_messages").insert({
         customer_id: p.customer_id,
         role: "assistant",
         content: reply,
+        channel,
       });
 
       if (reply.includes("[UNRESOLVED]")) {
@@ -415,13 +444,13 @@ Deno.serve(async (req) => {
       }
 
       // ─── 出站派发 ───
-      // wa_outbound_mode='meta-cloud' + 私聊 + Meta 配置齐 → 直接调 Graph API 发，跳过 wa_replies 表
-      // 否则（extension 模式 / 群聊 / Meta 配置缺失）→ 走 wa_replies，让 Chrome 扩展拉走自己发
-      const outboundMode = (settings.wa_outbound_mode as string) || "extension";
+      // channel='meta' + 私聊 + Meta 配置齐 → 直接调 Graph API 发，wa_replies 留审计但 delivered_at 立即标
+      // channel='extension' / 群聊 / Meta 配置缺失 → 走 wa_replies，让 Chrome 扩展拉走自己发
+      // 不再读 wa_settings.wa_outbound_mode（已 deprecated）
       const metaToken = (settings.meta_access_token as string) || "";
       const metaPhoneId = (settings.meta_phone_number_id as string) || "";
       const metaGraphVer = (settings.meta_graph_version as string) || "v25.0";
-      const canMeta = outboundMode === "meta-cloud" && !p.is_group && metaToken && metaPhoneId;
+      const canMeta = channel === "meta" && !p.is_group && metaToken && metaPhoneId;
 
       let replyId: number | null = null;
       let deliveryNote = "";
@@ -435,7 +464,6 @@ Deno.serve(async (req) => {
             phoneNumberId: metaPhoneId,
             accessToken: metaToken,
           });
-          // 仍写 wa_replies 留审计，但 delivered_at 立即标记
           const replyIns = await sb.from("wa_replies").insert({
             customer_id: p.customer_id,
             chat_name: p.chat_name,
@@ -444,34 +472,52 @@ Deno.serve(async (req) => {
             pending_id: p.id,
             delivered_at: new Date().toISOString(),
             delivery_meta: { via: "meta-cloud", wamids },
+            channel: "meta",
           }).select("id").single();
           replyId = replyIns.data?.id || null;
           deliveryNote = `via Meta ${wamids.length} wamid`;
         } catch (metaErr) {
-          // Meta 调用失败 → 回退到 wa_replies 路径让扩展兜底
-          cloudLog(sb, "错误", `Meta 出站失败回退扩展队列 pending#${p.id}：${(metaErr as Error).message.slice(0, 200)}`);
+          // Meta 调用失败：只留审计，不放进 Chrome 扩展待发送队列（扩展接不到这个 Meta 客户）。
+          cloudLog(sb, "错误", `Meta 出站失败 pending#${p.id}：${(metaErr as Error).message.slice(0, 200)}`, channel);
           const replyIns = await sb.from("wa_replies").insert({
             customer_id: p.customer_id,
             chat_name: p.chat_name,
             is_group: p.is_group,
             segments: JSON.stringify(segments),
             pending_id: p.id,
-            delivery_meta: { via: "extension-fallback-after-meta-error", error: (metaErr as Error).message.slice(0, 200) },
+            delivered_at: new Date().toISOString(),
+            delivery_meta: { via: "meta-failed", error: (metaErr as Error).message.slice(0, 200) },
+            channel: "meta",
           }).select("id").single();
           replyId = replyIns.data?.id || null;
-          deliveryNote = "via extension (Meta 失败回退)";
+          deliveryNote = "Meta 出站失敗（审计已记）";
         }
-      } else {
-        // 默认路径：写 wa_replies 让 Chrome 扩展拉走
+      } else if (channel === "meta") {
+        cloudLog(sb, "错误", `Meta 出站未配置 pending#${p.id}：缺 meta_access_token 或 meta_phone_number_id`, channel);
         const replyIns = await sb.from("wa_replies").insert({
           customer_id: p.customer_id,
           chat_name: p.chat_name,
           is_group: p.is_group,
           segments: JSON.stringify(segments),
           pending_id: p.id,
+          delivered_at: new Date().toISOString(),
+          delivery_meta: { via: "meta-not-sent", reason: "missing_meta_config" },
+          channel: "meta",
         }).select("id").single();
         replyId = replyIns.data?.id || null;
-        deliveryNote = p.is_group ? "via extension (群聊 Meta 不支持)" : "via extension";
+        deliveryNote = "Meta 未配置（审计已记）";
+      } else {
+        // extension 路径：写 wa_replies 让 Chrome 扩展拉走
+        const replyIns = await sb.from("wa_replies").insert({
+          customer_id: p.customer_id,
+          chat_name: p.chat_name,
+          is_group: p.is_group,
+          segments: JSON.stringify(segments),
+          pending_id: p.id,
+          channel: "extension",
+        }).select("id").single();
+        replyId = replyIns.data?.id || null;
+        deliveryNote = p.is_group ? "via extension (群聊)" : "via extension";
       }
 
       await sb.from("wa_pending_replies").update({
@@ -481,7 +527,7 @@ Deno.serve(async (req) => {
       }).eq("id", p.id);
 
       const unresolvedMark = reply.includes("[UNRESOLVED]") ? " [UNRESOLVED]" : "";
-      cloudLog(sb, "回复", `pending#${p.id} ${chatLabel} → ${segments.length} 段，${reply.length} 字 ${deliveryNote}${unresolvedMark}`);
+      cloudLog(sb, "回复", `pending#${p.id} ${chatLabel} → ${segments.length} 段，${reply.length} 字 ${deliveryNote}${unresolvedMark}`, channel);
 
       results.push({ id: p.id, action: "replied", reply_id: replyId, delivery: deliveryNote });
     } catch (err) {
@@ -491,7 +537,7 @@ Deno.serve(async (req) => {
         replied_at: new Date().toISOString(),
         error: errMsg,
       }).eq("id", p.id);
-      cloudLog(sb, "错误", `wa-ai-trigger pending#${p.id} ${chatLabel}：${errMsg.slice(0, 200)}`);
+      cloudLog(sb, "错误", `wa-ai-trigger pending#${p.id} ${chatLabel}：${errMsg.slice(0, 200)}`, channel);
       results.push({ id: p.id, action: "error", error: errMsg.slice(0, 200) });
     }
   }

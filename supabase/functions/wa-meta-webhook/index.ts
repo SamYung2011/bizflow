@@ -1,7 +1,7 @@
 // wa-meta-webhook: 接 Meta Cloud API 推送的客户来信 + 状态回执
 // GET  → Meta webhook 订阅验证（返回 hub.challenge 如果 verify token 对得上 wa_settings.meta_webhook_verify_token）
 // POST → 解析 entry[].changes[].value.messages[]，翻译成 wa-message 的 MessagePayload，转发给 wa-message edge function
-//        让它走现有的合并 / 冷却 / pending 流程，避免代码重复
+//        让它走 wa-message 的 channel='meta' 流程：记录历史 / 入 pending / 秒触发 wa-ai-trigger
 // 环境变量自动注入：SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -15,13 +15,13 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
-// 同步寫 wa_logs（[云] 前綴跟 wa-message / wa-ai-trigger 對齊）
+// 同步寫 wa_logs。wa-meta-webhook 本身所有日誌都是 Meta 通道事件，前綴一律 [Meta API]，channel='meta'
 async function cloudLog(
   sb: ReturnType<typeof createClient>,
   category: string,
   message: string,
 ) {
-  try { await sb.from("wa_logs").insert({ category, message: "[云] " + message }); } catch (_) { /* swallow */ }
+  try { await sb.from("wa_logs").insert({ category, message: "[Meta API] " + message, channel: "meta" }); } catch (_) { /* swallow */ }
 }
 
 // HMAC-SHA256 验证 Meta webhook 签名
@@ -110,6 +110,7 @@ async function forwardToWaMessage(
     is_group: false,                    // Meta Cloud API 不支持 group，全是私聊
     content,
     location,
+    channel: "meta",                    // 后续 wa-message / wa-ai-trigger 据此走 Meta 分支：跳过合并 / 跳过 60s 抢答 / 不分段 / Meta API 出站
   };
 
   const url = `${SUPABASE_URL}/functions/v1/wa-message`;

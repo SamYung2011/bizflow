@@ -28,6 +28,9 @@ const DICT_EN = {
   "等待": "Waiting",
   "未解决": "Unresolved",
   "图片": "Image",
+  "Meta-Webhook": "Meta Webhook",
+  "Meta-Status": "Meta Status",
+  "位置-注入": "Location Injected",
 
   // ── 雲端版扩展狀態卡 + 安裝教程 ──
   "在線雲端客戶端": "Online Cloud Clients",
@@ -652,6 +655,9 @@ const DICT_EN = {
   "知識庫": "Knowledge Base",
   "白名單": "Whitelist",
   "對話歷史": "Chat History",
+  "通道": "Channel",
+  "Chrome 插件": "Chrome Extension",
+  "Meta API": "Meta API",
   "待發送回覆": "Pending Replies",
   "條未發送回覆": "undelivered",
   "跳過後插件不再嘗試發送": "Extension will stop attempting to send after skip",
@@ -1556,6 +1562,9 @@ const DICT_FR = {
   "等待": "Attente",
   "未解决": "Non résolu",
   "图片": "Image",
+  "Meta-Webhook": "Webhook Meta",
+  "Meta-Status": "Statut Meta",
+  "位置-注入": "Emplacement injecté",
 
   // ── 雲端版扩展狀態卡 + 安裝教程 ──
   "在線雲端客戶端": "Clients cloud en ligne",
@@ -2179,6 +2188,9 @@ const DICT_FR = {
   "知識庫": "Base de connaissances",
   "白名單": "Liste blanche",
   "對話歷史": "Historique des conversations",
+  "通道": "Canal",
+  "Chrome 插件": "Extension Chrome",
+  "Meta API": "API Meta",
   "待發送回覆": "Réponses en attente",
   "條未發送回覆": "non livrée(s)",
   "跳過後插件不再嘗試發送": "L'extension cessera l'envoi après l'ignorer",

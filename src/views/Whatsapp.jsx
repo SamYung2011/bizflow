@@ -27,6 +27,7 @@ export default function WhatsappView() {
   // ── view-local state（從 App.jsx 搬入）──────────────────────
   const [waSubTab, setWaSubTab] = useState("settings"); // settings | knowledge | prompt | whitelist | messages | unresolved | reports | logs
   const [waSelectedCustomer, setWaSelectedCustomer] = useState(null);
+  const [waChannelFilter, setWaChannelFilter] = useState("all"); // all | extension | meta
   const [waSecretUnlocked, setWaSecretUnlocked] = useState(false); // 輸過密碼後這次 session 內放開
   // 解鎖後從 Edge Function wa-unlock 拿到的 openai_api_key 暫存（不寫進 waSettings/cache，避免持久化進 localStorage）
   const [unlockedApiKey, setUnlockedApiKey] = useState("");
@@ -163,14 +164,39 @@ export default function WhatsappView() {
     }
   };
   const kindLabel = { phone: t("私聊白名單（手機）"), group: t("群聊白名單（精確）"), group_fuzzy: t("群聊白名單（模糊）"), staff: t("客服名單（手機）") };
-  const customersMap = new Map();
-  for (const m of waMessages) {
-    if (!customersMap.has(m.customer_id)) customersMap.set(m.customer_id, []);
-    customersMap.get(m.customer_id).push(m);
+  const channelOf = (row) => row?.channel === "meta" ? "meta" : "extension";
+  const channelLabel = (channel) => channel === "meta" ? "Meta API" : "Chrome 插件";
+  const channelBadgeStyle = (channel) => channel === "meta"
+    ? { background: "#e3f2fd", color: "#1565c0", border: "1px solid #bbdefb" }
+    : { background: "#f5f5f5", color: "#666", border: "1px solid #e0e0e0" };
+  const channelMatches = (row) => waChannelFilter === "all" || channelOf(row) === waChannelFilter;
+  const filteredWaMessages = waMessages.filter(channelMatches);
+  const filteredWaLogs = waLogs.filter(channelMatches);
+  const channelOptions = [
+    { id: "all", label: t("全部") },
+    { id: "extension", label: t("Chrome 插件") },
+    { id: "meta", label: t("Meta API") },
+  ];
+  const channelFilterBar = (
+    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+      <span style={{ fontSize: 12, color: "#888", fontWeight: 700 }}>{t("通道")}</span>
+      {channelOptions.map(opt => (
+        <button key={opt.id} onClick={() => { setWaChannelFilter(opt.id); setWaSelectedCustomer(null); }}
+          style={{ padding: "5px 10px", borderRadius: 8, border: "1px solid " + (waChannelFilter === opt.id ? "#6382ff" : "#e0e0e0"), background: waChannelFilter === opt.id ? "#eef2ff" : "#fff", color: waChannelFilter === opt.id ? "#3b58d4" : "#666", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+  const conversationsMap = new Map();
+  for (const m of filteredWaMessages) {
+    const key = `${channelOf(m)}:${m.customer_id}`;
+    if (!conversationsMap.has(key)) conversationsMap.set(key, []);
+    conversationsMap.get(key).push(m);
   }
-  const customerIds = [...customersMap.keys()].sort((a, b) => {
-    const la = customersMap.get(a);
-    const lb = customersMap.get(b);
+  const conversationKeys = [...conversationsMap.keys()].sort((a, b) => {
+    const la = conversationsMap.get(a);
+    const lb = conversationsMap.get(b);
     return new Date(lb[0]?.created_at || 0) - new Date(la[0]?.created_at || 0);
   });
 
@@ -187,7 +213,7 @@ export default function WhatsappView() {
             <div style={{ fontSize: 26, fontWeight: 800 }}>{t("WhatsApp AI 客服")}</div>
             <div style={{ fontSize: 13, color: "#888", marginTop: 4 }}>
               {t("模式")} <span style={{ fontWeight: 700, color: s.claude_mode === "api" ? "#6382ff" : "#22c55e" }}>{s.claude_mode === "api" ? t("API（雲端）") : t("CLI（本地）")}</span>
-              {" · "}{t("共")} {customerIds.length} {t("位客戶")} · {waMessages.length} {t("條消息")} · {waUnresolved.filter(u => !u.resolved_at).length} {t("條未解決")}
+              {" · "}{t("共")} {conversationKeys.length} {t("位客戶")} · {filteredWaMessages.length} {t("條消息")} · {waUnresolved.filter(u => !u.resolved_at).length} {t("條未解決")}
             </div>
           </div>
           <div title={waHeartbeat?.error_message || (waHeartbeat?.last_heartbeat_at ? t("心跳：") + new Date(waHeartbeat.last_heartbeat_at).toLocaleString("zh-HK") : t("尚無心跳"))}
@@ -491,41 +517,64 @@ export default function WhatsappView() {
 
         {/* MESSAGES */}
         {waSubTab === "messages" && (
-          <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 14, minHeight: "60vh" }}>
-            <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-              <div style={{ padding: "12px 14px", borderBottom: "1px solid #f0f0f0", fontSize: 13, fontWeight: 700 }}>{t("客戶")} <span style={{ color: "#aaa", marginLeft: 4 }}>{customerIds.length}</span></div>
-              <div style={{ flex: 1, overflowY: "auto" }}>
-                {customerIds.length === 0 ? <div style={{ padding: 16, fontSize: 12, color: "#aaa", fontStyle: "italic" }}>{t("尚無對話")}</div>
-                : customerIds.map(cid => {
-                  const msgs = customersMap.get(cid);
-                  const active = waSelectedCustomer === cid;
-                  return (
-                    <div key={cid} onClick={() => setWaSelectedCustomer(cid)} style={{ padding: "10px 14px", borderBottom: "1px solid #f5f5f5", cursor: "pointer", background: active ? "#eef2ff" : "transparent" }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: active ? "#3b58d4" : "#333", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cid}</div>
-                      <div style={{ fontSize: 11, color: "#999", marginTop: 2 }}>{msgs.length} {t("條")} · {msgs[0]?.created_at?.slice(5, 16).replace("T", " ") || ""}</div>
-                    </div>
-                  );
-                })}
-              </div>
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 12, flexWrap: "wrap" }}>
+              <div />
+              {channelFilterBar}
             </div>
-            <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, padding: 16, overflowY: "auto", maxHeight: "70vh" }}>
-              {!waSelectedCustomer ? <div style={{ color: "#aaa", fontSize: 13, textAlign: "center", paddingTop: 80 }}>{t("← 從左側選擇客戶查看對話")}</div>
-              : (() => {
-                const msgs = [...(customersMap.get(waSelectedCustomer) || [])].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-                return (
-                  <>
-                    <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12, paddingBottom: 10, borderBottom: "1px solid #f0f0f0" }}>{waSelectedCustomer} · {msgs.length} {t("條")}</div>
-                    {msgs.map(m => (
-                      <div key={m.id} style={{ marginBottom: 12, display: "flex", justifyContent: m.role === "assistant" ? "flex-start" : "flex-end" }}>
-                        <div style={{ maxWidth: "75%", background: m.role === "assistant" ? "#f0f4ff" : "#e8f5e9", borderRadius: 10, padding: "8px 12px", fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
-                          {m.content}
-                          <div style={{ fontSize: 10, color: "#999", marginTop: 4 }}>{new Date(m.created_at).toLocaleString("zh-HK", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 14, minHeight: "60vh" }}>
+              <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                <div style={{ padding: "12px 14px", borderBottom: "1px solid #f0f0f0", fontSize: 13, fontWeight: 700 }}>{t("客戶")} <span style={{ color: "#aaa", marginLeft: 4 }}>{conversationKeys.length}</span></div>
+                <div style={{ flex: 1, overflowY: "auto" }}>
+                  {conversationKeys.length === 0 ? <div style={{ padding: 16, fontSize: 12, color: "#aaa", fontStyle: "italic" }}>{t("尚無對話")}</div>
+                  : conversationKeys.map(key => {
+                    const msgs = conversationsMap.get(key);
+                    const latest = msgs[0] || {};
+                    const channel = channelOf(latest);
+                    const active = waSelectedCustomer === key;
+                    return (
+                      <div key={key} onClick={() => setWaSelectedCustomer(key)} style={{ padding: "10px 14px", borderBottom: "1px solid #f5f5f5", cursor: "pointer", background: active ? "#eef2ff" : "transparent" }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: active ? "#3b58d4" : "#333", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{latest.customer_id}</div>
+                        <div style={{ fontSize: 11, color: "#999", marginTop: 4, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                          <span style={{ ...channelBadgeStyle(channel), borderRadius: 999, padding: "1px 6px", fontSize: 10, fontWeight: 700 }}>{t(channelLabel(channel))}</span>
+                          <span>{msgs.length} {t("條")}</span>
+                          <span>{latest.created_at?.slice(5, 16).replace("T", " ") || ""}</span>
                         </div>
                       </div>
-                    ))}
-                  </>
-                );
-              })()}
+                    );
+                  })}
+                </div>
+              </div>
+              <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 12, padding: 16, overflowY: "auto", maxHeight: "70vh" }}>
+                {!waSelectedCustomer ? <div style={{ color: "#aaa", fontSize: 13, textAlign: "center", paddingTop: 80 }}>{t("← 從左側選擇客戶查看對話")}</div>
+                : (() => {
+                  const msgs = [...(conversationsMap.get(waSelectedCustomer) || [])].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+                  const first = msgs[0] || {};
+                  const selectedChannel = channelOf(first);
+                  return (
+                    <>
+                      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12, paddingBottom: 10, borderBottom: "1px solid #f0f0f0", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        <span>{first.customer_id || "—"} · {msgs.length} {t("條")}</span>
+                        <span style={{ ...channelBadgeStyle(selectedChannel), borderRadius: 999, padding: "1px 7px", fontSize: 10, fontWeight: 700 }}>{t(channelLabel(selectedChannel))}</span>
+                      </div>
+                      {msgs.map(m => {
+                        const channel = channelOf(m);
+                        return (
+                          <div key={m.id} style={{ marginBottom: 12, display: "flex", justifyContent: m.role === "assistant" ? "flex-start" : "flex-end" }}>
+                            <div style={{ maxWidth: "75%", background: m.role === "assistant" ? "#f0f4ff" : "#e8f5e9", borderRadius: 10, padding: "8px 12px", fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
+                              {m.content}
+                              <div style={{ fontSize: 10, color: "#999", marginTop: 4, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                                <span>{new Date(m.created_at).toLocaleString("zh-HK", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                                <span style={{ ...channelBadgeStyle(channel), borderRadius: 999, padding: "0 6px", fontSize: 10, fontWeight: 700 }}>{t(channelLabel(channel))}</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </>
+                  );
+                })()}
+              </div>
             </div>
           </div>
         )}
@@ -547,11 +596,13 @@ export default function WhatsappView() {
                 const segs = typeof r.segments === "string" ? (() => { try { return JSON.parse(r.segments); } catch { return []; } })() : (r.segments || []);
                 const preview = segs.length === 0 ? t("（空回覆）") : segs.map(s => typeof s === "string" ? s : (s.content || (s.type === "image" ? `[${t("圖片")}: ${s.url || ""}]` : ""))).join(" / ").slice(0, 200);
                 const ageMin = Math.floor((Date.now() - new Date(r.created_at).getTime()) / 60000);
+                const channel = channelOf(r);
                 return (
                   <div key={r.id} style={{ background: "#fff", border: "1px solid #fce4ec", borderRadius: 10, padding: "12px 16px", marginBottom: 8, display: "flex", gap: 12, alignItems: "flex-start" }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, color: "#222", wordBreak: "break-word" }}>{preview || t("（無內容）")}</div>
                       <div style={{ fontSize: 11, color: "#888", marginTop: 4, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                        <span style={{ ...channelBadgeStyle(channel), borderRadius: 999, padding: "1px 6px", fontSize: 10, fontWeight: 700 }}>{t(channelLabel(channel))}</span>
                         <span>{r.chat_name || r.customer_id || "—"}</span>
                         <span>{segs.length} {t("段")}</span>
                         <span>{new Date(r.created_at).toLocaleString("zh-HK", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
@@ -668,6 +719,8 @@ export default function WhatsappView() {
             "知识库":   { bg: "#e3f2fd", color: "#1565c0" },
             // 雲端同步 — 紫
             "Supabase": { bg: "#f3e5f5", color: "#7b1fa2" },
+            "Meta-Webhook": { bg: "#e3f2fd", color: "#1565c0" },
+            "Meta-Status": { bg: "#e3f2fd", color: "#1565c0" },
             // 維護任務 — 橙
             "清扫":     { bg: "#fff3e0", color: "#a65a00" },
             "日报":     { bg: "#fff3e0", color: "#a65a00" },
@@ -685,6 +738,7 @@ export default function WhatsappView() {
             // 處理中 — 藍淺
             "生成":     { bg: "#e1f5fe", color: "#01579b" },
             "等待":     { bg: "#e1f5fe", color: "#01579b" },
+            "位置-注入": { bg: "#e1f5fe", color: "#01579b" },
             // 待處理 — 紅淺
             "未解决":   { bg: "#fff0f0", color: "#a32424" },
             // 圖片 — 中性
@@ -692,25 +746,30 @@ export default function WhatsappView() {
           };
           return (
             <div>
-              <div style={{ fontSize: 13, color: "#888", marginBottom: 10 }}>
-                {t("共")} {waLogs.length} {t("條")} · {t("雲端保留 24 小時 · 5s 自動刷新")}
-                <span style={{ marginLeft: 10, color: "#aaa", fontSize: 12 }}>
-                  {t("（收到/回復入隊/未解決的客戶原話自動脫敏）")}
-                </span>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 12, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 13, color: "#888" }}>
+                  {t("共")} {filteredWaLogs.length} {t("條")} · {t("雲端保留 24 小時 · 5s 自動刷新")}
+                  <span style={{ marginLeft: 10, color: "#aaa", fontSize: 12 }}>
+                    {t("（收到/回復入隊/未解決的客戶原話自動脫敏）")}
+                  </span>
+                </div>
+                {channelFilterBar}
               </div>
-              {waLogs.length === 0 ? (
+              {filteredWaLogs.length === 0 ? (
                 <div style={{ background: "#fff", borderRadius: 10, padding: 40, textAlign: "center", color: "#aaa", border: "1px dashed #e0e0e0" }}>
                   {t("暫無日誌（等 server.js 重啟後或下次同步出問題時會自動填）")}
                 </div>
               ) : (
                 <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: 10, padding: 12, maxHeight: "70vh", overflowY: "auto", fontFamily: "Consolas, Menlo, monospace", fontSize: 12, lineHeight: 1.7 }}>
-                  {waLogs.map(r => {
+                  {filteredWaLogs.map(r => {
                     const c = catColor[r.category] || { bg: "#f5f5f5", color: "#666" };
+                    const channel = channelOf(r);
                     const ts = new Date(r.created_at).toLocaleString(lang === "en" ? "en-HK" : lang === "fr" ? "fr-FR" : "zh-HK", { hour12: false });
                     return (
                       <div key={r.id} style={{ display: "flex", gap: 10, padding: "4px 0", borderBottom: "1px solid #fafafa" }}>
                         <span style={{ color: "#999", flexShrink: 0, width: 140 }}>{ts}</span>
                         <span style={{ background: c.bg, color: c.color, padding: "1px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700, flexShrink: 0, alignSelf: "center", minWidth: 60, textAlign: "center" }}>{t(r.category)}</span>
+                        <span style={{ ...channelBadgeStyle(channel), borderRadius: 999, padding: "1px 7px", fontSize: 10, fontWeight: 700, flexShrink: 0, alignSelf: "center" }}>{t(channelLabel(channel))}</span>
                         <span style={{ color: "#333", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{translateLogMsg(r.message)}</span>
                       </div>
                     );
