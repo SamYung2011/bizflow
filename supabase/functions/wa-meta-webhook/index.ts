@@ -96,9 +96,13 @@ async function forwardToWaMessage(
     const btn = inter.button_reply as Record<string, unknown> | undefined;
     const list = inter.list_reply as Record<string, unknown> | undefined;
     const choiceId = String(btn?.id || list?.id || "");
-    const title = String(btn?.title || list?.title || "[交互回复]");
+    const title = String(btn?.title || list?.title || "[Interactive reply]");
     const mapChoice = choiceId.match(/^hm_map:([-0-9.]+),([-0-9.]+)$/);
-    if (mapChoice) {
+    if (choiceId === "hm_entry:product_consult") {
+      content = "Product enquiry";
+    } else if (choiceId === "hm_entry:nearby_chargers") {
+      content = "Nearby chargers";
+    } else if (mapChoice) {
       content = `我想導航到：${title}\nhttps://maps.google.com/maps?daddr=${mapChoice[1]},${mapChoice[2]}`;
     } else {
       content = title;

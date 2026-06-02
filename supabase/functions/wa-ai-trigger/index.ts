@@ -33,6 +33,21 @@ const SYSTEM_PROMPT_CHARGERS_DEFAULT = `
   · 客户在咨询其他事情（配送、上门安装、产品询价等）→ **不要主动甩充电桩列表**，按其原问题回复，把位置当作配送/安装地址处理。
   · 客户冷启动只发了位置没说话 → 简短确认收到，温和询问需要查充电桩还是有其他需求。`;
 
+const PRODUCT_LINKS_TEXT = `常見產品官網：
+- GB/T→CCS2 DC Adapter：https://www.honnmono.shop/en/shop/dc-adaptor
+- GB/T→Type2 AC Adapter：https://www.honnmono.shop/en/shop/gbt-type2
+- Type2 充電樁：https://www.honnmono.shop/shop/type-2-wall-charger-with-cable-gun
+- Type2 便攜充電器 / EV 充電線：https://www.honnmono.shop/en/shop/portable-charger
+- CCS2→GB/T DC Adapter：https://www.honnmono.shop/en/shop/ccs2-gbt`;
+
+const SYSTEM_PROMPT_PRODUCT_LINKS = `
+
+產品官網連結規則：
+- 客戶諮詢具體產品時，主回覆可以照常使用 Meta TTS 語音；如需附連結，語音後最多追加 1 條文字消息。
+- 只能使用下面已確認的 Honnmono 官網連結；不要自行編造 URL。
+${PRODUCT_LINKS_TEXT}
+- 如果客戶未說明產品型號，先詢問想了解哪款產品；可以在後續文字補充上述常見產品官網讓客戶選。`;
+
 // SYSTEM_PROMPT_RULES 是安全規則，不對外暴露，保持硬編碼
 const SYSTEM_PROMPT_RULES = `
 
@@ -63,7 +78,7 @@ function buildSystemPrompt(settings: Record<string, unknown>): string {
   const botName = settings.bot_name ? `\n\n你的名字叫 ${settings.bot_name}，當客戶喊你這個名字就是在叫你。` : "";
   const knowledge = settings.knowledge ? `\n\n以下是公司知识库：\n${settings.knowledge}` : "";
   const chargers = (settings.chargers_prompt as string) || SYSTEM_PROMPT_CHARGERS_DEFAULT;
-  return head + botName + knowledge + chargers + SYSTEM_PROMPT_RULES;
+  return head + botName + knowledge + SYSTEM_PROMPT_PRODUCT_LINKS + chargers + SYSTEM_PROMPT_RULES;
 }
 
 function buildMetaTtsPrompt(settings: Record<string, unknown>): string {
@@ -259,11 +274,76 @@ function shouldSendMetaTextReply(opts: {
 }): boolean {
   if (opts.hasLocation) return true;
   const haystack = `${opts.incomingText || ""}`.toLowerCase();
-  return /位置|地址|在哪|喺邊|邊度|哪里|哪裡|导航|導航|路線|路线|google maps|maps\.google|充電|充电|充電樁|充电桩|charger|charging|附近|空位|停車場|停车场|car park/i.test(haystack);
+  return /位置|地址|在哪|喺邊|邊度|哪里|哪裡|导航|導航|路線|路线|google maps|maps\.google|附近|空位|停車場|停车场|car park|邊度充電|哪里充电|哪裡充電|where.*charg/i.test(haystack);
 }
 
 function hasMapLink(text: string): boolean {
   return /https?:\/\/(?:maps\.app\.goo\.gl|goo\.gl\/maps|(?:www\.)?google\.[^\s/]+\/maps|maps\.google\.|uri\.amap\.com|surl\.amap\.com|(?:www\.|m\.)?amap\.com)/i.test(String(text || ""));
+}
+
+function normalizeMenuText(text: string): string {
+  return String(text || "")
+    .replace(/[［\[\]【】（）()「」『』]/g, "")
+    .replace(/\s+/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function isEntryMenuRequest(text: string): boolean {
+  const s = normalizeMenuText(text);
+  return /^(hi|hello|hey|start|menu|help|你好|您好|哈囉|哈啰|嗨|菜單|菜单|目錄|目录|開始|开始)$/.test(s);
+}
+
+function isProductConsultChoice(text: string): boolean {
+  const s = normalizeMenuText(text);
+  return /^(我想)?(諮詢產品|咨询产品|產品諮詢|产品咨询|問產品|问产品|productenquiry|productinquiry|productenquiries|productinquiries|products|product)$/.test(s);
+}
+
+function isNearbyChargersChoice(text: string): boolean {
+  const s = normalizeMenuText(text);
+  return /^(我想)?(查)?(附近充電樁|附近充电桩|附近充電站|附近充电站|nearbychargers|nearbycharging|chargersnearby)$/.test(s);
+}
+
+function isProductInquiryText(text: string): boolean {
+  return /產品|产品|商品|型號|型号|價錢|价格|報價|报价|轉插|转接|adaptor|adapter|便攜|便携|充電線|充电线|wall charger|portable charger|ccs2|gbt|gb\/t|type2|7kw|11kw|22kw/i.test(String(text || ""));
+}
+
+function stripUrlsForVoice(text: string): string {
+  return String(text || "")
+    .replace(/https?:\/\/\S+/gi, "")
+    .replace(/產品連結參考：[\s\S]*$/i, "")
+    .replace(/相關產品連結：[\s\S]*$/i, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function buildProductLinkSupplement(text: string, fallbackAll = false): string {
+  const haystack = String(text || "").toLowerCase();
+  const rows: string[] = [];
+  const add = (line: string) => { if (!rows.includes(line)) rows.push(line); };
+
+  if (/(dc|快充|ccs2|gbt|gb\/t|國標|国标|轉插|转接|adaptor|adapter)/i.test(haystack)) {
+    if (/(gbt|gb\/t|國標|国标)/i.test(haystack) && /ccs2|dc|快充|adaptor|adapter|轉插|转接/i.test(haystack)) {
+      add("GB/T→CCS2 DC Adapter：https://www.honnmono.shop/en/shop/dc-adaptor");
+    }
+    if (/ccs2/i.test(haystack) && /(gbt|gb\/t|國標|国标)/i.test(haystack)) {
+      add("CCS2→GB/T DC Adapter：https://www.honnmono.shop/en/shop/ccs2-gbt");
+    }
+  }
+  if (/(type\s*2|type2|ac|中充|慢充)/i.test(haystack) && /(gbt|gb\/t|國標|国标|轉插|转接|adaptor|adapter)/i.test(haystack)) {
+    add("GB/T→Type2 AC Adapter：https://www.honnmono.shop/en/shop/gbt-type2");
+  }
+  if (/充電樁|充电桩|wall charger|7kw|11kw|22kw/i.test(haystack)) {
+    add("Type2 充電樁：https://www.honnmono.shop/shop/type-2-wall-charger-with-cable-gun");
+  }
+  if (/便攜|便携|portable|充電線|充电线|ev\s*cable|線|线/i.test(haystack)) {
+    add("Type2 便攜充電器 / EV 充電線：https://www.honnmono.shop/en/shop/portable-charger");
+  }
+
+  if (fallbackAll || rows.length === 0) {
+    return `產品連結參考：\n${PRODUCT_LINKS_TEXT.replace(/^常見產品官網：\n/, "")}`;
+  }
+  return `相關產品連結：\n- ${rows.join("\n- ")}`;
 }
 
 // 同步寫 wa_logs。channel='meta' 用 [Meta API] 前綴；'extension' / 兜底用 [云] 前綴。
@@ -387,6 +467,37 @@ async function sendMetaStationList(opts: {
             description: c.description,
           })),
         }],
+      },
+    },
+  };
+  return await metaPostMessage({
+    graphVersion: opts.graphVersion,
+    phoneNumberId: opts.phoneNumberId,
+    accessToken: opts.accessToken,
+    payload,
+  });
+}
+
+async function sendMetaEntryMenu(opts: {
+  to: string;
+  graphVersion: string;
+  phoneNumberId: string;
+  accessToken: string;
+}): Promise<string> {
+  const to = normalizeMetaPhone(opts.to);
+  if (!to) return "";
+  const payload: Record<string, unknown> = {
+    messaging_product: "whatsapp",
+    to,
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: "Hello！請問想了解產品，定係查附近充電樁？" },
+      action: {
+        buttons: [
+          { type: "reply", reply: { id: "hm_entry:product_consult", title: "Product enquiry" } },
+          { type: "reply", reply: { id: "hm_entry:nearby_chargers", title: "Nearby chargers" } },
+        ],
       },
     },
   };
@@ -532,6 +643,124 @@ Deno.serve(async (req) => {
         continue;
       }
 
+      const metaToken = (settings.meta_access_token as string) || "";
+      const metaPhoneId = (settings.meta_phone_number_id as string) || "";
+      const metaGraphVer = (settings.meta_graph_version as string) || "v25.0";
+      const canMeta = channel === "meta" && !p.is_group && metaToken && metaPhoneId;
+      const directMetaText = String(p.content || "");
+
+      if (canMeta && (isEntryMenuRequest(directMetaText) || isProductConsultChoice(directMetaText) || isNearbyChargersChoice(directMetaText))) {
+        let segments: { type: string; content: string }[] = [];
+        let deliveryMeta: Record<string, unknown> = {};
+        let deliveryNote = "";
+        let wamids: string[] = [];
+
+        if (isEntryMenuRequest(directMetaText)) {
+          const wamid = await sendMetaEntryMenu({
+            to: p.customer_id,
+            graphVersion: metaGraphVer,
+            phoneNumberId: metaPhoneId,
+            accessToken: metaToken,
+          });
+          if (wamid) wamids.push(wamid);
+          segments = [{ type: "interactive", content: "Entry menu: Product enquiry / Nearby chargers" }];
+          deliveryMeta = { via: "meta-cloud", wamids, interactiveButtons: { type: "entry_menu" } };
+          deliveryNote = `via Meta entry menu ${wamids.length} wamid`;
+        } else if (isProductConsultChoice(directMetaText)) {
+          const voiceText = "可以呀，想了解邊款產品？你可以直接講產品名、車款，或者話我知想解決咩充電問題，我幫你對應返合適款式。";
+          const linkText = buildProductLinkSupplement(directMetaText, true);
+          const textSegments = [{ type: "text", content: linkText }];
+          if (settings.meta_tts_enabled !== false && (settings.meta_tts_relay_url as string) && (settings.meta_tts_relay_token as string)) {
+            try {
+              const tts = await sendViaMetaTtsRelay({
+                relayUrl: settings.meta_tts_relay_url as string,
+                relayToken: settings.meta_tts_relay_token as string,
+                to: p.customer_id,
+                text: voiceText,
+                graphVersion: metaGraphVer,
+                phoneNumberId: metaPhoneId,
+                accessToken: metaToken,
+                voiceId: (settings.meta_tts_voice_id as string) || undefined,
+                language: (settings.meta_tts_language_boost as string) || undefined,
+              });
+              if (typeof tts.wamid === "string" && tts.wamid) wamids.push(tts.wamid);
+              const linkWamids = await sendViaMetaCloud({
+                to: p.customer_id,
+                segments: textSegments,
+                graphVersion: metaGraphVer,
+                phoneNumberId: metaPhoneId,
+                accessToken: metaToken,
+              });
+              wamids.push(...linkWamids);
+              segments = [{ type: "audio", content: voiceText }, ...textSegments];
+              deliveryMeta = { via: "meta-tts-relay", wamids, reason: "entry_product_consult", linkSupplement: true };
+              deliveryNote = `via Meta product voice + link ${wamids.length} wamid`;
+            } catch (ttsErr) {
+              cloudLog(sb, "错误", `入口產品 TTS 失败，改发文字 pending#${p.id}：${(ttsErr as Error).message.slice(0, 200)}`, channel);
+              segments = [{ type: "text", content: voiceText }, ...textSegments];
+              wamids = await sendViaMetaCloud({
+                to: p.customer_id,
+                segments,
+                graphVersion: metaGraphVer,
+                phoneNumberId: metaPhoneId,
+                accessToken: metaToken,
+              });
+              deliveryMeta = { via: "meta-cloud", fallbackFrom: "meta-tts-relay", fallbackError: (ttsErr as Error).message.slice(0, 200), wamids, reason: "entry_product_consult", linkSupplement: true };
+              deliveryNote = `via Meta product text fallback + link ${wamids.length} wamid`;
+            }
+          } else {
+            segments = [{ type: "text", content: voiceText }, ...textSegments];
+            wamids = await sendViaMetaCloud({
+              to: p.customer_id,
+              segments,
+              graphVersion: metaGraphVer,
+              phoneNumberId: metaPhoneId,
+              accessToken: metaToken,
+            });
+            deliveryMeta = { via: "meta-cloud", wamids, reason: "entry_product_consult", linkSupplement: true };
+            deliveryNote = `via Meta product text + link ${wamids.length} wamid`;
+          }
+        } else {
+          const body = "可以，請發送您的位置（WhatsApp 輸入框旁「+」→ 位置 → 發送當前位置），我即時幫你查附近有空位嘅充電站。";
+          segments = [{ type: "text", content: body }];
+          wamids = await sendViaMetaCloud({
+            to: p.customer_id,
+            segments,
+            graphVersion: metaGraphVer,
+            phoneNumberId: metaPhoneId,
+            accessToken: metaToken,
+          });
+          deliveryMeta = { via: "meta-cloud", wamids, reason: "entry_nearby_chargers" };
+          deliveryNote = `via Meta charger prompt ${wamids.length} wamid`;
+        }
+
+        await sb.from("wa_messages").insert({
+          customer_id: p.customer_id,
+          role: "assistant",
+          content: segments.map(s => s.content).join("\n"),
+          channel,
+        });
+        const replyIns = await sb.from("wa_replies").insert({
+          customer_id: p.customer_id,
+          chat_name: p.chat_name,
+          is_group: p.is_group,
+          segments: JSON.stringify(segments),
+          pending_id: p.id,
+          delivered_at: new Date().toISOString(),
+          delivery_meta: deliveryMeta,
+          channel: "meta",
+        }).select("id").single();
+        const replyId = replyIns.data?.id || null;
+        await sb.from("wa_pending_replies").update({
+          status: "replied",
+          replied_at: new Date().toISOString(),
+          reply_id: replyId,
+        }).eq("id", p.id);
+        cloudLog(sb, "回复", `pending#${p.id} ${chatLabel} → ${segments.length} 段，${deliveryNote}`, channel);
+        results.push({ id: p.id, action: "replied", reply_id: replyId, delivery: deliveryNote });
+        continue;
+      }
+
       // 拉最近 N 條對話（max_history 從 wa_settings 讀，bizflow 改了立即生效）
       const maxHist = (settings.max_history as number) || MAX_HISTORY_DEFAULT;
       let histQuery = sb.from("wa_messages")
@@ -643,15 +872,11 @@ Deno.serve(async (req) => {
       // channel='meta' + 私聊 + Meta 配置齐 → 直接调 Graph API 发，wa_replies 留审计但 delivered_at 立即标
       // channel='extension' / 群聊 / Meta 配置缺失 → 走 wa_replies，让 Chrome 扩展拉走自己发
       // 不再读 wa_settings.wa_outbound_mode（已 deprecated）
-      const metaToken = (settings.meta_access_token as string) || "";
-      const metaPhoneId = (settings.meta_phone_number_id as string) || "";
-      const metaGraphVer = (settings.meta_graph_version as string) || "v25.0";
       const ttsEnabled = settings.meta_tts_enabled !== false;
       const ttsRelayUrl = (settings.meta_tts_relay_url as string) || "";
       const ttsRelayToken = (settings.meta_tts_relay_token as string) || "";
       const ttsVoiceId = (settings.meta_tts_voice_id as string) || "";
       const ttsLanguage = (settings.meta_tts_language_boost as string) || "";
-      const canMeta = channel === "meta" && !p.is_group && metaToken && metaPhoneId;
 
       let replyId: number | null = null;
       let deliveryNote = "";
@@ -660,6 +885,11 @@ Deno.serve(async (req) => {
         try {
           let deliveryMeta: Record<string, unknown>;
           let wamids: string[];
+
+          const isProductInquiry = isProductInquiryText(p.content || "");
+          const productLinkSupplement = channel === "meta" && !sendMetaText && isProductInquiry
+            ? buildProductLinkSupplement(`${p.content || ""}\n${cleanedReply}`, false)
+            : "";
 
           if (sendMetaText) {
             wamids = await sendViaMetaCloud({
@@ -694,11 +924,12 @@ Deno.serve(async (req) => {
             deliveryNote = `via Meta text (位置/導航) ${wamids.length} wamid${listWamid ? " + station list" : ""}`;
           } else if (ttsEnabled && ttsRelayUrl && ttsRelayToken) {
             try {
+              const ttsText = productLinkSupplement ? (stripUrlsForVoice(cleanedReply) || cleanedReply) : cleanedReply;
               const tts = await sendViaMetaTtsRelay({
                 relayUrl: ttsRelayUrl,
                 relayToken: ttsRelayToken,
                 to: p.customer_id,
-                text: cleanedReply,
+                text: ttsText,
                 graphVersion: metaGraphVer,
                 phoneNumberId: metaPhoneId,
                 accessToken: metaToken,
@@ -712,14 +943,29 @@ Deno.serve(async (req) => {
                 mediaId: tts.mediaId || null,
                 traceId: tts.traceId || null,
                 voiceNote: true,
-                textLength: cleanedReply.length,
+                textLength: ttsText.length,
               };
               deliveryNote = `via Meta TTS ${wamids.length} wamid`;
+              if (productLinkSupplement) {
+                const linkWamids = await sendViaMetaCloud({
+                  to: p.customer_id,
+                  segments: [{ type: "text", content: productLinkSupplement }],
+                  graphVersion: metaGraphVer,
+                  phoneNumberId: metaPhoneId,
+                  accessToken: metaToken,
+                });
+                wamids.push(...linkWamids);
+                deliveryMeta.linkSupplement = {
+                  sent: true,
+                  wamids: linkWamids,
+                };
+                deliveryNote += " + product link";
+              }
             } catch (ttsErr) {
               cloudLog(sb, "错误", `Meta TTS 失败，改发文字 pending#${p.id}：${(ttsErr as Error).message.slice(0, 200)}`, channel);
               wamids = await sendViaMetaCloud({
                 to: p.customer_id,
-                segments,
+                segments: productLinkSupplement ? [...segments, { type: "text", content: productLinkSupplement }] : segments,
                 graphVersion: metaGraphVer,
                 phoneNumberId: metaPhoneId,
                 accessToken: metaToken,
@@ -729,8 +975,9 @@ Deno.serve(async (req) => {
                 fallbackFrom: "meta-tts-relay",
                 fallbackError: (ttsErr as Error).message.slice(0, 200),
                 wamids,
+                linkSupplement: Boolean(productLinkSupplement),
               };
-              deliveryNote = `via Meta text fallback ${wamids.length} wamid`;
+              deliveryNote = `via Meta text fallback ${wamids.length} wamid${productLinkSupplement ? " + product link" : ""}`;
             }
           } else {
             if (ttsEnabled) {
@@ -738,13 +985,13 @@ Deno.serve(async (req) => {
             }
             wamids = await sendViaMetaCloud({
               to: p.customer_id,
-              segments,
+              segments: productLinkSupplement ? [...segments, { type: "text", content: productLinkSupplement }] : segments,
               graphVersion: metaGraphVer,
               phoneNumberId: metaPhoneId,
               accessToken: metaToken,
             });
-            deliveryMeta = { via: "meta-cloud", wamids };
-            deliveryNote = `via Meta ${wamids.length} wamid`;
+            deliveryMeta = { via: "meta-cloud", wamids, linkSupplement: Boolean(productLinkSupplement) };
+            deliveryNote = `via Meta ${wamids.length} wamid${productLinkSupplement ? " + product link" : ""}`;
           }
 
           const replyIns = await sb.from("wa_replies").insert({
