@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabaseClient.js";
 import { useAppContext } from "../context/AppContext.jsx";
 import { useT } from "../i18n.jsx";
 import { Input } from "../components/Inputs.jsx";
+import MetaConfigPanel from "./whatsapp/MetaConfigPanel.jsx";
 
 // 與 App.jsx 同款 fallback（雲端 ext 版本號）
 const LATEST_EXT_VERSION_FALLBACK = "1.3.3";
@@ -37,6 +38,7 @@ export default function WhatsappView() {
   const s = waSettings || {};
   const subNav = [
     { id: "settings",   label: t("設置 / 模式") },
+    { id: "metaConfig", label: t("Meta 配置") },
     { id: "knowledge",  label: t("知識庫") },
     { id: "chargers",   label: t("充電樁 Prompt") },
     { id: "ttsPrompt",  label: t("TTS Prompt") },
@@ -53,10 +55,10 @@ export default function WhatsappView() {
     return true;
   };
   const saveSettings = async (patch) => {
-    if (!guardAdmin()) return;
+    if (!guardAdmin()) return false;
     const newVals = { ...s, ...patch, updated_at: new Date().toISOString() };
     const { error } = await supabase.from("wa_settings").update(patch).eq("id", 1);
-    if (error) { alert(`${t("保存失敗")}：${error.message}`); return; }
+    if (error) { alert(`${t("保存失敗")}：${error.message}`); return false; }
     setWaSettings(newVals);
     queryClient.setQueryData(["bf", "wa_settings"], newVals);
     // fire-and-forget 触发一次 wa-ai-trigger：讓「已超抢答倒計時但還沒等到 cron」的 pending 立即用新 settings 處理
@@ -64,6 +66,7 @@ export default function WhatsappView() {
       method: "POST",
       headers: { Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
     }).catch(() => { /* silent */ });
+    return true;
   };
   const addWhitelist = async (kind, value, note) => {
     if (!guardAdmin()) return;
@@ -380,6 +383,17 @@ export default function WhatsappView() {
               <button onClick={() => saveSettings({ bot_name: s.bot_name, bot_phone: s.bot_phone, boss_chat_name: s.boss_chat_name, reply_delay_base: s.reply_delay_base, cooldown_minutes: s.cooldown_minutes, max_replies_per_min: s.max_replies_per_min, daily_report_hour: s.daily_report_hour })} style={{ padding: "9px 18px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", marginTop: 8 }}>{t("儲存運行參數")}</button>
             </div>
           </div>
+        )}
+
+        {/* META CLOUD API CONFIG */}
+        {waSubTab === "metaConfig" && (
+          <MetaConfigPanel
+            s={s}
+            setWaSettings={setWaSettings}
+            saveSettings={saveSettings}
+            guardAdmin={guardAdmin}
+            t={t}
+          />
         )}
 
         {/* KNOWLEDGE */}
