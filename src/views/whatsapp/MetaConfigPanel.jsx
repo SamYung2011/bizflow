@@ -194,7 +194,7 @@ export default function MetaConfigPanel({
             <option value="extension">{t("Chrome 擴展（舊）")}</option>
             <option value="meta-cloud">{t("Meta 官方接口")}</option>
           </select>
-          <div style={HINT}>{t("以前用這個開關控制「全部消息走 Chrome 擴展、還是走 Meta 官方」。現在改成按聊天自動分流（群聊走擴展、私聊走 Meta），這個開關已經不再生效。保留只為兼容舊配置，不用改。")}</div>
+          <div style={{ fontSize: 11, color: "#888", lineHeight: 1.6, marginTop: 6 }}>{t("以前用這個開關控制「全部消息走 Chrome 擴展、還是走 Meta 官方」。現在改成按聊天自動分流（群聊走擴展、私聊走 Meta），這個開關已經不再生效。保留只為兼容舊配置，不用改。")}</div>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
