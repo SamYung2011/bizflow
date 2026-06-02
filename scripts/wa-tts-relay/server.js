@@ -8,6 +8,23 @@ const { spawnSync } = require("child_process");
 const PORT = Number(process.env.PORT || 8091);
 const RELAY_TOKEN = process.env.WA_TTS_RELAY_TOKEN || "";
 const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || "";
+const SUPABASE_URL = process.env.SUPABASE_URL || "";
+const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+
+async function fetchRelayTokenFromDb() {
+  if (!SUPABASE_URL || !SERVICE_KEY) return null;
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/wa_settings?select=meta_tts_relay_token&id=eq.1`, {
+      headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` },
+    });
+    if (!r.ok) return null;
+    const rows = await r.json();
+    const tok = rows?.[0]?.meta_tts_relay_token;
+    return (typeof tok === "string" && tok.length > 0) ? tok : null;
+  } catch {
+    return null;
+  }
+}
 
 const DEFAULTS = {
   minimaxEndpoint: process.env.MINIMAX_TTS_ENDPOINT || "https://api.minimax.io/v1/t2a_v2",
@@ -33,10 +50,12 @@ function normalizePhone(raw) {
   return String(raw || "").replace(/[^0-9]/g, "");
 }
 
-function assertAuth(req) {
-  if (!RELAY_TOKEN) throw new Error("WA_TTS_RELAY_TOKEN is not configured");
+async function assertAuth(req) {
+  // DB-first（UI 改的 wa_settings.meta_tts_relay_token 立即生效），env fallback 兼容旧部署
+  const expected = (await fetchRelayTokenFromDb()) || RELAY_TOKEN;
+  if (!expected) throw new Error("WA_TTS_RELAY_TOKEN is not configured (DB and env both empty)");
   const got = req.headers["x-relay-token"] || "";
-  if (got !== RELAY_TOKEN) {
+  if (got !== expected) {
     const err = new Error("Unauthorized");
     err.status = 401;
     throw err;
@@ -238,7 +257,7 @@ const server = require("http").createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && req.url === "/send-tts") {
-      assertAuth(req);
+      await assertAuth(req);
       const body = await readJson(req);
       const started = Date.now();
       const result = await sendTtsVoice(body);
