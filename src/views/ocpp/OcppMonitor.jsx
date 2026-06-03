@@ -14,6 +14,7 @@ const CONNECTOR_STATUS_BY_CODE = {
   3: "Unavailable",
   4: "Faulted",
 };
+const FORCE_STOP_STATUSES = new Set(["charging", "suspendedev", "preparing", "occupied"]);
 
 async function callOcppProxy(subPath, { method = "GET", accessToken, body } = {}) {
   const base = import.meta.env.VITE_SUPABASE_URL;
@@ -572,7 +573,11 @@ export default function OcppMonitor({ supabase, session, isAdmin }) {
                 const soc = r.SoC ?? r.Soc;
                 const ts = r.TimeStamp ?? r.timestamp;
                 const lastUpdate = r.LastUpdate ?? r.lastUpdate;
-                const canStop = txId != null;
+                const canStop = !!cpId && FORCE_STOP_STATUSES.has(String(status || "").trim().toLowerCase());
+                const stopTxId = txId ?? 0;
+                const stopTitle = canStop
+                  ? (txId != null ? t("讓樁立即停止充電並斷電流輸出") : t("無 OCPP TxId 時會按 0 強制停止"))
+                  : t("狀態不適合停止充電");
                 const canStart = txId == null && !!cpId && connectorId != null;
                 const canSchedule = !!cpId && connectorId != null;
                 return (
@@ -600,7 +605,7 @@ export default function OcppMonitor({ supabase, session, isAdmin }) {
                       <button onClick={() => setPendingAction({ kind: "start", cpId, connectorId })} disabled={actionBusy || !canStart} title={canStart ? t("讓樁立即開始充電（如果車已接好）") : t("缺少可用槍口或已有交易")} style={btnStyle("#fff", canStart ? "#374151" : "#9ca3af")}>
                         {t("開始充電")}
                       </button>{" "}
-                      <button onClick={() => setPendingAction({ kind: "stop", cpId, connectorId, txId })} disabled={actionBusy || !canStop} title={canStop ? t("讓樁立即停止充電並斷電流輸出") : t("缺少 OCPP TransactionId")} style={btnStyle("#fff", canStop ? "#374151" : "#9ca3af")}>
+                      <button onClick={() => setPendingAction({ kind: "stop", cpId, connectorId, txId: stopTxId })} disabled={actionBusy || !canStop} title={stopTitle} style={btnStyle("#fff", canStop ? "#374151" : "#9ca3af")}>
                         {t("停止充電")}
                       </button>{" "}
                       <button onClick={() => setPendingAction({ kind: "schedule", cpId, connectorId })} disabled={actionBusy || !canSchedule} title={canSchedule ? t("在指定時間自動開始充電") : t("缺少可用槍口")} style={btnStyle("#fff", canSchedule ? "#374151" : "#9ca3af")}>
@@ -663,7 +668,7 @@ export default function OcppMonitor({ supabase, session, isAdmin }) {
           } else if (kind === "unlock") {
             runCommand({ cpId, connectorId, command: "UnlockConnector" });
           } else if (kind === "stop") {
-            // 後端 cmd 名按 vendor 兼容（小寫 stopcharge），TransactionId 必須是 OCPP 數字 id
+            // 後端 cmd 名按 vendor 兼容（小寫 stopcharge）；Troy 桩无 TxId 时用 0 force-stop。
             runCommand({ cpId, connectorId, command: "stopcharge", params: { TransactionId: txId } });
           }
         }}
