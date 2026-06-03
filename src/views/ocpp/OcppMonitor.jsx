@@ -117,6 +117,29 @@ function fmtTs(...candidates) {
   return fallback ? String(fallback) : "—";
 }
 
+function fmtLocalTs(...candidates) {
+  for (const raw of candidates) {
+    const d = coerceDate(raw);
+    if (!d || Number.isNaN(d.getTime()) || d.getUTCFullYear() < 1900) continue;
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Hong_Kong",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(d).reduce((acc, part) => {
+      if (part.type !== "literal") acc[part.type] = part.value;
+      return acc;
+    }, {});
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+  }
+  const fallback = candidates.find((v) => v != null && v !== "");
+  return fallback ? String(fallback) : "—";
+}
+
 function fmtNum(n, unit = "", digits = 2) {
   if (n == null || Number.isNaN(Number(n))) return "—";
   return `${Number(n).toFixed(digits)}${unit}`;
@@ -156,6 +179,7 @@ function normalizeSchedules(data) {
     status: scheduleField(row, "Status"),
     result: scheduleField(row, "Result"),
     triggeredAt: scheduleField(row, "TriggeredAt"),
+    createdAt: scheduleField(row, "CreatedAt"),
     comment: scheduleField(row, "Comment"),
   }));
 }
@@ -681,7 +705,7 @@ export default function OcppMonitor({ supabase, session, isAdmin }) {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ background: "#fafafa", textAlign: "left" }}>
-                  {[t("預約 ID"), t("樁 ID"), t("槍號"), t("Tag"), t("預約時間"), t("狀態"), t("結果"), t("觸發時間"), t("備註"), t("操作")].map((h) => (
+                  {[t("預約 ID"), t("樁 ID"), t("槍號"), t("Tag"), t("預約時間"), t("建立時間"), t("狀態"), t("結果"), t("觸發時間"), t("備註"), t("操作")].map((h) => (
                     <th key={h} style={{ padding: "8px 10px", borderBottom: "1px solid #eee", fontWeight: 600, color: "#555" }}>{h}</th>
                   ))}
                 </tr>
@@ -697,14 +721,15 @@ export default function OcppMonitor({ supabase, session, isAdmin }) {
                       <td style={{ padding: "8px 10px", fontFamily: "monospace" }}>{s.chargePointId || "—"}</td>
                       <td style={{ padding: "8px 10px" }}>{s.connectorId ?? "—"}</td>
                       <td style={{ padding: "8px 10px", fontFamily: "monospace", fontSize: 12 }}>{s.tagId || "—"}</td>
-                      <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{fmtTs(s.scheduledTime)}</td>
+                      <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{fmtLocalTs(s.scheduledTime)}</td>
+                      <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{fmtLocalTs(s.createdAt)}</td>
                       <td style={{ padding: "8px 10px" }}>
                         <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: 999, background: palette.bg, color: palette.color, border: `1px solid ${palette.border}`, fontSize: 12, fontWeight: 600 }}>
                           {scheduleStatusLabel(s.status, t)}
                         </span>
                       </td>
                       <td style={{ padding: "8px 10px" }}>{s.result || "—"}</td>
-                      <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{fmtTs(s.triggeredAt)}</td>
+                      <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>{fmtLocalTs(s.triggeredAt)}</td>
                       <td style={{ padding: "8px 10px", maxWidth: 240, color: "#666" }}>{s.comment || "—"}</td>
                       <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
                         <button onClick={() => setPendingCancelSchedule(s)} disabled={actionBusy || !canCancel} title={canCancel ? t("取消尚未執行的預約") : t("只有待執行的預約可以取消")} style={btnStyle("#fff", canCancel ? "#374151" : "#9ca3af")}>
