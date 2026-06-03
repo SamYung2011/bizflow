@@ -107,16 +107,6 @@ function coerceDate(raw) {
   return null;
 }
 
-function fmtTs(...candidates) {
-  for (const raw of candidates) {
-    const d = coerceDate(raw);
-    if (!d || Number.isNaN(d.getTime()) || d.getUTCFullYear() < 1900) continue;
-    return d.toISOString().replace("T", " ").slice(0, 19);
-  }
-  const fallback = candidates.find((v) => v != null && v !== "");
-  return fallback ? String(fallback) : "—";
-}
-
 function fmtLocalTs(...candidates) {
   for (const raw of candidates) {
     const d = coerceDate(raw);
@@ -540,7 +530,7 @@ export default function OcppMonitor({ supabase, session, isAdmin }) {
           {t("每 30 秒自動刷新")}
         </label>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "#888" }}>
-          {lastRefresh ? `${t("最後刷新")}: ${fmtTs(lastRefresh)}` : t("尚未刷新")}
+          {lastRefresh ? `${t("最後刷新")}: ${fmtLocalTs(lastRefresh)}` : t("尚未刷新")}
         </span>
       </div>
 
@@ -599,7 +589,7 @@ export default function OcppMonitor({ supabase, session, isAdmin }) {
                     <td style={{ padding: "8px 10px", fontFamily: "monospace", fontSize: 12, color: "#666" }}>{orderId || "—"}</td>
                     <td style={{ padding: "8px 10px", fontFamily: "monospace", fontSize: 12, color: "#666" }}>{tagId || "—"}</td>
                     <td style={{ padding: "8px 10px", fontFamily: "monospace", fontSize: 12, color: "#666" }}>{txId ?? "—"}</td>
-                    <td style={{ padding: "8px 10px", fontSize: 12, color: "#888" }}>{fmtTs(ts, lastUpdate)}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 12, color: "#888" }}>{fmtLocalTs(ts, lastUpdate)}</td>
                     <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
                       <button title={t("讓樁端 OCPP 通信重啟，不影響物理充電")} onClick={() => setPendingAction({ kind: "reset", cpId, connectorId })} disabled={actionBusy || !cpId} style={btnStyle("#fff", "#374151")}>
                         {t("重啟")}
