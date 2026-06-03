@@ -7,6 +7,7 @@ const OcppChargingView = lazy(() => import("./views/ocpp/OcppCharging.jsx"));
 const OcppReportsView = lazy(() => import("./views/ocpp/OcppReports.jsx"));
 const ChargeUsersView = lazy(() => import("./views/ocpp/ChargeUsers.jsx"));
 const OcppFinanceView = lazy(() => import("./views/ocpp/finance/OcppFinance.jsx"));
+const OcppFirmwareView = lazy(() => import("./views/ocpp/OcppFirmware.jsx"));
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase, fetchAllTable } from "./lib/supabaseClient.js";
 import { isNonWarrantyItem, itemWarrantyMonths } from "./lib/warranty.js";
@@ -1045,6 +1046,7 @@ export default function App() {
       { id: "ocppReports", label: t("充電報表"), icon: "charger" },
       { id: "chargeUsers", label: t("用戶信息"), icon: "charger" },
       { id: "ocppFinance", label: t("OCPP 財務"), icon: "charger" },
+      { id: "ocppFirmware", label: t("韌體管理"), icon: "charger" },
     ]}] : []),
     { type: "single", id: "gototeam", label: t("團隊管理"), icon: "external", external: "https://team.honnmono.top" },
   ];
@@ -2021,6 +2023,15 @@ export default function App() {
         {tab === "ocppFinance" && (
           <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入 OCPP 財務…")}</div>}>
             <OcppFinanceView
+              session={session}
+              isAdmin={isBfAdmin}
+            />
+          </Suspense>
+        )}
+
+        {tab === "ocppFirmware" && (
+          <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入韌體管理…")}</div>}>
+            <OcppFirmwareView
               session={session}
               isAdmin={isBfAdmin}
             />
