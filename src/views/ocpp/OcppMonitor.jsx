@@ -7,6 +7,13 @@ import { useT } from "../../i18n.jsx";
 
 const REFRESH_INTERVAL_MS = 30_000;
 const PROXY_PATH = "/ocpp-proxy";
+const CONNECTOR_STATUS_BY_CODE = {
+  0: "Undefined",
+  1: "Available",
+  2: "Occupied",
+  3: "Unavailable",
+  4: "Faulted",
+};
 
 async function callOcppProxy(subPath, { method = "GET", accessToken, body } = {}) {
   const base = import.meta.env.VITE_SUPABASE_URL;
@@ -40,15 +47,17 @@ function normalizeStatusRows(data) {
   return data.flatMap((cp) => {
     const cpId = cp.ChargePointId || cp.chargePointId || cp.id || cp.Id || "";
     const protocol = cp.protocol || cp.Protocol;
+    const lastUpdate = cp.lastUpdate ?? cp.LastUpdate ?? cp.LastUpdateUnix ?? cp.last_update ?? null;
     const connectors = cp.OnlineConnectors || cp.onlineConnectors;
     if (!connectors || typeof connectors !== "object" || Object.keys(connectors).length === 0) {
-      return [{ ChargePointId: cpId, Protocol: protocol }];
+      return [{ ChargePointId: cpId, Protocol: protocol, LastUpdate: lastUpdate }];
     }
     return Object.entries(connectors).map(([key, value]) => ({
       ...(value || {}),
       ChargePointId: (value && value.ChargePointId) || cpId,
       ConnectorId: value && value.ConnectorId != null ? value.ConnectorId : Number(key),
       Protocol: protocol,
+      LastUpdate: (value && (value.LastUpdate ?? value.lastUpdate)) ?? lastUpdate,
     }));
   });
 }
@@ -64,13 +73,48 @@ function parseTxId(raw) {
   return null;
 }
 
-function fmtTs(ts) {
-  if (!ts) return "—";
+function normalizeConnectorStatus(status) {
+  if (status == null || status === "") return "";
+  if (typeof status === "number" && Number.isFinite(status)) {
+    return CONNECTOR_STATUS_BY_CODE[status] || String(status);
+  }
+  if (typeof status === "string" && /^\d+$/.test(status.trim())) {
+    const code = Number(status.trim());
+    return CONNECTOR_STATUS_BY_CODE[code] || status;
+  }
+  return String(status);
+}
+
+function coerceDate(raw) {
+  if (raw == null || raw === "") return null;
   try {
-    const d = new Date(ts);
-    if (Number.isNaN(d.getTime())) return String(ts);
+    if (raw instanceof Date) return Number.isNaN(raw.getTime()) ? null : raw;
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      return new Date(raw > 10_000_000_000 ? raw : raw * 1000);
+    }
+    if (typeof raw === "string") {
+      const trimmed = raw.trim();
+      if (!trimmed) return null;
+      if (/^\d+$/.test(trimmed)) {
+        const n = Number(trimmed);
+        return new Date(n > 10_000_000_000 ? n : n * 1000);
+      }
+      return new Date(trimmed);
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function fmtTs(...candidates) {
+  for (const raw of candidates) {
+    const d = coerceDate(raw);
+    if (!d || Number.isNaN(d.getTime()) || d.getUTCFullYear() < 1900) continue;
     return d.toISOString().replace("T", " ").slice(0, 19);
-  } catch { return String(ts); }
+  }
+  const fallback = candidates.find((v) => v != null && v !== "");
+  return fallback ? String(fallback) : "—";
 }
 
 function fmtNum(n, unit = "", digits = 2) {
@@ -123,6 +167,51 @@ function ConfirmModal({ open, title, body, onConfirm, onCancel, t, busy }) {
             {t("取消")}
           </button>
           <button onClick={onConfirm} disabled={busy} style={{ padding: "6px 16px", borderRadius: 6, border: "none", background: busy ? "#9ca3af" : "#1976d2", color: "#fff", cursor: busy ? "default" : "pointer", fontSize: 13, fontWeight: 600 }}>
+            {busy ? t("處理中…") : t("確認")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RemoteStartModal({ open, action, onConfirm, onCancel, t, busy }) {
+  const [tagId, setTagId] = useState("");
+
+  useEffect(() => {
+    if (open) setTagId("");
+  }, [open]);
+
+  if (!open || !action) return null;
+  const trimmed = tagId.trim();
+  const id = action.cpId + (action.connectorId != null ? ` / ${action.connectorId}` : "");
+
+  return (
+    <div onClick={busy ? undefined : onCancel} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 999, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 8, padding: "20px 24px", minWidth: 360, maxWidth: 500, boxShadow: "0 12px 32px rgba(0,0,0,0.2)" }}>
+        <h3 style={{ margin: "0 0 12px", fontSize: 16, fontWeight: 600 }}>{t("確認遠程啟動充電？")}</h3>
+        <p style={{ margin: "0 0 14px", fontSize: 13, color: "#555", lineHeight: 1.5 }}>
+          {t("將下發遠程啟動指令（OCPP RemoteStartTransaction）")}: {id}
+        </p>
+        <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>
+          {t("Tag（IdTag）")}
+        </label>
+        <input
+          autoFocus
+          value={tagId}
+          onChange={(e) => setTagId(e.target.value)}
+          placeholder={t("請輸入 IdTag")}
+          disabled={busy}
+          style={{ width: "100%", boxSizing: "border-box", border: "1px solid #d1d5db", borderRadius: 6, padding: "8px 10px", fontSize: 14, marginBottom: 8 }}
+        />
+        <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.45, marginBottom: 18 }}>
+          {t("測試階段樁端不校驗，任意字串即可")}
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button onClick={onCancel} disabled={busy} style={{ padding: "6px 16px", borderRadius: 6, border: "1px solid #ddd", background: "#fafafa", cursor: busy ? "default" : "pointer", fontSize: 13 }}>
+            {t("取消")}
+          </button>
+          <button onClick={() => onConfirm(trimmed)} disabled={busy || !trimmed} style={{ padding: "6px 16px", borderRadius: 6, border: "none", background: busy || !trimmed ? "#9ca3af" : "#1976d2", color: "#fff", cursor: busy || !trimmed ? "default" : "pointer", fontSize: 13, fontWeight: 600 }}>
             {busy ? t("處理中…") : t("確認")}
           </button>
         </div>
@@ -254,14 +343,16 @@ export default function OcppMonitor({ supabase, session, isAdmin }) {
                 const orderId = r.Order_Id || r.OrderId || r.order_id || "";
                 const tagId = r.TagId || r.tagId || "";
                 const txId = parseTxId(r.TransactionId ?? r.transactionId);
-                const status = r.Status || r.status || "";
+                const status = normalizeConnectorStatus(r.Status ?? r.status ?? "");
                 const power = r.PowerActiveImport ?? r.Power ?? r.ChargeRateKW;
                 const energy = r.EnergyActiveImportRegister ?? r.Energy ?? r.MeterKWH;
                 const voltage = r.Voltage;
                 const current = r.CurrentImport ?? r.Current;
                 const soc = r.SoC ?? r.Soc;
-                const ts = r.TimeStamp || r.timestamp || r.LastUpdate;
+                const ts = r.TimeStamp ?? r.timestamp;
+                const lastUpdate = r.LastUpdate ?? r.lastUpdate;
                 const canStop = txId != null;
+                const canStart = txId == null && !!cpId && connectorId != null;
                 return (
                   <tr key={`${cpId}:${connectorId}:${idx}`} style={{ borderBottom: "1px solid #f3f4f6" }}>
                     <td style={{ padding: "8px 10px", fontFamily: "monospace" }}>{cpId || "—"}</td>
@@ -275,7 +366,7 @@ export default function OcppMonitor({ supabase, session, isAdmin }) {
                     <td style={{ padding: "8px 10px", fontFamily: "monospace", fontSize: 12, color: "#666" }}>{orderId || "—"}</td>
                     <td style={{ padding: "8px 10px", fontFamily: "monospace", fontSize: 12, color: "#666" }}>{tagId || "—"}</td>
                     <td style={{ padding: "8px 10px", fontFamily: "monospace", fontSize: 12, color: "#666" }}>{txId ?? "—"}</td>
-                    <td style={{ padding: "8px 10px", fontSize: 12, color: "#888" }}>{fmtTs(ts)}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 12, color: "#888" }}>{fmtTs(ts, lastUpdate)}</td>
                     <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}>
                       <button onClick={() => setPendingAction({ kind: "reset", cpId, connectorId })} disabled={actionBusy || !cpId} style={btnStyle("#fff", "#374151")}>
                         {t("重啟")}
@@ -283,7 +374,7 @@ export default function OcppMonitor({ supabase, session, isAdmin }) {
                       <button onClick={() => setPendingAction({ kind: "unlock", cpId, connectorId })} disabled={actionBusy || !cpId || connectorId == null} style={btnStyle("#fff", "#374151")}>
                         {t("解鎖")}
                       </button>{" "}
-                      <button disabled title={t("需要 Tag 輸入框（後續實現）")} style={btnStyle("#f9fafb", "#9ca3af")}>
+                      <button onClick={() => setPendingAction({ kind: "start", cpId, connectorId })} disabled={actionBusy || !canStart} title={canStart ? "" : t("缺少可用槍口或已有交易")} style={btnStyle("#fff", canStart ? "#374151" : "#9ca3af")}>
                         {t("遠程啟動")}
                       </button>{" "}
                       <button onClick={() => setPendingAction({ kind: "stop", cpId, connectorId, txId })} disabled={actionBusy || !canStop} title={canStop ? "" : t("缺少 OCPP TransactionId")} style={btnStyle("#fff", canStop ? "#374151" : "#9ca3af")}>
@@ -298,8 +389,25 @@ export default function OcppMonitor({ supabase, session, isAdmin }) {
         </div>
       )}
 
+      <RemoteStartModal
+        open={pendingAction?.kind === "start"}
+        action={pendingAction}
+        busy={actionBusy}
+        onCancel={() => setPendingAction(null)}
+        onConfirm={(tagId) => {
+          if (!pendingAction) return;
+          runCommand({
+            cpId: pendingAction.cpId,
+            connectorId: pendingAction.connectorId,
+            command: "startcharge",
+            params: { TagId: tagId },
+          });
+        }}
+        t={t}
+      />
+
       <ConfirmModal
-        open={!!pendingAction}
+        open={!!pendingAction && pendingAction.kind !== "start"}
         busy={actionBusy}
         title={pendingAction ? confirmTitle(pendingAction, t) : ""}
         body={pendingAction ? confirmBody(pendingAction, t) : ""}
