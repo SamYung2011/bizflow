@@ -1807,7 +1807,7 @@ export default function App() {
             <div style={{ color: "#fff", fontSize: 12, fontWeight: 600 }}>{warrantyAlerts.length} {t("件保修需跟進")}</div>
           </div>
         )}
-        <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 2, overflowY: "auto" }}>
+        <nav className="sidebar-scroll" style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 2, overflowY: "auto" }}>
           {navItems.map(n => {
             // 单项：直接渲染按钮
             if (n.type !== "group") {
