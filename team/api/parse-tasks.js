@@ -55,12 +55,13 @@ export default async function handler(req, res) {
 
   const { data: emp } = await admin
     .from('employees')
-    .select('id')
+    .select('id, name')
     .eq('user_id', userId)
     .maybeSingle()
   if (!emp) {
     return res.status(403).json({ error: 'no employee binding' })
   }
+  const meName = (emp.name || '').trim() || '當前用戶'
 
   const { data: bindings } = await admin
     .from('employee_companies')
@@ -79,12 +80,23 @@ export default async function handler(req, res) {
   if (!enabledCompanies || enabledCompanies.length === 0) {
     return res.status(403).json({ error: 'feature not enabled for your company' })
   }
+  const enabledCompanyIds = enabledCompanies.map(c => c.id)
 
   const { data: depts } = await admin
     .from('departments')
     .select('name')
-    .in('company_id', enabledCompanies.map(c => c.id))
+    .in('company_id', enabledCompanyIds)
   const deptNames = [...new Set((depts || []).map(d => d.name).filter(Boolean))]
+
+  const { data: coBindings } = await admin
+    .from('employee_companies')
+    .select('employee_id, employees!inner(name)')
+    .in('company_id', enabledCompanyIds)
+  const colleagueNames = [...new Set(
+    (coBindings || [])
+      .map(b => b.employees?.name?.trim())
+      .filter(name => name && name !== meName)
+  )]
 
   const { data: settings, error: setErr } = await admin
     .from('wa_settings')
@@ -101,6 +113,14 @@ export default async function handler(req, res) {
   const today = new Date().toISOString().slice(0, 10)
   const sysPrompt = `你是任務整理助手。用戶會給你一段非結構化文案（會議記錄、待辦清單、群聊截圖文字等），請拆解成獨立的任務項。
 
+當前操作者：${meName}
+- 文案中的「我」「咱」「咱們」一律指代 ${meName}
+- description 中**必須**把這些代詞替換成「${meName}」，方便他人閱讀；不要保留「我」「咱」這類第一人稱
+
+同公司同事名單（文案中可能出現的人名）：${colleagueNames.length ? colleagueNames.join('、') : '無'}
+- 文案出現的人名如果在這個列表裡，保留為該名字（不要改寫、不要意譯）
+- 不在列表的人名（例如「sam 哥」「老板」「客戶 KC」等外部人物或代稱）原樣保留即可
+
 可選部門列表（如果無法確定就填 null）：${deptNames.length ? deptNames.join(' / ') : '無'}
 
 優先級規則：
@@ -116,7 +136,7 @@ export default async function handler(req, res) {
 返回格式：必須是合法 JSON，不要 markdown 圍籬，不要其他文字。Schema：
 {"tasks": [{"title": "...", "description": "...", "department_name": "..." | null, "due_date": "YYYY-MM-DD" | null, "priority": "high" | "mid" | "low"}]}
 
-title 簡短（≤30 字），description 補充細節（可空字串）。盡量保留原文要點。`
+title 簡短（≤30 字），description 寫清楚「誰做什麼、為什麼」（不要光是抄文案，把代詞換成名字）。`
 
   let upstream
   try {
