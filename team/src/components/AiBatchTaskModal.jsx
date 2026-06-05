@@ -51,6 +51,7 @@ export default function AiBatchTaskModal({
   const [cards, setCards] = useState([])
   const [activeIndex, setActiveIndex] = useState(0)
   const [expandedId, setExpandedId] = useState(null)
+  const [hoveredId, setHoveredId] = useState(null)
   const touchStartX = useRef(null)
 
   const deptByName = useMemo(() => {
@@ -151,6 +152,17 @@ export default function AiBatchTaskModal({
     moveActive(dx < 0 ? 1 : -1)
   }
 
+  const requestClose = () => {
+    if (cards.length > 0 && !window.confirm(t('關閉會丟失整理結果，確認嗎？'))) return
+    onClose()
+  }
+
+  const handleCardClick = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    moveActive(x < rect.width / 2 ? -1 : 1)
+  }
+
   const submit = async () => {
     if (confirmDisabled) return
     if (!companyId) {
@@ -215,20 +227,22 @@ export default function AiBatchTaskModal({
         const offset = idx - activeIndex
         const distance = Math.abs(offset)
         const isActive = idx === activeIndex
+        const isHovered = hoveredId === card.id
         const hidden = distance > 3
         return (
           <button
             key={card.id}
             type="button"
-            onMouseEnter={() => { setActiveIndex(idx); setExpandedId(card.id) }}
-            onClick={() => { setActiveIndex(idx); setExpandedId(expandedId === card.id ? null : card.id) }}
+            onMouseEnter={() => setHoveredId(card.id)}
+            onMouseLeave={() => setHoveredId(prev => prev === card.id ? null : prev)}
+            onClick={handleCardClick}
             style={{
               position: 'absolute',
               inset: isNarrow ? '0 10px auto' : '8px 18px auto',
               minHeight: isNarrow ? 190 : 250,
               transform: isNarrow
-                ? `translateX(${offset * 14}px) translateY(${distance * 8}px) rotate(${offset * 1.5}deg)`
-                : `translateX(${offset * 20}px) translateY(${distance * 16}px) rotate(${offset * 2.2}deg)`,
+                ? `translateX(${offset * 14}px) translateY(${distance * 8 - (isHovered ? 4 : 0)}px) rotate(${offset * 1.5}deg)`
+                : `translateX(${offset * 20}px) translateY(${distance * 16 - (isHovered ? 4 : 0)}px) rotate(${offset * 2.2}deg)`,
               opacity: hidden ? 0 : 1 - distance * 0.18,
               zIndex: 20 - distance,
               pointerEvents: hidden ? 'none' : 'auto',
@@ -240,7 +254,9 @@ export default function AiBatchTaskModal({
               borderRadius: radius.lg,
               padding: 16,
               cursor: 'pointer',
-              boxShadow: isActive ? '0 18px 45px rgba(37,99,235,0.16)' : '0 8px 22px rgba(0,0,0,0.08)',
+              boxShadow: isActive
+                ? (isHovered ? '0 22px 52px rgba(37,99,235,0.2)' : '0 18px 45px rgba(37,99,235,0.16)')
+                : (isHovered ? '0 14px 34px rgba(0,0,0,0.13)' : '0 8px 22px rgba(0,0,0,0.08)'),
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
@@ -312,14 +328,14 @@ export default function AiBatchTaskModal({
   ) : null
 
   return (
-    <div style={S.modal} onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div style={{ ...S.modalCard(980), padding: 0, overflow: 'hidden' }}>
+    <div style={S.modal}>
+      <div style={{ ...S.modalCard(980), padding: 0, overflowY: 'auto' }}>
         <div style={{ padding: '18px 20px', borderBottom: `1px solid ${c.border}`, display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 18, fontWeight: 800 }}>{t('AI 整理發布任務')}</div>
             <div style={{ fontSize: 12, color: c.textMuted, marginTop: 4 }}>{t('AI 只整理內容，不會自動指定負責人。請在預覽卡片手動 @ 成員。')}</div>
           </div>
-          <button type="button" onClick={onClose} style={{ ...S.iconBtn, fontSize: 20 }} title={t('取消')}>×</button>
+          <button type="button" onClick={requestClose} style={{ ...S.iconBtn, fontSize: 20 }} title={t('取消')}>×</button>
         </div>
 
         {stage === 'input' ? (
@@ -334,7 +350,7 @@ export default function AiBatchTaskModal({
             />
             {error && <div style={{ color: c.red, background: c.redBg, border: `1px solid #fecaca`, borderRadius: radius.sm, padding: 9, fontSize: 12, marginBottom: 10 }}>{error}</div>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button type="button" onClick={onClose} style={S.btnGhost}>{t('取消')}</button>
+              <button type="button" onClick={requestClose} style={S.btnGhost}>{t('取消')}</button>
               <button type="button" onClick={parseTasks} disabled={parseBusy || !text.trim()} style={{ ...S.btnPrimary, opacity: parseBusy || !text.trim() ? 0.45 : 1 }}>
                 {parseBusy ? t('整理中…') : t('AI 整理')}
               </button>
@@ -345,7 +361,7 @@ export default function AiBatchTaskModal({
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
               <div>
                 <div style={{ fontSize: 15, fontWeight: 800 }}>{t('抽卡預覽')}</div>
-                <div style={{ fontSize: 12, color: c.textMuted, marginTop: 3 }}>{t('點擊卡片展開編輯，手機可左右滑動切換')}</div>
+                <div style={{ fontSize: 12, color: c.textMuted, marginTop: 3 }}>{t('點擊卡片左半切上一張，右半切下一張；手機可左右滑動切換')}</div>
               </div>
               <div style={{ display: 'flex', gap: 6 }}>
                 <button type="button" onClick={() => moveActive(-1)} disabled={activeIndex === 0} style={{ ...S.btnGhostSm, opacity: activeIndex === 0 ? 0.4 : 1 }}>{t('上一張')}</button>
@@ -362,7 +378,7 @@ export default function AiBatchTaskModal({
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
               <button type="button" onClick={() => setStage('input')} style={S.btnGhost}>{t('返回修改文案')}</button>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button type="button" onClick={onClose} style={S.btnGhost}>{t('取消')}</button>
+                <button type="button" onClick={requestClose} style={S.btnGhost}>{t('取消')}</button>
                 <button type="button" onClick={submit} disabled={confirmDisabled} style={{ ...S.btnPrimary, opacity: confirmDisabled ? 0.45 : 1 }}>
                   {createBusy ? t('正在建立…') : t('確認建立')}
                 </button>

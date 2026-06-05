@@ -342,7 +342,7 @@ const DICT_EN = {
   "未解析到任務，請補充更多內容": "No tasks were parsed. Add more detail and try again.",
   "AI 整理失敗：": "AI organization failed: ",
   "抽卡預覽": "Card preview",
-  "點擊卡片展開編輯，手機可左右滑動切換": "Click a card to expand and edit. Swipe on mobile to switch cards.",
+  "點擊卡片左半切上一張，右半切下一張；手機可左右滑動切換": "Click the left half for the previous card, the right half for the next card. Swipe on mobile to switch.",
   "任務 {index} / {total}": "Task {index} / {total}",
   "未命名任務": "Untitled task",
   "沒有描述": "No description",
@@ -361,6 +361,7 @@ const DICT_EN = {
   "已建立 {count} 個任務": "Created {count} tasks",
   "任務建立數量不一致，請刷新後檢查": "Task creation count mismatch. Refresh and check the board.",
   "建立批量任務失敗：": "Failed to create batch tasks: ",
+  "關閉會丟失整理結果，確認嗎？": "Closing will discard the organized results. Continue?",
 };
 
 const DICT_FR = {
@@ -700,7 +701,7 @@ const DICT_FR = {
   "未解析到任務，請補充更多內容": "Aucune tâche détectée. Ajoutez plus de détails et réessayez.",
   "AI 整理失敗：": "Échec de l'organisation IA : ",
   "抽卡預覽": "Aperçu des cartes",
-  "點擊卡片展開編輯，手機可左右滑動切換": "Cliquez une carte pour l'éditer. Balayez sur mobile pour changer de carte.",
+  "點擊卡片左半切上一張，右半切下一張；手機可左右滑動切換": "Cliquez la moitié gauche pour la carte précédente, la moitié droite pour la suivante. Balayez sur mobile pour changer.",
   "任務 {index} / {total}": "Tâche {index} / {total}",
   "未命名任務": "Tâche sans titre",
   "沒有描述": "Aucune description",
@@ -719,6 +720,7 @@ const DICT_FR = {
   "已建立 {count} 個任務": "{count} tâches créées",
   "任務建立數量不一致，請刷新後檢查": "Le nombre de tâches créées ne correspond pas. Actualisez et vérifiez le tableau.",
   "建立批量任務失敗：": "Échec de la création en lot : ",
+  "關閉會丟失整理結果，確認嗎？": "La fermeture supprimera les résultats organisés. Continuer ?",
 };
 
 const I18nContext = createContext({ lang: "zh", setLang: () => {}, t: (s) => s });
