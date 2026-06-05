@@ -1,10 +1,11 @@
 import React, { useEffect, useState, lazy, Suspense } from "react";
 import { useT } from "../../../i18n.jsx";
 
-// OCPP 財務 hub — 5 sub-tab 容器（充值訂單 / 用戶錢包 / 運營商 / 平台 / 提現）
+// OCPP 財務 hub — 6 sub-tab 容器（充值訂單 / 退款 / 用戶錢包 / 運營商 / 平台 / 提現）
 // 每個 sub-tab 獨立文件，按需 lazy load 防止 hub 一加載就把全部子組件拉滿
 // 已訪問 tab 用 display:none 保活，切回不重卸載；active prop 邊沿檢測在隱藏→顯示時 refresh
 const Recharges = lazy(() => import("./Recharges.jsx"));
+const Refunds = lazy(() => import("./Refunds.jsx"));
 const UserMoneyLogs = lazy(() => import("./UserMoneyLogs.jsx"));
 const OperatorMoneyLogs = lazy(() => import("./OperatorMoneyLogs.jsx"));
 const PlatformMoneyLogs = lazy(() => import("./PlatformMoneyLogs.jsx"));
@@ -12,6 +13,7 @@ const Withdrawals = lazy(() => import("./Withdrawals.jsx"));
 
 const SUB_TABS = [
   { id: "recharges", labelKey: "充值訂單" },
+  { id: "refunds", labelKey: "退款" },
   { id: "userMoneyLogs", labelKey: "用戶錢包" },
   { id: "operatorMoneyLogs", labelKey: "運營商流水" },
   { id: "platformMoneyLogs", labelKey: "平台流水" },
@@ -70,6 +72,7 @@ export default function OcppFinance(props) {
 
       <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#888" }}>{t("載入中…")}</div>}>
         {visitedTabs.has("recharges") && <div style={{ display: subTab === "recharges" ? "block" : "none" }}><Recharges {...props} active={subTab === "recharges"} /></div>}
+        {visitedTabs.has("refunds") && <div style={{ display: subTab === "refunds" ? "block" : "none" }}><Refunds {...props} active={subTab === "refunds"} /></div>}
         {visitedTabs.has("userMoneyLogs") && <div style={{ display: subTab === "userMoneyLogs" ? "block" : "none" }}><UserMoneyLogs {...props} active={subTab === "userMoneyLogs"} /></div>}
         {visitedTabs.has("operatorMoneyLogs") && <div style={{ display: subTab === "operatorMoneyLogs" ? "block" : "none" }}><OperatorMoneyLogs {...props} active={subTab === "operatorMoneyLogs"} /></div>}
         {visitedTabs.has("platformMoneyLogs") && <div style={{ display: subTab === "platformMoneyLogs" ? "block" : "none" }}><PlatformMoneyLogs {...props} active={subTab === "platformMoneyLogs"} /></div>}

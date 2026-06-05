@@ -11,8 +11,10 @@
 //   GET /ocpp-admin/orders/{userId}/{orderId}
 //   GET /ocpp-admin/command-logs
 //   GET /ocpp-admin/charge-users
+//   GET /ocpp-admin/charge-user-tags
 //   GET /ocpp-admin/firmware
 //   GET /ocpp-admin/finance/recharges
+//   GET /ocpp-admin/finance/refunds
 //   GET /ocpp-admin/finance/user-money-logs
 //   GET /ocpp-admin/finance/operator-money-logs
 //   GET /ocpp-admin/finance/platform-money-logs
@@ -167,8 +169,10 @@ function mapPath(pathname: string) {
   if (/^\/orders\/\d+\/\d+$/.test(pathname)) return `/api${pathname}`;
   if (pathname === "/command-logs") return "/api/command-logs";
   if (pathname === "/charge-users") return "/api/charge-users";
+  if (pathname === "/charge-user-tags") return "/api/charge-user-tags";
   if (pathname === "/firmware") return "/api/firmware";
   if (pathname === "/finance/recharges") return "/api/finance/recharges";
+  if (pathname === "/finance/refunds") return "/api/finance/refunds";
   if (pathname === "/finance/user-money-logs") return "/api/finance/user-money-logs";
   if (pathname === "/finance/operator-money-logs") return "/api/finance/operator-money-logs";
   if (pathname === "/finance/platform-money-logs") return "/api/finance/platform-money-logs";

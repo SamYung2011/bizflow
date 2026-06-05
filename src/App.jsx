@@ -6,6 +6,7 @@ const OcppMonitorView = lazy(() => import("./views/ocpp/OcppMonitor.jsx"));
 const OcppChargingView = lazy(() => import("./views/ocpp/OcppCharging.jsx"));
 const OcppReportsView = lazy(() => import("./views/ocpp/OcppReports.jsx"));
 const ChargeUsersView = lazy(() => import("./views/ocpp/ChargeUsers.jsx"));
+const ChargeUserTagsView = lazy(() => import("./views/ocpp/ChargeUserTags.jsx"));
 const OcppFinanceView = lazy(() => import("./views/ocpp/finance/OcppFinance.jsx"));
 const OcppFirmwareView = lazy(() => import("./views/ocpp/OcppFirmware.jsx"));
 import { useQueryClient } from "@tanstack/react-query";
@@ -1045,6 +1046,7 @@ export default function App() {
       { id: "ocppCharging", label: t("OCPP 充電站"), icon: "charger" },
       { id: "ocppReports", label: t("充電報表"), icon: "charger" },
       { id: "chargeUsers", label: t("用戶信息"), icon: "charger" },
+      { id: "chargeUserTags", label: t("RFID 卡"), icon: "charger" },
       { id: "ocppFinance", label: t("OCPP 財務"), icon: "charger" },
       { id: "ocppFirmware", label: t("韌體管理"), icon: "charger" },
     ]}] : []),
@@ -2014,6 +2016,15 @@ export default function App() {
         {tab === "chargeUsers" && (
           <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入用戶信息…")}</div>}>
             <ChargeUsersView
+              session={session}
+              isAdmin={isBfAdmin}
+            />
+          </Suspense>
+        )}
+
+        {tab === "chargeUserTags" && (
+          <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入 RFID 卡…")}</div>}>
+            <ChargeUserTagsView
               session={session}
               isAdmin={isBfAdmin}
             />
