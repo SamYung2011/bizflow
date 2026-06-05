@@ -50,6 +50,12 @@ export default function CompaniesView({ data }) {
     refresh()
   }
 
+  const toggleAiBatch = async (co, next) => {
+    const { error } = await supabase.from('companies').update({ feature_ai_batch: next }).eq('id', co.id)
+    if (error) return alert(t('更新失敗：') + error.message)
+    refresh()
+  }
+
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
@@ -67,13 +73,14 @@ export default function CompaniesView({ data }) {
               <th style={tcell('left')}>{t('名稱')}</th>
               <th style={tcell('left')}>{t('員工數')}</th>
               <th style={tcell('left')}>{t('創建時間')}</th>
+              <th style={tcell('center')} title={t('開通「AI 整理發布任務」功能')}>{t('AI 整理')}</th>
               <th style={tcell('right')}></th>
             </tr>
           </thead>
           <tbody>
-            {companies.length === 0 && <tr><td colSpan={4} style={{ padding: 30, textAlign: 'center', color: c.textFaint }}>{t('無公司')}</td></tr>}
+            {companies.length === 0 && <tr><td colSpan={5} style={{ padding: 30, textAlign: 'center', color: c.textFaint }}>{t('無公司')}</td></tr>}
             {companies.map(co => (
-              <CompanyRow key={co.id} co={co} count={empCountByCompany.get(co.id) || 0} rename={rename} del={del} />
+              <CompanyRow key={co.id} co={co} count={empCountByCompany.get(co.id) || 0} rename={rename} del={del} toggleAiBatch={toggleAiBatch} />
             ))}
           </tbody>
         </table>
@@ -83,7 +90,7 @@ export default function CompaniesView({ data }) {
   )
 }
 
-function CompanyRow({ co, count, rename, del }) {
+function CompanyRow({ co, count, rename, del, toggleAiBatch }) {
   const { t } = useT()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(co.name)
@@ -96,6 +103,11 @@ function CompanyRow({ co, count, rename, del }) {
       </td>
       <td style={{ padding: '8px 12px', color: count > 0 ? c.text : c.textFaint }}>{count}</td>
       <td style={{ padding: '8px 12px', color: c.textMuted, fontSize: 12 }}>{co.created_at ? fmtDateTime(co.created_at) : '—'}</td>
+      <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+        <label style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', gap: 6 }} title={t('開通後該公司員工的任務板塊會出現「AI 整理發布任務」按鈕')}>
+          <input type="checkbox" checked={co.feature_ai_batch === true} onChange={e => toggleAiBatch(co, e.target.checked)} style={{ cursor: 'pointer', width: 16, height: 16 }} />
+        </label>
+      </td>
       <td style={{ padding: '8px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
         {editing ? (
           <>

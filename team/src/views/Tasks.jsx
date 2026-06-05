@@ -7,6 +7,7 @@ import { isTaskAssignedTo, empDoneFor, empAbandonedFor, isAwaitingApproval, uplo
 import EditTaskModal from '../components/EditTaskModal.jsx'
 import AssigneeChipEditor from '../components/AssigneeChipEditor.jsx'
 import CalendarView from '../components/CalendarView.jsx'
+import AiBatchTaskModal from '../components/AiBatchTaskModal.jsx'
 
 // ============================================================
 //  任務模組：員工側欄 + 任務總覽 + 單員工任務看板 + 新建任務表單 + 反饋面板
@@ -576,12 +577,14 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
   const [dueDate, setDueDate] = useState('')
   const [files, setFiles] = useState([])
   const [busy, setBusy] = useState(false)
+  const [showAiBatch, setShowAiBatch] = useState(false)
   // 子任務：[{ title, assignees }]。assignees=null 沿用父任務；否則自定義
   const [subtaskItems, setSubtaskItems] = useState([])
   const [departmentId, setDepartmentId] = useState('')  // '' = 公司內可見；非空 = 部門專屬
 
   // 任務所屬公司：companyId prop → emp.company_id → me.company_id
   const taskCompanyId = companyId || emp?.company_id || me.company_id
+  const aiBatchEnabled = ctx?.activeCompany?.id === taskCompanyId && ctx?.activeCompany?.feature_ai_batch === true
   // 該公司的部門列表 — 普通員工只能選自己加入的部門，admin / super admin 看全部
   const coDepartments = useMemo(() => {
     const all = departments.filter(d => d.company_id === taskCompanyId)
@@ -747,6 +750,28 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
       </div>
 
       <button onClick={submit} disabled={busy || !title.trim() || effective.length === 0} style={{ ...S.btnPrimary, width: '100%', opacity: (busy || !title.trim() || effective.length === 0) ? 0.4 : 1 }}>{busy ? t('處理中…') : t('新增任務')}</button>
+      {aiBatchEnabled && (
+        <button
+          type="button"
+          onClick={() => setShowAiBatch(true)}
+          style={{ ...S.btnGhost, width: '100%', marginTop: 8, borderStyle: 'dashed', color: c.accent }}
+        >
+          {t('AI 整理發布任務')}
+        </button>
+      )}
+      {showAiBatch && (
+        <AiBatchTaskModal
+          onClose={() => setShowAiBatch(false)}
+          onCreated={() => setShowAiBatch(false)}
+          me={me}
+          companyId={taskCompanyId}
+          departments={coDepartments}
+          empDepts={empDepts}
+          employees={activeEmps}
+          defaultAssigneeIds={effective}
+          canAssignOthers={canAssignOthers}
+        />
+      )}
     </div>
   )
 }
