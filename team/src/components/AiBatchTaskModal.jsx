@@ -221,7 +221,7 @@ export default function AiBatchTaskModal({
     <div
       onTouchStart={e => { touchStartX.current = e.touches[0].clientX }}
       onTouchEnd={handleTouchEnd}
-      style={{ position: 'relative', isolation: 'isolate', overflow: 'hidden', minHeight: isNarrow ? 230 : 360, height: isNarrow ? undefined : '100%', marginTop: isNarrow ? 6 : 0 }}
+      style={{ position: 'relative', isolation: 'isolate', minHeight: isNarrow ? 230 : 360, height: isNarrow ? undefined : '100%', marginTop: isNarrow ? 6 : 0 }}
     >
       {cards.map((card, idx) => {
         const offset = idx - activeIndex
@@ -240,10 +240,10 @@ export default function AiBatchTaskModal({
               position: 'absolute',
               inset: isNarrow ? '0 10px auto' : '8px 18px auto',
               minHeight: isNarrow ? 190 : 250,
-              height: isNarrow ? undefined : 'calc(100% - 16px)',
+              height: isNarrow ? undefined : 'calc(100% - 60px)',
               transform: isNarrow
                 ? `translateX(${offset * 14}px) translateY(${distance * 8 - (isHovered ? 4 : 0)}px) rotate(${offset * 1.5}deg)`
-                : `translateX(${offset * 10}px) translateY(${distance * 10 - (isHovered ? 4 : 0)}px) rotate(${offset * 1.4}deg)`,
+                : `translateX(${offset * 6}px) translateY(${distance * 6 - (isHovered ? 4 : 0)}px) rotate(${offset * 0.8}deg)`,
               opacity: hidden ? 0 : 1 - distance * 0.18,
               zIndex: 20 - distance,
               pointerEvents: hidden ? 'none' : 'auto',
