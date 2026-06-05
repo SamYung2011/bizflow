@@ -209,7 +209,7 @@ export default function AiBatchTaskModal({
     <div
       onTouchStart={e => { touchStartX.current = e.touches[0].clientX }}
       onTouchEnd={handleTouchEnd}
-      style={{ position: 'relative', minHeight: isNarrow ? 230 : 360, marginTop: isNarrow ? 6 : 0 }}
+      style={{ position: 'relative', isolation: 'isolate', minHeight: isNarrow ? 230 : 360, marginTop: isNarrow ? 6 : 0 }}
     >
       {cards.map((card, idx) => {
         const offset = idx - activeIndex
