@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useT } from "../../i18n.jsx";
+import OcppLogs from "./OcppLogs.jsx";
 
 // OCPP 監控 — bizflow 主站獨立模塊
 // 數據通路：bizflow → Supabase Edge Function `ocpp-proxy` → OCPP 8082 server
@@ -370,9 +371,43 @@ function ScheduleStartModal({ open, action, onConfirm, onCancel, t, busy }) {
   );
 }
 
+function MonitorSubTabs({ active, onChange, t }) {
+  return (
+    <div style={{ display: "inline-flex", gap: 4, padding: 4, border: "1px solid #e5e7eb", borderRadius: 8, background: "#f8fafc", marginBottom: 16 }}>
+      {[
+        ["monitor", t("監控")],
+        ["logs", t("OCPP 消息流")],
+      ].map(([id, label]) => {
+        const isActive = active === id;
+        return (
+          <button
+            key={id}
+            type="button"
+            onClick={() => onChange(id)}
+            style={{
+              border: "none",
+              borderRadius: 6,
+              padding: "6px 14px",
+              fontSize: 13,
+              fontWeight: isActive ? 700 : 500,
+              background: isActive ? "#fff" : "transparent",
+              color: isActive ? "#1976d2" : "#64748b",
+              boxShadow: isActive ? "0 1px 3px rgba(15,23,42,0.12)" : "none",
+              cursor: "pointer",
+            }}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function OcppMonitor({ supabase, session, isAdmin }) {
   const { t } = useT();
   // 全部 hooks 必須在任何 early return 之前聲明，避免 isAdmin 切換時 hook 順序變化
+  const [activeSubTab, setActiveSubTab] = useState("monitor");
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -513,8 +548,19 @@ export default function OcppMonitor({ supabase, session, isAdmin }) {
 
   const empty = !loading && !err && rows.length === 0;
 
+  if (activeSubTab === "logs") {
+    return (
+      <div style={{ padding: "16px 20px", maxWidth: 1400 }}>
+        <MonitorSubTabs active={activeSubTab} onChange={setActiveSubTab} t={t} />
+        <OcppLogs session={session} isAdmin={isAdmin} />
+      </div>
+    );
+  }
+
   return (
     <div style={{ padding: "16px 20px", maxWidth: 1400 }}>
+      <MonitorSubTabs active={activeSubTab} onChange={setActiveSubTab} t={t} />
+
       {/* preview / demo banner */}
       <div style={{ background: "#fff7e6", border: "1px solid #ffd58a", color: "#92400e", padding: "10px 14px", borderRadius: 6, fontSize: 13, marginBottom: 16 }}>
         <strong>{t("OCPP 監控 · 演示階段")}</strong>{" "}
