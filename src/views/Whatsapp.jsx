@@ -172,6 +172,11 @@ export default function WhatsappView() {
   const channelBadgeStyle = (channel) => channel === "meta"
     ? { background: "#e3f2fd", color: "#1565c0", border: "1px solid #bbdefb" }
     : { background: "#f5f5f5", color: "#666", border: "1px solid #e0e0e0" };
+  const messageText = (row) => {
+    const text = typeof row?.content === "string" ? row.content.trim() : "";
+    return text || t("（無內容）");
+  };
+  const messageSpeakerLabel = (row) => row?.role === "assistant" ? "AI" : t("客戶");
   const channelMatches = (row) => waChannelFilter === "all" || channelOf(row) === waChannelFilter;
   const filteredWaMessages = waMessages.filter(channelMatches);
   const filteredWaLogs = waLogs.filter(channelMatches);
@@ -546,9 +551,13 @@ export default function WhatsappView() {
                     const latest = msgs[0] || {};
                     const channel = channelOf(latest);
                     const active = waSelectedCustomer === key;
+                    const latestPreview = messageText(latest);
                     return (
                       <div key={key} onClick={() => setWaSelectedCustomer(key)} style={{ padding: "10px 14px", borderBottom: "1px solid #f5f5f5", cursor: "pointer", background: active ? "#eef2ff" : "transparent" }}>
                         <div style={{ fontSize: 12, fontWeight: 700, color: active ? "#3b58d4" : "#333", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{latest.customer_id}</div>
+                        <div style={{ fontSize: 12, color: active ? "#3b58d4" : "#555", marginTop: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          <span style={{ color: active ? "#6382ff" : "#999", fontWeight: 700 }}>{messageSpeakerLabel(latest)}：</span>{latestPreview}
+                        </div>
                         <div style={{ fontSize: 11, color: "#999", marginTop: 4, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                           <span style={{ ...channelBadgeStyle(channel), borderRadius: 999, padding: "1px 6px", fontSize: 10, fontWeight: 700 }}>{t(channelLabel(channel))}</span>
                           <span>{msgs.length} {t("條")}</span>
@@ -573,10 +582,12 @@ export default function WhatsappView() {
                       </div>
                       {msgs.map(m => {
                         const channel = channelOf(m);
+                        const isAi = m.role === "assistant";
                         return (
-                          <div key={m.id} style={{ marginBottom: 12, display: "flex", justifyContent: m.role === "assistant" ? "flex-start" : "flex-end" }}>
-                            <div style={{ maxWidth: "75%", background: m.role === "assistant" ? "#f0f4ff" : "#e8f5e9", borderRadius: 10, padding: "8px 12px", fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
-                              {m.content}
+                          <div key={m.id} style={{ marginBottom: 12, display: "flex", justifyContent: isAi ? "flex-start" : "flex-end" }}>
+                            <div style={{ maxWidth: "75%", background: isAi ? "#f0f4ff" : "#e8f5e9", borderRadius: 10, padding: "8px 12px", fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                              <div style={{ fontSize: 11, color: isAi ? "#4f63b5" : "#2e7d32", fontWeight: 800, marginBottom: 4 }}>{messageSpeakerLabel(m)}</div>
+                              {messageText(m)}
                               <div style={{ fontSize: 10, color: "#999", marginTop: 4, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                                 <span>{new Date(m.created_at).toLocaleString("zh-HK", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
                                 <span style={{ ...channelBadgeStyle(channel), borderRadius: 999, padding: "0 6px", fontSize: 10, fontWeight: 700 }}>{t(channelLabel(channel))}</span>
