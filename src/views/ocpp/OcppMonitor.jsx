@@ -373,7 +373,7 @@ function ScheduleStartModal({ open, action, onConfirm, onCancel, t, busy }) {
 
 function MonitorSubTabs({ active, onChange, t }) {
   return (
-    <div style={{ display: "inline-flex", gap: 4, padding: 4, border: "1px solid #e5e7eb", borderRadius: 8, background: "#f8fafc", marginBottom: 16 }}>
+    <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: "1px solid #e5e7eb" }}>
       {[
         ["monitor", t("監控")],
         ["logs", t("OCPP 消息流")],
@@ -385,15 +385,15 @@ function MonitorSubTabs({ active, onChange, t }) {
             type="button"
             onClick={() => onChange(id)}
             style={{
+              padding: "8px 16px",
+              background: "none",
               border: "none",
-              borderRadius: 6,
-              padding: "6px 14px",
-              fontSize: 13,
-              fontWeight: isActive ? 700 : 500,
-              background: isActive ? "#fff" : "transparent",
-              color: isActive ? "#1976d2" : "#64748b",
-              boxShadow: isActive ? "0 1px 3px rgba(15,23,42,0.12)" : "none",
+              borderBottom: isActive ? "2px solid #1976d2" : "2px solid transparent",
+              color: isActive ? "#1976d2" : "#666",
+              fontSize: 14,
+              fontWeight: isActive ? 600 : 500,
               cursor: "pointer",
+              marginBottom: -1,
             }}
           >
             {label}
