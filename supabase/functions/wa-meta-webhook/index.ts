@@ -65,6 +65,14 @@ async function forwardToWaMessage(
   let content = "";
   let location: { lat: number; lng: number; placeName?: string; address?: string } | null = null;
 
+  const mapChoiceContent = (choiceId: string, title: string) => {
+    const mapChoice = choiceId.match(/^hm_map:([-0-9.]+),([-0-9.]+)$/);
+    if (choiceId === "hm_entry:product_consult") return "Product enquiry";
+    if (choiceId === "hm_entry:nearby_chargers") return "Nearby chargers";
+    if (mapChoice) return `我想導航到：${title}\nhttps://maps.google.com/maps?daddr=${mapChoice[1]},${mapChoice[2]}`;
+    return title || choiceId || "[Button reply]";
+  };
+
   if (type === "text") {
     content = (msg.text as Record<string, unknown>)?.body as string || "";
   } else if (type === "location") {
@@ -90,26 +98,44 @@ async function forwardToWaMessage(
   } else if (type === "document") {
     const doc = msg.document as Record<string, unknown>;
     content = "[文档]" + (doc.filename ? " " + doc.filename : "");
+  } else if (type === "sticker") {
+    content = "[贴纸]";
+  } else if (type === "contacts") {
+    const contactCards = (msg.contacts as Array<Record<string, unknown>>) || [];
+    const names = contactCards.map(c => {
+      const name = c.name as Record<string, unknown> | undefined;
+      return String(name?.formatted_name || name?.first_name || "").trim();
+    }).filter(Boolean);
+    content = "[联系人]" + (names.length ? " " + names.join(", ") : "");
+  } else if (type === "button") {
+    const btn = msg.button as Record<string, unknown>;
+    const choiceId = String(btn?.payload || btn?.id || "");
+    const title = String(btn?.text || btn?.title || choiceId || "");
+    content = mapChoiceContent(choiceId, title);
   } else if (type === "interactive") {
     // 按钮点击 / 列表选择
     const inter = msg.interactive as Record<string, unknown>;
     const btn = inter.button_reply as Record<string, unknown> | undefined;
     const list = inter.list_reply as Record<string, unknown> | undefined;
+    const flow = inter.nfm_reply as Record<string, unknown> | undefined;
     const choiceId = String(btn?.id || list?.id || "");
-    const title = String(btn?.title || list?.title || "[Interactive reply]");
-    const mapChoice = choiceId.match(/^hm_map:([-0-9.]+),([-0-9.]+)$/);
-    if (choiceId === "hm_entry:product_consult") {
-      content = "Product enquiry";
-    } else if (choiceId === "hm_entry:nearby_chargers") {
-      content = "Nearby chargers";
-    } else if (mapChoice) {
-      content = `我想導航到：${title}\nhttps://maps.google.com/maps?daddr=${mapChoice[1]},${mapChoice[2]}`;
+    const title = String(btn?.title || list?.title || "");
+    if (flow) {
+      const flowBody = String(flow.body || flow.name || "[Flow response]");
+      const flowJson = typeof flow.response_json === "string" ? flow.response_json : "";
+      content = flowJson ? `${flowBody}\n${flowJson}` : flowBody;
     } else {
-      content = title;
+      content = mapChoiceContent(choiceId, title);
     }
   } else if (type === "reaction") {
     // 表情反应消息，不入处理流程，仅记日志后丢弃
     return { ok: true };
+  } else if (type === "unsupported") {
+    const errors = (msg.errors as Array<Record<string, unknown>>) || [];
+    const detail = String(errors[0]?.details || errors[0]?.title || errors[0]?.message || "").trim();
+    content = "[不支持的消息类型]" + (detail ? " " + detail : "");
+  } else if (type === "system") {
+    content = "[系统消息]";
   } else {
     content = `[${type}]`;
   }
