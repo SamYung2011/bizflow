@@ -23,6 +23,8 @@
 //   GET /ocpp-admin/share/charges
 //   GET /ocpp-admin/share/prices/{shareId}
 //   GET /ocpp-admin/share/income
+//   GET /ocpp-admin/ocpp/logs
+//   GET /ocpp-admin/ocpp/logs/{id}
 //
 // Auth:
 //   1. Validate caller JWT via Supabase auth/v1/user.
@@ -181,6 +183,8 @@ function mapPath(pathname: string) {
   if (pathname === "/share/charges") return "/api/share/charges";
   if (/^\/share\/prices\/[1-9]\d*$/.test(pathname)) return `/api${pathname}`;
   if (pathname === "/share/income") return "/api/share/income";
+  if (pathname === "/ocpp/logs") return "/api/ocpp/logs";
+  if (/^\/ocpp\/logs\/[1-9]\d*$/.test(pathname)) return `/api${pathname}`;
   return "";
 }
 
