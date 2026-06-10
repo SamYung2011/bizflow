@@ -29,6 +29,7 @@ const PAGE_LIMIT = 50;
 const INNER_TABS = [
   { id: "charges", labelKey: "共享充電桩" },
   { id: "income", labelKey: "共享分潤" },
+  { id: "bookings", labelKey: "共享預約" },
 ];
 
 const SHARE_OPTIONS = [
@@ -56,12 +57,52 @@ function openWindow(row) {
   return `${fmtClockSeconds(row.openStartTime)} - ${fmtClockSeconds(row.openEndTime)}`;
 }
 
+function bookingWindow(row) {
+  const start = Number(row.startTime ?? row.start_time);
+  const end = Number(row.endTime ?? row.end_time);
+  if (start === 0 && end === 86400) return "全天";
+  return `${fmtClockSeconds(start)} - ${fmtClockSeconds(end)}`;
+}
+
 function ownerName(row) {
   return row.ownerNickname || row.ownerUsername || row.ownerEmail || row.ownerUserId || "—";
 }
 
+function bookingUserName(row) {
+  return row.nickname || row.username || row.email || row.userId || row.user_id || "—";
+}
+
 function pileName(row) {
   return row.pileName || row.pileNo || (row.pileId ? `#${row.pileId}` : "—");
+}
+
+function bookingPileName(row) {
+  return row.pileName || row.pileNo || row.pile_no || (row.pileId ? `#${row.pileId}` : "—");
+}
+
+function bookingTypeName(row) {
+  return row.bookingTypeName || row.typeName || row.booking_type_name || row.bookingType || row.booking_type || "—";
+}
+
+function bookingTypeLabel(row) {
+  const value = String(bookingTypeName(row));
+  const key = value.trim().toLowerCase();
+  if (key === "single" || value === "1") return "單次";
+  if (key === "mon-fri" || key === "mon-fri." || value === "2") return "週一至週五";
+  if (key === "every day" || key === "everyday" || value === "3") return "每日";
+  if (key === "weekend" || value === "4") return "週末";
+  return value;
+}
+
+function bookingDate(row) {
+  const v = row.date ?? row.bookingDate ?? row.booking_date;
+  if (!v || v === "0000-00-00") return "—";
+  return String(v);
+}
+
+function bookingStateLabel(row) {
+  const value = row.state ?? row.bookingState ?? row.booking_state;
+  return value === undefined || value === null || value === "" ? "—" : String(value);
 }
 
 function shareTone(row) {
@@ -409,6 +450,123 @@ function ShareIncomeTab({ session, isAdmin, active }) {
   );
 }
 
+function ShareBookingsTab({ session, isAdmin, active }) {
+  const { t } = useT();
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [q, setQ] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const aliveRef = useRef(true);
+  const wasActiveRef = useRef(active);
+  const accessToken = session?.access_token;
+
+  const refresh = useCallback(async ({ force = false } = {}) => {
+    if (!isAdmin || !accessToken) return;
+    setLoading(true);
+    setErr("");
+    try {
+      const qs = new URLSearchParams();
+      qs.set("limit", String(PAGE_LIMIT));
+      qs.set("offset", String(offset));
+      if (q) qs.set("q", q);
+      const data = await callOcppAdmin(`/share/bookings?${qs}`, { accessToken, force });
+      if (!aliveRef.current) return;
+      setRows(Array.isArray(data?.data) ? data.data : []);
+      setHasMore(Boolean(data?.page?.hasMore));
+    } catch (e) {
+      if (!aliveRef.current) return;
+      setErr(String(e?.message || e));
+    } finally {
+      if (aliveRef.current) setLoading(false);
+    }
+  }, [isAdmin, accessToken, q, offset]);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => { aliveRef.current = false; };
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  useEffect(() => {
+    if (active && !wasActiveRef.current) refresh();
+    wasActiveRef.current = active;
+  }, [active, refresh]);
+
+  const empty = !loading && !err && rows.length === 0;
+
+  return (
+    <>
+      <FilterBar title={t("共享預約")} onRefresh={refresh} loading={loading} count={rows.length}>
+        <SearchBox
+          value={searchInput}
+          onChange={setSearchInput}
+          onSubmit={() => { setOffset(0); setQ(searchInput.trim()); }}
+          placeholder={t("用戶 / 桩號")}
+          width={240}
+        />
+      </FilterBar>
+      <ErrorBanner message={err} />
+      {empty && <EmptyState message={t("無共享預約數據")} />}
+      {rows.length > 0 && (
+        <>
+          <div style={TABLE_WRAP_STYLE}>
+            <table style={TABLE_STYLE}>
+              <TableHead columns={[
+                t("用戶"),
+                t("桩號"),
+                t("預約日期"),
+                t("起止時段"),
+                t("預約類型"),
+                t("狀態"),
+                t("建立時間"),
+              ]} />
+              <tbody>
+                {rows.map((row) => {
+                  const rowKey = row.bookingId || row.id || `${row.shareId || ""}-${row.userId || ""}-${row.pileNo || ""}`;
+                  return (
+                    <tr key={rowKey} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                      <td style={TD_STYLE}>
+                        <div>{bookingUserName(row)}</div>
+                        <div style={{ fontSize: 12, color: "#888" }}>{row.email || row.userId || row.user_id || "—"}</div>
+                      </td>
+                      <td style={TD_STYLE}>
+                        <div style={{ fontWeight: 600 }}>{bookingPileName(row)}</div>
+                        <div style={{ fontSize: 12, color: "#888" }}>{row.stationName || row.ownerNickname || row.ownerUserId || "—"}</div>
+                      </td>
+                      <td style={MONO_TD_STYLE}>{bookingDate(row)}</td>
+                      <td style={MONO_TD_STYLE}>{t(bookingWindow(row))}</td>
+                      <td style={TD_STYLE}>{t(bookingTypeLabel(row))}</td>
+                      <td style={TD_STYLE}>
+                        <span title={t("語義待確認")}>
+                          <Chip label={bookingStateLabel(row)} tone="gray" />
+                        </span>
+                      </td>
+                      <td style={MONO_TD_STYLE}>{fmtUnixTs(row.createdAt || row.createTime || row.create_time)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <Pager
+            offset={offset}
+            pageLimit={PAGE_LIMIT}
+            count={rows.length}
+            hasMore={hasMore}
+            loading={loading}
+            onPrev={() => setOffset((o) => Math.max(0, o - PAGE_LIMIT))}
+            onNext={() => setOffset((o) => o + PAGE_LIMIT)}
+          />
+        </>
+      )}
+    </>
+  );
+}
+
 export default function ShareCharging({ session, isAdmin, active = true }) {
   const { t } = useT();
   const [tab, setTab] = useState("charges");
@@ -438,6 +596,11 @@ export default function ShareCharging({ session, isAdmin, active = true }) {
       {visitedTabs.has("income") && (
         <div style={{ display: tab === "income" ? "block" : "none" }}>
           <ShareIncomeTab session={session} isAdmin={isAdmin} active={active && tab === "income"} />
+        </div>
+      )}
+      {visitedTabs.has("bookings") && (
+        <div style={{ display: tab === "bookings" ? "block" : "none" }}>
+          <ShareBookingsTab session={session} isAdmin={isAdmin} active={active && tab === "bookings"} />
         </div>
       )}
     </div>

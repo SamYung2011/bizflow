@@ -23,6 +23,7 @@
 //   GET /ocpp-admin/share/charges
 //   GET /ocpp-admin/share/prices/{shareId}
 //   GET /ocpp-admin/share/income
+//   GET /ocpp-admin/share/bookings
 //   GET /ocpp-admin/ocpp/logs
 //   GET /ocpp-admin/ocpp/logs/{id}
 //
@@ -183,6 +184,7 @@ function mapPath(pathname: string) {
   if (pathname === "/share/charges") return "/api/share/charges";
   if (/^\/share\/prices\/[1-9]\d*$/.test(pathname)) return `/api${pathname}`;
   if (pathname === "/share/income") return "/api/share/income";
+  if (pathname === "/share/bookings") return "/api/share/bookings";
   if (pathname === "/ocpp/logs") return "/api/ocpp/logs";
   if (/^\/ocpp\/logs\/[1-9]\d*$/.test(pathname)) return `/api${pathname}`;
   return "";
