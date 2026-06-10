@@ -511,6 +511,7 @@ export function CustomersListView({
   const [customerSortDir, setCustomerSortDir] = useState("desc")
   const [customerTimeRange, setCustomerTimeRange] = useState("all")
   const [customerSourceFilter, setCustomerSourceFilter] = useState("all") // all / shopify / framer / other
+  const [customerImeiFilter, setCustomerImeiFilter] = useState("all") // all / has / none
 
   const customerSourceMap = useMemo(() => {
     const inferSource = (inv) => {
@@ -574,6 +575,10 @@ export function CustomersListView({
       if (customerSourceFilter !== "all") {
         if (customerSourceMap.get(c.id) !== customerSourceFilter) return false;
       }
+      if (customerImeiFilter !== "all") {
+        const hasImei = imeiCodes.length > 0;
+        if (customerImeiFilter === "has" ? !hasImei : hasImei) return false;
+      }
       if (!cutoff) return true;
       const dateStr = lastPurchaseMap[c.id];
       return dateStr && new Date(dateStr) >= cutoff;
@@ -586,7 +591,7 @@ export function CustomersListView({
       if (!vb) return -1;
       return vb.localeCompare(va) * dir;
     });
-  }, [customerGroups, invoices, customerDevices, search, customerSort, customerSortDir, customerTimeRange, customerSourceFilter, customerSourceMap]);
+  }, [customerGroups, invoices, customerDevices, search, customerSort, customerSortDir, customerTimeRange, customerSourceFilter, customerSourceMap, customerImeiFilter]);
 
   return (
           <div>
@@ -636,6 +641,10 @@ export function CustomersListView({
               <span style={{ fontSize: 13, color: "#888", marginLeft: 12, marginRight: 4 }}>{t("來源")}：</span>
               {[["all", t("全部")], ["shopify", "Shopify"], ["framer", t("官網表格")], ["other", t("其他")]].map(([k, label]) => (
                 <button key={k} onClick={() => { setCustomerSourceFilter(k); setVisibleCustomers(30); }} style={{ padding: "6px 14px", borderRadius: 20, lineHeight: "20px", border: customerSourceFilter === k ? "1px solid #6382ff" : "1px solid #e0e0e0", background: customerSourceFilter === k ? "#f0f4ff" : "#fff", color: customerSourceFilter === k ? "#6382ff" : "#666", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{label}</button>
+              ))}
+              <span style={{ fontSize: 13, color: "#888", marginLeft: 12, marginRight: 4 }}>{t("設備")}：</span>
+              {[["all", t("全部")], ["has", t("有 IMEI")], ["none", t("無 IMEI")]].map(([k, label]) => (
+                <button key={k} onClick={() => { setCustomerImeiFilter(k); setVisibleCustomers(30); }} style={{ padding: "6px 14px", borderRadius: 20, lineHeight: "20px", border: customerImeiFilter === k ? "1px solid #6382ff" : "1px solid #e0e0e0", background: customerImeiFilter === k ? "#f0f4ff" : "#fff", color: customerImeiFilter === k ? "#6382ff" : "#666", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{label}</button>
               ))}
             </div>
 
