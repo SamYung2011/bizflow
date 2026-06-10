@@ -185,6 +185,7 @@ function mapPath(pathname: string) {
   if (/^\/share\/prices\/[1-9]\d*$/.test(pathname)) return `/api${pathname}`;
   if (pathname === "/share/income") return "/api/share/income";
   if (pathname === "/share/bookings") return "/api/share/bookings";
+  if (pathname === "/piles") return "/api/piles";
   if (pathname === "/ocpp/logs") return "/api/ocpp/logs";
   if (/^\/ocpp\/logs\/[1-9]\d*$/.test(pathname)) return `/api${pathname}`;
   return "";

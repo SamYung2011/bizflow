@@ -1455,6 +1455,14 @@ const DICT_EN = {
   "載入 OCPP 站點…": "Loading OCPP stations…",
 
   // ── OCPP charging hub (sub-tabs: PublicPiles / PrivatePiles / Stations / AlarmInfo) ──
+  "充電桩": "Chargers",
+  "公共桩": "Public chargers",
+  "未分配桩": "Unassigned chargers",
+  "公共": "Public",
+  "私人": "Private",
+  "未分配": "Unassigned",
+  "搜索桩編號 / 名稱 / 品牌 / 序列號 / 站點": "Search pile no / name / brand / serial / station",
+  "實時狀態": "Live status",
   "搜索桩編號 / 名稱 / 品牌 / 站點": "Search pile / name / vendor / station",
   "搜索桩編號 / 名稱 / 序列號": "Search pile / name / serial",
   "搜索樁編號 / 報警內容 / 站點": "Search pile / content / station",
@@ -1474,7 +1482,7 @@ const DICT_EN = {
   "所屬站點": "Station",
   "內容": "Content",
   "無報警記錄": "No alarm records",
-  "此列表為 chargecms rc_alarm 表的歷史持久化告警。當下實時故障（離線桩 / 故障槍口）請看「公共充電桩 / 私人充電桩」tab 內的狀態標識。": "This list shows persistent historical alarms from chargecms rc_alarm. For real-time faults (offline piles / faulted connectors), see the status badges on the Public/Private Piles tabs.",
+  "此列表為 chargecms rc_alarm 表的歷史持久化告警。當下實時故障（離線桩 / 故障槍口）請看「充電桩」tab 內的狀態標識。": "This list shows persistent historical alarms from chargecms rc_alarm. For real-time faults (offline piles / faulted connectors), see the status badges on the Piles tab.",
 
   "全部運營商": "All operators",
   "僅正常": "Normal only",
@@ -1606,6 +1614,8 @@ const DICT_EN = {
   "無運營商數據": "No operator data",
   "運營商 / 公司 / 聯絡人": "Operator / company / contact",
   // ── OCPP charging / 用戶信息 (charge-users) ──
+  "OCPP 用戶": "OCPP Users",
+  "載入 OCPP 用戶…": "Loading OCPP users…",
   "用戶信息": "Users",
   "用戶ID": "User ID",
   "手機": "Mobile",
@@ -3222,6 +3232,14 @@ const DICT_FR = {
   "載入 OCPP 站點…": "Chargement des bornes OCPP…",
 
   // ── OCPP charging hub (sub-tabs: PublicPiles / PrivatePiles / Stations / AlarmInfo) ──
+  "充電桩": "Bornes",
+  "公共桩": "Bornes publiques",
+  "未分配桩": "Bornes non affectées",
+  "公共": "Publique",
+  "私人": "Privée",
+  "未分配": "Non affectée",
+  "搜索桩編號 / 名稱 / 品牌 / 序列號 / 站點": "Rechercher n° borne / nom / marque / série / station",
+  "實時狀態": "Statut en direct",
   "搜索桩編號 / 名稱 / 品牌 / 站點": "Rechercher borne / nom / marque / station",
   "搜索桩編號 / 名稱 / 序列號": "Rechercher borne / nom / n° série",
   "搜索樁編號 / 報警內容 / 站點": "Rechercher borne / contenu / station",
@@ -3241,7 +3259,7 @@ const DICT_FR = {
   "所屬站點": "Station",
   "內容": "Contenu",
   "無報警記錄": "Aucune alarme",
-  "此列表為 chargecms rc_alarm 表的歷史持久化告警。當下實時故障（離線桩 / 故障槍口）請看「公共充電桩 / 私人充電桩」tab 內的狀態標識。": "Cette liste affiche les alarmes historiques persistantes de chargecms rc_alarm. Pour les pannes en temps réel (bornes hors ligne / connecteurs en panne), consultez les badges de statut dans les onglets Bornes publiques / privées.",
+  "此列表為 chargecms rc_alarm 表的歷史持久化告警。當下實時故障（離線桩 / 故障槍口）請看「充電桩」tab 內的狀態標識。": "Cette liste affiche les alarmes historiques persistantes de chargecms rc_alarm. Pour les pannes en temps réel (bornes hors ligne / connecteurs en panne), consultez les badges de statut dans l'onglet Bornes.",
 
   "全部運營商": "Tous les opérateurs",
   "僅正常": "Normales seulement",
@@ -3373,6 +3391,8 @@ const DICT_FR = {
   "無運營商數據": "Aucune donnée d'opérateur",
   "運營商 / 公司 / 聯絡人": "Opérateur / société / contact",
   // ── OCPP charging / 用戶信息 (charge-users) ──
+  "OCPP 用戶": "Utilisateurs OCPP",
+  "載入 OCPP 用戶…": "Chargement des utilisateurs OCPP…",
   "用戶信息": "Utilisateurs",
   "用戶ID": "ID utilisateur",
   "手機": "Mobile",

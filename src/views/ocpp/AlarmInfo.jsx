@@ -82,7 +82,7 @@ export default function AlarmInfo({ session, isAdmin, active = true }) {
       </div>
 
       <div style={{ background: "#fff7e6", border: "1px solid #ffd58a", color: "#92400e", padding: "8px 12px", borderRadius: 6, fontSize: 12, marginBottom: 12 }}>
-        {t("此列表為 chargecms rc_alarm 表的歷史持久化告警。當下實時故障（離線桩 / 故障槍口）請看「公共充電桩 / 私人充電桩」tab 內的狀態標識。")}
+        {t("此列表為 chargecms rc_alarm 表的歷史持久化告警。當下實時故障（離線桩 / 故障槍口）請看「充電桩」tab 內的狀態標識。")}
       </div>
 
       {err && (

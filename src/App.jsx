@@ -4,11 +4,8 @@ import React, { useState, useEffect, useMemo, Suspense, lazy } from "react";
 const ExpenseView = lazy(() => import("./views/Expense.jsx"));
 const OcppMonitorView = lazy(() => import("./views/ocpp/OcppMonitor.jsx"));
 const OcppChargingView = lazy(() => import("./views/ocpp/OcppCharging.jsx"));
-const OcppReportsView = lazy(() => import("./views/ocpp/OcppReports.jsx"));
-const ChargeUsersView = lazy(() => import("./views/ocpp/ChargeUsers.jsx"));
-const ChargeUserTagsView = lazy(() => import("./views/ocpp/ChargeUserTags.jsx"));
+const OcppUsersView = lazy(() => import("./views/ocpp/OcppUsers.jsx"));
 const OcppFinanceView = lazy(() => import("./views/ocpp/finance/OcppFinance.jsx"));
-const OcppFirmwareView = lazy(() => import("./views/ocpp/OcppFirmware.jsx"));
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase, fetchAllTable } from "./lib/supabaseClient.js";
 import { isNonWarrantyItem, itemWarrantyMonths } from "./lib/warranty.js";
@@ -1044,11 +1041,8 @@ export default function App() {
     ...(isBfAdmin ? [{ type: "group", id: "g_ocpp", label: t("OCPP 充電"), icon: "charger", children: [
       { id: "ocppMonitor", label: t("OCPP 監控"), icon: "charger" },
       { id: "ocppCharging", label: t("OCPP 充電站"), icon: "charger" },
-      { id: "ocppReports", label: t("充電報表"), icon: "charger" },
-      { id: "chargeUsers", label: t("用戶信息"), icon: "charger" },
-      { id: "chargeUserTags", label: t("RFID 卡"), icon: "charger" },
+      { id: "ocppUsers", label: t("OCPP 用戶"), icon: "charger" },
       { id: "ocppFinance", label: t("OCPP 財務"), icon: "charger" },
-      { id: "ocppFirmware", label: t("韌體管理"), icon: "charger" },
     ]}] : []),
     { type: "single", id: "gototeam", label: t("團隊管理"), icon: "external", external: "https://team.honnmono.top" },
   ];
@@ -2004,27 +1998,9 @@ export default function App() {
           </Suspense>
         )}
 
-        {tab === "ocppReports" && (
-          <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入充電報表…")}</div>}>
-            <OcppReportsView
-              session={session}
-              isAdmin={isBfAdmin}
-            />
-          </Suspense>
-        )}
-
-        {tab === "chargeUsers" && (
-          <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入用戶信息…")}</div>}>
-            <ChargeUsersView
-              session={session}
-              isAdmin={isBfAdmin}
-            />
-          </Suspense>
-        )}
-
-        {tab === "chargeUserTags" && (
-          <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入 RFID 卡…")}</div>}>
-            <ChargeUserTagsView
+        {tab === "ocppUsers" && (
+          <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入 OCPP 用戶…")}</div>}>
+            <OcppUsersView
               session={session}
               isAdmin={isBfAdmin}
             />
@@ -2034,15 +2010,6 @@ export default function App() {
         {tab === "ocppFinance" && (
           <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入 OCPP 財務…")}</div>}>
             <OcppFinanceView
-              session={session}
-              isAdmin={isBfAdmin}
-            />
-          </Suspense>
-        )}
-
-        {tab === "ocppFirmware" && (
-          <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入韌體管理…")}</div>}>
-            <OcppFirmwareView
               session={session}
               isAdmin={isBfAdmin}
             />

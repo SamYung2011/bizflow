@@ -1,6 +1,9 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
 import { useT } from "../../i18n.jsx";
-import OcppLogs from "./OcppLogs.jsx";
+
+const OcppLogs = lazy(() => import("./OcppLogs.jsx"));
+const CommandLogs = lazy(() => import("./CommandLogs.jsx"));
+const AlarmInfo = lazy(() => import("./AlarmInfo.jsx"));
 
 // OCPP 監控 — bizflow 主站獨立模塊
 // 數據通路：bizflow → Supabase Edge Function `ocpp-proxy` → OCPP 8082 server
@@ -375,8 +378,10 @@ function MonitorSubTabs({ active, onChange, t }) {
   return (
     <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: "1px solid #e5e7eb" }}>
       {[
-        ["monitor", t("監控")],
+        ["monitor", t("實時狀態")],
         ["logs", t("OCPP 消息流")],
+        ["commandLogs", t("命令日誌")],
+        ["alarms", t("報警信息")],
       ].map(([id, label]) => {
         const isActive = active === id;
         return (
@@ -552,7 +557,31 @@ export default function OcppMonitor({ supabase, session, isAdmin }) {
     return (
       <div style={{ padding: "16px 20px", maxWidth: 1400 }}>
         <MonitorSubTabs active={activeSubTab} onChange={setActiveSubTab} t={t} />
-        <OcppLogs session={session} isAdmin={isAdmin} />
+        <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#888" }}>{t("載入中…")}</div>}>
+          <OcppLogs session={session} isAdmin={isAdmin} />
+        </Suspense>
+      </div>
+    );
+  }
+
+  if (activeSubTab === "commandLogs") {
+    return (
+      <div style={{ padding: "16px 20px", maxWidth: 1400 }}>
+        <MonitorSubTabs active={activeSubTab} onChange={setActiveSubTab} t={t} />
+        <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#888" }}>{t("載入中…")}</div>}>
+          <CommandLogs session={session} isAdmin={isAdmin} active />
+        </Suspense>
+      </div>
+    );
+  }
+
+  if (activeSubTab === "alarms") {
+    return (
+      <div style={{ padding: "16px 20px", maxWidth: 1400 }}>
+        <MonitorSubTabs active={activeSubTab} onChange={setActiveSubTab} t={t} />
+        <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#888" }}>{t("載入中…")}</div>}>
+          <AlarmInfo session={session} isAdmin={isAdmin} active />
+        </Suspense>
       </div>
     );
   }

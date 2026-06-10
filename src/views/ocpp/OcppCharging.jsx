@@ -1,33 +1,29 @@
 import React, { useEffect, useState, lazy, Suspense } from "react";
 import { useT } from "../../i18n.jsx";
 
-// OCPP 充電站 hub — 8 sub-tab 容器
+// OCPP 充電站 hub — 充電資產 / 共享 / 訂單 / 報表 / 運營商
 // 每個 sub-tab 獨立文件，按需 lazy load 防止 hub 一加載就把全部子組件拉滿
-const PublicPiles = lazy(() => import("./PublicPiles.jsx"));
-const PrivatePiles = lazy(() => import("./PrivatePiles.jsx"));
+const Piles = lazy(() => import("./Piles.jsx"));
 const Stations = lazy(() => import("./Stations.jsx"));
 const ShareCharging = lazy(() => import("./ShareCharging.jsx"));
-const AlarmInfo = lazy(() => import("./AlarmInfo.jsx"));
 const OcppOrders = lazy(() => import("./OcppOrders.jsx"));
-const CommandLogs = lazy(() => import("./CommandLogs.jsx"));
+const OcppReports = lazy(() => import("./OcppReports.jsx"));
 const Operators = lazy(() => import("./Operators.jsx"));
 
 const SUB_TABS = [
-  { id: "publicPiles", labelKey: "公共充電桩" },
-  { id: "privatePiles", labelKey: "私人充電桩" },
+  { id: "piles", labelKey: "充電桩" },
   { id: "stations", labelKey: "充電站" },
   { id: "shareCharging", labelKey: "共享充電" },
   { id: "orders", labelKey: "充電訂單" },
-  { id: "commandLogs", labelKey: "命令日誌" },
-  { id: "alarms", labelKey: "報警信息" },
+  { id: "reports", labelKey: "充電報表" },
   { id: "operators", labelKey: "運營商" },
 ];
 
 export default function OcppCharging(props) {
   const { t } = useT();
   const { isAdmin } = props;
-  const [subTab, setSubTab] = useState("publicPiles");
-  const [visitedTabs, setVisitedTabs] = useState(() => new Set(["publicPiles"]));
+  const [subTab, setSubTab] = useState("piles");
+  const [visitedTabs, setVisitedTabs] = useState(() => new Set(["piles"]));
 
   useEffect(() => {
     setVisitedTabs((prev) => {
@@ -74,13 +70,11 @@ export default function OcppCharging(props) {
       </div>
 
       <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#888" }}>{t("載入中…")}</div>}>
-        {visitedTabs.has("publicPiles") && <div style={{ display: subTab === "publicPiles" ? "block" : "none" }}><PublicPiles {...props} active={subTab === "publicPiles"} /></div>}
-        {visitedTabs.has("privatePiles") && <div style={{ display: subTab === "privatePiles" ? "block" : "none" }}><PrivatePiles {...props} active={subTab === "privatePiles"} /></div>}
+        {visitedTabs.has("piles") && <div style={{ display: subTab === "piles" ? "block" : "none" }}><Piles {...props} active={subTab === "piles"} /></div>}
         {visitedTabs.has("stations") && <div style={{ display: subTab === "stations" ? "block" : "none" }}><Stations {...props} active={subTab === "stations"} /></div>}
         {visitedTabs.has("shareCharging") && <div style={{ display: subTab === "shareCharging" ? "block" : "none" }}><ShareCharging {...props} active={subTab === "shareCharging"} /></div>}
         {visitedTabs.has("orders") && <div style={{ display: subTab === "orders" ? "block" : "none" }}><OcppOrders {...props} active={subTab === "orders"} /></div>}
-        {visitedTabs.has("commandLogs") && <div style={{ display: subTab === "commandLogs" ? "block" : "none" }}><CommandLogs {...props} active={subTab === "commandLogs"} /></div>}
-        {visitedTabs.has("alarms") && <div style={{ display: subTab === "alarms" ? "block" : "none" }}><AlarmInfo {...props} active={subTab === "alarms"} /></div>}
+        {visitedTabs.has("reports") && <div style={{ display: subTab === "reports" ? "block" : "none" }}><OcppReports {...props} active={subTab === "reports"} /></div>}
         {visitedTabs.has("operators") && <div style={{ display: subTab === "operators" ? "block" : "none" }}><Operators {...props} active={subTab === "operators"} /></div>}
       </Suspense>
     </div>
