@@ -1,4 +1,5 @@
 import React, { useMemo, useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabaseClient.js'
 import { useAppContext } from '../context/AppContext.jsx'
 import { useT } from '../i18n.jsx'
@@ -19,10 +20,43 @@ import InvoiceEditModal from '../components/InvoiceEditModal.jsx'
  */
 export function PendingDeductionView({ handleMarkPaid }) {
   const { t } = useT()
-  const { invoices, customers } = useAppContext()
+  const { invoices, customers, currentEmployee } = useAppContext()
+  const queryClient = useQueryClient()
   const [deductedIds, setDeductedIds] = useState(new Set())
   const [loading, setLoading] = useState(true)
   const [viewingInvoice, setViewingInvoice] = useState(null)  // 點發票號彈編輯 modal 看詳情
+  const [dismissingId, setDismissingId] = useState(null)
+
+  // 忽略此單：標記 legacy_skip_deduct=true（不扣庫存）+ 寫 audit 留痕，移出待扣清單。
+  // 替代之前員工拿「百老匯渠道」按鈕變通跳過的做法（會污染渠道標記）。
+  const handleDismiss = async (inv) => {
+    if (!window.confirm(t('確認忽略此單？發票將標記為「不扣庫存」並移出待扣清單（發票本身不刪除）。'))) return
+    setDismissingId(inv.id)
+    try {
+      const marker = `__DEDUCT_DISMISSED__ ${new Date().toISOString().slice(0, 10)}`
+      const updates = {
+        legacy_skip_deduct: true,
+        notes: inv.notes ? `${inv.notes}\n${marker}` : marker,
+      }
+      const { error: upErr } = await supabase.from('invoices').update(updates).eq('id', inv.id)
+      if (upErr) throw upErr
+      const { error: auditErr } = await supabase.from('stock_deduction_audit').insert({
+        invoice_id: inv.id,
+        item_name: '__DISMISSED__',
+        mapped_product_id: null,
+        mapped_qty: 0,
+        warehouse_id: null,
+        decision: 'dismissed',
+        audited_by: currentEmployee?.id || null,
+      })
+      if (auditErr) console.warn('[dismiss audit] insert failed:', auditErr.message)
+      queryClient.setQueryData(['bf', 'invoices'], (old) => Array.isArray(old) ? old.map(i => i.id === inv.id ? { ...i, ...updates } : i) : old)
+    } catch (e) {
+      alert(`${t('忽略失敗')}: ${e.message || e}`)
+    } finally {
+      setDismissingId(null)
+    }
+  }
 
   // 拉所有已扣過的 invoice_id（從 inventory_movements 反查）
   useEffect(() => {
@@ -111,6 +145,14 @@ export function PendingDeductionView({ handleMarkPaid }) {
                     style={{ background: '#6382ff', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
                   >
                     {t('審核扣減')}
+                  </button>
+                  <button
+                    onClick={() => handleDismiss(inv)}
+                    disabled={dismissingId === inv.id}
+                    title={t('重複單/不需扣庫存時用，發票本身不刪除')}
+                    style={{ background: '#fff', color: '#b91c1c', border: '1px solid #fecaca', borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: dismissingId === inv.id ? 'wait' : 'pointer', opacity: dismissingId === inv.id ? 0.6 : 1 }}
+                  >
+                    {t('忽略此單')}
                   </button>
                 </div>
               </div>
