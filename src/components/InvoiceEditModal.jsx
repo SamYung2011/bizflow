@@ -105,21 +105,30 @@ export default function InvoiceEditModal({ invoice, onClose, onSaved }) {
     const newSalespersonId = editInvSalespersonId || null
     const updates = { items: finalItems, total: finalTotal, salesperson_id: newSalespersonId }
     const isPaid = (invoice.status || '').trim().toLowerCase() === 'paid'
-    if (isPaid && (invoice.salesperson_id || null) !== newSalespersonId) {
+    if (isPaid) {
       updates.commission_amount = computeCommissionFor({ ...invoice, items: finalItems, salesperson_id: newSalespersonId }, newSalespersonId, { products, lineItemAliases })
     }
     const { error } = await supabase.from("invoices").update(updates).eq("id", invoice.id)
     if (error) { alert(`${t("儲存失敗")}：${error.message}`); return }
+    const oldImeis = collectImeiCodesFromItems(invoice.items || [], { products, lineItemAliases })
+    const newImeis = collectImeiCodesFromItems(finalItems, { products, lineItemAliases })
+    const removedImeis = oldImeis.filter(i => !newImeis.includes(i))
     const imeiSync = await appendCustomerImeiCodes({
       supabase,
       queryClient,
       customerDevices,
       setCustomerDevices,
       customerId: invoice.customer_id,
-      imeiCodes: collectImeiCodesFromItems(finalItems, { products, lineItemAliases }),
+      imeiCodes: newImeis,
     })
     if (imeiSync.error) {
       alert(`${t("儲存修改已完成")}，${t("但 IMEI 未能同步到客戶資料")}：${imeiSync.error.message}`)
+    }
+    if (Array.isArray(imeiSync.conflicts) && imeiSync.conflicts.length > 0) {
+      alert(`${t("以下 IMEI 已歸屬其他客戶，未掛到當前客戶")}：\n${imeiSync.conflicts.map(c => c.imei).join("\n")}`)
+    }
+    if (removedImeis.length > 0) {
+      alert(`${t("以下 IMEI 已從本發票移除")}：\n${removedImeis.join("\n")}\n\n${t("若為 typo 修正而非客戶退貨，請到客戶資料頁手動移除舊 IMEI 設備記錄")}`)
     }
     const updatedInv = { ...invoice, ...updates }
     setInvoices(prev => prev.map(i => i.id === invoice.id ? { ...i, ...updates } : i))
@@ -163,8 +172,8 @@ export default function InvoiceEditModal({ invoice, onClose, onSaved }) {
               <option key={e.id} value={e.id}>{e.name}</option>
             ))}
           </select>
-          {(invoice.status || '').trim().toLowerCase() === 'paid' && (invoice.salesperson_id || '') !== editInvSalespersonId && (
-            <div style={{ fontSize: 11, color: "#b87500", marginTop: 4 }}>{t("已 Paid 發票改銷售人 → 佣金將按當前規則重算")}</div>
+          {(invoice.status || '').trim().toLowerCase() === 'paid' && (
+            <div style={{ fontSize: 11, color: "#b87500", marginTop: 4 }}>{t("已 Paid 發票儲存後 → 佣金將按當前明細與規則重算")}</div>
           )}
         </div>
         <div style={{ marginBottom: 14 }}>

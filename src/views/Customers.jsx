@@ -558,8 +558,8 @@ export function CustomersListView({
     const qCompact = q.replace(/[\s-]+/g, "");
     return customerGroups.virtualCustomers.filter(c => {
       const imeiCodes = customerDeviceImeisFor(customerDevices, c)
-      // 至少一個 email 或 phone 有值
-      if (c.allEmails.length === 0 && c.allPhones.length === 0) return false;
+      // 至少一個 email / phone / IMEI 有值（IMEI-only 客戶也保留）
+      if (c.allEmails.length === 0 && c.allPhones.length === 0 && imeiCodes.length === 0) return false;
       if (q) {
         const hit = c.allNames.some(n => n.toLowerCase().includes(q))
           || c.allEmails.some(e => e.toLowerCase().includes(q))

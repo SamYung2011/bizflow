@@ -540,6 +540,9 @@ export default function App() {
       imeiCodes: editCustForm.imeiCodes,
     });
     if (deviceSync.error) { setEditCustSaving(false); alert(t("設備保存失敗") + "：" + deviceSync.error.message); return; }
+    if (Array.isArray(deviceSync.conflicts) && deviceSync.conflicts.length > 0) {
+      alert(`${t("以下 IMEI 已歸屬其他客戶，未掛到當前客戶")}：\n${deviceSync.conflicts.map(c => c.imei).join("\n")}`);
+    }
     // 多值字段「反向清理」：form 裡被刪除的值，合并组内其他成員（rule 1 獨立 + 物理子）
     // 對應字段也要移除，否則 customerGroups 聚合會把被刪的值從其他成員裡拉回來。
     const splitMulti = v => String(v || "").split(/\n+/).map(s => s.trim()).filter(Boolean);
@@ -1091,6 +1094,9 @@ export default function App() {
       });
       if (deviceSync.error) {
         alert(`${t("新增客戶已完成")}，${t("但設備未能保存")}：${deviceSync.error.message}`);
+      }
+      if (Array.isArray(deviceSync.conflicts) && deviceSync.conflicts.length > 0) {
+        alert(`${t("以下 IMEI 已歸屬其他客戶，未掛到當前客戶")}：\n${deviceSync.conflicts.map(c => c.imei).join("\n")}`);
       }
       setShowAddCustomer(false);
       setNewCustomer({ name: "", email: "", phone: "", phone_mainland: "", car_make: "", car_model: "", address: "", imei_input: "", interest_products: [], referral: "", type: "Lead", notes: "" });

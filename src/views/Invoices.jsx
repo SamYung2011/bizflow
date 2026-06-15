@@ -214,6 +214,9 @@ export default function InvoicesView({
       if (imeiSync.error) {
         alert(`${t("發票已生成")} (#${data[0].invoice_number})，${t("但 IMEI 未能同步到客戶資料")}：${imeiSync.error.message}`)
       }
+      if (Array.isArray(imeiSync.conflicts) && imeiSync.conflicts.length > 0) {
+        alert(`${t("以下 IMEI 已歸屬其他客戶，未掛到當前客戶")}：\n${imeiSync.conflicts.map(c => c.imei).join("\n")}`)
+      }
 
       // Auto-create warranty: update inventory items with warranty_end dates
       const invoiceDate = new Date()

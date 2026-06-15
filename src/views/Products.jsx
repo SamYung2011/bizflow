@@ -117,15 +117,17 @@ export function ProductEditModal({
               const { error: upErr } = await supabase.from("inventory_stock").upsert(upserts, { onConflict: "product_id,warehouse_id" });
               if (upErr) { alert(`${t("庫存儲存失敗")}：${upErr.message}`); return; }
               if (movements.length > 0) await supabase.from("inventory_movements").insert(movements);
-              setStocks(prev => {
-                const map = new Map(prev.map(s => [`${s.product_id}_${s.warehouse_id}`, s]));
+              const mergeStocks = (prev) => {
+                const map = new Map((prev || []).map(s => [`${s.product_id}_${s.warehouse_id}`, s]));
                 for (const u of upserts) {
                   const k = `${u.product_id}_${u.warehouse_id}`;
                   const old = map.get(k);
                   map.set(k, { ...(old || { id: crypto.randomUUID() }), ...u });
                 }
                 return [...map.values()];
-              });
+              };
+              setStocks(mergeStocks);
+              queryClient.setQueryData(["bf", "inventory_stock"], mergeStocks);
             }
             setEditingProduct(null);
           }} style={{ flex: 1, padding: 12, background: "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>{t("儲存")}</button>
@@ -142,6 +144,7 @@ export function ProductNewModal({
 }) {
   const { t } = useT()
   const { products, setProducts } = useAppContext()
+  const queryClient = useQueryClient()
   if (!newProductOpen) return null
   const np = newProduct;
   const CATEGORY_PREFIX = { '轉插': 'ADP', '充電線': 'CBL', '便攜充電': 'PTC', '充電樁': 'CHG', '停售': 'DSC' };
@@ -254,6 +257,7 @@ export function ProductNewModal({
         allInserted = [inserted, ...(childInserted || [])];
       }
       setProducts(prev => [...prev, ...allInserted]);
+      queryClient.setQueryData(["bf", "products"], (old) => Array.isArray(old) ? [...old, ...allInserted] : allInserted);
       close();
     } catch (e) {
       alert(e.message || String(e));
@@ -898,6 +902,7 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
             const { error } = await supabase.from("products").update({ product_type: draft.product_type || null, collections: draft.collections, tags: draft.tags }).eq("id", p.id);
             if (error) { alert(t("儲存失敗：") + error.message); return; }
             setProducts(prev => prev.map(x => x.id === p.id ? { ...x, ...draft } : x));
+            queryClient.setQueryData(["bf", "products"], (old) => Array.isArray(old) ? old.map(x => x.id === p.id ? { ...x, ...draft } : x) : old);
             setSelectedProduct(prev => ({ ...prev, ...draft }));
             setProductOrgDraft(null);
           };
@@ -911,6 +916,7 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
             const { error } = await supabase.from("products").update({ status: next }).in("id", ids);
             if (error) { alert((isDiscontinued ? t("啟用失敗") : t("停售失敗")) + "：" + error.message); return; }
             setProducts(prev => prev.map(x => ids.includes(x.id) ? { ...x, status: next } : x));
+            queryClient.setQueryData(["bf", "products"], (old) => Array.isArray(old) ? old.map(x => ids.includes(x.id) ? { ...x, status: next } : x) : old);
             setSelectedProduct(prev => ({ ...prev, status: next }));
           };
           const toggleVirtual = async () => {
@@ -919,6 +925,7 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
             const { error } = await supabase.from("products").update({ is_virtual: next }).in("id", ids);
             if (error) { alert(t("儲存失敗：") + error.message); return; }
             setProducts(prev => prev.map(x => ids.includes(x.id) ? { ...x, is_virtual: next } : x));
+            queryClient.setQueryData(["bf", "products"], (old) => Array.isArray(old) ? old.map(x => ids.includes(x.id) ? { ...x, is_virtual: next } : x) : old);
             setSelectedProduct(prev => ({ ...prev, is_virtual: next }));
           };
           const deleteProduct = async () => {
@@ -929,10 +936,10 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
             if (!confirm(msg)) return;
             const ids = [p.id, ...children.map(c => c.id)];
             await supabase.from("inventory_stock").delete().in("product_id", ids);
-            await supabase.from("inventory_movements").delete().in("product_id", ids);
             const { error } = await supabase.from("products").delete().eq("id", p.id);
             if (error) { alert(t("刪除失敗") + "：" + error.message); return; }
             setProducts(prev => prev.filter(x => !ids.includes(x.id)));
+            queryClient.setQueryData(["bf", "products"], (old) => Array.isArray(old) ? old.filter(x => !ids.includes(x.id)) : old);
             setSelectedProduct(null);
             setProductOrgDraft(null);
           };
@@ -999,6 +1006,7 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
                         const { error: dbErr } = await supabase.from('products').update({ image_url: url }).eq('id', p.id);
                         if (dbErr) { alert(t('保存失敗：') + dbErr.message); return; }
                         setProducts(prev => prev.map(x => x.id === p.id ? { ...x, image_url: url } : x));
+                        queryClient.setQueryData(["bf", "products"], (old) => Array.isArray(old) ? old.map(x => x.id === p.id ? { ...x, image_url: url } : x) : old);
                         setSelectedProduct(prev => ({ ...prev, image_url: url }));
                       }} />
                     </label>
@@ -1008,6 +1016,7 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
                         const { error } = await supabase.from('products').update({ image_url: null }).eq('id', p.id);
                         if (error) { alert(t('移除失敗：') + error.message); return; }
                         setProducts(prev => prev.map(x => x.id === p.id ? { ...x, image_url: null } : x));
+                        queryClient.setQueryData(["bf", "products"], (old) => Array.isArray(old) ? old.map(x => x.id === p.id ? { ...x, image_url: null } : x) : old);
                         setSelectedProduct(prev => ({ ...prev, image_url: null }));
                       }} style={{ marginLeft: 8, padding: "8px 16px", background: "#f5f5f5", color: "#666", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>{t("移除")}</button>
                     )}

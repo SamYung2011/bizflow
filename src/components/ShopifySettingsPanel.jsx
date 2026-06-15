@@ -79,18 +79,6 @@ export default function ShopifySettingsPanel() {
     setTestResult(null)
     try {
       const d = await callEdge('shopify-settings', { action: 'test-connection', pwd, shop_domain: domainDraft.trim(), access_token: tokenDraft.trim() })
-      // 测试成功 → 自动 save，避免 draft 丢失（HMR / reload / 切 tab）后又要重填
-      if (d.ok) {
-        try {
-          await callEdge('shopify-settings', { action: 'save', pwd, shop_domain: domainDraft.trim(), access_token: tokenDraft.trim() })
-          const next = { ...(shopifySettings || { id: 1 }), shop_domain: normalizeDomain(domainDraft), updated_at: new Date().toISOString() }
-          setShopifySettings(next)
-          queryClient.setQueryData(['bf', 'shopify_settings'], next)
-          d.autoSaved = true
-        } catch (saveErr) {
-          d.autoSaveError = saveErr.message
-        }
-      }
       setTestResult(d)
     } catch (e) {
       setTestResult({ ok: false, error: e.message })
@@ -344,13 +332,10 @@ export default function ShopifySettingsPanel() {
               <div style={{ marginTop: 14, padding: 12, borderRadius: 8, background: testResult.ok ? "#f0fdf4" : "#fef2f2", border: "1px solid " + (testResult.ok ? "#bbf7d0" : "#fecaca"), fontSize: 12 }}>
                 {testResult.ok ? (
                   <div>
-                    <div style={{ fontWeight: 700, color: "#047857", marginBottom: 4 }}>✓ {t("連接成功")}{testResult.autoSaved && <span style={{ fontWeight: 400, color: "#047857", marginLeft: 6 }}>· {t("已自動儲存")}</span>}</div>
+                    <div style={{ fontWeight: 700, color: "#047857", marginBottom: 4 }}>✓ {t("連接成功")}</div>
                     <div style={{ color: "#555" }}>
                       {t("店舖")}：<b>{testResult.shop?.name || "—"}</b> · {testResult.shop?.myshopifyDomain || ""} · {t("貨幣")} {testResult.shop?.currencyCode || "—"}
                     </div>
-                    {testResult.autoSaveError && (
-                      <div style={{ marginTop: 6, color: "#b45309", fontSize: 11 }}>⚠ {t("自動儲存失敗")}：{testResult.autoSaveError}</div>
-                    )}
                   </div>
                 ) : (
                   <div>

@@ -133,26 +133,41 @@ export async function appendCustomerImeiCodes({
   imeiCodes,
 }) {
   const additions = uniqueValidImeis(imeiCodes)
-  if (!customerId || additions.length === 0) return { updated: false }
+  if (!customerId || additions.length === 0) return { updated: false, conflicts: [] }
 
-  const rows = additions.map(imei => ({
+  const { data: existing, error: lookupErr } = await supabase
+    .from("customer_devices")
+    .select("imei, customer_id")
+    .in("imei", additions)
+  if (lookupErr) return { updated: false, error: lookupErr, conflicts: [] }
+
+  const conflicts = []
+  const safeToInsert = []
+  const existingByImei = new Map((existing || []).map(r => [compactCode(r.imei), r]))
+  for (const imei of additions) {
+    const owner = existingByImei.get(imei)
+    if (!owner) { safeToInsert.push(imei); continue }
+    if (String(owner.customer_id) === String(customerId)) continue
+    conflicts.push({ imei, owner_customer_id: owner.customer_id })
+  }
+
+  if (safeToInsert.length === 0) {
+    return { updated: false, imei_codes: [], conflicts }
+  }
+
+  const rows = safeToInsert.map(imei => ({
     customer_id: customerId,
     imei,
     device_type: "adapter_pro",
   }))
-
-  const { error } = await supabase
+  const { data: insertedData, error } = await supabase
     .from("customer_devices")
-    .upsert(rows, { onConflict: "imei" })
+    .insert(rows)
     .select()
-  if (error) return { updated: false, error }
+  if (error) return { updated: false, error, conflicts }
 
-  const { data } = await supabase
-    .from("customer_devices")
-    .select("*")
-    .in("imei", additions)
-  const savedRows = data || rows
-  const savedImeis = new Set(additions)
+  const savedRows = insertedData || rows
+  const savedImeis = new Set(safeToInsert)
   const mergeRows = old => (
     Array.isArray(old)
       ? [...old.filter(r => !savedImeis.has(compactCode(r.imei))), ...savedRows]
@@ -160,7 +175,7 @@ export async function appendCustomerImeiCodes({
   )
   setCustomerDevices?.(mergeRows)
   queryClient?.setQueryData?.(["bf", "customer_devices"], mergeRows)
-  return { updated: true, imei_codes: additions }
+  return { updated: true, imei_codes: safeToInsert, conflicts }
 }
 
 export async function replaceCustomerDeviceImeis({
@@ -172,40 +187,59 @@ export async function replaceCustomerDeviceImeis({
   imeiCodes,
   deviceType = "adapter_pro",
 }) {
-  if (!customerId) return { updated: false }
+  if (!customerId) return { updated: false, conflicts: [] }
   const nextImeis = uniqueValidImeis(imeiCodes)
   const existing = (customerDevices || []).filter(row => (
     String(row?.customer_id || "") === String(customerId) && (row.device_type || "adapter_pro") === deviceType
   ))
   const nextSet = new Set(nextImeis)
-  const staleImeis = existing
-    .map(row => compactCode(row.imei))
-    .filter(imei => imei && !nextSet.has(imei))
+  const existingImeis = new Set(existing.map(row => compactCode(row.imei)).filter(Boolean))
+  const staleImeis = [...existingImeis].filter(imei => !nextSet.has(imei))
+  const candidateInserts = nextImeis.filter(imei => !existingImeis.has(imei))
+
+  const conflicts = []
+  let safeToInsert = candidateInserts
+  if (candidateInserts.length > 0) {
+    const { data: ownership, error: lookupErr } = await supabase
+      .from("customer_devices")
+      .select("imei, customer_id")
+      .in("imei", candidateInserts)
+    if (lookupErr) return { updated: false, error: lookupErr, conflicts: [] }
+    const ownByImei = new Map((ownership || []).map(r => [compactCode(r.imei), r]))
+    safeToInsert = []
+    for (const imei of candidateInserts) {
+      const owner = ownByImei.get(imei)
+      if (!owner) { safeToInsert.push(imei); continue }
+      if (String(owner.customer_id) === String(customerId)) continue
+      conflicts.push({ imei, owner_customer_id: owner.customer_id })
+    }
+  }
 
   if (staleImeis.length > 0) {
     const { error } = await supabase
       .from("customer_devices")
       .delete()
+      .eq("customer_id", customerId)
       .in("imei", staleImeis)
-    if (error) return { updated: false, error }
+    if (error) return { updated: false, error, conflicts }
   }
 
   let savedRows = []
-  if (nextImeis.length > 0) {
-    const rows = nextImeis.map(imei => ({
+  if (safeToInsert.length > 0) {
+    const rows = safeToInsert.map(imei => ({
       customer_id: customerId,
       imei,
       device_type: deviceType,
     }))
     const { data, error } = await supabase
       .from("customer_devices")
-      .upsert(rows, { onConflict: "imei" })
+      .insert(rows)
       .select()
-    if (error) return { updated: false, error }
+    if (error) return { updated: false, error, conflicts }
     savedRows = data || rows
   }
 
-  const removeImeis = new Set([...staleImeis, ...nextImeis])
+  const removeImeis = new Set([...staleImeis, ...safeToInsert])
   const mergeRows = old => (
     Array.isArray(old)
       ? [...old.filter(r => !removeImeis.has(compactCode(r.imei))), ...savedRows]
@@ -213,5 +247,5 @@ export async function replaceCustomerDeviceImeis({
   )
   setCustomerDevices?.(mergeRows)
   queryClient?.setQueryData?.(["bf", "customer_devices"], mergeRows)
-  return { updated: true, imei_codes: nextImeis }
+  return { updated: true, imei_codes: [...existingImeis].filter(i => nextSet.has(i)).concat(safeToInsert), conflicts }
 }

@@ -350,6 +350,13 @@ export default function WhatsappView() {
                 }} style={{ padding: "9px 18px", background: waSecretUnlocked ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: waSecretUnlocked ? "pointer" : "not-allowed" }}>{t("儲存 API 配置")}</button>
                 <button disabled={!s.openai_base_url || !unlockedApiKey || !s.model} onClick={async () => {
                   try {
+                    const ALLOWED_HOSTS = ['api.openai.com', 'api.deepseek.com', 'api.anthropic.com', 'dashscope.aliyuncs.com', 'open.bigmodel.cn'];
+                    let parsed;
+                    try { parsed = new URL(s.openai_base_url); } catch { alert(t("base URL 格式錯誤")); return; }
+                    if (parsed.protocol !== 'https:') { alert(t("base URL 必須使用 HTTPS")); return; }
+                    if (!ALLOWED_HOSTS.includes(parsed.host)) {
+                      if (!confirm(`${t("警告：將把 API Key 發送到自訂網址")}：\n${parsed.host}\n\n${t("該網址不在已知名單。確認此網址受信任？取消可避免 Key 外泄")}`)) return;
+                    }
                     const r = await fetch(s.openai_base_url.replace(/\/+$/, '') + '/chat/completions', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + unlockedApiKey },
