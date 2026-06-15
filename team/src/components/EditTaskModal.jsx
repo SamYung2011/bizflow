@@ -83,10 +83,15 @@ export default function EditTaskModal({ task: initial, data, me, userId, onClose
   }
 
   const approve = async () => {
+    // 不走 updateField — 它的 ro 守门会拦住只有 can_validate_task 没 can_edit_others_tasks 的角色
     const anyDone = tkList.some(a => a.completed_at != null)
     const ns = anyDone ? 'done' : 'abandoned'
     const now = new Date().toISOString()
-    await updateField({ status: ns, completed_at: now, approved_at: now, approved_by: me.id })
+    const patch = { status: ns, completed_at: now, approved_at: now, approved_by: me.id }
+    setTk(prev => ({ ...prev, ...patch }))
+    const { error } = await supabase.from('employee_tasks').update(patch).eq('id', tk.id)
+    if (error) { alert(t('核驗失敗：') + error.message); return }
+    queryClient.invalidateQueries({ queryKey: ['admin', 'employee_tasks'] })
   }
 
   const toggleAbandoned = async () => {
@@ -196,7 +201,7 @@ export default function EditTaskModal({ task: initial, data, me, userId, onClose
           })()}
         </div>
 
-        <AssigneeEditor tk={tk} tkList={tkList} employees={employees} empCompanies={empCompanies} canManage={canManageAssignees} setAssignees={setAssignees} scopeCompanyId={scopeCompanyId} onForbidden={roAlert} />
+        <AssigneeEditor tk={tk} tkList={tkList} employees={employees} empCompanies={empCompanies} empDepts={empDepts} canManage={canManageAssignees} setAssignees={setAssignees} scopeCompanyId={scopeCompanyId} onForbidden={roAlert} />
 
         {canEdit ? (
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 8, fontSize: 12, color: c.textMuted, cursor: 'pointer' }}>
@@ -211,7 +216,7 @@ export default function EditTaskModal({ task: initial, data, me, userId, onClose
 
         <AttachmentList tk={tk} ro={ro} onUpdate={updateField} onForbidden={roAlert} />
 
-        <SubtaskList tk={tk} subtasks={subtasks} employees={employees} empCompanies={empCompanies} feedbacks={feedbacks} assigneesByTask={assigneesByTask} me={me} canEdit={canEdit} scopeCompanyId={scopeCompanyId} ctx={ctx} onForbidden={roAlert} />
+        <SubtaskList tk={tk} subtasks={subtasks} employees={employees} empCompanies={empCompanies} empDepts={empDepts} feedbacks={feedbacks} assigneesByTask={assigneesByTask} me={me} canEdit={canEdit} scopeCompanyId={scopeCompanyId} ctx={ctx} onForbidden={roAlert} />
 
         <FeedbackThread tk={tk} fbList={fbList} employees={employees} empCompanies={empCompanies} me={me} userId={userId} scopeCompanyId={scopeCompanyId} ctx={ctx} />
 
@@ -241,15 +246,21 @@ export default function EditTaskModal({ task: initial, data, me, userId, onClose
   )
 }
 
-function AssigneeEditor({ tk, tkList, employees, empCompanies = [], canManage, setAssignees, scopeCompanyId, onForbidden = () => {} }) {
+function AssigneeEditor({ tk, tkList, employees, empCompanies = [], empDepts = [], canManage, setAssignees, scopeCompanyId, onForbidden = () => {} }) {
   const { t } = useT()
   const cur = tkList.map(a => a.employee_id)
   const empIdsInScope = useMemo(
     () => empIdsInCompany(empCompanies, scopeCompanyId),
     [empCompanies, scopeCompanyId]
   )
+  // 部門專屬任務：候選還要在該部門裡（DB is_valid_task_assignee 兜底，前端先過濾避免假候選）
+  const deptMemberSet = useMemo(() => {
+    if (!tk.department_id) return null
+    return new Set((empDepts || []).filter(ed => ed.department_id === tk.department_id).map(ed => ed.employee_id))
+  }, [tk.department_id, empDepts])
   const sameCo = (e) => scopeCompanyId ? empIdsInScope.has(e.id) : true
-  const cands = employees.filter(e => e.active !== false && sameCo(e) && !cur.includes(e.id))
+  const inDept = (e) => !deptMemberSet || deptMemberSet.has(e.id)
+  const cands = employees.filter(e => e.active !== false && sameCo(e) && inDept(e) && !cur.includes(e.id))
   return (
     <div style={{ marginTop: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
@@ -305,7 +316,7 @@ function AttachmentList({ tk, ro, onUpdate, onForbidden = () => {} }) {
   )
 }
 
-function SubtaskList({ tk, subtasks, employees, empCompanies = [], feedbacks, assigneesByTask, me, canEdit, scopeCompanyId, ctx, onForbidden = () => {} }) {
+function SubtaskList({ tk, subtasks, employees, empCompanies = [], empDepts = [], feedbacks, assigneesByTask, me, canEdit, scopeCompanyId, ctx, onForbidden = () => {} }) {
   const { t } = useT()
   const queryClient = useQueryClient()
   const [subTitle, setSubTitle] = useState('')
@@ -317,8 +328,14 @@ function SubtaskList({ tk, subtasks, employees, empCompanies = [], feedbacks, as
     () => empIdsInCompany(empCompanies, scopeCompanyId),
     [empCompanies, scopeCompanyId]
   )
+  // 子任務繼承父任務 department_id，候選也要按該部門過濾
+  const deptMemberSet = useMemo(() => {
+    if (!tk.department_id) return null
+    return new Set((empDepts || []).filter(ed => ed.department_id === tk.department_id).map(ed => ed.employee_id))
+  }, [tk.department_id, empDepts])
   const sameCo = (e) => scopeCompanyId ? empIdsInScope.has(e.id) : true
-  const subCands = employees.filter(e => e.active !== false && sameCo(e) && !effectiveSub.includes(e.id))
+  const inDept = (e) => !deptMemberSet || deptMemberSet.has(e.id)
+  const subCands = employees.filter(e => e.active !== false && sameCo(e) && inDept(e) && !effectiveSub.includes(e.id))
 
   const addSub = async () => {
     const title = subTitle.trim()
@@ -327,6 +344,7 @@ function SubtaskList({ tk, subtasks, employees, empCompanies = [], feedbacks, as
     const { data, error } = await supabase.from('employee_tasks').insert({
       employee_id: effectiveSub[0], creator_employee_id: me.id, needs_approval: !!tk.needs_approval,
       title, priority: 'none', parent_task_id: tk.id, company_id: tk.company_id,
+      department_id: tk.department_id || null,
     }).select().single()
     if (error) return alert(error.message)
     await supabase.from('task_assignees').insert(effectiveSub.map(eid => ({ task_id: data.id, employee_id: eid })))
