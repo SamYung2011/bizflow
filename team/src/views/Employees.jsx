@@ -57,16 +57,19 @@ export default function EmployeesView({ data, me, isMobile, ctx }) {
     if (!confirm(msg)) return
     try {
       // 刪該員工在本公司創建的所有任務（cascade 帶 assignees + feedbacks）
-      await supabase.from('employee_tasks').delete()
+      const { error: taskDeleteErr } = await supabase.from('employee_tasks').delete()
         .eq('creator_employee_id', emp.id)
         .eq('company_id', targetCompanyId)
+      if (taskDeleteErr) throw taskDeleteErr
       // 刪該員工在本公司任務的 assignees 行（A 是 assignee 不是 creator 的情況）
-      const { data: companyTasks } = await supabase.from('employee_tasks')
+      const { data: companyTasks, error: taskSelectErr } = await supabase.from('employee_tasks')
         .select('id').eq('company_id', targetCompanyId)
+      if (taskSelectErr) throw taskSelectErr
       if (companyTasks && companyTasks.length > 0) {
-        await supabase.from('task_assignees').delete()
+        const { error: assigneeDeleteErr } = await supabase.from('task_assignees').delete()
           .eq('employee_id', emp.id)
           .in('task_id', companyTasks.map(tk => tk.id))
+        if (assigneeDeleteErr) throw assigneeDeleteErr
       }
       // 刪 binding
       const { error: bErr } = await supabase.from('employee_companies').delete()
@@ -75,10 +78,11 @@ export default function EmployeesView({ data, me, isMobile, ctx }) {
       if (bErr) throw bErr
       // 變孤兒 → 標停用
       if (willBeOrphan) {
-        await supabase.from('employees').update({
+        const { error: empUpdateErr } = await supabase.from('employees').update({
           active: false,
           deactivated_at: new Date().toISOString(),
         }).eq('id', emp.id)
+        if (empUpdateErr) throw empUpdateErr
       }
       refresh()
     } catch (e) {
@@ -115,7 +119,7 @@ export default function EmployeesView({ data, me, isMobile, ctx }) {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>{t('員工管理')}</h1>
-        <button onClick={() => setShowAdd(true)} style={S.btnPrimary}>＋ {t('新增員工')}</button>
+        {ctx?.isSuperAdmin && <button onClick={() => setShowAdd(true)} style={S.btnPrimary}>＋ {t('新增員工')}</button>}
       </div>
 
       {visibleCompanies.length === 0 && <Empty>{t('沒有可管理的公司')}</Empty>}
@@ -152,7 +156,7 @@ export default function EmployeesView({ data, me, isMobile, ctx }) {
         )
       })}
 
-      {showAdd && <NewEmployeeModal companies={companies} onClose={() => setShowAdd(false)} onSaved={refresh} />}
+      {showAdd && <NewEmployeeModal companies={companies} roles={roles} onClose={() => setShowAdd(false)} onSaved={refresh} />}
     </div>
   )
 }
@@ -242,24 +246,44 @@ function EmployeeRow({ emp, companies, empCompanies, roles, companyContext, upda
   )
 }
 
-function NewEmployeeModal({ companies, onClose, onSaved }) {
+function NewEmployeeModal({ companies, roles, onClose, onSaved }) {
   const { t } = useT()
   const [name, setName] = useState('')
-  const [role, setRole] = useState('')
+  const [roleId, setRoleId] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
   const [companyId, setCompanyId] = useState(companies[0]?.id || '')
   const [busy, setBusy] = useState(false)
+  const companyRoles = roles.filter(r => r.company_id === companyId)
+  const selectedRole = companyRoles.find(r => r.id === roleId)
+  const defaultRole = companyRoles.find(r => r.name === '普通員工') || companyRoles[0] || null
 
   const save = async () => {
     if (!name.trim()) return alert(t('姓名必填'))
+    if (!companyId) return alert(t('未選定公司'))
+    const bindingRoleId = selectedRole?.id || defaultRole?.id || null
+    const roleName = (selectedRole || defaultRole)?.name || null
     setBusy(true)
-    const { error } = await supabase.from('employees').insert({
-      name: name.trim(), role: role.trim() || null, phone: phone.trim() || null,
+    const { data: employee, error } = await supabase.from('employees').insert({
+      name: name.trim(), role: roleName, phone: phone.trim() || null,
       email: email.trim() || null, company_id: companyId || null, kind: 'employee',
+    }).select('id').single()
+    if (error) {
+      setBusy(false)
+      return alert(t('新增失敗：') + error.message)
+    }
+    const { error: bindError } = await supabase.from('employee_companies').insert({
+      employee_id: employee.id,
+      company_id: companyId,
+      is_default: true,
+      is_company_admin: false,
+      role_id: bindingRoleId,
     })
     setBusy(false)
-    if (error) return alert(t('新增失敗：') + error.message)
+    if (bindError) {
+      await supabase.from('employees').delete().eq('id', employee.id)
+      return alert(t('創建綁定失敗：') + bindError.message)
+    }
     onSaved(); onClose()
   }
   return (
@@ -270,10 +294,13 @@ function NewEmployeeModal({ companies, onClose, onSaved }) {
           <button onClick={onClose} style={S.iconBtn}>×</button>
         </div>
         <Field label={t('姓名 *')}><input value={name} onChange={e => setName(e.target.value)} style={S.input} placeholder={t('員工姓名')} /></Field>
-        <Field label={t('職位')}><input value={role} onChange={e => setRole(e.target.value)} style={S.input} placeholder={t('例如 客服 / 技術 / 銷售')} /></Field>
-        <Field label={t('公司')}><select value={companyId} onChange={e => setCompanyId(e.target.value)} style={S.input}>
+        <Field label={t('公司')}><select value={companyId} onChange={e => { setCompanyId(e.target.value); setRoleId('') }} style={S.input}>
           <option value="">—</option>
           {companies.map(co => <option key={co.id} value={co.id}>{co.name}</option>)}
+        </select></Field>
+        <Field label={t('職位')}><select value={roleId} onChange={e => setRoleId(e.target.value)} style={S.input}>
+          <option value="">{defaultRole ? defaultRole.name : '—'}</option>
+          {companyRoles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
         </select></Field>
         <Field label={t('電話')}><input value={phone} onChange={e => setPhone(e.target.value)} style={S.input} placeholder="+852" /></Field>
         <Field label="Email"><input value={email} onChange={e => setEmail(e.target.value)} style={S.input} placeholder="email@example.com" /></Field>

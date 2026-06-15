@@ -6,21 +6,24 @@ import { useT } from '../i18n.jsx'
 
 export default function CompaniesView({ data }) {
   const { t } = useT()
-  const { companies, employees } = data
+  const { companies, empCompanies } = data
   const queryClient = useQueryClient()
   const [newName, setNewName] = useState('')
   const [busy, setBusy] = useState(false)
 
   const empCountByCompany = useMemo(() => {
     const m = new Map()
-    for (const e of employees) {
-      if (!e.company_id) continue
-      m.set(e.company_id, (m.get(e.company_id) || 0) + 1)
+    for (const row of empCompanies) {
+      if (!row.company_id) continue
+      m.set(row.company_id, (m.get(row.company_id) || 0) + 1)
     }
     return m
-  }, [employees])
+  }, [empCompanies])
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['admin', 'companies'] })
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['admin', 'companies'] })
+    queryClient.invalidateQueries({ queryKey: ['admin', 'employee_companies'] })
+  }
 
   const add = async () => {
     const name = newName.trim()

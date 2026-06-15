@@ -25,7 +25,7 @@ export default function EditTaskModal({ task: initial, data, me, userId, onClose
   const isCreator = tk.creator_employee_id === me.id
   // RBAC：super/company admin / 有 can_edit_others_tasks / 創建人本人 → 可編輯
   const canEdit = ctx?.isSuperAdmin || ctx?.isAdminOfActive || isCreator || ctx?.hasPermission?.('can_edit_others_tasks')
-  const canAssignOthers = ctx?.isSuperAdmin || ctx?.isAdminOfActive || ctx?.hasPermission?.('can_assign_others')
+  const canManageAssignees = ctx?.isSuperAdmin || ctx?.isAdminOfActive || isCreator || ctx?.hasPermission?.('can_assign_others')
   const ro = !canEdit
   // ro 觸發提示：替代之前頂部 banner，浮窗 toast 樣式，3 秒自動消失
   const [roToast, setRoToast] = useState(false)
@@ -115,7 +115,7 @@ export default function EditTaskModal({ task: initial, data, me, userId, onClose
     onClose()
   }
 
-  const canDelete = ctx?.isSuperAdmin || ctx?.isAdminOfActive || isCreator || (isAssignee && tkList.length === 1 && !tk.needs_approval) || ctx?.hasPermission?.('can_delete_others_tasks')
+  const canDelete = ctx?.isSuperAdmin || ctx?.isAdminOfActive || isCreator || ctx?.hasPermission?.('can_delete_others_tasks')
   const canValidate = ctx?.isSuperAdmin || ctx?.isAdminOfActive || isCreator || ctx?.hasPermission?.('can_validate_task')
 
   return (
@@ -196,7 +196,7 @@ export default function EditTaskModal({ task: initial, data, me, userId, onClose
           })()}
         </div>
 
-        <AssigneeEditor tk={tk} tkList={tkList} employees={employees} empCompanies={empCompanies} canManage={canEdit && canAssignOthers} setAssignees={setAssignees} scopeCompanyId={scopeCompanyId} onForbidden={roAlert} />
+        <AssigneeEditor tk={tk} tkList={tkList} employees={employees} empCompanies={empCompanies} canManage={canManageAssignees} setAssignees={setAssignees} scopeCompanyId={scopeCompanyId} onForbidden={roAlert} />
 
         {canEdit ? (
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 8, fontSize: 12, color: c.textMuted, cursor: 'pointer' }}>

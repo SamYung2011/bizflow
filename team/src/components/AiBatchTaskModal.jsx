@@ -105,7 +105,7 @@ export default function AiBatchTaskModal({
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ text: text.trim() }),
+        body: JSON.stringify({ text: text.trim(), companyId }),
       })
       const payload = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(payload?.error || payload?.message || `${res.status}`)
@@ -113,6 +113,9 @@ export default function AiBatchTaskModal({
       if (parsed.length === 0) throw new Error(t('未解析到任務，請補充更多內容'))
       const next = parsed.map((task, idx) => {
         const deptId = deptByName.get(normalizeDepartmentName(task.department_name)) || ''
+        const baseAssigneeIds = defaultAssigneeIds.length > 0 ? [...defaultAssigneeIds] : []
+        const memberSet = deptId ? deptMembersById.get(deptId) : null
+        const assigneeIds = memberSet ? baseAssigneeIds.filter(id => memberSet.has(id)) : baseAssigneeIds
         return {
           id: `ai-${Date.now()}-${idx}`,
           title: String(task.title || '').trim(),
@@ -120,7 +123,7 @@ export default function AiBatchTaskModal({
           department_id: deptId,
           due_date: cleanDate(task.due_date),
           priority: cleanPriority(task.priority),
-          assigneeIds: defaultAssigneeIds.length > 0 ? [...defaultAssigneeIds] : [],
+          assigneeIds,
         }
       }).filter(task => task.title)
       if (next.length === 0) throw new Error(t('未解析到任務，請補充更多內容'))
@@ -169,14 +172,20 @@ export default function AiBatchTaskModal({
       alert(t('未選定公司，請先在右上角切換公司再新增任務'))
       return
     }
-    const clean = cards.map(card => ({
-      title: card.title.trim(),
-      description: card.description.trim(),
-      department_id: card.department_id || null,
-      due_date: card.due_date || null,
-      priority: cleanPriority(card.priority),
-      assigneeIds: card.assigneeIds || [],
-    })).filter(card => card.title && card.assigneeIds.length > 0)
+    const clean = cards.map(card => {
+      const memberSet = card.department_id ? deptMembersById.get(card.department_id) : null
+      const assigneeIds = memberSet
+        ? (card.assigneeIds || []).filter(id => memberSet.has(id))
+        : (card.assigneeIds || [])
+      return {
+        title: card.title.trim(),
+        description: card.description.trim(),
+        department_id: card.department_id || null,
+        due_date: card.due_date || null,
+        priority: cleanPriority(card.priority),
+        assigneeIds,
+      }
+    }).filter(card => card.title && card.assigneeIds.length > 0)
     if (clean.length === 0) {
       alert(t('請為每張卡指定至少一位負責人'))
       return

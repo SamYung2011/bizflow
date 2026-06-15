@@ -599,6 +599,8 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
   }, [departmentId, empDepts])
 
   const effective = assigneeIds === null ? [emp.id] : assigneeIds
+  // 提交時實際寫入的 assignee 列表：選了部門就要再 filter 一次，防止默認 assignee 不在部門裡
+  const submitAssigneeIds = deptMemberIds ? effective.filter(id => deptMemberIds.has(id)) : effective
   // 候選限「任務所屬公司」的 binding 成員（跨公司綁定靠 employee_companies，不能用 employees.company_id 老字段）
   const empIdsInScope = useMemo(
     () => empIdsInCompany(empCompanies, taskCompanyId),
@@ -613,7 +615,8 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
   const candidates = activeEmps.filter(e => !effective.includes(e.id))
 
   const submit = async () => {
-    if (!title.trim() || effective.length === 0) return
+    if (!title.trim()) return
+    if (submitAssigneeIds.length === 0) return alert(t('請至少指定一位部門內負責人'))
     // company_id fallback：優先 prop，否則用 emp.company_id（任務所屬員工的公司），最後 me.company_id
     const effectiveCompanyId = companyId || emp?.company_id || me.company_id
     if (!effectiveCompanyId) {
@@ -622,7 +625,7 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
     setBusy(true)
     try {
       const { data, error } = await supabase.from('employee_tasks').insert({
-        employee_id: effective[0],
+        employee_id: submitAssigneeIds[0],
         creator_employee_id: me.id,
         needs_approval: needsApproval,
         title: title.trim(),
@@ -634,7 +637,7 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
         department_id: departmentId || null,
       }).select().single()
       if (error) throw error
-      const rows = effective.map(eid => ({ task_id: data.id, employee_id: eid }))
+      const rows = submitAssigneeIds.map(eid => ({ task_id: data.id, employee_id: eid }))
       const { error: ae } = await supabase.from('task_assignees').insert(rows)
       if (ae) throw ae
       if (files.length > 0) {
@@ -646,9 +649,11 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
         .map(s => ({ title: s.title.trim(), assignees: s.assignees }))
         .filter(s => s.title)
       for (const { title: subTitle, assignees: subAssignees } of cleanSubs) {
-        const eff = subAssignees && subAssignees.length > 0 ? subAssignees : effective
+        const eff = subAssignees && subAssignees.length > 0 ? subAssignees : submitAssigneeIds
+        const filteredEff = deptMemberIds ? eff.filter(eid => deptMemberIds.has(eid)) : eff
+        if (filteredEff.length === 0) continue
         const { data: sub, error: se } = await supabase.from('employee_tasks').insert({
-          employee_id: eff[0],
+          employee_id: filteredEff[0],
           creator_employee_id: me.id,
           needs_approval: needsApproval,
           title: subTitle,
@@ -658,7 +663,7 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
           department_id: departmentId || null,
         }).select().single()
         if (se) { console.error('子任務新增失敗', se); continue }
-        await supabase.from('task_assignees').insert(eff.map(eid => ({ task_id: sub.id, employee_id: eid })))
+        await supabase.from('task_assignees').insert(filteredEff.map(eid => ({ task_id: sub.id, employee_id: eid })))
       }
       setTitle(''); setNote(''); setPriority('low'); setAssigneeIds(null); setNeedsApproval(false); setStartDate(''); setDueDate(''); setFiles([]); setSubtaskItems([]); setDepartmentId('')
       queryClient.invalidateQueries({ queryKey: ['admin', 'employee_tasks'] })
@@ -687,10 +692,8 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
               setDepartmentId(newDeptId)
               if (newDeptId) {
                 const memberSet = new Set(empDepts.filter(ed => ed.department_id === newDeptId).map(ed => ed.employee_id))
-                if (assigneeIds !== null) {
-                  const pruned = assigneeIds.filter(id => memberSet.has(id))
-                  setAssigneeIds(pruned.length > 0 ? pruned : null)
-                }
+                const currentAssigneeIds = assigneeIds === null ? [emp.id] : assigneeIds
+                setAssigneeIds(currentAssigneeIds.filter(id => memberSet.has(id)))
                 // 子任務的自定義 assignees 也要過濾，否則部門 trigger 會卡 INSERT
                 setSubtaskItems(prev => prev.map(it => {
                   if (it.assignees === null) return it
@@ -749,7 +752,7 @@ function NewTaskForm({ emp, me, employees, companyId, departments = [], empDepts
         ))}
       </div>
 
-      <button onClick={submit} disabled={busy || !title.trim() || effective.length === 0} style={{ ...S.btnPrimary, width: '100%', opacity: (busy || !title.trim() || effective.length === 0) ? 0.4 : 1 }}>{busy ? t('處理中…') : t('新增任務')}</button>
+      <button onClick={submit} disabled={busy || !title.trim() || submitAssigneeIds.length === 0} style={{ ...S.btnPrimary, width: '100%', opacity: (busy || !title.trim() || submitAssigneeIds.length === 0) ? 0.4 : 1 }}>{busy ? t('處理中…') : t('新增任務')}</button>
       {aiBatchEnabled && (
         <button
           type="button"
