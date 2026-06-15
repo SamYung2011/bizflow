@@ -237,7 +237,7 @@ export default function App() {
   const {
     session, setSession,
     authLoading, setAuthLoading,
-    userId, currentEmployee, isBfAdmin, isWaAdmin, canShip,
+    userId, currentEmployee, isBfAdmin, isWaAdmin, canShip, canViewRevenue,
     tab, setTab,
     loading, setLoading,
     loadError, setLoadError,
@@ -1030,7 +1030,7 @@ export default function App() {
     ]},
     { type: "group", id: "g_sales", label: t("訂單銷售"), icon: "invoice", children: [
       { id: "invoices", label: t("發票訂單"), icon: "invoice" },
-      { id: "revenue", label: t("營收分析"), icon: "trend_up" },
+      ...(canViewRevenue ? [{ id: "revenue", label: t("營收分析"), icon: "trend_up" }] : []),
     ]},
     { type: "group", id: "g_customers", label: t("客戶售後"), icon: "customer", children: [
       { id: "customers", label: t("客戶管理"), icon: "customer" },
@@ -1954,8 +1954,8 @@ export default function App() {
           />
         )}
 
-        {/* REVENUE */}
-        {tab === "revenue" && (
+        {/* REVENUE — 只給 canViewRevenue 看（admin + employees.can_view_revenue=true） */}
+        {tab === "revenue" && canViewRevenue && (
           <RevenueView />
         )}
 

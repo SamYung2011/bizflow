@@ -130,6 +130,8 @@ export function AppProvider({ children }) {
   const isWaAdmin = isBfAdmin || (!!session?.user?.email && WA_ADMIN_EMAILS.includes(session.user.email))
   // 發貨權限：admin 或 employees.can_ship=true 的人
   const canShip = isBfAdmin || (currentEmployee && currentEmployee.can_ship === true)
+  // 營收查看權限：admin 或 employees.can_view_revenue=true 的人。控制營收分析 tab + 首頁本月營收卡
+  const canViewRevenue = isBfAdmin || (currentEmployee && currentEmployee.can_view_revenue === true)
 
   // qTaskPending：依賴 isWaAdmin，1c 從 App.jsx 搬進來
   const qTaskPending = useQuery({ queryKey: ['bf', 'task_pending'], queryFn: () => fetchAllTable('task_pending', 'requested_at', false), enabled: !!userId && isWaAdmin, refetchInterval: 15000 })
@@ -467,7 +469,7 @@ export function AppProvider({ children }) {
   const value = {
     session, setSession,
     authLoading, setAuthLoading,
-    userId, currentEmployee, isBfAdmin, isWaAdmin, canShip,
+    userId, currentEmployee, isBfAdmin, isWaAdmin, canShip, canViewRevenue,
     tab, setTab,
     loading, setLoading,
     loadError, setLoadError,
