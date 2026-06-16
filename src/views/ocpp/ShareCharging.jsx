@@ -121,10 +121,12 @@ function incomeTypeKey(typeKey) {
   return "未知";
 }
 
-function incomeTone(typeKey) {
+function incomeTone(typeKey, money) {
+  const n = Number(money);
+  if (Number.isFinite(n) && n < 0) return "out";
   if (typeKey === "income" || typeKey === "enter_balance") return "in";
   if (typeKey === "withdrawal") return "out";
-  return flowTone(typeKey);
+  return flowTone(typeKey, money);
 }
 
 function InnerTabs({ value, onChange }) {
@@ -426,7 +428,7 @@ function ShareIncomeTab({ session, isAdmin, active }) {
                       <div>{row.nickname || row.username || row.email || row.userId || "—"}</div>
                       <div style={{ fontSize: 12, color: "#888" }}>{row.email || row.userId || "—"}</div>
                     </td>
-                    <td style={{ ...TD_STYLE, textAlign: "right" }}><MoneyText value={row.money} tone={incomeTone(row.typeKey)} /></td>
+                    <td style={{ ...TD_STYLE, textAlign: "right" }}><MoneyText value={row.money} tone={incomeTone(row.typeKey, row.money)} /></td>
                     <td style={{ ...TD_STYLE, textAlign: "right" }}><MoneyText value={row.afterMoney} /></td>
                     <td style={MONO_TD_STYLE}>{row.orderId || "—"}</td>
                     <td style={{ ...TD_STYLE, minWidth: 220 }}>{row.memo || "—"}</td>

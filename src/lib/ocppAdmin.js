@@ -1,5 +1,5 @@
 // OCPP admin API helper — bizflow 主站 → Supabase Edge Function `ocpp-admin` → ECS chargecms-readapi 8084
-// 共用於 src/views/ocpp/* 各 sub-tab（PublicPiles / PrivatePiles / Stations / AlarmInfo / OcppMonitor）
+// 共用於 src/views/ocpp/* 各 sub-tab（Piles / Stations / AlarmInfo / OcppMonitor）
 
 const PROXY_PATH = "/ocpp-admin";
 const DEFAULT_CACHE_TTL_MS = 45_000;
@@ -38,6 +38,7 @@ export async function callOcppAdmin(subPath, { accessToken, force = false, ttlMs
   const request = (async () => {
     const res = await fetch(`${base}/functions/v1${PROXY_PATH}${subPath}`, {
       method: "GET",
+      cache: "no-store",
       headers: {
         apikey: anon,
         Authorization: `Bearer ${accessToken}`,

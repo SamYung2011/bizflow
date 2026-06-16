@@ -13,7 +13,8 @@ export function fmtMoney(v) {
 }
 
 // 金額方向染色：tone "in"=入賬綠 / "out"=出賬紅 / null=中性黑
-// chargecms money 字段恒為正數，入賬/出賬方向靠 typeKey 區分（不是數值正負）→ 見 flowTone
+// chargecms money 字段一般恒為正數，方向靠 typeKey 區分 → 見 flowTone
+// 例外：admin 手動扣餘額（user.User.recharge() Reduce）會寫負數 + typeKey=recharge → flowTone 視為出賬紅
 export function MoneyText({ value, tone = null }) {
   const txt = `HK$ ${fmtMoney(value)}`;
   if (tone === "in") return <span style={{ color: "#059669", fontWeight: 600 }}>{txt}</span>;
@@ -25,8 +26,12 @@ const TONE_BY_TYPE = {
   recharge: "in", refund: "in", income: "in",
   consume: "out", withdrawal: "out",
 };
-// 充值/退款/收入=入賬綠，消費/提現=出賬紅（chargecms money 恒正，方向靠 type 定）
-export function flowTone(typeKey) {
+// 充值/退款/收入=入賬綠，消費/提現=出賬紅（chargecms money 一般恒正，方向靠 type 定）
+// 負數例外：admin 後台手動扣餘額（user.User.recharge() Reduce）寫負數 + typeKey=recharge
+// → 負數無論 typeKey 都當「出賬」染紅（語義是倒扣 / 退款）
+export function flowTone(typeKey, money) {
+  const n = Number(money);
+  if (Number.isFinite(n) && n < 0) return "out";
   return TONE_BY_TYPE[typeKey] || null;
 }
 

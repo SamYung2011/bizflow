@@ -4,7 +4,7 @@ import { callOcppAdmin, fmtUnixTs } from "../../lib/ocppAdmin.js";
 
 // 報警信息 — chargecms rc_alarm 表持久化告警
 // Reads `/api/alarms` through the admin-only ocpp-admin Edge Function.
-// v0.1：只讀 rc_alarm 歷史告警；當下實時故障在 PublicPiles / PrivatePiles 用 status chip 突顯
+// v0.1：只讀 rc_alarm 歷史告警；當下實時故障在 Piles 用 status chip 突顯
 
 export default function AlarmInfo({ session, isAdmin, active = true }) {
   const { t } = useT();

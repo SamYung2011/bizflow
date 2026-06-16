@@ -114,7 +114,7 @@ export default function UserMoneyLogs({ session, isAdmin, active = true }) {
                       <tr style={{ borderBottom: open ? "none" : "1px solid #f3f4f6" }}>
                         <td style={TD_STYLE}><TypeChip typeKey={r.typeKey} t={t} /></td>
                         <td style={TD_STYLE}>{r.nickname || r.username || r.email || r.userId || "—"}</td>
-                        <td style={{ ...TD_STYLE, textAlign: "right" }}><MoneyText value={r.money} tone={flowTone(r.typeKey)} /></td>
+                        <td style={{ ...TD_STYLE, textAlign: "right" }}><MoneyText value={r.money} tone={flowTone(r.typeKey, r.money)} /></td>
                         <td style={{ ...TD_STYLE, textAlign: "right" }}>HK$ {fmtMoney(r.afterMoney)}</td>
                         <td style={TD_STYLE}>{r.memo || "—"}</td>
                         <td style={TD_STYLE}>{fmtUnixTs(r.createdAt)}</td>

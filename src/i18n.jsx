@@ -1408,7 +1408,7 @@ const DICT_EN = {
   "此模塊通過 Edge Function ocpp-admin 從 chargecms 讀數據（只讀，零寫入），不影響 vendor 8081 / chargecms PHP / 樁 firmware。後端 chargecms-readapi 部署完成前列表可能為空或返錯。": "This module reads chargecms data through the ocpp-admin edge function (read-only, zero write). vendor 8081 / chargecms PHP / charger firmware are not touched. Until the chargecms-readapi backend is deployed, the list may be empty or return an error.",
   "載入 OCPP 站點…": "Loading OCPP stations…",
 
-  // ── OCPP charging hub (sub-tabs: PublicPiles / PrivatePiles / Stations / AlarmInfo) ──
+  // ── OCPP charging hub (sub-tabs: Piles / Stations / AlarmInfo) ──
   "充電桩": "Chargers",
   "公共桩": "Public chargers",
   "未分配桩": "Unassigned chargers",
@@ -3140,7 +3140,7 @@ const DICT_FR = {
   "此模塊通過 Edge Function ocpp-admin 從 chargecms 讀數據（只讀，零寫入），不影響 vendor 8081 / chargecms PHP / 樁 firmware。後端 chargecms-readapi 部署完成前列表可能為空或返錯。": "Ce module lit les données chargecms via la fonction Edge ocpp-admin (lecture seule, zéro écriture). Vendor 8081 / chargecms PHP / firmware des bornes ne sont pas touchés. Tant que le backend chargecms-readapi n'est pas déployé, la liste peut être vide ou renvoyer une erreur.",
   "載入 OCPP 站點…": "Chargement des bornes OCPP…",
 
-  // ── OCPP charging hub (sub-tabs: PublicPiles / PrivatePiles / Stations / AlarmInfo) ──
+  // ── OCPP charging hub (sub-tabs: Piles / Stations / AlarmInfo) ──
   "充電桩": "Bornes",
   "公共桩": "Bornes publiques",
   "未分配桩": "Bornes non affectées",

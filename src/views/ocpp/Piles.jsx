@@ -16,7 +16,7 @@ import {
   MONO_TD_STYLE,
 } from "./finance/financeShared.jsx";
 
-// 充電桩 — 公共桩 + 私人桩 + 未分配桩統一列表（2026-06-10 nav 重构合并 PublicPiles/PrivatePiles）。
+// 充電桩 — 公共桩 + 私人桩 + 未分配桩統一列表（2026-06-10 nav 重构合并舊分頁）。
 // 走 readapi /piles 統一接口，服務端筛选 + 分頁（舊公共桩页是拉 200 條前端搜，行為一并統一）。
 // 「未分配」= station_id=0 且 is_share=0，舊兩页都看不到的洞从这里補上。
 
