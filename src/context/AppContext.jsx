@@ -466,7 +466,9 @@ export function AppProvider({ children }) {
     return values.sort((a, b) => b.totalSold - a.totalSold)
   }, [invoices, products, customers])
 
-  const value = {
+  // useMemo 包 context value：上次 P2 指出「30+ 字段擠一個 object，每次 render 都新建 → 所有 useAppContext 消費者全部 re-render」。
+  // 包後只在依賴變化時重建 value、再傳下去（setters 是 React 穩定引用，不列入 deps）。
+  const value = useMemo(() => ({
     session, setSession,
     authLoading, setAuthLoading,
     userId, currentEmployee, isBfAdmin, isWaAdmin, canShip, canViewRevenue,
@@ -507,14 +509,31 @@ export function AppProvider({ children }) {
     qCompanies, qWaReports, qWaHeartbeat, qWaLogs, qWaClients,
     qShopifySettings, qShopifyVariantLinks,
     qTaskPending,
-    // 跨 view 共用的派生 helper
     customerGroups,
     warrantyItems,
     outOfStockSkus,
     lowStockSkus,
     allWarrantyItems,
     derivedInventory,
-  }
+  }), [
+    session, authLoading, userId, currentEmployee, isBfAdmin, isWaAdmin, canShip, canViewRevenue,
+    tab, loading, loadError,
+    products, warehouses, stocks, suppliers,
+    customers, customerDevices, lineItemAliases,
+    invoices, inventory,
+    employees, tasks, taskAssignees, feedbacks, updateLogs, logComments,
+    waSettings, waWhitelist, waMessages, waUnresolved, waReports, waLogs, waClients, waHeartbeat,
+    shopifySettings, shopifyVariantLinks,
+    qProducts, qWarehouses, qStocks, qSuppliers,
+    qCustomers, qCustomerDevices, qLineItemAliases,
+    qInvoices, qInventory,
+    qEmployees, qTasks, qTaskAssignees,
+    qFeedbacks, qUpdateLogs, qLogComments,
+    qWaSettings, qWaWhitelist, qWaMessages, qWaPending, qWaUnresolved,
+    qCompanies, qWaReports, qWaHeartbeat, qWaLogs, qWaClients,
+    qShopifySettings, qShopifyVariantLinks, qTaskPending,
+    customerGroups, warrantyItems, outOfStockSkus, lowStockSkus, allWarrantyItems, derivedInventory,
+  ])
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
 }
 

@@ -14,6 +14,12 @@ import { customerDeviceImeisFor } from '../lib/imei.js'
 // 多值字段拆分（與 App.jsx 內定義同步）
 const splitMulti = v => String(v || "").split(/\n+/).map(s => s.trim()).filter(Boolean);
 
+const validDateTime = (value) => {
+  if (value == null || value === "") return null;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : null;
+};
+
 export function MergeHistoryModal({
   mergeHistoryOpen, setMergeHistoryOpen,
   openRollback,
@@ -533,7 +539,11 @@ export function CustomersListView({
     for (const c of customerGroups.virtualCustomers) {
       const list = invoicesByGroup.get(c.id);
       if (!list || list.length === 0) { map.set(c.id, "other"); continue; }
-      const earliest = [...list].sort((a, b) => new Date(a.date) - new Date(b.date))[0];
+      const dated = list
+        .map(inv => ({ inv, time: validDateTime(inv.date) }))
+        .filter(x => x.time != null)
+        .sort((a, b) => a.time - b.time);
+      const earliest = dated.length > 0 ? dated[0].inv : list[0];
       map.set(c.id, inferSource(earliest));
     }
     return map;
@@ -546,11 +556,13 @@ export function CustomersListView({
     if (customerSort === "lastPurchase" || cutoff) {
       for (const inv of invoices) {
         if (!inv.customer_id || !inv.date) continue;
+        const invTime = validDateTime(inv.date);
+        if (invTime == null) continue;
         const gid = customerGroups.idToGroup.get(inv.customer_id);
         if (!gid) continue;
         const prev = lastPurchaseMap[gid];
-        if (!prev || new Date(inv.date) > new Date(prev)) {
-          lastPurchaseMap[gid] = inv.date;
+        if (!prev || invTime > prev.time) {
+          lastPurchaseMap[gid] = { date: inv.date, time: invTime };
         }
       }
     }
@@ -580,12 +592,12 @@ export function CustomersListView({
         if (customerImeiFilter === "has" ? !hasImei : hasImei) return false;
       }
       if (!cutoff) return true;
-      const dateStr = lastPurchaseMap[c.id];
-      return dateStr && new Date(dateStr) >= cutoff;
+      const rec = lastPurchaseMap[c.id];
+      return rec && rec.time >= cutoff.getTime();
     }).sort((a, b) => {
       const dir = customerSortDir === "desc" ? 1 : -1;
-      const va = customerSort === "lastPurchase" ? lastPurchaseMap[a.id] : a.created_at;
-      const vb = customerSort === "lastPurchase" ? lastPurchaseMap[b.id] : b.created_at;
+      const va = customerSort === "lastPurchase" ? lastPurchaseMap[a.id]?.date : a.created_at;
+      const vb = customerSort === "lastPurchase" ? lastPurchaseMap[b.id]?.date : b.created_at;
       if (!va && !vb) return 0;
       if (!va) return 1;
       if (!vb) return -1;

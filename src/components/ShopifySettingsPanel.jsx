@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAppContext } from '../context/AppContext.jsx'
 import { useT } from '../i18n.jsx'
+import { toastError } from '../lib/toast.js'
 
 // Shopify 集成設置面板（產品 tab → Shopify API 子 tab）
 // access_token 由 Edge Function `shopify-settings` 加密讀寫；migration 059 column-level lock 攔 anon/authenticated 直拉
@@ -49,7 +50,7 @@ export default function ShopifySettingsPanel() {
       setUnlocked(true)
       setShowPwdInput(false)
     } catch (e) {
-      alert(`${t('解鎖失敗')}：${e.message}`)
+      toastError(t("解鎖失敗"), { detail: e })
     } finally {
       setBusy(false)
     }
@@ -66,7 +67,7 @@ export default function ShopifySettingsPanel() {
       queryClient.setQueryData(['bf', 'shopify_settings'], next)
       alert(t('已儲存'))
     } catch (e) {
-      alert(`${t('保存失敗')}：${e.message}`)
+      toastError(t("保存失敗"), { detail: e })
     } finally {
       setBusy(false)
     }
@@ -205,7 +206,7 @@ export default function ShopifySettingsPanel() {
       setLinkSearch('')
       // qty 保留，万一她要加另一个相同 qty 的组件
     } catch (e) {
-      alert(`${t('關聯失敗')}：${e.message}`)
+      toastError(t("關聯失敗"), { detail: e })
     } finally {
       setLinking(false)
     }
@@ -219,7 +220,7 @@ export default function ShopifySettingsPanel() {
       setShopifyVariantLinks(newLinks)
       queryClient.setQueryData(['bf', 'shopify_variant_links'], newLinks)
     } catch (e) {
-      alert(`${t('解除失敗')}：${e.message}`)
+      toastError(t("解除失敗"), { detail: e })
     }
   }
 

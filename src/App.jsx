@@ -27,6 +27,8 @@ import WhatsappView from "./views/Whatsapp.jsx";
 import UpdateLogView from "./views/UpdateLog.jsx";
 import Dashboard from "./views/Dashboard.jsx";
 import MarkdownText from "./components/MarkdownText.jsx";
+import { ToastHost } from "./components/Toast.jsx";
+import { toastError, toastWarn, toastSuccess } from "./lib/toast.js";
 import { INVOICE_SHELL_HEAD, INVOICE_PAGE, INVOICE_SHELL_TAIL } from "./invoiceTemplate.js";
 import { RECEIPT_FRAGMENT } from "./receiptTemplate.js";
 import { useT } from "./i18n.jsx";
@@ -105,15 +107,6 @@ function normalizeItem(item, products) {
   }
   if (!name) name = "EV 充電配件";
   return { name, qty, price };
-}
-
-// 發票明細行的空白模板 —— id 用 randomUUID 確保 React key 穩定
-// （避免刪中間行時後面的 input value 錯位到前面的位置）
-function mkItem(warehouseId = null) {
-  const id = (typeof crypto !== "undefined" && crypto.randomUUID)
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  return { id, name: "", qty: 1, price: 0, warehouse_id: warehouseId };
 }
 
 // mode = { invoice: boolean, receipt: boolean }；都 false 直接返回
@@ -421,7 +414,7 @@ export default function App() {
     }
     for (const [cid, patch] of patches) {
       const { error } = await supabase.from("customers").update(patch).eq("id", cid);
-      if (error) { setRollbackBusy(false); alert(t("回退失敗：") + error.message); return; }
+      if (error) { setRollbackBusy(false); toastError(t("回退失敗"), { detail: error }); return; }
     }
     if (patches.size > 0) {
       setCustomers(prev => prev.map(c => patches.has(c.id) ? { ...c, ...patches.get(c.id) } : c));
@@ -434,7 +427,7 @@ export default function App() {
     const ok = window.confirm(t("確定撤銷此合併？該記錄會變回獨立客戶，發票關聯不變。"));
     if (!ok) return;
     const { error } = await supabase.from("customers").update({ parent_id: null }).eq("id", childCid);
-    if (error) { alert(t("撤銷失敗：") + error.message); return; }
+    if (error) { toastError(t("撤銷失敗"), { detail: error }); return; }
     setCustomers(prev => prev.map(c => c.id === childCid ? { ...c, parent_id: null } : c));
   }
   async function handleUpgradePhysical(vc) {
@@ -449,7 +442,7 @@ export default function App() {
     );
     if (!ok) return;
     const { error } = await supabase.from("customers").update({ parent_id: primaryCid }).in("id", siblings);
-    if (error) { alert(t("升級物理合併失敗：") + error.message); return; }
+    if (error) { toastError(t("升級物理合併失敗"), { detail: error }); return; }
     setCustomers(prev => prev.map(c => siblings.includes(c.id) ? { ...c, parent_id: primaryCid } : c));
     setMergeHistoryOpen(null);
   }
@@ -475,7 +468,7 @@ export default function App() {
         const { error } = await supabase.from("customers").update({ parent_id: u.keeper }).in("id", u.siblings);
         return { u, error };
       }));
-      results.forEach(r => { if (r.error) errors.push(r.error.message); else okUpdates.push(r.u); });
+      results.forEach(r => { if (r.error) errors.push(r.error); else okUpdates.push(r.u); });
     }
     setCustomers(prev => prev.map(c => {
       for (const u of okUpdates) if (u.siblings.includes(c.id)) return { ...c, parent_id: u.keeper };
@@ -483,7 +476,7 @@ export default function App() {
     }));
     setMergeAllBusy(false);
     setMergeCandidatesOpen(false);
-    if (errors.length) alert(`${t("部分合併失敗")}：\n` + errors.slice(0, 5).join("\n"));
+    if (errors.length) toastError(t("部分合併失敗"), { sub: `${errors.length} ${t("件")}`, detail: errors });
   }
   const openEditCustomer = (virtualC) => {
     const cids = virtualC.groupCids || [virtualC.id];
@@ -530,7 +523,7 @@ export default function App() {
     console.log("[SAVE] patch", patch);
     const { data: updData, error, status: updStatus } = await supabase.from("customers").update(patch).eq("id", editCustCid).select();
     console.log("[SAVE] update result", { updData, error, updStatus });
-    if (error) { setEditCustSaving(false); alert(t("保存失敗：") + error.message); return; }
+    if (error) { setEditCustSaving(false); toastError(t("保存失敗"), { detail: error }); return; }
     const deviceSync = await replaceCustomerDeviceImeis({
       supabase,
       queryClient,
@@ -539,7 +532,7 @@ export default function App() {
       customerId: editCustCid,
       imeiCodes: editCustForm.imeiCodes,
     });
-    if (deviceSync.error) { setEditCustSaving(false); alert(t("設備保存失敗") + "：" + deviceSync.error.message); return; }
+    if (deviceSync.error) { setEditCustSaving(false); toastError(t("設備保存失敗"), { detail: deviceSync.error }); return; }
     if (Array.isArray(deviceSync.conflicts) && deviceSync.conflicts.length > 0) {
       alert(`${t("以下 IMEI 已歸屬其他客戶，未掛到當前客戶")}：\n${deviceSync.conflicts.map(c => c.imei).join("\n")}`);
     }
@@ -578,7 +571,7 @@ export default function App() {
     }
     for (const [sibCid, sibPatch] of siblingPatchMap) {
       const { error: e } = await supabase.from("customers").update(sibPatch).eq("id", sibCid);
-      if (e) { setEditCustSaving(false); alert(t("關聯記錄更新失敗：") + e.message); return; }
+      if (e) { setEditCustSaving(false); toastError(t("關聯記錄更新失敗"), { detail: e }); return; }
     }
     if (siblingPatchMap.size > 0) {
       setCustomers(prev => prev.map(c => siblingPatchMap.has(c.id) ? { ...c, ...siblingPatchMap.get(c.id) } : c));
@@ -602,7 +595,7 @@ export default function App() {
     }
     if (cidsToDowngrade.length > 0) {
       const { error: e } = await supabase.from("customers").update({ parent_id: null }).in("id", cidsToDowngrade);
-      if (e) { setEditCustSaving(false); alert(t("別名降級失敗：") + e.message); return; }
+      if (e) { setEditCustSaving(false); toastError(t("別名降級失敗"), { detail: e }); return; }
     }
     // Add: 先查當前合并组里 rule 1 的独立成员，同名直接 UPDATE parent_id；否則 INSERT 新子記錄
     const gid = customerGroups.idToGroup.get(editCustCid);
@@ -618,14 +611,14 @@ export default function App() {
       const match = ruleOneSiblings.find(s => !usedSiblingIds.has(s.id) && normName(s.name) === normName(aliasName));
       if (match) {
         const { data, error: e } = await supabase.from("customers").update({ parent_id: editCustCid }).eq("id", match.id).select().single();
-        if (e) { setEditCustSaving(false); alert(t("別名合併失敗：") + e.message); return; }
+        if (e) { setEditCustSaving(false); toastError(t("別名合併失敗"), { detail: e }); return; }
         usedSiblingIds.add(match.id);
         if (data) adoptedRows.push(data);
       } else {
         const { data, error: e } = await supabase.from("customers").insert({
           name: aliasName, parent_id: editCustCid, type: editCustForm.type || "Regular"
         }).select().single();
-        if (e) { setEditCustSaving(false); alert(t("別名新增失敗：") + e.message); return; }
+        if (e) { setEditCustSaving(false); toastError(t("別名新增失敗"), { detail: e }); return; }
         if (data) insertedRows.push(data);
       }
     }
@@ -725,11 +718,11 @@ export default function App() {
     }
     if (Object.keys(patch).length > 0) {
       const { error } = await supabase.from("customers").update(patch).eq("id", oldCustomer.id);
-      if (error) { alert(t("合併失敗（更新老客戶）：") + error.message); setMergeBusy(false); return; }
+      if (error) { toastError(t("合併失敗（更新老客戶）"), { detail: error }); setMergeBusy(false); return; }
     }
     const newNotes = (inv.notes || "").replace(/\s*__PENDING_MERGE__:[\w-]+/g, "").trim();
     const { error: invErr } = await supabase.from("invoices").update({ customer_id: oldCustomer.id, notes: newNotes }).eq("id", inv.id);
-    if (invErr) { alert(t("合併失敗（更新發票）：") + invErr.message); setMergeBusy(false); return; }
+    if (invErr) { toastError(t("合併失敗（更新發票）"), { detail: invErr }); setMergeBusy(false); return; }
     // 如果临时新客户没挂其他发票，删掉
     const { data: otherInvs } = await supabase.from("invoices").select("id").eq("customer_id", newCustomer.id).neq("id", inv.id).limit(1);
     let deletedNewCust = false;
@@ -1093,7 +1086,7 @@ export default function App() {
         imeiCodes: [newCustomer.imei_input],
       });
       if (deviceSync.error) {
-        alert(`${t("新增客戶已完成")}，${t("但設備未能保存")}：${deviceSync.error.message}`);
+        toastError(`${t("新增客戶已完成")}，${t("但設備未能保存")}`, { detail: deviceSync.error });
       }
       if (Array.isArray(deviceSync.conflicts) && deviceSync.conflicts.length > 0) {
         alert(`${t("以下 IMEI 已歸屬其他客戶，未掛到當前客戶")}：\n${deviceSync.conflicts.map(c => c.imei).join("\n")}`);
@@ -1101,7 +1094,7 @@ export default function App() {
       setShowAddCustomer(false);
       setNewCustomer({ name: "", email: "", phone: "", phone_mainland: "", car_make: "", car_model: "", address: "", imei_input: "", interest_products: [], referral: "", type: "Lead", notes: "" });
     } else if (error) {
-      alert(`${t("新增客戶失敗")}：${error.message}`);
+      toastError(t("新增客戶失敗"), { detail: error });
     }
     setSaving(false);
   }
@@ -1244,7 +1237,7 @@ export default function App() {
           .select("id, delta")
           .eq("invoice_id", inv.id)
           .eq("type", "sale");
-        if (movementErr) { alert(`${t("扣庫存記錄檢查失敗")}：${movementErr.message}`); return; }
+        if (movementErr) { toastError(t("扣庫存記錄檢查失敗"), { detail: movementErr }); return; }
         const deductedQty = (existingMovements || []).reduce((sum, row) => sum + Math.abs(Number(row.delta || 0)), 0);
         if (deductedQty > 0) {
           const ok = window.confirm(
@@ -1263,7 +1256,7 @@ export default function App() {
           qty: d.after,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'product_id,warehouse_id' });
-        if (stockErr) { alert(`${t("庫存扣減失敗")}：${stockErr.message}`); return; }
+        if (stockErr) { toastError(t("庫存扣減失敗"), { detail: stockErr }); return; }
         const { error: movementInsertErr } = await supabase.from("inventory_movements").insert({
           product_id: d.product_id,
           warehouse_id: d.warehouse_id,
@@ -1272,7 +1265,7 @@ export default function App() {
           reason: isAlreadyPaid ? `發票 #${inv.invoice_number || inv.id} 補扣庫存` : `發票 #${inv.invoice_number || inv.id} 標記已付款`,
           invoice_id: inv.id,
         });
-        if (movementInsertErr) { alert(`${t("庫存流水寫入失敗")}：${movementInsertErr.message}`); return; }
+        if (movementInsertErr) { toastError(t("庫存流水寫入失敗"), { detail: movementInsertErr }); return; }
       }
 
       // audit 記錄（Phase 1 人工審核期）：所有 plan 項都記，含 skip 的
@@ -1362,7 +1355,7 @@ export default function App() {
     const baseUpdates = { status: "Paid", commission_amount: commissionAmount };
     const updates = isBroadway ? { ...baseUpdates, notes: nextNotes } : baseUpdates;
     const { error } = await supabase.from("invoices").update(updates).eq("id", inv.id);
-    if (error) { alert(`${t("標記失敗")}：${error.message}`); return; }
+    if (error) { toastError(t("標記失敗"), { detail: error }); return; }
     setInvoices(prev => prev.map(i => i.id === inv.id ? { ...i, ...updates } : i));
     queryClient.setQueryData(["bf", "invoices"], (old) => Array.isArray(old) ? old.map(i => i.id === inv.id ? { ...i, ...updates } : i) : old);
       applyStockDeductionsToState(deductions);
@@ -1385,7 +1378,7 @@ export default function App() {
     const confirmed = window.confirm(msg);
     if (!confirmed) return;
     const { error } = await supabase.from("customers").delete().in("id", cids);
-    if (error) { alert(`${t("刪除客戶失敗")}：${error.message}`); return; }
+    if (error) { toastError(t("刪除客戶失敗"), { detail: error }); return; }
     setCustomers(prev => prev.filter(x => !cids.includes(x.id)));
     setSelectedCustomer(null);
   }
@@ -1400,7 +1393,7 @@ export default function App() {
       email: newEmployee.email.trim() || null,
       note: newEmployee.note.trim() || null,
     }).select().single();
-    if (error) { alert(`${t("新增失敗")}：${error.message}`); return; }
+    if (error) { toastError(t("新增失敗"), { detail: error }); return; }
     setEmployees(prev => [...prev, data]);
     setShowAddEmployee(false);
     setNewEmployee({ name: "", role: "", phone: "", email: "", note: "" });
@@ -1413,7 +1406,7 @@ export default function App() {
       : `${t("確定刪除員工")}「${emp.name}」？${t("此操作不可撤銷。")}`;
     if (!window.confirm(msg)) return;
     const { error } = await supabase.from("employees").delete().eq("id", emp.id);
-    if (error) { alert(`${t("刪除失敗")}：${error.message}`); return; }
+    if (error) { toastError(t("刪除失敗"), { detail: error }); return; }
     const deletedTaskIds = new Set(tasks.filter(t => t.employee_id === emp.id).map(t => t.id));
     setEmployees(prev => prev.filter(e => e.id !== emp.id));
     setTasks(prev => prev.filter(t => t.employee_id !== emp.id));
@@ -1441,7 +1434,7 @@ export default function App() {
       parent_task_id: parentTaskId,
       note: note || null,
     }).select().single();
-    if (error) { alert(`${t("新增任務失敗")}：${error.message}`); return; }
+    if (error) { toastError(t("新增任務失敗"), { detail: error }); return; }
     let row = data;
     // 同步寫 task_assignees（多人分配的真實來源）
     if (assigneeIds.length > 0) {
@@ -1458,9 +1451,9 @@ export default function App() {
       try {
         const attachments = await Promise.all(files.map(f => uploadAttachment(f, data.id)));
         const { data: upd, error: e2 } = await supabase.from("employee_tasks").update({ attachments }).eq("id", data.id).select().single();
-        if (e2) { alert(`${t("附件保存失敗")}：${e2.message}`); }
+        if (e2) { toastError(t("附件保存失敗"), { detail: e2 }); }
         else { row = upd; }
-      } catch (e) { alert(`${t("附件上傳失敗")}：${e.message}`); }
+      } catch (e) { toastError(t("附件上傳失敗"), { detail: e }); }
     }
     setTasks(prev => [...prev, row]);
     return row;
@@ -1475,12 +1468,12 @@ export default function App() {
     if (toAdd.length > 0) {
       const rows = toAdd.map(eid => ({ task_id: taskId, employee_id: eid }));
       const { data, error } = await supabase.from("task_assignees").insert(rows).select();
-      if (error) { alert(`${t("分配失敗")}：${error.message}`); return; }
+      if (error) { toastError(t("分配失敗"), { detail: error }); return; }
       if (data && data.length > 0) setTaskAssignees(prev => [...prev, ...data]);
     }
     if (toRemove.length > 0) {
       const { error } = await supabase.from("task_assignees").delete().eq("task_id", taskId).in("employee_id", toRemove);
-      if (error) { alert(`${t("移除失敗")}：${error.message}`); return; }
+      if (error) { toastError(t("移除失敗"), { detail: error }); return; }
       setTaskAssignees(prev => prev.filter(a => !(a.task_id === taskId && toRemove.includes(a.employee_id))));
     }
     // 同步 employee_tasks.employee_id 為新主負責人（= 第一個 assignee）
@@ -1493,7 +1486,7 @@ export default function App() {
 
   async function handleUpdateTask(taskId, patch) {
     const { error } = await supabase.from("employee_tasks").update(patch).eq("id", taskId);
-    if (error) { alert(`${t("更新失敗")}：${error.message}`); return; }
+    if (error) { toastError(t("更新失敗"), { detail: error }); return; }
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...patch } : t));
     // prev 可能在 async 期間被 setEditingTask(null) 改成 null（用戶點完成關 modal 時 onBlur 後 update 才回來），
     // 要 guard：prev 為 null 或不是同一 task 時保持原樣不要 merge 進空白對象（避免空白 modal 重彈）
@@ -1552,7 +1545,7 @@ export default function App() {
     const nextTs = myRow.abandoned_at ? null : new Date().toISOString();
     const newCompletedAt = nextTs ? null : myRow.completed_at;
     const { error } = await supabase.from("task_assignees").update({ abandoned_at: nextTs, completed_at: newCompletedAt }).eq("task_id", task.id).eq("employee_id", empId);
-    if (error) { alert(`${t("更新失敗")}：${error.message}`); return; }
+    if (error) { toastError(t("更新失敗"), { detail: error }); return; }
     setTaskAssignees(prev => prev.map(a => (a.task_id === task.id && a.employee_id === empId) ? { ...a, abandoned_at: nextTs, completed_at: newCompletedAt } : a));
     // auto-status：不需核驗 + 全員結算 → 算 task 整體
     if (!task.needs_approval) {
@@ -1582,7 +1575,7 @@ export default function App() {
     }
     const nextTs = myRow.completed_at ? null : new Date().toISOString();
     const { error } = await supabase.from("task_assignees").update({ completed_at: nextTs }).eq("task_id", task.id).eq("employee_id", empId);
-    if (error) { alert(`${t("更新失敗")}：${error.message}`); return; }
+    if (error) { toastError(t("更新失敗"), { detail: error }); return; }
     setTaskAssignees(prev => prev.map(a => (a.task_id === task.id && a.employee_id === empId) ? { ...a, completed_at: nextTs } : a));
     // 全員完成 + 不需核驗 → auto-set task.status=done；任一未完成 + task.status=done → 回退到 open
     const updatedList = list.map(a => a.employee_id === empId ? { ...a, completed_at: nextTs } : a);
@@ -1601,7 +1594,7 @@ export default function App() {
     const subIds = tasks.filter(s => s.parent_task_id === taskId).map(s => s.id);
     const allDeleted = new Set([taskId, ...subIds]);
     const { error } = await supabase.from("employee_tasks").delete().eq("id", taskId);
-    if (error) { alert(`${t("刪除失敗")}：${error.message}`); return; }
+    if (error) { toastError(t("刪除失敗"), { detail: error }); return; }
     setTasks(prev => prev.filter(t => !allDeleted.has(t.id)));
     setFeedbacks(prev => prev.filter(f => !allDeleted.has(f.task_id))); // CASCADE 在 db 自动删，本地也同步
     setTaskAssignees(prev => prev.filter(a => !allDeleted.has(a.task_id))); // 同步清理 assignees
@@ -1631,7 +1624,7 @@ export default function App() {
       if (files && files.length > 0) {
         attachments = await Promise.all(files.map(f => uploadAttachment(f, taskId)));
       }
-    } catch (e) { alert(`${t("附件上傳失敗")}：${e.message}`); return; }
+    } catch (e) { toastError(t("附件上傳失敗"), { detail: e }); return; }
     // 回復別人的反饋 → 自動 @ 原作者（除非是自己回自己）
     let finalMentions = Array.isArray(mentionedUserIds) ? [...mentionedUserIds] : [];
     if (parentFeedbackId) {
@@ -1649,7 +1642,7 @@ export default function App() {
       parent_feedback_id: parentFeedbackId,
       mentioned_user_ids: finalMentions,
     }).select().single();
-    if (error) { alert(`${t("發送失敗")}：${error.message}`); return; }
+    if (error) { toastError(t("發送失敗"), { detail: error }); return; }
     setFeedbacks(prev => [...prev, data]);
     setPendingAttachments([]);
     setPendingMentions([]);
@@ -1660,7 +1653,7 @@ export default function App() {
   async function handleDeleteFeedback(fbId) {
     if (!window.confirm(t("確定刪除此反饋？"))) return;
     const { error } = await supabase.from("employee_task_feedbacks").delete().eq("id", fbId);
-    if (error) { alert(`${t("刪除失敗")}：${error.message}`); return; }
+    if (error) { toastError(t("刪除失敗"), { detail: error }); return; }
     setFeedbacks(prev => prev.filter(f => f.id !== fbId));
   }
 
@@ -2159,7 +2152,7 @@ export default function App() {
         const doMerge = async (keeper) => {
           if (!confirm(`${t("確認把")}「${selectedCustomer.name || t("(無名)")}」${t("合併到")}「${keeper.name || t("(無名)")}」？\n${t("合併後當前客戶會變成 keeper 的子記錄，發票關聯不變。")}`)) return;
           const { error } = await supabase.from("customers").update({ parent_id: keeper.id }).in("id", fromCids);
-          if (error) { alert(t("合併失敗") + "：" + error.message); return; }
+          if (error) { toastError(t("合併失敗"), { detail: error }); return; }
           setCustomers(prev => prev.map(c => fromCids.includes(c.id) ? { ...c, parent_id: keeper.id } : c));
           setManualMergeOpen(false);
           setManualMergeQuery("");
@@ -2651,7 +2644,7 @@ export default function App() {
                           const newOnes = await Promise.all(files.map(f => uploadAttachment(f, tk.id)));
                           const merged = [...(Array.isArray(tk.attachments) ? tk.attachments : []), ...newOnes];
                           await handleUpdateTask(tk.id, { attachments: merged });
-                        } catch (err) { alert(`${t("附件上傳失敗")}：${err.message}`); }
+                        } catch (err) { toastError(t("附件上傳失敗"), { detail: err }); }
                       }} />
                     </label>}
                   </div>
@@ -2986,6 +2979,7 @@ export default function App() {
         newProduct={newProduct} setNewProduct={setNewProduct}
         newProductSaving={newProductSaving} setNewProductSaving={setNewProductSaving}
       />
+      <ToastHost />
     </div>
   );
 }

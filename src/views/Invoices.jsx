@@ -1,25 +1,18 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabaseClient.js'
-import { isNonWarrantyItem } from '../lib/warranty.js'
 import { useAppContext } from '../context/AppContext.jsx'
 import { useT } from '../i18n.jsx'
 import { Icon } from '../components/Icon.jsx'
 import InvoiceEditModal from '../components/InvoiceEditModal.jsx'
-import { fmtInvNum, invoiceSource, formatNotes } from '../lib/invoiceHelpers.js'
+import { fmtInvNum, invoiceSource, formatNotes, insertInvoiceWithRetry } from '../lib/invoiceHelpers.js'
 import { deriveShippingStatus, isShippingTrackable, isProblematicShipping } from '../lib/shippingHelpers.js'
+import { toastError, toastWarn } from '../lib/toast.js'
 import { appendCustomerImeiCodes, collectImeiCodesFromItems, collectInvalidImeiCodesFromItems, isDcAdaptorProLineItem } from '../lib/imei.js'
+import { makeInvoiceItem as mkItem, attachWarrantySnapshot } from '../lib/invoiceItems.js'
 
 // 多值字段拆分（與 App.jsx 內定義同步）
 const splitMulti = v => String(v || "").split(/\n+/).map(s => s.trim()).filter(Boolean)
-
-// 發票明細行的空白模板 —— id 用 randomUUID 確保 React key 穩定
-function mkItem(warehouseId = null) {
-  const id = (typeof crypto !== "undefined" && crypto.randomUUID)
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  return { id, name: "", qty: 1, price: 0, warehouse_id: warehouseId }
-}
 
 export default function InvoicesView({
   // 共享數據 / 派生
@@ -130,24 +123,40 @@ export default function InvoicesView({
     })
   }, [invoices, customers, search, shippingFilter])
 
-  // 寫 invoice items 前把當前 product.warranty_months 快照進每條 item
-  function attachWarrantySnapshot(items) {
-    return items.map(it => {
-      if (it == null) return it
-      if (it.warranty_months != null) return it
-      if (isNonWarrantyItem(it.name)) return it
-      const prod = products.find(p => p.name === it.name)
-      if (!prod || !prod.warranty_months) return it
-      return { ...it, warranty_months: Number(prod.warranty_months) }
-    })
-  }
-
   // 額外費用合計（新建發票用）
   const extrasTotal =
     (newInvoice.deposit?.enabled ? (Number(newInvoice.deposit.amount) || 0) : 0) +
     (newInvoice.surcharge?.enabled ? (Number(newInvoice.surcharge.amount) || 0) : 0) -
     (newInvoice.discount?.enabled ? (Number(newInvoice.discount.amount) || 0) : 0)
   const invoiceTotal = newInvoice.items.reduce((sum, item) => sum + (item.price * item.qty || 0), 0) + extrasTotal
+
+  const updateNewInvoiceItem = (idx, patch) => {
+    setNewInvoice(prev => {
+      const items = [...prev.items]
+      if (!items[idx]) return prev
+      const nextPatch = typeof patch === "function" ? patch(items[idx]) : patch
+      items[idx] = { ...items[idx], ...nextPatch }
+      return { ...prev, items }
+    })
+  }
+
+  const addNewInvoiceItem = () => {
+    setNewInvoice(prev => ({ ...prev, items: [...prev.items, mkItem(warehouses[0]?.id)] }))
+  }
+
+  const removeNewInvoiceItem = (itemId) => {
+    setNewInvoice(prev => {
+      const items = prev.items.filter(i => i.id !== itemId)
+      return { ...prev, items: items.length ? items : [mkItem(warehouses[0]?.id)] }
+    })
+  }
+
+  const updateNewInvoiceExtra = (key, patch) => {
+    setNewInvoice(prev => ({
+      ...prev,
+      [key]: { ...(prev[key] || { enabled: false, amount: 0 }), ...patch },
+    }))
+  }
 
   // 關閉新建發票彈窗 → 一次清掉所有殘留
   function closeNewInvoice() {
@@ -166,8 +175,7 @@ export default function InvoicesView({
 
   async function handleGenerateInvoice() {
     setSaving(true)
-    const invNumber = `${Date.now()}`.slice(-6)
-    const finalItems = attachWarrantySnapshot([...newInvoice.items])
+    const finalItems = attachWarrantySnapshot([...newInvoice.items], products)
     if (newInvoice.deposit?.enabled && Number(newInvoice.deposit.amount)) {
       finalItems.push({ id: mkItem().id, name: "押金", qty: 1, price: Number(newInvoice.deposit.amount) })
     }
@@ -183,7 +191,7 @@ export default function InvoicesView({
       setSaving(false)
       return
     }
-    const { data, error } = await supabase.from("invoices").insert([{
+    const { data, error } = await insertInvoiceWithRetry(supabase, (invNumber) => ({
       invoice_number: invNumber,
       customer_id: newInvoice.customerId || null,
       salesperson_id: newInvoice.salespersonId || null,
@@ -192,7 +200,7 @@ export default function InvoicesView({
       total: invoiceTotal,
       status: "Unpaid",
       notes: newInvoice.notes,
-    }]).select()
+    }))
     if (!error && data) {
       setInvoices(prev => [data[0], ...prev])
       queryClient.setQueryData(["bf", "invoices"], (old) => Array.isArray(old) ? [data[0], ...old] : [data[0]])
@@ -212,7 +220,7 @@ export default function InvoicesView({
         imeiCodes: collectImeiCodesFromItems(finalItems, { products, lineItemAliases }),
       })
       if (imeiSync.error) {
-        alert(`${t("發票已生成")} (#${data[0].invoice_number})，${t("但 IMEI 未能同步到客戶資料")}：${imeiSync.error.message}`)
+        toastError(`${t("發票已生成")} (#${data[0].invoice_number})，${t("但 IMEI 未能同步到客戶資料")}`, { detail: imeiSync.error })
       }
       if (Array.isArray(imeiSync.conflicts) && imeiSync.conflicts.length > 0) {
         alert(`${t("以下 IMEI 已歸屬其他客戶，未掛到當前客戶")}：\n${imeiSync.conflicts.map(c => c.imei).join("\n")}`)
@@ -239,7 +247,7 @@ export default function InvoicesView({
             }).eq("id", invItem.id)
             if (invErr) {
               console.error(`庫存更新失敗 (item ${invItem.id}):`, invErr)
-              alert(`${t("發票已生成")} (#${data[0].invoice_number})，${t("但部分庫存更新失敗")}：${invErr.message}\n${t("請在庫存頁手動核對。")}`)
+              toastWarn(`${t("發票已生成")} (#${data[0].invoice_number})，${t("但部分庫存更新失敗")}`, { sub: t("請在庫存頁手動核對。"), detail: invErr })
               continue
             }
             setInventory(prev => prev.map(i =>
@@ -254,7 +262,7 @@ export default function InvoicesView({
         closeNewInvoice()
       }, 2000)
     } else if (error) {
-      alert(`${t("發票生成失敗")}：${error.message}`)
+      toastError(t("發票生成失敗"), { detail: error })
     }
     setSaving(false)
   }
@@ -297,7 +305,7 @@ export default function InvoicesView({
         }
       }
       const { error } = await supabase.from("invoices").update(updates).eq("id", shippingInvoice.id)
-      if (error) { alert(`${t("發貨保存失敗")}：${error.message}`); return }
+      if (error) { toastError(t("發貨保存失敗"), { detail: error }); return }
       const { data: fresh } = await supabase.from("invoices").select("*").eq("id", shippingInvoice.id).maybeSingle()
       const merged = (i) => ({ ...i, ...(fresh || updates) })
       setInvoices(prev => prev.map(i => i.id === shippingInvoice.id ? merged(i) : i))
@@ -342,7 +350,7 @@ export default function InvoicesView({
         queryClient.setQueryData(["bf", "invoices"], (old) => Array.isArray(old) ? old.map(i => i.id === inv.id ? inv : i) : old)
       }
     } catch (e) {
-      alert(`${t("刷新失敗")}：${e.message}`)
+      toastError(t("刷新失敗"), { detail: e })
     } finally {
       setTrackingRefreshing(false)
     }
@@ -351,7 +359,7 @@ export default function InvoicesView({
     if (!trackingInvoice) return
     if (!window.confirm(t("標為「異常」？"))) return
     const { error } = await supabase.from("invoices").update({ shipping_status: "異常" }).eq("id", trackingInvoice.id)
-    if (error) { alert(`${t("操作失敗")}：${error.message}`); return }
+    if (error) { toastError(t("操作失敗"), { detail: error }); return }
     setInvoices(prev => prev.map(i => i.id === trackingInvoice.id ? { ...i, shipping_status: "異常" } : i))
     queryClient.setQueryData(["bf", "invoices"], (old) => Array.isArray(old) ? old.map(i => i.id === trackingInvoice.id ? { ...i, shipping_status: "異常" } : i) : old)
     setTrackingInvoice(prev => prev ? { ...prev, shipping_status: "異常" } : prev)
@@ -374,7 +382,7 @@ export default function InvoicesView({
       .select("id, product_id, warehouse_id, delta")
       .eq("invoice_id", inv.id)
       .eq("type", "sale")
-    if (movFetchErr) { alert(`${t("查詢扣庫存記錄失敗")}：${movFetchErr.message}`); return }
+    if (movFetchErr) { toastError(t("查詢扣庫存記錄失敗"), { detail: movFetchErr }); return }
     const stockReturns = new Map() // key: `${product_id}|${warehouse_id}` → qty
     if (Array.isArray(saleMovs)) {
       for (const m of saleMovs) {
@@ -389,7 +397,7 @@ export default function InvoicesView({
     // 2. 查老 inventory（IMEI 序號制）
     const { data: relatedInv, error: fetchErr } = await supabase
       .from("inventory").select("id").eq("invoice_id", inv.id)
-    if (fetchErr) { alert(`${t("查詢關聯庫存失敗")}：${fetchErr.message}`); return }
+    if (fetchErr) { toastError(t("查詢關聯庫存失敗"), { detail: fetchErr }); return }
 
     // 3. 拼 confirm 文案：根據實際涉及哪些庫存動態顯示
     const stockMsgParts = []
@@ -420,7 +428,7 @@ export default function InvoicesView({
         .eq("product_id", product_id)
         .eq("warehouse_id", warehouse_id)
         .maybeSingle()
-      if (stockErr) { alert(`${t("返還 SKU 庫存失敗")}：${stockErr.message}`); return }
+      if (stockErr) { toastError(t("返還 SKU 庫存失敗"), { detail: stockErr }); return }
       const current = Number(stockRow?.qty || 0)
       const { error: upsertErr } = await supabase.from("inventory_stock").upsert({
         product_id,
@@ -428,7 +436,7 @@ export default function InvoicesView({
         qty: current + qty,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'product_id,warehouse_id' })
-      if (upsertErr) { alert(`${t("返還 SKU 庫存失敗")}：${upsertErr.message}`); return }
+      if (upsertErr) { toastError(t("返還 SKU 庫存失敗"), { detail: upsertErr }); return }
       await supabase.from("inventory_movements").insert({
         product_id,
         warehouse_id,
@@ -444,12 +452,12 @@ export default function InvoicesView({
       const { error: restoreErr } = await supabase.from("inventory")
         .update({ status: "In Stock", customer_id: null, sold_date: null, warranty_end: null, invoice_id: null })
         .eq("invoice_id", inv.id)
-      if (restoreErr) { alert(`${t("還原庫存失敗")}：${restoreErr.message}`); return }
+      if (restoreErr) { toastError(t("還原庫存失敗"), { detail: restoreErr }); return }
     }
 
     // 6. 刪發票（FK：inventory_movements.invoice_id SET NULL / stock_deduction_audit CASCADE）
     const { error: delErr } = await supabase.from("invoices").delete().eq("id", inv.id)
-    if (delErr) { alert(`${t("刪除發票失敗")}：${delErr.message}`); return }
+    if (delErr) { toastError(t("刪除發票失敗"), { detail: delErr }); return }
 
     // 7. 更新 local state
     setInvoices(prev => prev.filter(i => i.id !== inv.id))
@@ -604,7 +612,7 @@ export default function InvoicesView({
                       value={customerQuery}
                       onChange={e => {
                         setCustomerQuery(e.target.value)
-                        if (newInvoice.customerId) setNewInvoice({...newInvoice, customerId: "", fieldOverrides: {}})
+                        if (newInvoice.customerId) setNewInvoice(prev => ({ ...prev, customerId: "", fieldOverrides: {} }))
                         setCustomerDropdownOpen(true)
                       }}
                       onFocus={() => setCustomerDropdownOpen(true)}
@@ -614,7 +622,7 @@ export default function InvoicesView({
                     />
                     {newInvoice.customerId && (
                       <button
-                        onClick={() => { setNewInvoice({...newInvoice, customerId: "", fieldOverrides: {}}); setCustomerQuery(""); }}
+                        onClick={() => { setNewInvoice(prev => ({ ...prev, customerId: "", fieldOverrides: {} })); setCustomerQuery(""); }}
                         style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "#f0f0f0", border: "none", borderRadius: "50%", width: 22, height: 22, cursor: "pointer", fontSize: 12, color: "#666", lineHeight: 1, padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
                       >×</button>
                     )}
@@ -650,7 +658,7 @@ export default function InvoicesView({
                                         const vals = [...new Set(sources.flatMap(s => splitMulti(s)))]
                                         if (vals.length > 0) overrides[def.key] = vals[0]
                                       }
-                                      setNewInvoice({ ...newInvoice, customerId: v.id, fieldOverrides: overrides })
+                                      setNewInvoice(prev => ({ ...prev, customerId: v.id, fieldOverrides: overrides }))
                                       setCustomerQuery([v.name, v.phone].filter(Boolean).join(" · "))
                                       setCustomerDropdownOpen(false)
                                     }}
@@ -681,7 +689,7 @@ export default function InvoicesView({
                 {/* 負責銷售下拉（可空 = 無歸屬不算佣金） */}
                 <div style={{ marginBottom: 14 }}>
                   <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 5 }}>{t("負責銷售")}</label>
-                  <select value={newInvoice.salespersonId || ""} onChange={e => setNewInvoice({ ...newInvoice, salespersonId: e.target.value })}
+                  <select value={newInvoice.salespersonId || ""} onChange={e => setNewInvoice(prev => ({ ...prev, salespersonId: e.target.value }))}
                     style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", background: "#fff", boxSizing: "border-box" }}>
                     <option value="">{t("（無）")}</option>
                     {employees.filter(e => e.role === '銷售' && e.active !== false).map(e => (
@@ -752,7 +760,7 @@ export default function InvoicesView({
                         <div style={{ position: "relative" }}>
                           <input
                             value={item.name}
-                            onChange={e => { const items = [...newInvoice.items]; items[idx] = {...item, name: e.target.value}; setNewInvoice({...newInvoice, items}); }}
+                            onChange={e => updateNewInvoiceItem(idx, { name: e.target.value })}
                             onFocus={() => setProductPickerOpenId(item.id)}
                             onBlur={() => setTimeout(() => setProductPickerOpenId(cur => cur === item.id ? null : cur), 150)}
                             placeholder={t("產品 / 服務（輸入關鍵字）")}
@@ -776,9 +784,7 @@ export default function InvoicesView({
                                   <div
                                     key={p.id}
                                     onMouseDown={() => {
-                                      const items = [...newInvoice.items]
-                                      items[idx] = {...item, name: p.name, price: Number(p.price) || item.price}
-                                      setNewInvoice({...newInvoice, items})
+                                      updateNewInvoiceItem(idx, { name: p.name, price: Number(p.price) || item.price })
                                       setProductPickerOpenId(null)
                                     }}
                                     style={{ padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid #f5f5f5" }}
@@ -800,18 +806,18 @@ export default function InvoicesView({
                             )
                           })()}
                         </div>
-                        <input type="number" min="1" value={item.qty} onChange={e => { const items = [...newInvoice.items]; items[idx].qty = parseInt(e.target.value) || 1; setNewInvoice({...newInvoice, items}); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "center" }} />
-                        <input type="number" value={item.price} onChange={e => { const items = [...newInvoice.items]; items[idx].price = parseFloat(e.target.value) || 0; setNewInvoice({...newInvoice, items}); }} placeholder={t("價格")} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
-                        <select value={item.warehouse_id || ''} onChange={e => { const items = [...newInvoice.items]; items[idx] = {...item, warehouse_id: e.target.value || null}; setNewInvoice({...newInvoice, items}); }} title={t("扣庫存的倉庫（不顯示在發票/收據上）")} style={{ padding: "9px 6px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", background: "#fff" }}>
+                        <input type="number" min="1" value={item.qty} onChange={e => updateNewInvoiceItem(idx, { qty: parseInt(e.target.value) || 1 })} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "center" }} />
+                        <input type="number" value={item.price} onChange={e => updateNewInvoiceItem(idx, { price: parseFloat(e.target.value) || 0 })} placeholder={t("價格")} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
+                        <select value={item.warehouse_id || ''} onChange={e => updateNewInvoiceItem(idx, { warehouse_id: e.target.value || null })} title={t("扣庫存的倉庫（不顯示在發票/收據上）")} style={{ padding: "9px 6px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", background: "#fff" }}>
                           {warehouses.map(w => <option key={w.id} value={w.id}>{t(w.name.replace("分部", ""))}</option>)}
                         </select>
-                        <button onClick={() => { const items = newInvoice.items.filter(i => i.id !== item.id); setNewInvoice({...newInvoice, items: items.length ? items : [mkItem(warehouses[0]?.id)]}); }} style={{ background: "#fce4ec", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
+                        <button onClick={() => removeNewInvoiceItem(item.id)} style={{ background: "#fce4ec", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
                       </div>
                       {isDcAdaptorProLineItem(item, { products, lineItemAliases }) && (
                         <div style={{ margin: "0 0 10px 0", paddingLeft: 0 }}>
                           <input
                             value={item.imei_code || ""}
-                            onChange={e => { const items = [...newInvoice.items]; items[idx] = { ...item, imei_code: e.target.value }; setNewInvoice({ ...newInvoice, items }); }}
+                            onChange={e => updateNewInvoiceItem(idx, { imei_code: e.target.value })}
                             placeholder={t("IMEI 辨識碼")}
                             style={{ width: "100%", padding: "9px 12px", borderRadius: 10, border: "1px solid #d8e0ff", background: "#f8faff", fontSize: 14, outline: "none", boxSizing: "border-box" }}
                           />
@@ -819,7 +825,7 @@ export default function InvoicesView({
                       )}
                     </React.Fragment>
                   ))}
-                  <button onClick={() => setNewInvoice({...newInvoice, items: [...newInvoice.items, mkItem(warehouses[0]?.id)]})} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", width: "100%" }}>+ {t("新增項目")}</button>
+                  <button onClick={addNewInvoiceItem} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", width: "100%" }}>+ {t("新增項目")}</button>
                 </div>
                 <div style={{ marginBottom: 14, padding: "14px 16px", background: "#fafbff", borderRadius: 12, border: "1px solid #eef0fa" }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: "#555", marginBottom: 10 }}>{t("額外費用（可選）")}</div>
@@ -831,12 +837,12 @@ export default function InvoicesView({
                     const v = newInvoice[key] || { enabled: false, amount: 0 }
                     return (
                       <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                        <input type="checkbox" id={`extra-${key}`} checked={v.enabled} onChange={e => setNewInvoice({ ...newInvoice, [key]: { ...v, enabled: e.target.checked } })} style={{ width: 16, height: 16, cursor: "pointer" }} />
+                        <input type="checkbox" id={`extra-${key}`} checked={v.enabled} onChange={e => updateNewInvoiceExtra(key, { enabled: e.target.checked })} style={{ width: 16, height: 16, cursor: "pointer" }} />
                         <label htmlFor={`extra-${key}`} style={{ fontSize: 14, cursor: "pointer", minWidth: 70, fontWeight: 600 }}>
                           <span style={{ color, marginRight: 4 }}>{sign}</span>{label}
                         </label>
                         {v.enabled && (
-                          <input type="number" min="0" value={v.amount || ""} onChange={e => setNewInvoice({ ...newInvoice, [key]: { ...v, amount: parseFloat(e.target.value) || 0 } })} placeholder={t("金額 HKD")} style={{ flex: 1, padding: "7px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
+                          <input type="number" min="0" value={v.amount || ""} onChange={e => updateNewInvoiceExtra(key, { amount: parseFloat(e.target.value) || 0 })} placeholder={t("金額 HKD")} style={{ flex: 1, padding: "7px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
                         )}
                       </div>
                     )
@@ -844,10 +850,10 @@ export default function InvoicesView({
                 </div>
                 <div style={{ marginBottom: 14 }}>
                   <label style={{ fontSize: 13, fontWeight: 700, color: "#555", display: "block", marginBottom: 5 }}>{t("備註")}</label>
-                  <input value={newInvoice.notes} onChange={e => setNewInvoice({...newInvoice, notes: e.target.value})} placeholder={t("例如 Shopify 訂單 #1055、WhatsApp 訂單...")} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+                  <input value={newInvoice.notes} onChange={e => setNewInvoice(prev => ({ ...prev, notes: e.target.value }))} placeholder={t("例如 Shopify 訂單 #1055、WhatsApp 訂單...")} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", background: "#f0f4ff", borderRadius: 12, marginBottom: 20 }}>
-                  <input type="checkbox" id="warranty" checked={newInvoice.warranty} onChange={e => setNewInvoice({...newInvoice, warranty: e.target.checked})} style={{ width: 16, height: 16, cursor: "pointer" }} />
+                  <input type="checkbox" id="warranty" checked={newInvoice.warranty} onChange={e => setNewInvoice(prev => ({ ...prev, warranty: e.target.checked }))} style={{ width: 16, height: 16, cursor: "pointer" }} />
                   <label htmlFor="warranty" style={{ fontSize: 14, cursor: "pointer", fontWeight: 600 }}>{t("客戶需要延長保修（+1 年）")}</label>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", background: "#1a1a2e", borderRadius: 12, marginBottom: 16 }}>

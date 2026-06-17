@@ -5,6 +5,7 @@ import { useAppContext } from "../context/AppContext.jsx";
 import { useT } from "../i18n.jsx";
 import { Input } from "../components/Inputs.jsx";
 import MetaConfigPanel from "./whatsapp/MetaConfigPanel.jsx";
+import { toastError, toastWarn } from "../lib/toast.js";
 
 // 與 App.jsx 同款 fallback（雲端 ext 版本號）
 const LATEST_EXT_VERSION_FALLBACK = "1.3.3";
@@ -57,7 +58,7 @@ export default function WhatsappView() {
     if (!guardAdmin()) return false;
     const newVals = { ...s, ...patch, updated_at: new Date().toISOString() };
     const { error } = await supabase.from("wa_settings").update(patch).eq("id", 1);
-    if (error) { alert(`${t("保存失敗")}：${error.message}`); return false; }
+    if (error) { toastError(t("保存失敗"), { detail: error }); return false; }
     setWaSettings(newVals);
     queryClient.setQueryData(["bf", "wa_settings"], newVals);
     // fire-and-forget 触发一次 wa-ai-trigger：讓「已超抢答倒計時但還沒等到 cron」的 pending 立即用新 settings 處理
@@ -71,33 +72,33 @@ export default function WhatsappView() {
     if (!guardAdmin()) return;
     if (!value.trim()) return;
     const { data, error } = await supabase.from("wa_whitelist").insert({ kind, value: value.trim(), note: note?.trim() || null, active: true }).select().single();
-    if (error) { alert(`${t("新增失敗")}：${error.message}`); return; }
+    if (error) { toastError(t("新增失敗"), { detail: error }); return; }
     setWaWhitelist(prev => [data, ...prev]);
   };
   const removeWhitelist = async (id) => {
     if (!guardAdmin()) return;
     if (!window.confirm(t("確定移除？"))) return;
     const { error } = await supabase.from("wa_whitelist").delete().eq("id", id);
-    if (error) { alert(`${t("移除失敗")}：${error.message}`); return; }
+    if (error) { toastError(t("移除失敗"), { detail: error }); return; }
     setWaWhitelist(prev => prev.filter(w => w.id !== id));
   };
   const toggleWhitelistActive = async (row) => {
     if (!guardAdmin()) return;
     const { error } = await supabase.from("wa_whitelist").update({ active: !row.active }).eq("id", row.id);
-    if (error) { alert(`${t("更新失敗")}：${error.message}`); return; }
+    if (error) { toastError(t("更新失敗"), { detail: error }); return; }
     setWaWhitelist(prev => prev.map(w => w.id === row.id ? { ...w, active: !row.active } : w));
   };
   const markUnresolved = async (id) => {
     if (!guardAdmin()) return;
     const { error } = await supabase.from("wa_unresolved").update({ resolved_at: new Date().toISOString() }).eq("id", id);
-    if (error) { alert(`${t("更新失敗")}：${error.message}`); return; }
+    if (error) { toastError(t("更新失敗"), { detail: error }); return; }
     setWaUnresolved(prev => prev.map(u => u.id === id ? { ...u, resolved_at: new Date().toISOString() } : u));
   };
   // 跳過某條待發送回覆：标 delivered_at + delivery_meta=manual_skip，扩展不再拉
   const skipReply = async (id) => {
     if (!guardAdmin()) return;
     const { error } = await supabase.from("wa_replies").update({ delivered_at: new Date().toISOString(), delivery_meta: { reason: "manual_skip" } }).eq("id", id);
-    if (error) { alert(`${t("跳過失敗")}：${error.message}`); return; }
+    if (error) { toastError(t("跳過失敗"), { detail: error }); return; }
     queryClient.invalidateQueries({ queryKey: ["bf", "wa_replies_pending"] });
   };
   const skipAllReplies = async () => {
@@ -106,7 +107,7 @@ export default function WhatsappView() {
     if (ids.length === 0) return;
     if (!window.confirm(`${t("確定全部跳過")} ${ids.length} ${t("條未發送回覆？")}`)) return;
     const { error } = await supabase.from("wa_replies").update({ delivered_at: new Date().toISOString(), delivery_meta: { reason: "manual_skip" } }).in("id", ids);
-    if (error) { alert(`${t("全部跳過失敗")}：${error.message}`); return; }
+    if (error) { toastError(t("全部跳過失敗"), { detail: error }); return; }
     queryClient.invalidateQueries({ queryKey: ["bf", "wa_replies_pending"] });
   };
   // 狀態徽標：優先顯示離線（心跳超過 2 分鐘）
@@ -162,7 +163,7 @@ export default function WhatsappView() {
       setWaSecretUnlocked(true);
       return true;
     } catch (e) {
-      alert(`${t("解鎖失敗")}：${e.message}`);
+      toastError(t("解鎖失敗"), { detail: e });
       return false;
     }
   };
@@ -346,7 +347,7 @@ export default function WhatsappView() {
                     const d = await r.json();
                     if (!r.ok || !d.ok) { alert(d.error === 'Wrong password' ? t("密碼錯誤、API Key 未更新") : `${t("保存 API Key 失敗")}：${d.error || ''}`); return; }
                     alert(t("已保存"));
-                  } catch (e) { alert(`${t("保存 API Key 失敗")}：${e.message}`); }
+                  } catch (e) { toastError(t("保存 API Key 失敗"), { detail: e }); }
                 }} style={{ padding: "9px 18px", background: waSecretUnlocked ? "#6382ff" : "#e0e0e0", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: waSecretUnlocked ? "pointer" : "not-allowed" }}>{t("儲存 API 配置")}</button>
                 <button disabled={!s.openai_base_url || !unlockedApiKey || !s.model} onClick={async () => {
                   try {

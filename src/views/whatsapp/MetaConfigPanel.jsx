@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Input } from "../../components/Inputs.jsx";
+import { toastError } from "../../lib/toast.js";
 
 const META_SECRET_FIELDS = [
   {
@@ -65,7 +66,7 @@ export default function MetaConfigPanel({
       const d = await callUnlock({ action: "meta-masks", pwd: pwd.trim() });
       setSecretMasks(d.meta_secrets || {});
     } catch (e) {
-      alert(`${t("讀取失敗")}：${e.message}`);
+      toastError(t("讀取失敗"), { detail: e });
     }
   };
 
@@ -112,7 +113,7 @@ export default function MetaConfigPanel({
       setEditingSecret(null);
       alert(t("新鑰匙已生效"));
     } catch (e) {
-      alert(`${t("保存失敗")}：${e.message}`);
+      toastError(t("保存失敗"), { detail: e });
     } finally {
       setSecretSaving(null);
     }

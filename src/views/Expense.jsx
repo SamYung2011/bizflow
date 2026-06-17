@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useT } from "../i18n.jsx";
+import { toastError } from "../lib/toast.js";
 
 const CATEGORIES = ["餐飲", "交通", "辦公", "物料", "通訊", "其他"];
 const CURRENCIES = ["RMB", "HKD", "USD"];
@@ -242,7 +243,7 @@ export default function ExpenseView({ supabase, session, currentEmployee, employ
       .from("expense_reimbursements")
       .update({ status: "approved", reviewed_by: currentEmployee?.id || null, reviewed_at: new Date().toISOString(), reject_reason: null })
       .eq("id", row.id);
-    if (error) return alert(t("操作失敗：") + error.message);
+    if (error) return toastError(t("操作失敗"), { detail: error });
     load();
   }
 
@@ -253,7 +254,7 @@ export default function ExpenseView({ supabase, session, currentEmployee, employ
       .from("expense_reimbursements")
       .update({ status: "rejected", reviewed_by: currentEmployee?.id || null, reviewed_at: new Date().toISOString(), reject_reason: reason || null })
       .eq("id", row.id);
-    if (error) return alert(t("操作失敗：") + error.message);
+    if (error) return toastError(t("操作失敗"), { detail: error });
     load();
   }
 
@@ -263,7 +264,7 @@ export default function ExpenseView({ supabase, session, currentEmployee, employ
       .from("expense_reimbursements")
       .update({ paid: next, paid_at: next ? new Date().toISOString() : null })
       .eq("id", row.id);
-    if (error) return alert(t("操作失敗：") + error.message);
+    if (error) return toastError(t("操作失敗"), { detail: error });
     load();
   }
 
@@ -273,14 +274,14 @@ export default function ExpenseView({ supabase, session, currentEmployee, employ
       .from("expense_reimbursements")
       .update({ status: "pending", reviewed_by: null, reviewed_at: null, reject_reason: null, paid: false, paid_at: null })
       .eq("id", row.id);
-    if (error) return alert(t("操作失敗：") + error.message);
+    if (error) return toastError(t("操作失敗"), { detail: error });
     load();
   }
 
   async function deleteRow(row) {
     if (!window.confirm(t("確認刪除這筆報銷？"))) return;
     const { error } = await supabase.from("expense_reimbursements").delete().eq("id", row.id);
-    if (error) return alert(t("刪除失敗：") + error.message);
+    if (error) return toastError(t("刪除失敗"), { detail: error });
     load();
   }
 

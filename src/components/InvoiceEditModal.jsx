@@ -1,20 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabaseClient.js'
-import { isNonWarrantyItem } from '../lib/warranty.js'
 import { useAppContext } from '../context/AppContext.jsx'
 import { useT } from '../i18n.jsx'
 import { Icon } from './Icon.jsx'
 import { computeCommissionFor } from '../lib/commission.js'
 import { appendCustomerImeiCodes, collectImeiCodesFromItems, collectInvalidImeiCodesFromItems, isDcAdaptorProLineItem } from '../lib/imei.js'
-
-// 發票明細行的空白模板 —— id 用 randomUUID 確保 React key 穩定
-function mkItem(warehouseId = null) {
-  const id = (typeof crypto !== "undefined" && crypto.randomUUID)
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  return { id, name: "", qty: 1, price: 0, warehouse_id: warehouseId }
-}
+import { toastError } from '../lib/toast.js'
+import { makeInvoiceItem as mkItem, attachWarrantySnapshot } from '../lib/invoiceItems.js'
 
 /**
  * 編輯發票 Modal —— 可重用組件
@@ -69,22 +62,10 @@ export default function InvoiceEditModal({ invoice, onClose, onSaved }) {
     setEditInvSalespersonId(invoice.salesperson_id || "")
   }, [invoice])
 
-  // ── 寫 invoice items 前把當前 product.warranty_months 快照進每條 item ─
-  function attachWarrantySnapshot(items) {
-    return items.map(it => {
-      if (it == null) return it
-      if (it.warranty_months != null) return it
-      if (isNonWarrantyItem(it.name)) return it
-      const prod = products.find(p => p.name === it.name)
-      if (!prod || !prod.warranty_months) return it
-      return { ...it, warranty_months: Number(prod.warranty_months) }
-    })
-  }
-
   // ── 保存 ─────────────────────────────────────────────────
   async function handleSaveInvoice() {
     if (!invoice) return
-    const cleanItems = attachWarrantySnapshot(editInvItems.filter(it => it.name || it.qty || it.price))
+    const cleanItems = attachWarrantySnapshot(editInvItems.filter(it => it.name || it.qty || it.price), products)
     const finalItems = [...cleanItems]
     if (editInvExtras.deposit?.enabled && Number(editInvExtras.deposit.amount)) {
       finalItems.push({ id: mkItem().id, name: "押金", qty: 1, price: Number(editInvExtras.deposit.amount) })
@@ -109,7 +90,7 @@ export default function InvoiceEditModal({ invoice, onClose, onSaved }) {
       updates.commission_amount = computeCommissionFor({ ...invoice, items: finalItems, salesperson_id: newSalespersonId }, newSalespersonId, { products, lineItemAliases })
     }
     const { error } = await supabase.from("invoices").update(updates).eq("id", invoice.id)
-    if (error) { alert(`${t("儲存失敗")}：${error.message}`); return }
+    if (error) { toastError(t("儲存失敗"), { detail: error }); return }
     const oldImeis = collectImeiCodesFromItems(invoice.items || [], { products, lineItemAliases })
     const newImeis = collectImeiCodesFromItems(finalItems, { products, lineItemAliases })
     const removedImeis = oldImeis.filter(i => !newImeis.includes(i))
@@ -122,7 +103,7 @@ export default function InvoiceEditModal({ invoice, onClose, onSaved }) {
       imeiCodes: newImeis,
     })
     if (imeiSync.error) {
-      alert(`${t("儲存修改已完成")}，${t("但 IMEI 未能同步到客戶資料")}：${imeiSync.error.message}`)
+      toastError(`${t("儲存修改已完成")}，${t("但 IMEI 未能同步到客戶資料")}`, { detail: imeiSync.error })
     }
     if (Array.isArray(imeiSync.conflicts) && imeiSync.conflicts.length > 0) {
       alert(`${t("以下 IMEI 已歸屬其他客戶，未掛到當前客戶")}：\n${imeiSync.conflicts.map(c => c.imei).join("\n")}`)
@@ -149,6 +130,28 @@ export default function InvoiceEditModal({ invoice, onClose, onSaved }) {
   ), [editInvExtras])
   const editItemsSum = editItemsSubtotal + editExtrasTotal
   const editFinalTotal = editInvTotalOverride === "" ? editItemsSum : (Number(editInvTotalOverride) || 0)
+
+  const updateEditInvItem = (idx, patch) => {
+    setEditInvItems(prev => prev.map((it, i) => i === idx ? { ...it, ...patch } : it))
+  }
+
+  const addEditInvItem = () => {
+    setEditInvItems(prev => [...prev, mkItem(warehouses[0]?.id)])
+  }
+
+  const removeEditInvItem = (itemId) => {
+    setEditInvItems(prev => {
+      const items = prev.filter(i => i.id !== itemId)
+      return items.length ? items : [mkItem(warehouses[0]?.id)]
+    })
+  }
+
+  const updateEditInvExtra = (key, patch) => {
+    setEditInvExtras(prev => ({
+      ...prev,
+      [key]: { ...(prev[key] || { enabled: false, amount: 0 }), ...patch },
+    }))
+  }
 
   if (!invoice) return null
 
@@ -184,26 +187,26 @@ export default function InvoiceEditModal({ invoice, onClose, onSaved }) {
           {editInvItems.map((item, idx) => (
             <React.Fragment key={item.id}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 56px 90px 72px 36px", gap: 6, marginBottom: isDcAdaptorProLineItem(item, { products, lineItemAliases }) ? 6 : 8 }}>
-                <input value={item.name} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, name: e.target.value }; setEditInvItems(arr); }} placeholder={t("產品名")} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
-                <input type="number" value={item.qty} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, qty: parseInt(e.target.value) || 0 }; setEditInvItems(arr); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "center" }} />
-                <input type="number" value={item.price} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, price: parseFloat(e.target.value) || 0 }; setEditInvItems(arr); }} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
-                <select value={item.warehouse_id || ''} onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, warehouse_id: e.target.value || null }; setEditInvItems(arr); }} title={t("扣庫存的倉庫（不顯示在發票/收據上）")} style={{ padding: "9px 6px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", background: "#fff" }}>
+                <input value={item.name} onChange={e => updateEditInvItem(idx, { name: e.target.value })} placeholder={t("產品名")} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
+                <input type="number" value={item.qty} onChange={e => updateEditInvItem(idx, { qty: parseInt(e.target.value) || 0 })} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", textAlign: "center" }} />
+                <input type="number" value={item.price} onChange={e => updateEditInvItem(idx, { price: parseFloat(e.target.value) || 0 })} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
+                <select value={item.warehouse_id || ''} onChange={e => updateEditInvItem(idx, { warehouse_id: e.target.value || null })} title={t("扣庫存的倉庫（不顯示在發票/收據上）")} style={{ padding: "9px 6px", borderRadius: 10, border: "1px solid #e0e0e0", fontSize: 13, outline: "none", background: "#fff" }}>
                   <option value="">—</option>
                   {warehouses.map(w => <option key={w.id} value={w.id}>{t(w.name.replace("分部", ""))}</option>)}
                 </select>
-                <button onClick={() => setEditInvItems(editInvItems.filter(i => i.id !== item.id))} style={{ background: "#fce4ec", border: "none", borderRadius: 8, cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
+                <button onClick={() => removeEditInvItem(item.id)} style={{ background: "#fce4ec", border: "none", borderRadius: 8, cursor: "pointer", color: "#e53935" }}><Icon name="x" size={13} /></button>
               </div>
               {isDcAdaptorProLineItem(item, { products, lineItemAliases }) && (
                 <input
                   value={item.imei_code || ""}
-                  onChange={e => { const arr = [...editInvItems]; arr[idx] = { ...item, imei_code: e.target.value }; setEditInvItems(arr); }}
+                  onChange={e => updateEditInvItem(idx, { imei_code: e.target.value })}
                   placeholder={t("IMEI 辨識碼")}
                   style={{ width: "100%", padding: "9px 12px", borderRadius: 10, border: "1px solid #d8e0ff", background: "#f8faff", fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 10 }}
                 />
               )}
             </React.Fragment>
           ))}
-          <button onClick={() => setEditInvItems([...editInvItems, mkItem(warehouses[0]?.id)])} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", width: "100%", marginTop: 4 }}>+ {t("新增項目")}</button>
+          <button onClick={addEditInvItem} style={{ fontSize: 13, color: "#6382ff", background: "none", border: "1px dashed #6382ff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", width: "100%", marginTop: 4 }}>+ {t("新增項目")}</button>
         </div>
         <div style={{ marginBottom: 14, padding: "14px 16px", background: "#fafbff", borderRadius: 12, border: "1px solid #eef0fa" }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: "#555", marginBottom: 10 }}>{t("額外費用")}</div>
@@ -215,12 +218,12 @@ export default function InvoiceEditModal({ invoice, onClose, onSaved }) {
             const v = editInvExtras[key] || { enabled: false, amount: 0 }
             return (
               <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                <input type="checkbox" id={`edit-extra-${key}`} checked={v.enabled} onChange={e => setEditInvExtras({ ...editInvExtras, [key]: { ...v, enabled: e.target.checked } })} style={{ width: 16, height: 16, cursor: "pointer" }} />
+                <input type="checkbox" id={`edit-extra-${key}`} checked={v.enabled} onChange={e => updateEditInvExtra(key, { enabled: e.target.checked })} style={{ width: 16, height: 16, cursor: "pointer" }} />
                 <label htmlFor={`edit-extra-${key}`} style={{ fontSize: 14, cursor: "pointer", minWidth: 70, fontWeight: 600 }}>
                   <span style={{ color, marginRight: 4 }}>{sign}</span>{label}
                 </label>
                 {v.enabled && (
-                  <input type="number" min="0" value={v.amount || ""} onChange={e => setEditInvExtras({ ...editInvExtras, [key]: { ...v, amount: parseFloat(e.target.value) || 0 } })} placeholder={t("金額 HKD")} style={{ flex: 1, padding: "7px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
+                  <input type="number" min="0" value={v.amount || ""} onChange={e => updateEditInvExtra(key, { amount: parseFloat(e.target.value) || 0 })} placeholder={t("金額 HKD")} style={{ flex: 1, padding: "7px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none" }} />
                 )}
               </div>
             )

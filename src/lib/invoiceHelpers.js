@@ -1,6 +1,30 @@
 // 發票相關純函數 helper
 // 從 App.jsx 抽出，跨 view 共用（dashboard / Customers / Invoices）
 
+// 生成 9 位純數字 invoice_number（保持「來源 Shopify」判定 `/^\d+$/` 兼容）。
+// 後 9 位毫秒戳 + 同毫秒並發加 9-bit random fanout。`Date.now() % 10^9` 約 11.5 天循環、
+// 加 DB unique index `invoices_invoice_number_uniq` 兜底，配合 insertInvoiceWithRetry 撞號自動換號。
+export const generateInvoiceNumber = () => {
+  const ts = Number(`${Date.now()}`.slice(-9))
+  const rand = Math.floor(Math.random() * 512)  // 0-511
+  return String((ts * 1000 + rand) % 1_000_000_000).padStart(9, "0")
+}
+
+// 包 supabase invoices INSERT，遇 unique violation (23505) 自動換 invoice_number 重試。
+// `buildPayload(num)` 由 caller 提供，返回 INSERT row（含 invoice_number）。
+// 返回 { data, error, attempts } — data 為新 row 或 null。
+export async function insertInvoiceWithRetry(supabase, buildPayload, maxAttempts = 5) {
+  for (let i = 0; i < maxAttempts; i++) {
+    const num = generateInvoiceNumber()
+    const payload = buildPayload(num)
+    const { data, error } = await supabase.from("invoices").insert([payload]).select()
+    if (!error && data) return { data, error: null, attempts: i + 1 }
+    // 23505 = unique_violation；只在這條才重試，其他錯誤直接返回
+    if (error?.code !== "23505") return { data: null, error, attempts: i + 1 }
+  }
+  return { data: null, error: { code: "23505", message: "invoice_number conflict after retries" }, attempts: maxAttempts }
+}
+
 // 將發票編號格式化為 DCxxxxx 形式：純數字 → 補齊到 5 位；UUID fallback 不動
 export const fmtInvNum = (inv) => {
   const raw = String(inv.invoice_number || inv.id)

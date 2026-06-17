@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient.js'
 import { useAppContext } from '../context/AppContext.jsx'
 import { useT } from '../i18n.jsx'
 import MarkdownText from '../components/MarkdownText.jsx'
+import { toastError } from '../lib/toast.js'
 
 const MARKDOWN_LOG_AUTHORS = new Set(["1267481a-503f-4154-829e-bc97788b4567"])
 const MARKDOWN_COMMENT_AUTHORS = new Set(["2f88a573-c4db-4b93-aadc-2a56106c5f9c"])
@@ -29,7 +30,7 @@ export default function UpdateLogView() {
       summary: summary.trim(),
       detail: (detail || "").trim() || null,
     }).select().single()
-    if (error) { alert(`${t("新增失敗")}：${error.message}`); return }
+    if (error) { toastError(t("新增失敗"), { detail: error }); return }
     setUpdateLogs(prev => [data, ...prev])
     queryClient.setQueryData(["bf", "employee_update_logs"], (old) => Array.isArray(old) ? [data, ...old] : [data])
     return data
@@ -38,7 +39,7 @@ export default function UpdateLogView() {
   async function handleUpdateUpdateLog(logId, patch) {
     const finalPatch = { ...patch, updated_at: new Date().toISOString() }
     const { data, error } = await supabase.from("employee_update_logs").update(finalPatch).eq("id", logId).select().single()
-    if (error) { alert(`${t("保存失敗")}：${error.message}`); return }
+    if (error) { toastError(t("保存失敗"), { detail: error }); return }
     setUpdateLogs(prev => prev.map(l => l.id === logId ? data : l))
     queryClient.setQueryData(["bf", "employee_update_logs"], (old) => Array.isArray(old) ? old.map(l => l.id === logId ? data : l) : old)
   }
@@ -46,7 +47,7 @@ export default function UpdateLogView() {
   async function handleDeleteUpdateLog(logId) {
     if (!window.confirm(t("確定刪除此更新及所有評論？"))) return
     const { error } = await supabase.from("employee_update_logs").delete().eq("id", logId)
-    if (error) { alert(`${t("刪除失敗")}：${error.message}`); return }
+    if (error) { toastError(t("刪除失敗"), { detail: error }); return }
     setUpdateLogs(prev => prev.filter(l => l.id !== logId))
     setLogComments(prev => prev.filter(c => c.update_log_id !== logId))
     queryClient.setQueryData(["bf", "employee_update_logs"], (old) => Array.isArray(old) ? old.filter(l => l.id !== logId) : old)
@@ -63,7 +64,7 @@ export default function UpdateLogView() {
       body: body.trim(),
       parent_comment_id: parentCommentId,
     }).select().single()
-    if (error) { alert(`${t("發送失敗")}：${error.message}`); return }
+    if (error) { toastError(t("發送失敗"), { detail: error }); return }
     setLogComments(prev => [...prev, data])
     queryClient.setQueryData(["bf", "employee_update_log_comments"], (old) => Array.isArray(old) ? [...old, data] : [data])
     return data
@@ -72,7 +73,7 @@ export default function UpdateLogView() {
   async function handleUpdateLogComment(commentId, body) {
     if (!body || !body.trim()) return
     const { data, error } = await supabase.from("employee_update_log_comments").update({ body: body.trim(), updated_at: new Date().toISOString() }).eq("id", commentId).select().single()
-    if (error) { alert(`${t("保存失敗")}：${error.message}`); return }
+    if (error) { toastError(t("保存失敗"), { detail: error }); return }
     setLogComments(prev => prev.map(c => c.id === commentId ? data : c))
     queryClient.setQueryData(["bf", "employee_update_log_comments"], (old) => Array.isArray(old) ? old.map(c => c.id === commentId ? data : c) : old)
   }
@@ -80,7 +81,7 @@ export default function UpdateLogView() {
   async function handleDeleteLogComment(commentId) {
     if (!window.confirm(t("確定刪除此評論？"))) return
     const { error } = await supabase.from("employee_update_log_comments").delete().eq("id", commentId)
-    if (error) { alert(`${t("刪除失敗")}：${error.message}`); return }
+    if (error) { toastError(t("刪除失敗"), { detail: error }); return }
     setLogComments(prev => prev.filter(c => c.id !== commentId))
     queryClient.setQueryData(["bf", "employee_update_log_comments"], (old) => Array.isArray(old) ? old.filter(c => c.id !== commentId) : old)
   }

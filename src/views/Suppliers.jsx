@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient.js'
 import { useAppContext } from '../context/AppContext.jsx'
 import { useT } from '../i18n.jsx'
 import { Icon } from '../components/Icon.jsx'
+import { toastError } from '../lib/toast.js'
 
 export default function SuppliersView() {
   const { t } = useT()
@@ -26,7 +27,7 @@ export default function SuppliersView() {
       note: newSupplier.note?.trim() || null,
     }
     const { data, error } = await supabase.from("suppliers").insert(payload).select().single()
-    if (error) { alert(`${t("新增失敗")}：${error.message}`); return }
+    if (error) { toastError(t("新增失敗"), { detail: error }); return }
     setSuppliers(prev => [data, ...prev])
     queryClient.setQueryData(["bf", "suppliers"], (old) => Array.isArray(old) ? [data, ...old] : [data])
     setNewSupplier({ name: "", contact_url: "", contact_person: "", category: "", note: "" })
@@ -35,14 +36,14 @@ export default function SuppliersView() {
   async function handleUpdateSupplier(id, patch) {
     const finalPatch = { ...patch, updated_at: new Date().toISOString() }
     const { error } = await supabase.from("suppliers").update(finalPatch).eq("id", id)
-    if (error) { alert(`${t("更新失敗")}：${error.message}`); return }
+    if (error) { toastError(t("更新失敗"), { detail: error }); return }
     setSuppliers(prev => prev.map(s => s.id === id ? { ...s, ...finalPatch } : s))
     queryClient.setQueryData(["bf", "suppliers"], (old) => Array.isArray(old) ? old.map(s => s.id === id ? { ...s, ...finalPatch } : s) : old)
   }
   async function handleDeleteSupplier(id) {
     if (!window.confirm(t("確定刪除此供應商？"))) return
     const { error } = await supabase.from("suppliers").delete().eq("id", id)
-    if (error) { alert(`${t("刪除失敗")}：${error.message}`); return }
+    if (error) { toastError(t("刪除失敗"), { detail: error }); return }
     setSuppliers(prev => prev.filter(s => s.id !== id))
     queryClient.setQueryData(["bf", "suppliers"], (old) => Array.isArray(old) ? old.filter(s => s.id !== id) : old)
     setEditingSupplier(null)

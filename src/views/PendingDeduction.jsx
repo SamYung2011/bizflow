@@ -6,6 +6,7 @@ import { useT } from '../i18n.jsx'
 import { Icon } from '../components/Icon.jsx'
 import { fmtInvNum, invoiceSource, formatNotes } from '../lib/invoiceHelpers.js'
 import InvoiceEditModal from '../components/InvoiceEditModal.jsx'
+import { toastError } from '../lib/toast.js'
 
 /**
  * 待扣庫存清單 — Phase 1 人工審核期入口
@@ -52,7 +53,7 @@ export function PendingDeductionView({ handleMarkPaid }) {
       if (auditErr) console.warn('[dismiss audit] insert failed:', auditErr.message)
       queryClient.setQueryData(['bf', 'invoices'], (old) => Array.isArray(old) ? old.map(i => i.id === inv.id ? { ...i, ...updates } : i) : old)
     } catch (e) {
-      alert(`${t('忽略失敗')}: ${e.message || e}`)
+      toastError(t('忽略失敗'), { detail: e })
     } finally {
       setDismissingId(null)
     }

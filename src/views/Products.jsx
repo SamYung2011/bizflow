@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabaseClient.js'
 import { isNonWarrantyItem } from '../lib/warranty.js'
@@ -6,6 +6,7 @@ import { useAppContext } from '../context/AppContext.jsx'
 import { useT } from '../i18n.jsx'
 import { Icon } from '../components/Icon.jsx'
 import ShopifySettingsPanel from '../components/ShopifySettingsPanel.jsx'
+import { toastError } from '../lib/toast.js'
 
 // LOW_STOCK_THRESHOLD 已搬到 AppContext（lowStockSkus 也已在那裡計算）
 
@@ -88,7 +89,7 @@ export function ProductEditModal({
               }
               for (const u of dirtyInvoices) {
                 const { error: invErr } = await supabase.from("invoices").update({ items: u.items }).eq("id", u.id);
-                if (invErr) { alert(`${t("凍結舊訂單保修失敗")}：${invErr.message}`); return; }
+                if (invErr) { toastError(t("凍結舊訂單保修失敗"), { detail: invErr }); return; }
               }
               if (dirtyInvoices.length > 0) {
                 const idMap = new Map(dirtyInvoices.map(u => [u.id, u.items]));
@@ -98,7 +99,7 @@ export function ProductEditModal({
             }
             if (Object.keys(productPatch).length > 0) {
               const { error: pErr } = await supabase.from("products").update(productPatch).eq("id", editingProduct.id);
-              if (pErr) { alert(`${t("產品儲存失敗")}：${pErr.message}`); return; }
+              if (pErr) { toastError(t("產品儲存失敗"), { detail: pErr }); return; }
               setProducts(prev => prev.map(x => x.id === editingProduct.id ? { ...x, ...productPatch } : x));
               queryClient.setQueryData(["bf", "products"], (old) => Array.isArray(old) ? old.map(x => x.id === editingProduct.id ? { ...x, ...productPatch } : x) : old);
             }
@@ -115,7 +116,7 @@ export function ProductEditModal({
             }
             if (upserts.length > 0) {
               const { error: upErr } = await supabase.from("inventory_stock").upsert(upserts, { onConflict: "product_id,warehouse_id" });
-              if (upErr) { alert(`${t("庫存儲存失敗")}：${upErr.message}`); return; }
+              if (upErr) { toastError(t("庫存儲存失敗"), { detail: upErr }); return; }
               if (movements.length > 0) await supabase.from("inventory_movements").insert(movements);
               const mergeStocks = (prev) => {
                 const map = new Map((prev || []).map(s => [`${s.product_id}_${s.warehouse_id}`, s]));
@@ -260,7 +261,7 @@ export function ProductNewModal({
       queryClient.setQueryData(["bf", "products"], (old) => Array.isArray(old) ? [...old, ...allInserted] : allInserted);
       close();
     } catch (e) {
-      alert(e.message || String(e));
+      toastError(t("操作失敗"), { detail: e });
     } finally {
       setNewProductSaving(false);
     }
@@ -390,6 +391,7 @@ export function ProductsListView({
   const [expandedAliasGroups, setExpandedAliasGroups] = useState(() => new Set())
 
   // lowStockSkus 已搬到 AppContext（dashboard 也用同份）
+  const lowStockSkuIds = useMemo(() => new Set(lowStockSkus.map(x => x.id)), [lowStockSkus])
 
   async function handleSaveAlias(draft) {
     if (!draft.alias_name || !draft.alias_name.trim()) { alert(t("alias_name 不能為空")); return }
@@ -416,7 +418,7 @@ export function ProductsListView({
       }
       setEditingAlias(null)
     } catch (e) {
-      alert(`${t("保存失敗")}：${e.message}`)
+      toastError(t("保存失敗"), { detail: e })
     } finally {
       setAliasSaving(false)
     }
@@ -425,14 +427,14 @@ export function ProductsListView({
   async function handleDeleteAlias(aliasId) {
     if (!window.confirm(t("確定刪除此映射？"))) return
     const { error } = await supabase.from("line_item_aliases").delete().eq("id", aliasId)
-    if (error) { alert(`${t("刪除失敗")}：${error.message}`); return }
+    if (error) { toastError(t("刪除失敗"), { detail: error }); return }
     setLineItemAliases(prev => prev.filter(a => a.id !== aliasId))
     queryClient.setQueryData(["bf", "line_item_aliases"], (old) => Array.isArray(old) ? old.filter(a => a.id !== aliasId) : old)
   }
 
   async function handleVerifyAlias(aliasId) {
     const { data, error } = await supabase.from("line_item_aliases").update({ verified: true, updated_at: new Date().toISOString() }).eq("id", aliasId).select().single()
-    if (error) { alert(`${t("確認失敗")}：${error.message}`); return }
+    if (error) { toastError(t("確認失敗"), { detail: error }); return }
     setLineItemAliases(prev => prev.map(a => a.id === aliasId ? data : a))
     queryClient.setQueryData(["bf", "line_item_aliases"], (old) => Array.isArray(old) ? old.map(a => a.id === aliasId ? data : a) : old)
   }
@@ -492,8 +494,7 @@ export function ProductsListView({
           })()}
         </div>
         <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", overflow: "hidden" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "36px 60px 2.5fr 0.8fr 1fr 1fr 0.8fr", gap: 12, padding: "12px 16px", background: "#fafbfc", borderBottom: "1px solid #f0f0f0", fontSize: 12, color: "#666", fontWeight: 600 }}>
-            <div><input type="checkbox" /></div>
+          <div style={{ display: "grid", gridTemplateColumns: "60px 2.5fr 0.8fr 1fr 1fr 0.8fr", gap: 12, padding: "12px 16px", background: "#fafbfc", borderBottom: "1px solid #f0f0f0", fontSize: 12, color: "#666", fontWeight: 600 }}>
             <div>{t("圖片")}</div>
             <div>{t("商品")}</div>
             <div>{t("狀態")}</div>
@@ -522,10 +523,9 @@ export function ProductsListView({
               ? (prices.length ? `HK$ ${Math.min(...prices)} - ${Math.max(...prices)}` : "—")
               : `HK$ ${p.price}`;
             return (
-              <div key={p.id} onClick={() => setSelectedProduct(p)} style={{ display: "grid", gridTemplateColumns: "36px 60px 2.5fr 0.8fr 1.2fr 1fr 1.1fr", gap: 12, padding: "12px 16px", borderBottom: "1px solid #f5f5f5", alignItems: "center", fontSize: 13, cursor: "pointer" }}
+              <div key={p.id} onClick={() => setSelectedProduct(p)} style={{ display: "grid", gridTemplateColumns: "60px 2.5fr 0.8fr 1.2fr 1fr 1.1fr", gap: 12, padding: "12px 16px", borderBottom: "1px solid #f5f5f5", alignItems: "center", fontSize: 13, cursor: "pointer" }}
                 onMouseEnter={e => e.currentTarget.style.background = "#fafbfc"}
                 onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                <div onClick={e => e.stopPropagation()}><input type="checkbox" /></div>
                 {p.image_url ? (
                   <img src={p.image_url} style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 8, border: "1px solid #f0f0f0" }} />
                 ) : (
@@ -544,7 +544,7 @@ export function ProductsListView({
                   )}
                   {p.is_virtual !== true && status !== "discontinued" && (() => {
                     const targetIds = hasChildren ? children.map(c => c.id) : [p.id];
-                    const isLow = lowStockSkus.some(x => targetIds.includes(x.id));
+                    const isLow = targetIds.some(id => lowStockSkuIds.has(id));
                     return isLow ? <span style={{ padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700, background: "#fef3c7", color: "#92400e" }}>⚠ {t("低庫存")}</span> : null;
                   })()}
                 </div>
@@ -900,7 +900,7 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
           const draft = productOrgDraft || { product_type: p.product_type || "", collections: p.collections || [], tags: p.tags || [] };
           const saveDraft = async () => {
             const { error } = await supabase.from("products").update({ product_type: draft.product_type || null, collections: draft.collections, tags: draft.tags }).eq("id", p.id);
-            if (error) { alert(t("儲存失敗：") + error.message); return; }
+            if (error) { toastError(t("儲存失敗"), { detail: error }); return; }
             setProducts(prev => prev.map(x => x.id === p.id ? { ...x, ...draft } : x));
             queryClient.setQueryData(["bf", "products"], (old) => Array.isArray(old) ? old.map(x => x.id === p.id ? { ...x, ...draft } : x) : old);
             setSelectedProduct(prev => ({ ...prev, ...draft }));
@@ -914,7 +914,7 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
             const next = isDiscontinued ? "active" : "discontinued";
             const ids = [p.id, ...children.map(c => c.id)];
             const { error } = await supabase.from("products").update({ status: next }).in("id", ids);
-            if (error) { alert((isDiscontinued ? t("啟用失敗") : t("停售失敗")) + "：" + error.message); return; }
+            if (error) { toastError(isDiscontinued ? t("啟用失敗") : t("停售失敗"), { detail: error }); return; }
             setProducts(prev => prev.map(x => ids.includes(x.id) ? { ...x, status: next } : x));
             queryClient.setQueryData(["bf", "products"], (old) => Array.isArray(old) ? old.map(x => ids.includes(x.id) ? { ...x, status: next } : x) : old);
             setSelectedProduct(prev => ({ ...prev, status: next }));
@@ -923,7 +923,7 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
             const next = !isVirtual;
             const ids = [p.id, ...children.map(c => c.id)];
             const { error } = await supabase.from("products").update({ is_virtual: next }).in("id", ids);
-            if (error) { alert(t("儲存失敗：") + error.message); return; }
+            if (error) { toastError(t("儲存失敗"), { detail: error }); return; }
             setProducts(prev => prev.map(x => ids.includes(x.id) ? { ...x, is_virtual: next } : x));
             queryClient.setQueryData(["bf", "products"], (old) => Array.isArray(old) ? old.map(x => ids.includes(x.id) ? { ...x, is_virtual: next } : x) : old);
             setSelectedProduct(prev => ({ ...prev, is_virtual: next }));
@@ -937,7 +937,7 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
             const ids = [p.id, ...children.map(c => c.id)];
             await supabase.from("inventory_stock").delete().in("product_id", ids);
             const { error } = await supabase.from("products").delete().eq("id", p.id);
-            if (error) { alert(t("刪除失敗") + "：" + error.message); return; }
+            if (error) { toastError(t("刪除失敗"), { detail: error }); return; }
             setProducts(prev => prev.filter(x => !ids.includes(x.id)));
             queryClient.setQueryData(["bf", "products"], (old) => Array.isArray(old) ? old.filter(x => !ids.includes(x.id)) : old);
             setSelectedProduct(null);
@@ -956,7 +956,7 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
                         const v = (e.target.value || "").trim();
                         if (!v || v === p.name) return;
                         const { error } = await supabase.from("products").update({ name: v }).eq("id", p.id);
-                        if (error) { alert(`${t("保存失敗")}：${error.message}`); e.target.value = p.name; return; }
+                        if (error) { toastError(t("保存失敗"), { detail: error }); e.target.value = p.name; return; }
                         setProducts(prev => prev.map(x => x.id === p.id ? { ...x, name: v } : x));
                         setSelectedProduct(prev => ({ ...prev, name: v }));
                         queryClient.setQueryData(["bf", "products"], (old) => Array.isArray(old) ? old.map(x => x.id === p.id ? { ...x, name: v } : x) : old);
@@ -1000,11 +1000,11 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
                         const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
                         const path = `${p.internal_code || p.id}/${Date.now()}.${ext}`;
                         const { error: upErr } = await supabase.storage.from('product-images').upload(path, file, { upsert: false });
-                        if (upErr) { alert(t('上傳失敗：') + upErr.message); return; }
+                        if (upErr) { toastError(t("上傳失敗"), { detail: upErr }); return; }
                         const { data: pub } = supabase.storage.from('product-images').getPublicUrl(path);
                         const url = pub.publicUrl;
                         const { error: dbErr } = await supabase.from('products').update({ image_url: url }).eq('id', p.id);
-                        if (dbErr) { alert(t('保存失敗：') + dbErr.message); return; }
+                        if (dbErr) { toastError(t("保存失敗"), { detail: dbErr }); return; }
                         setProducts(prev => prev.map(x => x.id === p.id ? { ...x, image_url: url } : x));
                         queryClient.setQueryData(["bf", "products"], (old) => Array.isArray(old) ? old.map(x => x.id === p.id ? { ...x, image_url: url } : x) : old);
                         setSelectedProduct(prev => ({ ...prev, image_url: url }));
@@ -1014,7 +1014,7 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
                       <button onClick={async () => {
                         if (!confirm(t('確定移除這張圖片？'))) return;
                         const { error } = await supabase.from('products').update({ image_url: null }).eq('id', p.id);
-                        if (error) { alert(t('移除失敗：') + error.message); return; }
+                        if (error) { toastError(t("移除失敗"), { detail: error }); return; }
                         setProducts(prev => prev.map(x => x.id === p.id ? { ...x, image_url: null } : x));
                         queryClient.setQueryData(["bf", "products"], (old) => Array.isArray(old) ? old.map(x => x.id === p.id ? { ...x, image_url: null } : x) : old);
                         setSelectedProduct(prev => ({ ...prev, image_url: null }));
@@ -1228,7 +1228,7 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
                     <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 14 }}>{t("商品組織分類")}</div>
                     <div style={{ marginBottom: 12 }}>
                       <label style={{ fontSize: 12, color: "#888", display: "block", marginBottom: 4 }}>{t("類型")}</label>
-                      <input value={draft.product_type} onChange={e => setProductOrgDraft({ ...draft, product_type: e.target.value })} placeholder={t("如 EV / 配件")}
+                      <input value={draft.product_type} onChange={e => setProductOrgDraft(prev => prev ? { ...prev, product_type: e.target.value } : prev)} placeholder={t("如 EV / 配件")}
                         style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, boxSizing: "border-box" }} />
                     </div>
                     <div style={{ marginBottom: 12 }}>
@@ -1237,14 +1237,17 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
                         {draft.collections.map((c, i) => (
                           <span key={i} style={{ background: "#f0f4ff", color: "#6382ff", padding: "4px 8px", borderRadius: 6, fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
                             {c}
-                            <button onClick={() => setProductOrgDraft({ ...draft, collections: draft.collections.filter((_, j) => j !== i) })} style={{ background: "none", border: "none", cursor: "pointer", color: "#6382ff", padding: 0 }}>×</button>
+                            <button onClick={() => setProductOrgDraft(prev => prev ? { ...prev, collections: prev.collections.filter((_, j) => j !== i) } : prev)} style={{ background: "none", border: "none", cursor: "pointer", color: "#6382ff", padding: 0 }}>×</button>
                           </span>
                         ))}
                       </div>
                       <input placeholder={t("輸入後回車新增")} list="collection-opts" onKeyDown={e => {
                         if (e.key === "Enter" && e.target.value.trim()) {
                           const v = e.target.value.trim();
-                          if (!draft.collections.includes(v)) setProductOrgDraft({ ...draft, collections: [...draft.collections, v] });
+                  setProductOrgDraft(prev => {
+                    if (!prev || prev.collections.includes(v)) return prev;
+                    return { ...prev, collections: [...prev.collections, v] };
+                  });
                           e.target.value = "";
                         }
                       }} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, boxSizing: "border-box" }} />
@@ -1256,14 +1259,17 @@ export function ProductsDetailView({ selectedProduct, setSelectedProduct, setEdi
                         {draft.tags.map((t, i) => (
                           <span key={i} style={{ background: "#fff6e5", color: "#b87500", padding: "4px 8px", borderRadius: 6, fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
                             {t}
-                            <button onClick={() => setProductOrgDraft({ ...draft, tags: draft.tags.filter((_, j) => j !== i) })} style={{ background: "none", border: "none", cursor: "pointer", color: "#b87500", padding: 0 }}>×</button>
+                            <button onClick={() => setProductOrgDraft(prev => prev ? { ...prev, tags: prev.tags.filter((_, j) => j !== i) } : prev)} style={{ background: "none", border: "none", cursor: "pointer", color: "#b87500", padding: 0 }}>×</button>
                           </span>
                         ))}
                       </div>
                       <input placeholder={t("輸入後回車新增")} list="tag-opts" onKeyDown={e => {
                         if (e.key === "Enter" && e.target.value.trim()) {
                           const v = e.target.value.trim();
-                          if (!draft.tags.includes(v)) setProductOrgDraft({ ...draft, tags: [...draft.tags, v] });
+                          setProductOrgDraft(prev => {
+                            if (!prev || prev.tags.includes(v)) return prev;
+                            return { ...prev, tags: [...prev.tags, v] };
+                          });
                           e.target.value = "";
                         }
                       }} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13, boxSizing: "border-box" }} />
