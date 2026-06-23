@@ -29,47 +29,57 @@ export function AppProvider({ children }) {
 
   // 登入後才加載數據 — 用 user.id 作為依賴
   const userId = session?.user?.id
+  // 全 App 共享：當前 tab。部分高頻/重資料 query 只在對應 tab 啟動，避免首頁被無關輪詢拖慢。
+  const [tab, setTab] = useState('dashboard')
+  const isWhatsappTab = tab === 'whatsapp'
+  const isProductsTab = tab === 'products'
+  const isCustomersTab = tab === 'customers'
+  const isInvoicesTab = tab === 'invoices'
+  const isRevenueTab = tab === 'revenue'
+  const isSuppliersTab = tab === 'suppliers'
+  const isPendingDeductionTab = tab === 'pendingDeduction'
+  const isUpdateLogTab = tab === 'updatelog'
 
   // 批 1：products / suppliers / warehouses / stocks
   const qProducts = useQuery({ queryKey: ['bf', 'products'], queryFn: () => fetchAllTable('products', 'name'), enabled: !!userId })
   const qWarehouses = useQuery({ queryKey: ['bf', 'warehouses'], queryFn: () => fetchAllTable('warehouses', 'sort_order'), enabled: !!userId })
   const qStocks = useQuery({ queryKey: ['bf', 'inventory_stock'], queryFn: () => fetchAllTable('inventory_stock', null), enabled: !!userId })
-  const qSuppliers = useQuery({ queryKey: ['bf', 'suppliers'], queryFn: () => fetchAllTable('suppliers', 'created_at', false), enabled: !!userId })
+  const qSuppliers = useQuery({ queryKey: ['bf', 'suppliers'], queryFn: () => fetchAllTable('suppliers', 'created_at', false), enabled: !!userId && isSuppliersTab })
 
   // 批 2：customers / line_item_aliases
   // customers 高頻：staleTime: 0 → F5 立刻 hydrate 老 cache 顯示 + 同時 background refetch 拿最新
   const qCustomers = useQuery({ queryKey: ['bf', 'customers'], queryFn: () => fetchAllTable('customers', 'name'), enabled: !!userId, staleTime: 0 })
-  const qCustomerDevices = useQuery({ queryKey: ['bf', 'customer_devices'], queryFn: () => fetchAllTable('customer_devices', 'created_at'), enabled: !!userId, staleTime: 0 })
-  const qLineItemAliases = useQuery({ queryKey: ['bf', 'line_item_aliases'], queryFn: () => fetchAllTable('line_item_aliases', 'alias_name'), enabled: !!userId })
+  const qCustomerDevices = useQuery({ queryKey: ['bf', 'customer_devices'], queryFn: () => fetchAllTable('customer_devices', 'created_at'), enabled: !!userId && (isCustomersTab || isInvoicesTab), staleTime: 0 })
+  const qLineItemAliases = useQuery({ queryKey: ['bf', 'line_item_aliases'], queryFn: () => fetchAllTable('line_item_aliases', 'alias_name'), enabled: !!userId && (isProductsTab || isInvoicesTab || isRevenueTab || isPendingDeductionTab) })
 
   // 批 3：invoices / inventory
   // invoices 高頻：staleTime: 0（同上）
   const qInvoices = useQuery({ queryKey: ['bf', 'invoices'], queryFn: () => fetchAllTable('invoices', 'date', false), enabled: !!userId, staleTime: 0 })
-  const qInventory = useQuery({ queryKey: ['bf', 'inventory'], queryFn: () => fetchAllTable('inventory', null), enabled: !!userId })
+  const qInventory = useQuery({ queryKey: ['bf', 'inventory'], queryFn: () => fetchAllTable('inventory', null), enabled: !!userId && isInvoicesTab })
 
   // 批 4：員工/任務/反饋/更新日誌/WhatsApp/companies 等
-  // WhatsApp 全板塊高頻：staleTime: 0 + 原有 refetchInterval 不動
+  // WhatsApp 全板塊高頻：只在 WhatsApp tab 啟動，避免首頁被 2s/5s 輪詢反覆重渲染。
   const qEmployees = useQuery({ queryKey: ['bf', 'employees'], queryFn: () => fetchAllTable('employees', 'created_at'), enabled: !!userId })
   const qTasks = useQuery({ queryKey: ['bf', 'employee_tasks'], queryFn: () => fetchAllTable('employee_tasks', 'created_at'), enabled: !!userId })
   const qTaskAssignees = useQuery({ queryKey: ['bf', 'task_assignees'], queryFn: () => fetchAllTable('task_assignees', 'created_at', true, null), enabled: !!userId })
   const qFeedbacks = useQuery({ queryKey: ['bf', 'employee_task_feedbacks'], queryFn: () => fetchAllTable('employee_task_feedbacks', 'created_at'), enabled: !!userId })
-  const qUpdateLogs = useQuery({ queryKey: ['bf', 'employee_update_logs'], queryFn: () => fetchAllTable('employee_update_logs', 'created_at', false), enabled: !!userId })
-  const qLogComments = useQuery({ queryKey: ['bf', 'employee_update_log_comments'], queryFn: () => fetchAllTable('employee_update_log_comments', 'created_at'), enabled: !!userId })
+  const qUpdateLogs = useQuery({ queryKey: ['bf', 'employee_update_logs'], queryFn: () => fetchAllTable('employee_update_logs', 'created_at', false), enabled: !!userId && isUpdateLogTab })
+  const qLogComments = useQuery({ queryKey: ['bf', 'employee_update_log_comments'], queryFn: () => fetchAllTable('employee_update_log_comments', 'created_at'), enabled: !!userId && isUpdateLogTab })
   // wa_settings 不拉 admin_password / openai_api_key / Meta tokens（敏感欄位、走 wa-unlock Edge Function；DB 層 migration 057/078 已 column-level REVOKE）
-  const qWaSettings = useQuery({ queryKey: ['bf', 'wa_settings'], queryFn: async () => { const { data } = await supabase.from('wa_settings').select('id, claude_mode, openai_base_url, model, max_history, max_replies_per_min, reply_delay_base, cooldown_minutes, bot_phone, boss_chat_name, daily_report_hour, system_prompt, boss_prompt, knowledge, updated_at, bot_name, chargers_prompt, location_hint_prompt, latest_ext_version, wa_outbound_mode, meta_graph_version, meta_phone_number_id, meta_waba_id, meta_webhook_verify_token, meta_tts_enabled, meta_tts_relay_url, meta_tts_voice_id, meta_tts_language_boost, meta_tts_prompt').eq('id', 1).maybeSingle(); return data }, enabled: !!userId, refetchInterval: 30000, staleTime: 0 })
-  const qWaWhitelist = useQuery({ queryKey: ['bf', 'wa_whitelist'], queryFn: () => fetchAllTable('wa_whitelist', 'created_at'), enabled: !!userId, refetchInterval: 30000, staleTime: 0 })
-  const qWaMessages = useQuery({ queryKey: ['bf', 'wa_messages'], queryFn: async () => { const { data } = await supabase.from('wa_messages').select('*').order('created_at', { ascending: false }).limit(1000); return data || [] }, enabled: !!userId, refetchInterval: 5000, staleTime: 0 })
-  const qWaPending = useQuery({ queryKey: ['bf', 'wa_replies_pending'], queryFn: async () => { const { data, error } = await supabase.from('wa_replies').select('*').is('delivered_at', null).or('channel.eq.extension,channel.is.null').order('created_at', { ascending: false }).limit(500); if (error) throw error; return data || [] }, enabled: !!userId, refetchInterval: 5000, staleTime: 0 })
-  const qWaUnresolved = useQuery({ queryKey: ['bf', 'wa_unresolved'], queryFn: () => fetchAllTable('wa_unresolved', 'created_at', false), enabled: !!userId, refetchInterval: 30000, staleTime: 0 })
+  const qWaSettings = useQuery({ queryKey: ['bf', 'wa_settings'], queryFn: async () => { const { data } = await supabase.from('wa_settings').select('id, claude_mode, openai_base_url, model, max_history, max_replies_per_min, reply_delay_base, cooldown_minutes, bot_phone, boss_chat_name, daily_report_hour, system_prompt, boss_prompt, knowledge, updated_at, bot_name, chargers_prompt, location_hint_prompt, latest_ext_version, wa_outbound_mode, meta_graph_version, meta_phone_number_id, meta_waba_id, meta_webhook_verify_token, meta_tts_enabled, meta_tts_relay_url, meta_tts_voice_id, meta_tts_language_boost, meta_tts_prompt').eq('id', 1).maybeSingle(); return data }, enabled: !!userId && isWhatsappTab, refetchInterval: 30000, staleTime: 0 })
+  const qWaWhitelist = useQuery({ queryKey: ['bf', 'wa_whitelist'], queryFn: () => fetchAllTable('wa_whitelist', 'created_at'), enabled: !!userId && isWhatsappTab, refetchInterval: 30000, staleTime: 0 })
+  const qWaMessages = useQuery({ queryKey: ['bf', 'wa_messages'], queryFn: async () => { const { data } = await supabase.from('wa_messages').select('*').order('created_at', { ascending: false }).limit(1000); return data || [] }, enabled: !!userId && isWhatsappTab, refetchInterval: 5000, staleTime: 0 })
+  const qWaPending = useQuery({ queryKey: ['bf', 'wa_replies_pending'], queryFn: async () => { const { data, error } = await supabase.from('wa_replies').select('*').is('delivered_at', null).or('channel.eq.extension,channel.is.null').order('created_at', { ascending: false }).limit(500); if (error) throw error; return data || [] }, enabled: !!userId && isWhatsappTab, refetchInterval: 5000, staleTime: 0 })
+  const qWaUnresolved = useQuery({ queryKey: ['bf', 'wa_unresolved'], queryFn: () => fetchAllTable('wa_unresolved', 'created_at', false), enabled: !!userId && isWhatsappTab, refetchInterval: 30000, staleTime: 0 })
   const qCompanies = useQuery({ queryKey: ['bf', 'companies'], queryFn: () => fetchAllTable('companies', 'name', true), enabled: !!userId, refetchInterval: 60000 })
-  const qWaReports = useQuery({ queryKey: ['bf', 'wa_daily_reports'], queryFn: () => fetchAllTable('wa_daily_reports', 'report_date', false), enabled: !!userId, refetchInterval: 60000, staleTime: 0 })
-  const qWaHeartbeat = useQuery({ queryKey: ['bf', 'wa_heartbeat'], queryFn: async () => { const { data } = await supabase.from('wa_heartbeat').select('*').eq('id', 1).maybeSingle(); return data }, enabled: !!userId, refetchInterval: 15000, staleTime: 0 })
-  const qWaLogs = useQuery({ queryKey: ['bf', 'wa_logs'], queryFn: async () => { const { data } = await supabase.from('wa_logs').select('*').order('created_at', { ascending: false }).limit(500); return data || [] }, enabled: !!userId, refetchInterval: 5000, staleTime: 0 })
-  const qWaClients = useQuery({ queryKey: ['bf', 'wa_clients'], queryFn: async () => { const { data } = await supabase.from('wa_clients').select('*').order('last_seen', { ascending: false }); return data || [] }, enabled: !!userId, refetchInterval: 2000, staleTime: 0 })
+  const qWaReports = useQuery({ queryKey: ['bf', 'wa_daily_reports'], queryFn: () => fetchAllTable('wa_daily_reports', 'report_date', false), enabled: !!userId && isWhatsappTab, refetchInterval: 60000, staleTime: 0 })
+  const qWaHeartbeat = useQuery({ queryKey: ['bf', 'wa_heartbeat'], queryFn: async () => { const { data } = await supabase.from('wa_heartbeat').select('*').eq('id', 1).maybeSingle(); return data }, enabled: !!userId && isWhatsappTab, refetchInterval: 15000, staleTime: 0 })
+  const qWaLogs = useQuery({ queryKey: ['bf', 'wa_logs'], queryFn: async () => { const { data } = await supabase.from('wa_logs').select('*').order('created_at', { ascending: false }).limit(500); return data || [] }, enabled: !!userId && isWhatsappTab, refetchInterval: 5000, staleTime: 0 })
+  const qWaClients = useQuery({ queryKey: ['bf', 'wa_clients'], queryFn: async () => { const { data } = await supabase.from('wa_clients').select('*').order('last_seen', { ascending: false }); return data || [] }, enabled: !!userId && isWhatsappTab, refetchInterval: 2000, staleTime: 0 })
   // shopify_settings 不拉 access_token（敏感欄位、走 shopify-settings Edge Function；DB 層 migration 059 已 column-level REVOKE）
-  const qShopifySettings = useQuery({ queryKey: ['bf', 'shopify_settings'], queryFn: async () => { const { data } = await supabase.from('shopify_settings').select('id, shop_domain, api_version, last_synced_at, updated_at').eq('id', 1).maybeSingle(); return data }, enabled: !!userId, refetchInterval: 60000, staleTime: 0 })
+  const qShopifySettings = useQuery({ queryKey: ['bf', 'shopify_settings'], queryFn: async () => { const { data } = await supabase.from('shopify_settings').select('id, shop_domain, api_version, last_synced_at, updated_at').eq('id', 1).maybeSingle(); return data }, enabled: !!userId && isProductsTab, refetchInterval: 60000, staleTime: 0 })
   // M:N 关联表（migration 062）：bizflow product ↔ Shopify variant 多对多
-  const qShopifyVariantLinks = useQuery({ queryKey: ['bf', 'shopify_variant_links'], queryFn: () => fetchAllTable('shopify_variant_links', 'created_at'), enabled: !!userId })
+  const qShopifyVariantLinks = useQuery({ queryKey: ['bf', 'shopify_variant_links'], queryFn: () => fetchAllTable('shopify_variant_links', 'created_at'), enabled: !!userId && isProductsTab })
 
   const [products, setProducts] = useState([])
   const [warehouses, setWarehouses] = useState([])
@@ -133,11 +143,10 @@ export function AppProvider({ children }) {
   // 營收查看權限：admin 或 employees.can_view_revenue=true 的人。控制營收分析 tab + 首頁本月營收卡
   const canViewRevenue = isBfAdmin || (currentEmployee && currentEmployee.can_view_revenue === true)
 
-  // qTaskPending：依賴 isWaAdmin，1c 從 App.jsx 搬進來
-  const qTaskPending = useQuery({ queryKey: ['bf', 'task_pending'], queryFn: () => fetchAllTable('task_pending', 'requested_at', false), enabled: !!userId && isWaAdmin, refetchInterval: 15000 })
+  // qTaskPending：依賴 isWaAdmin，1c 從 App.jsx 搬進來；只在 WhatsApp tab 用。
+  const qTaskPending = useQuery({ queryKey: ['bf', 'task_pending'], queryFn: () => fetchAllTable('task_pending', 'requested_at', false), enabled: !!userId && isWaAdmin && isWhatsappTab, refetchInterval: 15000 })
 
-  // 全 App 共享：當前 tab + 首屏 loading/error 匯總
-  const [tab, setTab] = useState('dashboard')
+  // 全 App 共享：首屏 loading/error 匯總
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
 
@@ -343,6 +352,20 @@ export function AppProvider({ children }) {
     return { idToGroup, groupInfo, virtualCustomers }
   }, [customers])
 
+  const customerById = useMemo(() => {
+    const map = new Map()
+    for (const c of customers) map.set(c.id, c)
+    return map
+  }, [customers])
+
+  const productByName = useMemo(() => {
+    const map = new Map()
+    for (const p of products) {
+      if (p?.name && !map.has(p.name)) map.set(p.name, p)
+    }
+    return map
+  }, [products])
+
   // 保修提醒（dashboard 用「30 天內到期」短期版）
   const warrantyItems = useMemo(() => {
     const today = new Date()
@@ -350,10 +373,10 @@ export function AppProvider({ children }) {
     const results = []
     for (const inv of invoices) {
       if (!Array.isArray(inv.items) || !inv.date) continue
-      const cust = customers.find(c => c.id === inv.customer_id)
+      const cust = customerById.get(inv.customer_id)
       for (const item of inv.items) {
         if (isNonWarrantyItem(item.name)) continue
-        const prod = products.find(p => p.name === item.name)
+        const prod = productByName.get(item.name)
         const months = itemWarrantyMonths(item, prod)
         if (!months) continue
         const wEnd = new Date(inv.date)
@@ -367,7 +390,7 @@ export function AppProvider({ children }) {
       if (!!a.customer !== !!b.customer) return a.customer ? -1 : 1
       return a.daysLeft - b.daysLeft
     })
-  }, [invoices, products, customers])
+  }, [invoices, customerById, productByName])
 
   // 庫存不足 SKU（活 SKU + 非父 + 非停售 + 非虛擬 + 所有倉庫合計 <= 0）
   const outOfStockSkus = useMemo(() => {
@@ -412,11 +435,11 @@ export function AppProvider({ children }) {
     const results = []
     for (const inv of invoices) {
       if (!Array.isArray(inv.items) || !inv.date) continue
-      const cust = customers.find(c => c.id === inv.customer_id)
+      const cust = customerById.get(inv.customer_id)
       if (!cust) continue
       for (const item of inv.items) {
         if (isNonWarrantyItem(item.name)) continue
-        const prod = products.find(p => p.name === item.name)
+        const prod = productByName.get(item.name)
         const months = itemWarrantyMonths(item, prod)
         if (!months) continue
         const wEnd = new Date(inv.date)
@@ -445,26 +468,7 @@ export function AppProvider({ children }) {
       }
     }
     return results.sort((a, b) => a.daysLeft - b.daysLeft)
-  }, [invoices, products, customers])
-
-  // 從發票反推庫存：按產品聚合已售數量（dashboard 反推庫存卡用）
-  const derivedInventory = useMemo(() => {
-    const map = {}
-    for (const inv of invoices) {
-      if (!Array.isArray(inv.items)) continue
-      const cust = customers.find(c => c.id === inv.customer_id)
-      for (const item of inv.items) {
-        const prod = products.find(p => p.name === item.name)
-        const key = item.name
-        if (!map[key]) map[key] = { productName: key, productId: prod?.id, totalSold: 0, stock: prod?.stock ?? 0, warrantyMonths: prod?.warranty_months, records: [] }
-        map[key].totalSold += (item.qty || 1)
-        map[key].records.push({ customerName: cust?.name || "—", date: inv.date, qty: item.qty || 1, invoiceNum: fmtInvNum(inv) })
-      }
-    }
-    const values = Object.values(map)
-    for (const v of values) v.stock = Math.max((v.stock || 0) - v.totalSold, 0)
-    return values.sort((a, b) => b.totalSold - a.totalSold)
-  }, [invoices, products, customers])
+  }, [invoices, customerById, productByName])
 
   // useMemo 包 context value：上次 P2 指出「30+ 字段擠一個 object，每次 render 都新建 → 所有 useAppContext 消費者全部 re-render」。
   // 包後只在依賴變化時重建 value、再傳下去（setters 是 React 穩定引用，不列入 deps）。
@@ -514,7 +518,6 @@ export function AppProvider({ children }) {
     outOfStockSkus,
     lowStockSkus,
     allWarrantyItems,
-    derivedInventory,
   }), [
     session, authLoading, userId, currentEmployee, isBfAdmin, isWaAdmin, canShip, canViewRevenue,
     tab, loading, loadError,
@@ -532,7 +535,7 @@ export function AppProvider({ children }) {
     qWaSettings, qWaWhitelist, qWaMessages, qWaPending, qWaUnresolved,
     qCompanies, qWaReports, qWaHeartbeat, qWaLogs, qWaClients,
     qShopifySettings, qShopifyVariantLinks, qTaskPending,
-    customerGroups, warrantyItems, outOfStockSkus, lowStockSkus, allWarrantyItems, derivedInventory,
+    customerGroups, warrantyItems, outOfStockSkus, lowStockSkus, allWarrantyItems,
   ])
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
 }

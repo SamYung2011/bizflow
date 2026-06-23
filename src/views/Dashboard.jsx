@@ -1,5 +1,5 @@
 import React from 'react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useAppContext } from '../context/AppContext.jsx'
 import { useT } from '../i18n.jsx'
 import { Icon } from '../components/Icon.jsx'
@@ -69,17 +69,22 @@ export default function Dashboard({
   // dashboard 專用 local state（純 dashboard 內用）
   const [dashSearch, setDashSearch] = useState("")
 
-  const getCustomer = (id) => customers.find(c => c.id === id)
+  const customerById = useMemo(() => {
+    const map = new Map()
+    for (const c of customers) map.set(c.id, c)
+    return map
+  }, [customers])
+  const getCustomer = (id) => customerById.get(id)
 
   // 月營收（當月）
   const now = new Date()
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
-  const monthlyRevenue = invoices
+  const monthlyRevenue = useMemo(() => invoices
     .filter(i => (i.date || "").startsWith(currentMonth) && (i.status || "").trim().toLowerCase() === "paid")
-    .reduce((s, i) => s + (i.total || 0), 0)
+    .reduce((s, i) => s + (i.total || 0), 0), [invoices, currentMonth])
 
   // 庫存統計：活 SKU + 非歸檔 + 非停售，合計 > 0 才算
-  const stockSummary = (() => {
+  const stockSummary = useMemo(() => {
     const byProd = {}
     for (const s of stocks) byProd[s.product_id] = (byProd[s.product_id] || 0) + (s.qty || 0)
     const activeIds = new Set(products.filter(p => p.category !== '_archived' && (p.status || 'active') !== 'discontinued').map(p => p.id))
@@ -88,8 +93,29 @@ export default function Dashboard({
       if (qty > 0 && activeIds.has(pid)) { skuCount++; totalQty += qty }
     }
     return { skuCount, totalQty }
-  })()
+  }, [products, stocks])
   const inStock = stockSummary.skuCount
+  const customerCount = useMemo(
+    () => customerGroups.virtualCustomers.filter(c => c.allEmails.length > 0 || c.allPhones.length > 0).length,
+    [customerGroups]
+  )
+  const shippingStats = useMemo(() => {
+    const stats = { pending: 0, inTransit: 0, overdue: 0 }
+    for (const inv of invoices) {
+      if ((inv.status || "").trim().toLowerCase() !== "paid") continue
+      const status = deriveShippingStatus(inv)
+      if (status === '待發貨' && isShippingTrackable(inv)) stats.pending += 1
+      if (['已發貨','在途','派送中'].includes(status)) stats.inTransit += 1
+      if (isProblematicShipping(inv)) stats.overdue += 1
+    }
+    return stats
+  }, [invoices])
+  const goShipping = (k) => {
+    sessionStorage.setItem('invoices.initialShippingFilter', k)
+    setTab("invoices")
+    setSelectedCustomer(null)
+    setSearch("")
+  }
 
   // warrantyAlerts 即 allWarrantyItems（dashboard 卡片用）
   const warrantyAlerts = allWarrantyItems
@@ -103,31 +129,15 @@ export default function Dashboard({
       <div style={{ display: "grid", gridTemplateColumns: `repeat(${canViewRevenue ? 4 : 3}, 1fr)`, gap: 16, marginBottom: 16 }}>
         {canViewRevenue && <StatCard label={t("本月營收")} value={`HKD$${monthlyRevenue.toLocaleString()}`} sub={lang === "en" ? `${now.toLocaleString("en", { month: "long", year: "numeric" })}` : lang === "fr" ? `${now.toLocaleString("fr", { month: "long", year: "numeric" })}` : `${now.getFullYear()}年${now.getMonth() + 1}月`} accent="#6382ff" icon={<Icon name="trend_up" size={20} />} onClick={() => setTab("revenue")} />}
         <StatCard label={t("庫存數量")} value={inStock} sub={lowStockSkus.length > 0 ? `${t("共")} ${stockSummary.totalQty} ${t("件")} · ⚠ ${lowStockSkus.length} ${t("件低庫存")}` : `${t("共")} ${stockSummary.totalQty} ${t("件")}`} accent={lowStockSkus.length > 0 ? "#f59e0b" : "#22c55e"} icon={<Icon name="inventory" size={20} />} onClick={() => setTab("products")} />
-        <StatCard label={t("客戶數")} value={customerGroups.virtualCustomers.filter(c => c.allEmails.length > 0 || c.allPhones.length > 0).length} sub={t("累計")} accent="#f59e0b" icon={<Icon name="customer" size={20} />} onClick={() => { setTab("customers"); setSelectedCustomer(null) }} />
+        <StatCard label={t("客戶數")} value={customerCount} sub={t("累計")} accent="#f59e0b" icon={<Icon name="customer" size={20} />} onClick={() => { setTab("customers"); setSelectedCustomer(null) }} />
         <StatCard label={t("保修提醒")} value={warrantyAlerts.length} sub={t("需跟進")} accent="#ef4444" icon={<Icon name="warning" size={20} />} onClick={() => setTab("warranty")} />
       </div>
       {/* 物流 3 卡（dashboard 第二行） */}
-      {(() => {
-        const paidInvoices = invoices.filter(i => (i.status || "").trim().toLowerCase() === "paid")
-        // 待發貨 dashboard 卡：跟列表 filter 對齊，只算啟用日期之後的（避免 4500+ 張歷史 NULL 全進來）
-        const pending = paidInvoices.filter(i => deriveShippingStatus(i) === '待發貨' && isShippingTrackable(i)).length
-        const inTransit = paidInvoices.filter(i => ['已發貨','在途','派送中'].includes(deriveShippingStatus(i))).length
-        // 異常 = shipping_status='異常' OR 已發貨但 > 14 天未簽（lib/shippingHelpers）
-        const overdue = paidInvoices.filter(isProblematicShipping).length
-        const goShipping = (k) => {
-          sessionStorage.setItem('invoices.initialShippingFilter', k)
-          setTab("invoices")
-          setSelectedCustomer(null)
-          setSearch("")
-        }
-        return (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 28 }}>
-            <StatCard label={t("待發貨")} value={pending} sub={t("已付款待出庫")} accent="#888" icon={<Icon name="inventory" size={20} />} onClick={() => goShipping("pending")} />
-            <StatCard label={t("運送中")} value={inTransit} sub={t("已發貨待簽收")} accent="#6382ff" icon={<Icon name="trend_up" size={20} />} onClick={() => goShipping("in_transit")} />
-            <StatCard label={t("超期未簽")} value={overdue} sub={`> 14 ${t("天未簽收")}`} accent="#ef4444" icon={<Icon name="warning" size={20} />} onClick={() => goShipping("exception")} />
-          </div>
-        )
-      })()}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 28 }}>
+        <StatCard label={t("待發貨")} value={shippingStats.pending} sub={t("已付款待出庫")} accent="#888" icon={<Icon name="inventory" size={20} />} onClick={() => goShipping("pending")} />
+        <StatCard label={t("運送中")} value={shippingStats.inTransit} sub={t("已發貨待簽收")} accent="#6382ff" icon={<Icon name="trend_up" size={20} />} onClick={() => goShipping("in_transit")} />
+        <StatCard label={t("超期未簽")} value={shippingStats.overdue} sub={`> 14 ${t("天未簽收")}`} accent="#ef4444" icon={<Icon name="warning" size={20} />} onClick={() => goShipping("exception")} />
+      </div>
       <div style={{ position: "relative", marginBottom: 20 }}>
         <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: "10px 14px", display: "flex", alignItems: "center", gap: 8 }}>
           <Icon name="search" size={15} />

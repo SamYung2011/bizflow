@@ -1009,7 +1009,7 @@ export default function App() {
     return m ? m[1] : "";
   };
   // monthlyRevenue / stockSummary / inStock / warrantyItems / outOfStockSkus /
-  // lowStockSkus / allWarrantyItems / derivedInventory 已搬到 AppContext 或 Dashboard.jsx
+  // lowStockSkus / allWarrantyItems 已搬到 AppContext 或 Dashboard.jsx
   // fmtInvNum 已搬到 src/lib/invoiceHelpers.js
 
   // nav 分组结构：4 业务组 + 单项混合（2026-05-21 整合）
@@ -1746,12 +1746,12 @@ export default function App() {
     </div>
   );
 
-  // 扩展更新 toast 計算（全局浮動，任何 tab 都可見）
+  // 扩展更新 toast 計算（只在 WhatsApp tab 顯示，避免首頁為此啟動 client 輪詢）
   const _latestExtVer = qWaSettings.data?.latest_ext_version || LATEST_EXT_VERSION_FALLBACK;
   const _outdatedClients = (waClients || [])
     .filter(c => Date.now() - new Date(c.last_seen).getTime() < 25000)
     .filter(c => c.version && c.version !== _latestExtVer);
-  const _showUpdateToast = _outdatedClients.length > 0 && extUpdateToastDismissedFor !== _latestExtVer;
+  const _showUpdateToast = tab === "whatsapp" && _outdatedClients.length > 0 && extUpdateToastDismissedFor !== _latestExtVer;
 
   // 非白名单 → 空屏等 redirect（useEffect 已在文件上方触发 signOut + 跳走）
   if (shouldBlock) {
