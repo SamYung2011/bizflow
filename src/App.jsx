@@ -19,6 +19,7 @@ import { computeCommissionFor } from "./lib/commission.js";
 import { ProductEditModal, ProductNewModal, ProductsListView, ProductsDetailView, emptyNewProduct } from "./views/Products.jsx";
 import { AddCustomerModal, EditCustomerModal, MergeHistoryModal, RollbackModal, MergeCandidatesModal, CustomersListView, CustomersDetailView } from "./views/Customers.jsx";
 import InvoicesView from "./views/Invoices.jsx";
+import ChargerLeadsView from "./views/ChargerLeads.jsx";
 import WarrantyView from "./views/Warranty.jsx";
 import RevenueView from "./views/Revenue.jsx";
 import SuppliersView from "./views/Suppliers.jsx";
@@ -1023,6 +1024,7 @@ export default function App() {
     ]},
     { type: "group", id: "g_sales", label: t("訂單銷售"), icon: "invoice", children: [
       { id: "invoices", label: t("發票訂單"), icon: "invoice" },
+      { id: "chargerLeads", label: t("充電樁意向表單"), icon: "charger" },
       ...(canViewRevenue ? [{ id: "revenue", label: t("營收分析"), icon: "trend_up" }] : []),
     ]},
     { type: "group", id: "g_customers", label: t("客戶售後"), icon: "customer", children: [
@@ -1939,6 +1941,9 @@ export default function App() {
             Badge={Badge}
           />
         )}
+
+        {/* CHARGER LEADS — 充電樁意向表單（Framer 表單 → charger_leads，跟進到上門估價） */}
+        {tab === "chargerLeads" && <ChargerLeadsView />}
 
         {/* WARRANTY */}
         {tab === "warranty" && (

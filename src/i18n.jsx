@@ -5,6 +5,25 @@ import { createContext, useContext, useState, useEffect } from "react";
 const STORAGE_KEY = "bizflow-lang";
 
 const DICT_EN = {
+  // ── 充電樁意向表單（訂單銷售組新子板塊，2026-06-25）──
+  "充電樁意向表單": "Charger Intent Forms",
+  "意向登記": "Intent Leads",
+  "上門估價": "On-site Survey",
+  "待安排上門": "Pending Visit",
+  "已安排上門": "Visit Scheduled",
+  "測量中": "Measuring",
+  "測量完成": "Measured",
+  "安裝費報價": "Install Quote",
+  "轉上門估價": "Move to Survey",
+  "安排上門": "Schedule Visit",
+  "開始測量": "Start Measuring",
+  "疑似老客戶待合併": "Possible Duplicate",
+  "安裝服務": "Install Service",
+  "(未填名)": "(No Name)",
+  "加載失敗": "Load Failed",
+  "官網 Framer 表單提交的充電樁購買意向，跟進到上門估價": "Charger purchase intents from the website form, tracked through on-site survey",
+  "搜尋姓名 / 電話 / 地址 / 產品…": "Search name / phone / address / product…",
+
   // ── server.js log category badges（WhatsApp tab → 日誌 子 tab 上顯示）──
   // server.js 寫入 wa_logs.category 是固定中文，前端渲染時 t() 翻譯成英文 badge
   "启动": "Startup",
@@ -1737,6 +1756,25 @@ const DICT_EN = {
 };
 
 const DICT_FR = {
+  // ── 充電樁意向表單（訂單銷售組新子板塊，2026-06-25）──
+  "充電樁意向表單": "Demandes de borne",
+  "意向登記": "Prospects",
+  "上門估價": "Évaluation sur place",
+  "待安排上門": "Visite à planifier",
+  "已安排上門": "Visite planifiée",
+  "測量中": "En cours de mesure",
+  "測量完成": "Mesure terminée",
+  "安裝費報價": "Devis d'installation",
+  "轉上門估價": "Vers l'évaluation",
+  "安排上門": "Planifier la visite",
+  "開始測量": "Démarrer la mesure",
+  "疑似老客戶待合併": "Doublon possible",
+  "安裝服務": "Service d'installation",
+  "(未填名)": "(Sans nom)",
+  "加載失敗": "Échec du chargement",
+  "官網 Framer 表單提交的充電樁購買意向，跟進到上門估價": "Demandes d'achat de borne via le formulaire du site, suivies jusqu'à l'évaluation sur place",
+  "搜尋姓名 / 電話 / 地址 / 產品…": "Rechercher nom / téléphone / adresse / produit…",
+
   // ── server.js log category badges（WhatsApp tab → 日誌 子 tab 上顯示）──
   // server.js 寫入 wa_logs.category 是固定中文，前端渲染時 t() 翻譯成英文 badge
   "启动": "Démarrage",
