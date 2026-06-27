@@ -221,10 +221,13 @@ Deno.serve(async (req) => {
   const total = items.reduce((s, i) => s + i.price * i.qty, 0);
 
   // —— 3. 順序號 invoice_number = 當前最大 + 1 ————————————————
+  // 只喺五位數內（< 100000）取 max：發票表混入過 Shopify 訂單號等 9 位大號，
+  // 唔限範圍會被頂飛，framer 發票號滾雪球變長（2026-06-27 修）。
   const { data: maxRow } = await sb
     .from("invoices")
     .select("invoice_number")
     .not("invoice_number", "is", null)
+    .lt("invoice_number", 100000)
     .order("invoice_number", { ascending: false })
     .limit(1);
   const nextInvNum = (maxRow?.[0]?.invoice_number || 0) + 1;
