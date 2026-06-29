@@ -108,13 +108,13 @@ export default function TasksView({ data, me, session, isMobile, ctx }) {
   return (
     <div>
       {viewHeader}
-      <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 18, minHeight: 'calc(100vh - 80px)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '300px minmax(0, 1fr)', gap: 18, minHeight: 'calc(100vh - 80px)' }}>
         <EmpSidebar
           employees={visibleEmployees}
           mode={mode} setMode={setMode} selectedEmpId={selectedEmpId} setSelectedEmpId={setSelectedEmpId}
           tasks={tasks} assigneesByTask={assigneesByTask} me={me}
         />
-        <div>
+        <div style={{ minWidth: 0 }}>
           {mode === 'overview' ? (
             <OverviewView employees={visibleEmployees} tasks={tasks} assigneesByTask={assigneesByTask} expanded={overviewExpanded} toggleExpanded={toggleOverviewExpanded} setEditingTask={setEditingTask} />
           ) : selectedEmp ? (
@@ -452,12 +452,12 @@ function TaskBoard({ emp, data, me, userId, setEditingTask, compact, companyId, 
   }
 
   const colBox = (title, color, items) => (
-    <div style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: radius.lg, padding: 12, minHeight: 220, display: 'flex', flexDirection: 'column' }}>
+    <div style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: radius.lg, padding: 12, minHeight: 220, minWidth: 0, maxWidth: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
         <span style={{ fontSize: 13, fontWeight: 700, color }}>{title}</span>
         <span style={{ fontSize: 11, color: c.textFaint }}>{items.length}</span>
       </div>
-      <div style={{ flex: 1, overflowY: 'auto' }}>{items.map(tk => renderCard(tk))}</div>
+      <div style={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>{items.map(tk => renderCard(tk))}</div>
     </div>
   )
 
@@ -479,12 +479,12 @@ function TaskBoard({ emp, data, me, userId, setEditingTask, compact, companyId, 
           {fbList.length > 0 && <FbPanel fbList={fbList} feedbacks={feedbacks} setEditingTask={setEditingTask} />}
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gridTemplateRows: 'auto auto', gap: 12, marginBottom: 16 }}>
-          <div style={{ gridColumn: 1, gridRow: 1 }}>{colBox(t('高優先級'), c.red, cols.high)}</div>
-          <div style={{ gridColumn: 2, gridRow: 1 }}>{colBox(t('中優先級'), c.amber, cols.mid)}</div>
-          <div style={{ gridColumn: 3, gridRow: '1 / 3' }}>{newTaskBlock}</div>
-          <div style={{ gridColumn: 1, gridRow: 2 }}><FbPanel fbList={fbList} feedbacks={feedbacks} setEditingTask={setEditingTask} /></div>
-          <div style={{ gridColumn: 2, gridRow: 2 }}>{colBox(t('低優先級'), c.green, cols.low)}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)', gridTemplateRows: 'auto auto', gap: 12, marginBottom: 16 }}>
+          <div style={{ gridColumn: 1, gridRow: 1, minWidth: 0 }}>{colBox(t('高優先級'), c.red, cols.high)}</div>
+          <div style={{ gridColumn: 2, gridRow: 1, minWidth: 0 }}>{colBox(t('中優先級'), c.amber, cols.mid)}</div>
+          <div style={{ gridColumn: 3, gridRow: '1 / 3', minWidth: 0 }}>{newTaskBlock}</div>
+          <div style={{ gridColumn: 1, gridRow: 2, minWidth: 0 }}><FbPanel fbList={fbList} feedbacks={feedbacks} setEditingTask={setEditingTask} /></div>
+          <div style={{ gridColumn: 2, gridRow: 2, minWidth: 0 }}>{colBox(t('低優先級'), c.green, cols.low)}</div>
         </div>
       )}
       {(cols.abandoned.length > 0 || cols.done.length > 0) && (
@@ -525,7 +525,7 @@ function FbPanel({ fbList, feedbacks, setEditingTask }) {
   const { t } = useT()
   const [expanded, toggle] = useToggleSet()
   return (
-    <div style={{ background: c.amberBg, border: `1px solid #fde68a`, borderRadius: radius.lg, padding: 12, height: 320, display: 'flex', flexDirection: 'column' }}>
+    <div style={{ background: c.amberBg, border: `1px solid #fde68a`, borderRadius: radius.lg, padding: 12, height: 320, minWidth: 0, maxWidth: '100%', overflow: 'hidden', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
       <div style={{ fontSize: 13, fontWeight: 700, color: '#a16207', marginBottom: 8, flexShrink: 0 }}>💬 {t('任務反饋記錄')} <span style={{ fontSize: 11, color: '#b88a00' }}>{fbList.length}</span></div>
       <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
       {fbList.length === 0 ? (
@@ -534,24 +534,24 @@ function FbPanel({ fbList, feedbacks, setEditingTask }) {
         const allFbs = feedbacks.filter(f => f.task_id === tk.id).sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
         const isExp = expanded.has(tk.id)
         return (
-          <div key={tk.id} style={{ background: c.card, border: `1px solid #fde68a`, borderRadius: radius.sm, padding: '8px 10px', marginBottom: 6 }}>
+          <div key={tk.id} style={{ background: c.card, border: `1px solid #fde68a`, borderRadius: radius.sm, padding: '8px 10px', marginBottom: 6, minWidth: 0, maxWidth: '100%', overflow: 'hidden' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
               <button type="button" onClick={() => toggle(tk.id)} title={isExp ? t('收起') : t('展開全部反饋')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#b88a00', fontSize: 10, padding: 0, width: 12, lineHeight: 1 }}>{isExp ? '▼' : '▶'}</button>
-              <span onClick={() => setEditingTask(tk)} style={{ fontSize: 12, fontWeight: 600, flex: 1, cursor: 'pointer' }}>{tk.title}</span>
+              <span onClick={() => setEditingTask(tk)} style={{ fontSize: 12, fontWeight: 600, flex: 1, minWidth: 0, cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tk.title}</span>
               {tk._fbSource === 'mention' && <Pill tone="purple" style={{ fontSize: 10, padding: '1px 5px' }}>{t('@ 提到')}</Pill>}
               {allFbs.length > 1 && <span style={{ fontSize: 10, color: '#b88a00' }}>{allFbs.length}</span>}
             </div>
             {!isExp ? (
               <div onClick={() => setEditingTask(tk)} style={{ cursor: 'pointer' }}>
                 <div style={{ fontSize: 10, color: '#b88a00', marginBottom: 2 }}>{tk._fb.author_name || t('未知')} · {fmtDateTime(tk._fb.created_at)}</div>
-                <div style={{ fontSize: 11, color: '#8a6900', lineHeight: 1.5, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', whiteSpace: 'pre-wrap' }}>{tk._fb.body}</div>
+                <div style={{ fontSize: 11, color: '#8a6900', lineHeight: 1.5, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{tk._fb.body}</div>
               </div>
             ) : (
               <div style={{ marginTop: 4, borderTop: '1px dashed #fde68a', paddingTop: 6 }}>
                 {allFbs.map(fb => (
                   <div key={fb.id} style={{ borderLeft: '2px solid #fde68a', paddingLeft: 8, marginBottom: 6 }}>
                     <div style={{ fontSize: 10, color: '#b88a00', marginBottom: 1 }}><strong style={{ color: '#a16207' }}>{fb.author_name || '?'}</strong> · {fmtDateTime(fb.created_at)}</div>
-                    <div style={{ fontSize: 11, color: '#8a6900', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{fb.body}</div>
+                    <div style={{ fontSize: 11, color: '#8a6900', lineHeight: 1.5, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{fb.body}</div>
                   </div>
                 ))}
               </div>
