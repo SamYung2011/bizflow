@@ -10,12 +10,15 @@ const RELAY_TOKEN = process.env.WA_TTS_RELAY_TOKEN || "";
 const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || "";
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+// 给所有 fetch 加超时上限，防上游 hang 住泄漏（MiniMax / Meta 上传 / Meta 发送 / DB token 查询）
+const FETCH_TIMEOUT_MS = Number(process.env.WA_TTS_FETCH_TIMEOUT_MS || 60000);
 
 async function fetchRelayTokenFromDb() {
   if (!SUPABASE_URL || !SERVICE_KEY) return null;
   try {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/wa_settings?select=meta_tts_relay_token&id=eq.1`, {
       headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!r.ok) return null;
     const rows = await r.json();
@@ -71,8 +74,16 @@ async function readJson(req) {
 }
 
 async function checkedFetch(url, options, label) {
-  const res = await fetch(url, options);
-  const text = await res.text();
+  let res, text;
+  try {
+    res = await fetch(url, { ...options, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    text = await res.text();
+  } catch (err) {
+    if (err.name === "TimeoutError" || err.name === "AbortError") {
+      throw new Error(`${label} timed out after ${FETCH_TIMEOUT_MS}ms`);
+    }
+    throw new Error(`${label} request failed: ${err.message}`);
+  }
   if (!res.ok) throw new Error(`${label} HTTP ${res.status}: ${text.slice(0, 500)}`);
   try {
     return JSON.parse(text);
