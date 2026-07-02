@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react'
 import { c, radius, S } from '../styles.jsx'
 import { useT } from '../i18n.jsx'
 import { isTaskAssignedTo, empDoneFor, empAbandonedFor } from '../lib/taskHelpers.js'
+import { openTaskUnlessTextSelected } from '../lib/selectionGuard.js'
 
 // 月曆視圖：6 行 x 7 列，任務按 start_date → due_date 渲染為跨天橫條
 // props: tasks (已過濾)、employees、assigneesByTask、me、setEditingTask
@@ -217,7 +218,7 @@ export default function CalendarView({ tasks, employees, assigneesByTask, me, se
                 const top = DATE_HEADER_HEIGHT + lane * (LANE_HEIGHT + LANE_GAP) + 4
                 return (
                   <div key={task.id}
-                    onClick={() => setEditingTask(task)}
+                    onClick={(e) => openTaskUnlessTextSelected(e, task, setEditingTask)}
                     title={task.title}
                     style={{
                       position: 'absolute',
@@ -253,7 +254,7 @@ export default function CalendarView({ tasks, employees, assigneesByTask, me, se
               const isAb = myRow ? myRow.abandoned_at != null : tk.status === 'abandoned'
               const tone = pillTone(tk, isDone, isAb)
               return (
-                <div key={tk.id} onClick={() => setEditingTask(tk)} style={{ background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`, borderRadius: radius.sm, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer', textDecoration: isAb ? 'line-through' : 'none' }}>{isDone ? '✓ ' : ''}{tk.title}</div>
+                <div key={tk.id} onClick={(e) => openTaskUnlessTextSelected(e, tk, setEditingTask)} style={{ background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`, borderRadius: radius.sm, padding: '4px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer', textDecoration: isAb ? 'line-through' : 'none' }}>{isDone ? '✓ ' : ''}{tk.title}</div>
               )
             })}
           </div>
@@ -282,7 +283,7 @@ export default function CalendarView({ tasks, employees, assigneesByTask, me, se
                 const tone = pillTone(tk, isDone, isAb)
                 const cr = employees.find(e => e.id === tk.creator_employee_id)
                 return (
-                  <div key={tk.id} onClick={() => { setExpanded(null); setEditingTask(tk) }} style={{ background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`, borderRadius: radius.sm, padding: '8px 12px', cursor: 'pointer', textDecoration: isAb ? 'line-through' : 'none' }}>
+                  <div key={tk.id} onClick={(e) => openTaskUnlessTextSelected(e, tk, setEditingTask, () => setExpanded(null))} style={{ background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`, borderRadius: radius.sm, padding: '8px 12px', cursor: 'pointer', textDecoration: isAb ? 'line-through' : 'none' }}>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{isDone ? '✓ ' : ''}{tk.title}</div>
                     <div style={{ fontSize: 10, color: c.textMuted, marginTop: 3 }}>
                       {tk.start_date && tk.due_date && tk.start_date !== tk.due_date ? `${tk.start_date} → ${tk.due_date}` : (tk.due_date || tk.start_date)}

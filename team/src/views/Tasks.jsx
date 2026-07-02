@@ -8,6 +8,7 @@ import EditTaskModal from '../components/EditTaskModal.jsx'
 import AssigneeChipEditor from '../components/AssigneeChipEditor.jsx'
 import CalendarView from '../components/CalendarView.jsx'
 import AiBatchTaskModal from '../components/AiBatchTaskModal.jsx'
+import { openTaskUnlessTextSelected } from '../lib/selectionGuard.js'
 
 // ============================================================
 //  任務模組：員工側欄 + 任務總覽 + 單員工任務看板 + 新建任務表單 + 反饋面板
@@ -223,7 +224,7 @@ function OverviewView({ employees, tasks, assigneesByTask, expanded, toggleExpan
                       <div style={{ fontSize: 11, fontWeight: 700, color: g.color, marginBottom: 6 }}>{g.label} <span style={{ color: c.textFaint, fontWeight: 400 }}>· {g.list.length}</span></div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                         {g.list.map(tk => (
-                          <div key={tk.id} onClick={() => setEditingTask(tk)} style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: radius.sm, padding: '7px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div key={tk.id} onClick={(e) => openTaskUnlessTextSelected(e, tk, setEditingTask)} style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: radius.sm, padding: '7px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
                             <span style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>{tk.title}</span>
                             {tk.due_date && <span style={{ fontSize: 10, color: c.textFaint }}>{tk.due_date}</span>}
                           </div>
@@ -237,7 +238,7 @@ function OverviewView({ employees, tasks, assigneesByTask, expanded, toggleExpan
                       <div style={{ fontSize: 11, fontWeight: 700, color: c.textMuted, marginBottom: 6 }}>{t('最近完成')} <span style={{ color: c.textFaint, fontWeight: 400 }}>· {empDone.length}</span></div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                         {empDone.map(tk => (
-                          <div key={tk.id} onClick={() => setEditingTask(tk)} style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: radius.sm, padding: '7px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, opacity: 0.7 }}>
+                          <div key={tk.id} onClick={(e) => openTaskUnlessTextSelected(e, tk, setEditingTask)} style={{ background: c.bg, border: `1px solid ${c.border}`, borderRadius: radius.sm, padding: '7px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, opacity: 0.7 }}>
                             <span style={{ flex: 1, fontSize: 12, color: c.textMuted, textDecoration: 'line-through' }}>{tk.title}</span>
                             <span style={{ fontSize: 10, color: c.green }}>✓ {fmtShort(tk.completed_at)}</span>
                           </div>
@@ -401,7 +402,7 @@ function TaskBoard({ emp, data, me, userId, setEditingTask, compact, companyId, 
     const fbCount = feedbacks.filter(f => f.task_id === task.id).length
     const list = assigneesByTask.get(task.id) || []
     return (
-      <div key={task.id} onClick={(e) => { if (e.target.tagName !== 'INPUT') setEditingTask(task) }} style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.md, padding: '9px 11px', marginBottom: 6, opacity: (isDone || isAb) ? 0.55 : 1, cursor: 'pointer' }}>
+      <div key={task.id} onClick={(e) => openTaskUnlessTextSelected(e, task, setEditingTask)} style={{ background: c.card, border: `1px solid ${c.border}`, borderRadius: radius.md, padding: '9px 11px', marginBottom: 6, opacity: (isDone || isAb) ? 0.55 : 1, cursor: 'pointer' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
           <input type="checkbox" checked={isDone} disabled={!canTick} onChange={onTick} onClick={e => e.stopPropagation()} style={{ width: 14, height: 14, marginTop: 2, cursor: canTick ? 'pointer' : 'not-allowed' }} />
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -537,12 +538,12 @@ function FbPanel({ fbList, feedbacks, setEditingTask }) {
           <div key={tk.id} style={{ background: c.card, border: `1px solid #fde68a`, borderRadius: radius.sm, padding: '8px 10px', marginBottom: 6, minWidth: 0, maxWidth: '100%', overflow: 'hidden' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
               <button type="button" onClick={() => toggle(tk.id)} title={isExp ? t('收起') : t('展開全部反饋')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#b88a00', fontSize: 10, padding: 0, width: 12, lineHeight: 1 }}>{isExp ? '▼' : '▶'}</button>
-              <span onClick={() => setEditingTask(tk)} style={{ fontSize: 12, fontWeight: 600, flex: 1, minWidth: 0, cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tk.title}</span>
+              <span onClick={(e) => openTaskUnlessTextSelected(e, tk, setEditingTask)} style={{ fontSize: 12, fontWeight: 600, flex: 1, minWidth: 0, cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tk.title}</span>
               {tk._fbSource === 'mention' && <Pill tone="purple" style={{ fontSize: 10, padding: '1px 5px' }}>{t('@ 提到')}</Pill>}
               {allFbs.length > 1 && <span style={{ fontSize: 10, color: '#b88a00' }}>{allFbs.length}</span>}
             </div>
             {!isExp ? (
-              <div onClick={() => setEditingTask(tk)} style={{ cursor: 'pointer' }}>
+              <div onClick={(e) => openTaskUnlessTextSelected(e, tk, setEditingTask)} style={{ cursor: 'pointer' }}>
                 <div style={{ fontSize: 10, color: '#b88a00', marginBottom: 2 }}>{tk._fb.author_name || t('未知')} · {fmtDateTime(tk._fb.created_at)}</div>
                 <div style={{ fontSize: 11, color: '#8a6900', lineHeight: 1.5, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{tk._fb.body}</div>
               </div>
