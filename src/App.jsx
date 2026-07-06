@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, Suspense, lazy } from "react";
 
 // 報銷模組：lazy load 防內存爆。切到「報銷」tab 才下載這 chunk
 const ExpenseView = lazy(() => import("./views/Expense.jsx"));
+const NorthboundView = lazy(() => import("./views/Northbound.jsx"));
 const OcppMonitorView = lazy(() => import("./views/ocpp/OcppMonitor.jsx"));
 const OcppChargingView = lazy(() => import("./views/ocpp/OcppCharging.jsx"));
 const OcppUsersView = lazy(() => import("./views/ocpp/OcppUsers.jsx"));
@@ -1025,6 +1026,7 @@ export default function App() {
     { type: "group", id: "g_sales", label: t("訂單銷售"), icon: "invoice", children: [
       { id: "invoices", label: t("發票訂單"), icon: "invoice" },
       { id: "chargerLeads", label: t("充電樁意向表單"), icon: "charger" },
+      { id: "northbound", label: t("港車北上"), icon: "car" },
       ...(canViewRevenue ? [{ id: "revenue", label: t("營收分析"), icon: "trend_up" }] : []),
     ]},
     { type: "group", id: "g_customers", label: t("客戶售後"), icon: "customer", children: [
@@ -1944,6 +1946,13 @@ export default function App() {
 
         {/* CHARGER LEADS — 充電樁意向表單（Framer 表單 → charger_leads，跟進到上門估價） */}
         {tab === "chargerLeads" && <ChargerLeadsView />}
+
+        {/* NORTHBOUND — 港車北上（lazy load） */}
+        {tab === "northbound" && (
+          <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入港車北上模組…")}</div>}>
+            <NorthboundView />
+          </Suspense>
+        )}
 
         {/* WARRANTY */}
         {tab === "warranty" && (
