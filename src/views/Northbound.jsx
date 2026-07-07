@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient.js";
 import { Icon } from "../components/Icon.jsx";
 import { useT } from "../i18n.jsx";
@@ -49,30 +49,6 @@ function fmtDateTime(v) {
   });
 }
 
-function fmtDateRange(row) {
-  const start = fmtDate(row.submitted_at);
-  const end = fmtDate(row.submitted_end_at);
-  if (start && end) return `${start} → ${end}`;
-  return start || end || "—";
-}
-
-function rowToForm(row) {
-  if (!row) return emptyForm;
-  return {
-    remarks: row.remarks || "",
-    submitted_at: fmtDate(row.submitted_at),
-    submitted_end_at: fmtDate(row.submitted_end_at),
-    name: row.name || "",
-    plate_no: row.plate_no || "",
-    hkid: row.hkid || "",
-    phone_hk: row.phone_hk || "",
-    phone_mainland: row.phone_mainland || "",
-    address: row.address || "",
-    hrp_no: row.hrp_no || "",
-    status_id: row.status_id || "",
-  };
-}
-
 function buildPayload(form) {
   return {
     remarks: textOrNull(form.remarks),
@@ -93,6 +69,56 @@ function statusFor(row, statuses) {
   return row.status || statuses.find((s) => s.id === row.status_id) || null;
 }
 
+function inlineValueFromRow(row, field) {
+  if (!row) return "";
+  if (field === "submitted_at" || field === "submitted_end_at") return fmtDate(row[field]);
+  if (field === "status_id") return row.status_id || "";
+  return row[field] || "";
+}
+
+function inlinePayloadValue(field, value) {
+  if (field === "submitted_at" || field === "submitted_end_at") return dateOrNull(value);
+  if (field === "status_id") return value || null;
+  return textOrNull(value);
+}
+
+async function fetchAllNorthboundRecords() {
+  const size = 1000;
+  const { count, error: countError } = await supabase
+    .from("northbound_records")
+    .select("id", { count: "exact", head: true });
+  if (countError) throw countError;
+
+  const totalPages = Math.max(1, Math.ceil((count || 0) / size));
+  const pagePromises = [];
+  for (let i = 0; i < totalPages; i++) {
+    const from = i * size;
+    pagePromises.push(
+      supabase
+        .from("northbound_records")
+        .select(RECORD_SELECT)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, from + size - 1)
+    );
+  }
+
+  const pages = await Promise.all(pagePromises);
+  const seen = new Set();
+  const records = [];
+  for (const page of pages) {
+    if (page.error) throw page.error;
+    for (const row of page.data || []) {
+      if (row?.id != null) {
+        if (seen.has(row.id)) continue;
+        seen.add(row.id);
+      }
+      records.push(row);
+    }
+  }
+  return records;
+}
+
 function StatusChip({ status, t }) {
   if (!status) {
     return (
@@ -109,8 +135,81 @@ function StatusChip({ status, t }) {
   );
 }
 
-function NorthboundForm({ t, editing, statuses, onClose, onSaved, onCreateStatus }) {
-  const [form, setForm] = useState(() => ({ ...rowToForm(editing) }));
+function InlineEditableCell({
+  row,
+  field,
+  type = "text",
+  statuses = [],
+  inlineEdit,
+  savingKey,
+  onStart,
+  onDraftChange,
+  onCommit,
+  onCancel,
+  t,
+  style,
+  children,
+}) {
+  const editKey = `${row.id}:${field}`;
+  const editing = inlineEdit?.rowId === row.id && inlineEdit.field === field;
+  const saving = savingKey === editKey;
+  const cellStyle = {
+    ...td,
+    ...style,
+    cursor: editing ? "default" : "text",
+    opacity: saving ? 0.65 : 1,
+  };
+
+  if (!editing) {
+    return (
+      <td style={cellStyle} onDoubleClick={() => onStart(row.id, field)}>
+        {children}
+      </td>
+    );
+  }
+
+  const commonProps = {
+    value: inlineEdit.value,
+    disabled: saving,
+    autoFocus: true,
+    onChange: (e) => onDraftChange(row.id, field, e.target.value),
+    onBlur: (e) => onCommit(row.id, field, e.target.value),
+    onKeyDown: (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        onCommit(row.id, field, e.target.value);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        onCancel(row.id, field);
+      }
+    },
+  };
+
+  if (type === "select") {
+    return (
+      <td style={cellStyle}>
+        <select {...commonProps} style={inlineInputStyle}>
+          <option value="">{t("未設定情況")}</option>
+          {statuses.map((s) => <option key={s.id} value={s.id}>{t(s.label)}</option>)}
+        </select>
+      </td>
+    );
+  }
+
+  return (
+    <td style={cellStyle}>
+      <input
+        {...commonProps}
+        type={type}
+        onFocus={type === "text" ? (e) => e.target.select() : undefined}
+        style={inlineInputStyle}
+      />
+    </td>
+  );
+}
+
+function NorthboundForm({ t, statuses, onClose, onSaved, onCreateStatus }) {
+  const [form, setForm] = useState(() => ({ ...emptyForm }));
   const [saving, setSaving] = useState(false);
   const [creatingStatus, setCreatingStatus] = useState(false);
   const [newStatusLabel, setNewStatusLabel] = useState("");
@@ -148,10 +247,7 @@ function NorthboundForm({ t, editing, statuses, onClose, onSaved, onCreateStatus
     }
     setSaving(true);
     try {
-      const query = editing?.id
-        ? supabase.from("northbound_records").update(payload).eq("id", editing.id)
-        : supabase.from("northbound_records").insert(payload);
-      const { data, error } = await query.select(RECORD_SELECT).single();
+      const { data, error } = await supabase.from("northbound_records").insert(payload).select(RECORD_SELECT).single();
       if (error) throw error;
       onSaved(data);
     } catch (e) {
@@ -166,7 +262,7 @@ function NorthboundForm({ t, editing, statuses, onClose, onSaved, onCreateStatus
       <div onClick={(e) => e.stopPropagation()} style={modalPanel}>
         <div style={modalHead}>
           <div style={{ fontSize: 17, fontWeight: 800, color: "#1a2138" }}>
-            {editing ? t("編輯港車北上") : t("新增港車北上")}
+            {t("新增港車北上")}
           </div>
           <button onClick={onClose} style={closeBtn}>×</button>
         </div>
@@ -256,13 +352,17 @@ function Field({ label, required, children }) {
 export default function NorthboundView() {
   const { t } = useT();
   const [records, setRecords] = useState([]);
+  const recordsRef = useRef([]);
   const [statuses, setStatuses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [editing, setEditing] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [inlineEdit, setInlineEdit] = useState(null);
+  const [inlineSaving, setInlineSaving] = useState("");
+  const inlineSavingRef = useRef("");
+  const inlineCancelRef = useRef("");
 
   const sortedStatuses = useMemo(() => {
     return [...statuses].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || String(a.label || "").localeCompare(String(b.label || "")));
@@ -270,19 +370,23 @@ export default function NorthboundView() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: statusData, error: statusError }, { data: recordData, error: recordError }] = await Promise.all([
-      supabase.from("northbound_statuses").select("*").order("sort_order", { ascending: true }).order("created_at", { ascending: true }),
-      supabase.from("northbound_records").select(RECORD_SELECT).order("created_at", { ascending: false }),
-    ]);
-    if (statusError || recordError) {
-      toastError(t("載入失敗"), { detail: statusError || recordError });
-      setStatuses([]);
-      setRecords([]);
-    } else {
+    try {
+      const [{ data: statusData, error: statusError }, recordData] = await Promise.all([
+        supabase.from("northbound_statuses").select("*").order("sort_order", { ascending: true }).order("created_at", { ascending: true }),
+        fetchAllNorthboundRecords(),
+      ]);
+      if (statusError) throw statusError;
       setStatuses(statusData || []);
+      recordsRef.current = recordData || [];
       setRecords(recordData || []);
+    } catch (e) {
+      toastError(t("載入失敗"), { detail: e });
+      setStatuses([]);
+      recordsRef.current = [];
+      setRecords([]);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -320,23 +424,81 @@ export default function NorthboundView() {
   }
 
   function openCreate() {
-    setEditing(null);
-    setShowForm(true);
-  }
-
-  function openEdit(row) {
-    setEditing(row);
     setShowForm(true);
   }
 
   function handleSaved(row) {
     setRecords((prev) => {
       const exists = prev.some((r) => r.id === row.id);
-      if (exists) return prev.map((r) => (r.id === row.id ? row : r));
-      return [row, ...prev];
+      const next = exists ? prev.map((r) => (r.id === row.id ? row : r)) : [row, ...prev];
+      recordsRef.current = next;
+      return next;
     });
     setShowForm(false);
-    setEditing(null);
+  }
+
+  function startInlineEdit(rowId, field) {
+    if (inlineSavingRef.current) return;
+    const current = recordsRef.current.find((r) => r.id === rowId);
+    if (!current) return;
+    setInlineEdit({ rowId, field, value: inlineValueFromRow(current, field) });
+  }
+
+  function patchInlineDraft(rowId, field, value) {
+    setInlineEdit((prev) => (
+      prev?.rowId === rowId && prev.field === field ? { ...prev, value } : prev
+    ));
+  }
+
+  function cancelInlineEdit(rowId, field) {
+    const key = `${rowId}:${field}`;
+    inlineCancelRef.current = key;
+    setInlineEdit((prev) => (prev?.rowId === rowId && prev.field === field ? null : prev));
+    setTimeout(() => {
+      if (inlineCancelRef.current === key) inlineCancelRef.current = "";
+    }, 0);
+  }
+
+  async function commitInlineEdit(rowId, field, value) {
+    const key = `${rowId}:${field}`;
+    if (inlineCancelRef.current === key) {
+      inlineCancelRef.current = "";
+      return;
+    }
+    if (inlineSavingRef.current === key) return;
+    const current = recordsRef.current.find((r) => r.id === rowId);
+    if (!current) {
+      setInlineEdit((prev) => (prev?.rowId === rowId && prev.field === field ? null : prev));
+      return;
+    }
+    if (inlineValueFromRow(current, field) === String(value ?? "")) {
+      setInlineEdit((prev) => (prev?.rowId === rowId && prev.field === field ? null : prev));
+      return;
+    }
+
+    inlineSavingRef.current = key;
+    setInlineSaving(key);
+    try {
+      const { data, error } = await supabase
+        .from("northbound_records")
+        .update({ [field]: inlinePayloadValue(field, value) })
+        .eq("id", rowId)
+        .select(RECORD_SELECT)
+        .single();
+      if (error) throw error;
+      setRecords((prev) => {
+        const next = prev.map((r) => (r.id === data.id ? data : r));
+        recordsRef.current = next;
+        return next;
+      });
+      setInlineEdit((prev) => (prev?.rowId === rowId && prev.field === field ? null : prev));
+    } catch (e) {
+      toastError(t("保存失敗"), { detail: e });
+      setInlineEdit((prev) => (prev?.rowId === rowId && prev.field === field ? null : prev));
+    } finally {
+      inlineSavingRef.current = "";
+      setInlineSaving("");
+    }
   }
 
   async function deleteRecord(row) {
@@ -348,7 +510,11 @@ export default function NorthboundView() {
       toastError(t("刪除失敗"), { detail: error });
       return;
     }
-    setRecords((prev) => prev.filter((r) => r.id !== row.id));
+    setRecords((prev) => {
+      const next = prev.filter((r) => r.id !== row.id);
+      recordsRef.current = next;
+      return next;
+    });
   }
 
   return (
@@ -393,7 +559,8 @@ export default function NorthboundView() {
             <thead>
               <tr style={{ background: "#f7f8fc", color: "#556", textAlign: "left" }}>
                 <th style={th}>{t("情況")}</th>
-                <th style={th}>{t("交資料日期")}</th>
+                <th style={th}>{t("交資料日期（起）")}</th>
+                <th style={th}>{t("交資料日期（止）")}</th>
                 <th style={th}>{t("名稱")}</th>
                 <th style={th}>{t("車牌")}</th>
                 <th style={th}>{t("身份證")}</th>
@@ -408,29 +575,61 @@ export default function NorthboundView() {
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={12} style={emptyCell}>{t("載入中…")}</td></tr>
+                <tr><td colSpan={13} style={emptyCell}>{t("載入中…")}</td></tr>
               )}
               {!loading && filtered.length === 0 && (
-                <tr><td colSpan={12} style={emptyCell}>{t("暫無記錄")}</td></tr>
+                <tr><td colSpan={13} style={emptyCell}>{t("暫無記錄")}</td></tr>
               )}
               {!loading && filtered.map((row) => {
                 const status = statusFor(row, sortedStatuses);
+                const inlineCellProps = {
+                  row,
+                  inlineEdit,
+                  savingKey: inlineSaving,
+                  onStart: startInlineEdit,
+                  onDraftChange: patchInlineDraft,
+                  onCommit: commitInlineEdit,
+                  onCancel: cancelInlineEdit,
+                  t,
+                };
                 return (
                   <tr key={row.id} style={{ borderTop: "1px solid #eef0f5" }}>
-                    <td style={td}><StatusChip status={status} t={t} /></td>
-                    <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDateRange(row)}</td>
-                    <td style={{ ...td, fontWeight: 700, color: "#1f2937" }}>{row.name || "—"}</td>
-                    <td style={td}>{row.plate_no || "—"}</td>
-                    <td style={td}>{row.hkid || "—"}</td>
-                    <td style={td}>{row.phone_hk || "—"}</td>
-                    <td style={td}>{row.phone_mainland || "—"}</td>
-                    <td style={{ ...td, minWidth: 180, whiteSpace: "pre-wrap" }}>{row.address || "—"}</td>
-                    <td style={td}>{row.hrp_no || "—"}</td>
-                    <td style={{ ...td, minWidth: 180, whiteSpace: "pre-wrap" }}>{row.remarks || "—"}</td>
+                    <InlineEditableCell {...inlineCellProps} field="status_id" type="select" statuses={sortedStatuses}>
+                      <StatusChip status={status} t={t} />
+                    </InlineEditableCell>
+                    <InlineEditableCell {...inlineCellProps} field="submitted_at" type="date" style={{ whiteSpace: "nowrap" }}>
+                      {fmtDate(row.submitted_at) || "—"}
+                    </InlineEditableCell>
+                    <InlineEditableCell {...inlineCellProps} field="submitted_end_at" type="date" style={{ whiteSpace: "nowrap" }}>
+                      {fmtDate(row.submitted_end_at) || "—"}
+                    </InlineEditableCell>
+                    <InlineEditableCell {...inlineCellProps} field="name" style={{ fontWeight: 700, color: "#1f2937" }}>
+                      {row.name || "—"}
+                    </InlineEditableCell>
+                    <InlineEditableCell {...inlineCellProps} field="plate_no">
+                      {row.plate_no || "—"}
+                    </InlineEditableCell>
+                    <InlineEditableCell {...inlineCellProps} field="hkid">
+                      {row.hkid || "—"}
+                    </InlineEditableCell>
+                    <InlineEditableCell {...inlineCellProps} field="phone_hk">
+                      {row.phone_hk || "—"}
+                    </InlineEditableCell>
+                    <InlineEditableCell {...inlineCellProps} field="phone_mainland">
+                      {row.phone_mainland || "—"}
+                    </InlineEditableCell>
+                    <InlineEditableCell {...inlineCellProps} field="address" style={{ minWidth: 180, whiteSpace: "pre-wrap" }}>
+                      {row.address || "—"}
+                    </InlineEditableCell>
+                    <InlineEditableCell {...inlineCellProps} field="hrp_no">
+                      {row.hrp_no || "—"}
+                    </InlineEditableCell>
+                    <InlineEditableCell {...inlineCellProps} field="remarks" style={{ minWidth: 180, whiteSpace: "pre-wrap" }}>
+                      {row.remarks || "—"}
+                    </InlineEditableCell>
                     <td style={{ ...td, whiteSpace: "nowrap", color: "#6b7280" }}>{fmtDateTime(row.created_at) || "—"}</td>
                     <td style={td}>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        <button onClick={() => openEdit(row)} style={btnSmGray}>{t("編輯")}</button>
                         <button onClick={() => deleteRecord(row)} disabled={deletingId === row.id} style={btnSmRed}>
                           {deletingId === row.id ? t("刪除中…") : t("刪除")}
                         </button>
@@ -447,9 +646,8 @@ export default function NorthboundView() {
       {showForm && (
         <NorthboundForm
           t={t}
-          editing={editing}
           statuses={sortedStatuses}
-          onClose={() => { setShowForm(false); setEditing(null); }}
+          onClose={() => { setShowForm(false); }}
           onSaved={handleSaved}
           onCreateStatus={createStatus}
         />
@@ -464,9 +662,9 @@ const emptyCell = { padding: 34, textAlign: "center", color: "#999" };
 const chipStyle = { display: "inline-block", padding: "3px 10px", borderRadius: 999, border: "1px solid", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" };
 const primaryBtn = { padding: "9px 18px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: 700 };
 const secondaryBtn = { padding: "8px 14px", border: "1px solid #d8dce5", background: "#fff", color: "#556", borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: 700, whiteSpace: "nowrap" };
-const btnSmGray = { padding: "4px 10px", background: "#fff", color: "#556", border: "1px solid #d8dce5", borderRadius: 5, cursor: "pointer", fontSize: 12, fontWeight: 700 };
 const btnSmRed = { padding: "4px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 12, fontWeight: 700 };
 const inputStyle = { width: "100%", padding: "8px 10px", border: "1px solid #d8dce5", borderRadius: 7, fontSize: 14, boxSizing: "border-box" };
+const inlineInputStyle = { ...inputStyle, minWidth: 130, marginTop: 0, background: "#fff" };
 const textareaStyle = { ...inputStyle, resize: "vertical", fontFamily: "inherit" };
 const searchBox = { background: "#fff", borderRadius: 12, border: "1px solid #eef0f5", padding: "10px 14px", display: "flex", alignItems: "center", gap: 8, minWidth: 0 };
 const modalBackdrop = { position: "fixed", inset: 0, background: "rgba(0,0,0,0.42)", zIndex: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: 18 };
