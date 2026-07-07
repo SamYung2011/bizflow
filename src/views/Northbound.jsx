@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient.js";
 import { Icon } from "../components/Icon.jsx";
+import { DateRangeInput, DateRangePanel, DateRangePopover, formatDateRangeForDisplay } from "../components/DateRangePicker.jsx";
 import { useT } from "../i18n.jsx";
 import { toastError } from "../lib/toast.js";
 
@@ -208,6 +209,48 @@ function InlineEditableCell({
   );
 }
 
+function InlineDateRangeCell({
+  row,
+  dateRangeEdit,
+  dateRangeSaving,
+  panelRef,
+  onStart,
+  onDraftChange,
+  onCommit,
+  onCancel,
+  t,
+}) {
+  const cellRef = useRef(null);
+  const editKey = `${row.id}:submitted_range`;
+  const editing = dateRangeEdit?.rowId === row.id;
+  const saving = dateRangeSaving === editKey;
+  const display = formatDateRangeForDisplay(fmtDate(row.submitted_at), fmtDate(row.submitted_end_at));
+  const cellStyle = {
+    ...td,
+    position: "relative",
+    whiteSpace: "nowrap",
+    cursor: editing ? "default" : "text",
+    opacity: saving ? 0.65 : 1,
+    minWidth: 190,
+  };
+
+  return (
+    <td ref={cellRef} style={cellStyle} onDoubleClick={() => onStart(row)}>
+      {display || "—"}
+      <DateRangePopover anchorRef={cellRef} panelRef={panelRef} open={editing} onDismiss={onCancel}>
+        <DateRangePanel
+          t={t}
+          start={dateRangeEdit?.start || ""}
+          end={dateRangeEdit?.end || ""}
+          onChange={onDraftChange}
+          onComplete={(next) => onCommit(row.id, next.start, next.end)}
+          onCancel={onCancel}
+        />
+      </DateRangePopover>
+    </td>
+  );
+}
+
 function NorthboundForm({ t, statuses, onClose, onSaved, onCreateStatus }) {
   const [form, setForm] = useState(() => ({ ...emptyForm }));
   const [saving, setSaving] = useState(false);
@@ -287,12 +330,21 @@ function NorthboundForm({ t, statuses, onClose, onSaved, onCreateStatus }) {
             <Field label={t("大陸電話")}>
               <input value={form.phone_mainland} onChange={(e) => patch("phone_mainland", e.target.value)} style={inputStyle} />
             </Field>
-            <Field label={t("交資料日期（起）")}>
-              <input type="date" value={form.submitted_at} onChange={(e) => patch("submitted_at", e.target.value)} style={inputStyle} />
-            </Field>
-            <Field label={t("交資料日期（止）")}>
-              <input type="date" value={form.submitted_end_at} onChange={(e) => patch("submitted_end_at", e.target.value)} style={inputStyle} />
-            </Field>
+            <div style={{ gridColumn: "span 2" }}>
+              <Field label={t("交資料日期")}>
+                <DateRangeInput
+                  t={t}
+                  start={form.submitted_at}
+                  end={form.submitted_end_at}
+                  placeholder={t("選擇日期範圍")}
+                  onChange={(next) => setForm((prev) => ({
+                    ...prev,
+                    submitted_at: next.start,
+                    submitted_end_at: next.end,
+                  }))}
+                />
+              </Field>
+            </div>
           </div>
 
           <Field label={t("地址")}>
@@ -363,6 +415,10 @@ export default function NorthboundView() {
   const [inlineSaving, setInlineSaving] = useState("");
   const inlineSavingRef = useRef("");
   const inlineCancelRef = useRef("");
+  const [dateRangeEdit, setDateRangeEdit] = useState(null);
+  const [dateRangeSaving, setDateRangeSaving] = useState("");
+  const dateRangeSavingRef = useRef("");
+  const dateRangePanelRef = useRef(null);
 
   const sortedStatuses = useMemo(() => {
     return [...statuses].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || String(a.label || "").localeCompare(String(b.label || "")));
@@ -439,9 +495,20 @@ export default function NorthboundView() {
 
   function startInlineEdit(rowId, field) {
     if (inlineSavingRef.current) return;
+    setDateRangeEdit(null);
     const current = recordsRef.current.find((r) => r.id === rowId);
     if (!current) return;
     setInlineEdit({ rowId, field, value: inlineValueFromRow(current, field) });
+  }
+
+  function startDateRangeEdit(row) {
+    if (dateRangeSavingRef.current || inlineSavingRef.current) return;
+    setInlineEdit(null);
+    setDateRangeEdit({
+      rowId: row.id,
+      start: fmtDate(row.submitted_at),
+      end: fmtDate(row.submitted_end_at),
+    });
   }
 
   function patchInlineDraft(rowId, field, value) {
@@ -457,6 +524,14 @@ export default function NorthboundView() {
     setTimeout(() => {
       if (inlineCancelRef.current === key) inlineCancelRef.current = "";
     }, 0);
+  }
+
+  function patchDateRangeDraft(next) {
+    setDateRangeEdit((prev) => (prev ? { ...prev, start: next.start || "", end: next.end || "" } : prev));
+  }
+
+  function cancelDateRangeEdit() {
+    setDateRangeEdit(null);
   }
 
   async function commitInlineEdit(rowId, field, value) {
@@ -498,6 +573,49 @@ export default function NorthboundView() {
     } finally {
       inlineSavingRef.current = "";
       setInlineSaving("");
+    }
+  }
+
+  async function commitDateRangeEdit(rowId, start, end) {
+    const key = `${rowId}:submitted_range`;
+    if (dateRangeSavingRef.current === key) return;
+    const current = recordsRef.current.find((r) => r.id === rowId);
+    if (!current) {
+      setDateRangeEdit((prev) => (prev?.rowId === rowId ? null : prev));
+      return;
+    }
+    const nextStart = start || "";
+    const nextEnd = end || "";
+    if (fmtDate(current.submitted_at) === nextStart && fmtDate(current.submitted_end_at) === nextEnd) {
+      setDateRangeEdit((prev) => (prev?.rowId === rowId ? null : prev));
+      return;
+    }
+
+    dateRangeSavingRef.current = key;
+    setDateRangeSaving(key);
+    try {
+      const { data, error } = await supabase
+        .from("northbound_records")
+        .update({
+          submitted_at: dateOrNull(nextStart),
+          submitted_end_at: dateOrNull(nextEnd),
+        })
+        .eq("id", rowId)
+        .select(RECORD_SELECT)
+        .single();
+      if (error) throw error;
+      setRecords((prev) => {
+        const next = prev.map((r) => (r.id === data.id ? data : r));
+        recordsRef.current = next;
+        return next;
+      });
+      setDateRangeEdit((prev) => (prev?.rowId === rowId ? null : prev));
+    } catch (e) {
+      toastError(t("保存失敗"), { detail: e });
+      setDateRangeEdit((prev) => (prev?.rowId === rowId ? null : prev));
+    } finally {
+      dateRangeSavingRef.current = "";
+      setDateRangeSaving("");
     }
   }
 
@@ -553,14 +671,13 @@ export default function NorthboundView() {
         <span>{t("可見")} {filtered.length} {t("筆")}</span>
       </div>
 
-      <div style={{ background: "#fff", border: "1px solid #eef0f5", borderRadius: 12, overflow: "hidden" }}>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", minWidth: 1180, borderCollapse: "collapse", fontSize: 13 }}>
+      <div style={tableShell}>
+        <div style={tableScroller}>
+          <table style={{ width: "100%", minWidth: 1120, borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
-              <tr style={{ background: "#f7f8fc", color: "#556", textAlign: "left" }}>
+              <tr style={{ color: "#556", textAlign: "left" }}>
                 <th style={th}>{t("情況")}</th>
-                <th style={th}>{t("交資料日期（起）")}</th>
-                <th style={th}>{t("交資料日期（止）")}</th>
+                <th style={th}>{t("交資料日期")}</th>
                 <th style={th}>{t("名稱")}</th>
                 <th style={th}>{t("車牌")}</th>
                 <th style={th}>{t("身份證")}</th>
@@ -575,10 +692,10 @@ export default function NorthboundView() {
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={13} style={emptyCell}>{t("載入中…")}</td></tr>
+                <tr><td colSpan={12} style={emptyCell}>{t("載入中…")}</td></tr>
               )}
               {!loading && filtered.length === 0 && (
-                <tr><td colSpan={13} style={emptyCell}>{t("暫無記錄")}</td></tr>
+                <tr><td colSpan={12} style={emptyCell}>{t("暫無記錄")}</td></tr>
               )}
               {!loading && filtered.map((row) => {
                 const status = statusFor(row, sortedStatuses);
@@ -597,12 +714,17 @@ export default function NorthboundView() {
                     <InlineEditableCell {...inlineCellProps} field="status_id" type="select" statuses={sortedStatuses}>
                       <StatusChip status={status} t={t} />
                     </InlineEditableCell>
-                    <InlineEditableCell {...inlineCellProps} field="submitted_at" type="date" style={{ whiteSpace: "nowrap" }}>
-                      {fmtDate(row.submitted_at) || "—"}
-                    </InlineEditableCell>
-                    <InlineEditableCell {...inlineCellProps} field="submitted_end_at" type="date" style={{ whiteSpace: "nowrap" }}>
-                      {fmtDate(row.submitted_end_at) || "—"}
-                    </InlineEditableCell>
+                    <InlineDateRangeCell
+                      row={row}
+                      dateRangeEdit={dateRangeEdit}
+                      dateRangeSaving={dateRangeSaving}
+                      panelRef={dateRangePanelRef}
+                      onStart={startDateRangeEdit}
+                      onDraftChange={patchDateRangeDraft}
+                      onCommit={commitDateRangeEdit}
+                      onCancel={cancelDateRangeEdit}
+                      t={t}
+                    />
                     <InlineEditableCell {...inlineCellProps} field="name" style={{ fontWeight: 700, color: "#1f2937" }}>
                       {row.name || "—"}
                     </InlineEditableCell>
@@ -656,7 +778,9 @@ export default function NorthboundView() {
   );
 }
 
-const th = { padding: "10px 14px", fontWeight: 700, fontSize: 12, textTransform: "uppercase", letterSpacing: 0.4, whiteSpace: "nowrap" };
+const tableShell = { background: "#fff", border: "1px solid #eef0f5", borderRadius: 12, overflow: "hidden", height: "calc(100vh - 248px)", minHeight: 360, maxHeight: 620 };
+const tableScroller = { height: "100%", overflow: "auto" };
+const th = { position: "sticky", top: 0, zIndex: 3, background: "#f7f8fc", padding: "10px 14px", fontWeight: 700, fontSize: 12, textTransform: "uppercase", letterSpacing: 0.4, whiteSpace: "nowrap" };
 const td = { padding: "12px 14px", verticalAlign: "top" };
 const emptyCell = { padding: 34, textAlign: "center", color: "#999" };
 const chipStyle = { display: "inline-block", padding: "3px 10px", borderRadius: 999, border: "1px solid", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" };
