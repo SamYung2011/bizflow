@@ -276,8 +276,8 @@ export function deriveAuthContext({ session, employee, bindings, companies, role
     isAdmin: isBfAdmin,
     bizflowMainAccess: employee.bizflow_main_access === true,
     mustChangePassword: employee.must_change_password === true,
-    canShip: employee.can_ship === true,
-    canViewRevenue: employee.can_view_revenue === true
+    canShip: isBfAdmin || employee.can_ship === true,
+    canViewRevenue: isBfAdmin || employee.can_view_revenue === true
   };
   context.hasPermission = (key) => hasPermission(context, key);
   return context;
