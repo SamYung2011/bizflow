@@ -655,7 +655,10 @@ async function buildHomeSnapshot() {
   });
   const chart = [...chartCounts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 11)
     .map(([label, value]) => ({ label, value }));
-  const openTasks = tasksSnapshot.tasks.filter((task) => task.status === "open" && task.parentId === null);
+  // 煊煊 2026-07-13:首页「我的任务」只取当前登录成员被指派的进行中主任务。
+  const openTasks = tasksSnapshot.tasks.filter((task) =>
+    task.status === "open" && task.parentId === null &&
+    task.assignees.some((assignee) => assignee.employeeId === currentUser?.employeeId));
   const mainProducts = inventorySnapshot.products.filter((product) => product.parentId === null);
   return {
     __live: true,
