@@ -16,6 +16,9 @@ const state = {
 
 let viewHelpers = null;
 let attached = false;
+// Guards against refresh()'s own input.focus() re-entering the focusin handler,
+// which would recurse refresh→focus→focusin→refresh into a stack overflow.
+let programmaticFocus = false;
 
 function searchable(value) {
   return String(value || "").trim().toLocaleLowerCase();
@@ -126,8 +129,11 @@ function refresh(root, focus = false) {
   search.outerHTML = renderGlobalSearch(viewHelpers);
   if (!focus) return;
   const input = root.querySelector("[data-shell-search-input]");
-  input?.focus();
-  input?.setSelectionRange(input.value.length, input.value.length);
+  if (!input) return;
+  programmaticFocus = true;
+  input.focus();
+  input.setSelectionRange(input.value.length, input.value.length);
+  programmaticFocus = false;
 }
 
 function navigateResult(result) {
@@ -167,6 +173,7 @@ export function attachGlobalSearch(root) {
   });
 
   document.addEventListener("focusin", (event) => {
+    if (programmaticFocus) return;
     if (!event.target.closest("[data-shell-search-input]") || !state.query.trim()) return;
     state.open = true;
     refresh(root, true);
