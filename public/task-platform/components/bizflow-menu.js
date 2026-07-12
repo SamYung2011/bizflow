@@ -5,10 +5,10 @@ const items = [
   { key: "inventory", labelKey: "nav.inventory", icon: "icon-nav-inventory", href: "./inventory.html", unreadKey: "inventory" },
   { key: "finance", labelKey: "nav.finance", icon: "icon-nav-sales", href: "./expense.html" },
   { key: "whatsapp", labelKey: "nav.whatsapp", icon: "icon-nav-messenger", href: "./whatsapp.html" },
-  { key: "ocpp-monitor", labelKey: "nav.ocppMonitor", icon: "icon-nav-remix", href: "./ocpp-monitor.html" },
-  { key: "ocpp-charging", labelKey: "nav.ocppCharging", icon: "icon-nav-cloud", href: "./ocpp-charging.html" },
-  { key: "ocpp-users", labelKey: "nav.ocppUsers", icon: "icon-nav-user", href: "./ocpp-users.html" },
-  { key: "ocpp-finance", labelKey: "nav.ocppFinance", icon: "icon-nav-sales", href: "./ocpp-finance.html" }
+  { key: "ocpp-monitor", labelKey: "nav.ocppMonitor", icon: "icon-nav-remix", href: "./ocpp-monitor.html", adminOnly: true },
+  { key: "ocpp-charging", labelKey: "nav.ocppCharging", icon: "icon-nav-cloud", href: "./ocpp-charging.html", adminOnly: true },
+  { key: "ocpp-users", labelKey: "nav.ocppUsers", icon: "icon-nav-user", href: "./ocpp-users.html", adminOnly: true },
+  { key: "ocpp-finance", labelKey: "nav.ocppFinance", icon: "icon-nav-sales", href: "./ocpp-finance.html", adminOnly: true }
 ];
 
 export function createBizflowMenu(activeKey) {

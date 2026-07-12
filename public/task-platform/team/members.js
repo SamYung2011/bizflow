@@ -20,7 +20,9 @@ const sessionEmail = String(session?.user?.email || "").toLowerCase();
 const canViewCommission = !authenticated || currentUser.isSuperAdmin === true ||
   currentUser.hasPermission("can_view_commission") || currentUser.role === "銷售";
 const memberAccess = {
-  canManageEmployees: !authenticated || currentUser.hasPermission("can_manage_employees"),
+  // Mirrors bizflow_samyung/team/src/admin.jsx:29-37.
+  canManageEmployees: !authenticated || currentUser.isSuperAdmin === true || currentUser.isAdminOfAny === true ||
+    currentUser.hasPermission("can_manage_employees"),
   canApproveRegistration: !authenticated || currentUser.hasPermission("can_approve_registration"),
   canViewCommission,
   canManageRoles: !authenticated || currentUser.hasPermission("can_manage_roles"),
@@ -227,7 +229,7 @@ export function renderTeamMembers({ icon, escapeHtml, lang, redDot }) {
 
   return `<div class="team-members-page" data-live-read-only="${state.liveReadOnly}">
     <h1 class="team-members-title" title="${escapeHtml(tt("members.title"))}">${escapeHtml(tt("members.title"))}</h1>
-    <section class="team-members-stats">${stats.map((stat) => renderStatCard(stat, helpers)).join("")}</section>
+    ${state.access.canManageEmployees ? `<section class="team-members-stats">${stats.map((stat) => renderStatCard(stat, helpers)).join("")}</section>` : ""}
     <section class="team-members-panel">
       <div class="team-members-tabs" role="tablist">${visibleTabs.map((tab) => renderTab(tab, helpers)).join("")}</div>
       <div class="team-members-content">${renderActiveTab(helpers)}</div>

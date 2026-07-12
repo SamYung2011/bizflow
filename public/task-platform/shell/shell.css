@@ -388,6 +388,11 @@ body {
   box-shadow: none;
 }
 
+.shell-add-row:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
 .shell-main {
   min-height: 100vh;
   margin-left: 320px;

@@ -46,10 +46,20 @@ const defaultMenu = [
   { key: "nav.inventory", icon: "icon-nav-inventory", unreadKey: "inventory" }
 ];
 
-let menuItems = (window.__shellMenu ?? defaultMenu).map((item) => ({
-  ...item,
-  update: item.unreadKey ? (unread[item.unreadKey] ?? 0) > 0 : false
-}));
+const menuSource = window.__shellMenu ?? defaultMenu;
+
+function buildMenuItems(user) {
+  const authenticated = typeof user?.hasPermission === "function";
+  const canViewAdminItems = !authenticated || user.isBfAdmin === true;
+  return menuSource
+    .filter((item) => !item.adminOnly || canViewAdminItems)
+    .map((item) => ({
+      ...item,
+      update: item.unreadKey ? (unread[item.unreadKey] ?? 0) > 0 : false
+    }));
+}
+
+let menuItems = buildMenuItems(window.__shellData?.user);
 
 let hasUnreadMessages = (unread.messages ?? 0) > 0;
 
@@ -239,7 +249,9 @@ function renderNav() {
 }
 
 function renderAddRow() {
-  return `<button type="button" class="tp-component add-row shell-add-row" aria-label="${escapeHtml(t("shell.add"))}">
+  const user = state.profileUser ?? window.__shellData?.user;
+  const liveReadOnly = typeof user?.hasPermission === "function";
+  return `<button type="button" class="tp-component add-row shell-add-row" aria-label="${escapeHtml(t("shell.add"))}"${liveReadOnly ? " disabled aria-disabled=\"true\"" : ""}>
     ${icon("icon-add-surface-add")}
   </button>`;
 }
@@ -567,6 +579,7 @@ async function guardAuthenticatedShell() {
   }
   state.profileUser = { ...user, availableCompanies: user.availableCompanies.map((company) => ({ ...company })) };
   if (window.__shellData) window.__shellData.user = state.profileUser;
+  menuItems = buildMenuItems(state.profileUser);
   const switchable = user.switchableCompanies.map((company) => ({ key: company.id, label: company.name }));
   if (switchable.length) {
     companies = switchable;

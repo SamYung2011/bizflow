@@ -804,6 +804,7 @@
   };
   var viewHelpers = null;
   var attached = false;
+  var programmaticFocus = false;
   function searchable(value) {
     return String(value || "").trim().toLocaleLowerCase();
   }
@@ -896,8 +897,11 @@
     search.outerHTML = renderGlobalSearch(viewHelpers);
     if (!focus) return;
     const input = root2.querySelector("[data-shell-search-input]");
-    input?.focus();
-    input?.setSelectionRange(input.value.length, input.value.length);
+    if (!input) return;
+    programmaticFocus = true;
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+    programmaticFocus = false;
   }
   function navigateResult(result) {
     const kind = result.getAttribute("data-search-kind");
@@ -933,6 +937,7 @@
       loading.then(() => refresh(root2, true));
     });
     document.addEventListener("focusin", (event) => {
+      if (programmaticFocus) return;
       if (!event.target.closest("[data-shell-search-input]") || !state.query.trim()) return;
       state.open = true;
       refresh(root2, true);
@@ -1022,10 +1027,16 @@
     { key: "nav.customers", icon: "icon-nav-user" },
     { key: "nav.inventory", icon: "icon-nav-inventory", unreadKey: "inventory" }
   ];
-  var menuItems = (window.__shellMenu ?? defaultMenu).map((item) => ({
-    ...item,
-    update: item.unreadKey ? (unread[item.unreadKey] ?? 0) > 0 : false
-  }));
+  var menuSource = window.__shellMenu ?? defaultMenu;
+  function buildMenuItems(user) {
+    const authenticated = typeof user?.hasPermission === "function";
+    const canViewAdminItems = !authenticated || user.isBfAdmin === true;
+    return menuSource.filter((item) => !item.adminOnly || canViewAdminItems).map((item) => ({
+      ...item,
+      update: item.unreadKey ? (unread[item.unreadKey] ?? 0) > 0 : false
+    }));
+  }
+  var menuItems = buildMenuItems(window.__shellData?.user);
   var hasUnreadMessages = (unread.messages ?? 0) > 0;
   mountIconSprite();
   function escapeHtml2(value) {
@@ -1172,7 +1183,9 @@
   </nav>`;
   }
   function renderAddRow() {
-    return `<button type="button" class="tp-component add-row shell-add-row" aria-label="${escapeHtml2(t("shell.add"))}">
+    const user = state2.profileUser ?? window.__shellData?.user;
+    const liveReadOnly = typeof user?.hasPermission === "function";
+    return `<button type="button" class="tp-component add-row shell-add-row" aria-label="${escapeHtml2(t("shell.add"))}"${liveReadOnly ? ' disabled aria-disabled="true"' : ""}>
     ${icon2("icon-add-surface-add")}
   </button>`;
   }
@@ -1476,6 +1489,7 @@
     }
     state2.profileUser = { ...user, availableCompanies: user.availableCompanies.map((company) => ({ ...company })) };
     if (window.__shellData) window.__shellData.user = state2.profileUser;
+    menuItems = buildMenuItems(state2.profileUser);
     const switchable = user.switchableCompanies.map((company) => ({ key: company.id, label: company.name }));
     if (switchable.length) {
       companies = switchable;
