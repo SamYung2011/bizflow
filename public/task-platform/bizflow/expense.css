@@ -1,0 +1,618 @@
+.shell-app {
+  --expense-shell-min-width: 1200px; /* 全站桌面壳既有最小宽度，尚无全局尺寸 token。 */
+
+  min-width: var(--expense-shell-min-width);
+}
+
+.expense-page {
+  --expense-page-offset: 104px; /* 桌面 shell 顶部与页面底部空间合计，无对应复合 token。 */
+  --expense-table-min-width: 1180px; /* 九列表格保持可扫描的最小宽度，无对应组件 token。 */
+  --expense-segment-width: 980px; /* 六个筛选项完整显示的桌面宽度，无对应组件 token。 */
+  --expense-modal-width: 640px; /* 表单双栏桌面宽度，无对应组件 token。 */
+  --expense-close-size: 40px; /* docs/01 add-surface 267:270 图标按钮规格。 */
+  --expense-border-width: 1px; /* 表格与输入框细分隔线，无全局描边宽度 token。 */
+  --expense-row-height: 60px; /* 与 management-list 行高契约一致。 */
+  --expense-description-width: 220px; /* 桌面说明列截断宽度，无对应组件 token。 */
+  --expense-empty-height: 260px; /* 桌面空态稳定占位高度，无对应组件 token。 */
+  --expense-currency-width: 100px; /* 币种选择器最小宽度，无对应组件 token。 */
+  --expense-hidden-control-size: 1px; /* 原生文件输入视觉隐藏尺寸。 */
+  --expense-textarea-height: 96px; /* 三行说明字段稳定高度，无对应组件 token。 */
+  --expense-receipt-size: 72px; /* 收据预览缩略图尺寸，无对应组件 token。 */
+  --expense-mobile-segment-width: 620px; /* 六个移动筛选项横向滚动总宽，无对应组件 token。 */
+  --expense-mobile-empty-height: 360px; /* 手机空态填充内容列的稳定高度。 */
+  --expense-reduced-duration: .01ms; /* reduced-motion 近零时长，沿用全站处方。 */
+  --expense-overlay-bg: rgba(0, 0, 0, .5); /* docs/00 表单遮罩契约。 */
+  --expense-popover-shadow: 0 10px 30px rgba(0, 0, 0, .12); /* 沿用全站表单浮层投影。 */
+
+  display: flex;
+  min-width: 0;
+  min-height: calc(100vh - var(--expense-page-offset));
+  flex-direction: column;
+  gap: var(--space-20);
+}
+
+.expense-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-20);
+}
+
+.expense-head h1 {
+  margin: 0;
+  color: var(--black);
+  font-size: var(--font-display-size);
+  font-weight: var(--font-title-2-weight);
+  line-height: var(--lh-num);
+}
+
+.expense-head p {
+  margin: var(--space-4) 0 0;
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+}
+
+.expense-add,
+.expense-button {
+  display: inline-flex;
+  min-height: 35px; /* docs/01 base Button hug 271:1104。 */
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: 0 var(--space-20);
+  border: 0;
+  border-radius: var(--radius-10);
+  background: var(--blue);
+  color: var(--white);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  cursor: pointer;
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.expense-add:hover,
+.expense-button:hover {
+  opacity: .9;
+}
+
+.expense-add:active,
+.expense-button:active {
+  transform: scale(.98);
+}
+
+.expense-add .icon {
+  width: var(--space-20);
+  height: var(--space-20);
+}
+
+.expense-segment .app-segment {
+  width: min(100%, var(--expense-segment-width));
+}
+
+.expense-stats {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-10) var(--space-20);
+  padding: var(--space-10) var(--space-20);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+}
+
+.expense-stats strong {
+  color: var(--gray-80);
+}
+
+.expense-table-shell {
+  max-width: 100%;
+  border-radius: var(--radius-20);
+  background: var(--white);
+  overflow-x: auto;
+}
+
+.expense-table {
+  width: 100%;
+  min-width: var(--expense-table-min-width);
+  border-collapse: collapse;
+  color: var(--gray-60);
+  font-size: var(--font-description-size);
+}
+
+.expense-table th,
+.expense-table td {
+  padding: var(--space-10);
+  border-bottom: var(--expense-border-width) solid var(--gray-10);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.expense-table th {
+  height: var(--space-40);
+  background: var(--gray-5);
+  color: var(--gray-40);
+  font-weight: var(--font-description-weight);
+  white-space: nowrap;
+}
+
+.expense-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.expense-row {
+  min-height: var(--expense-row-height);
+}
+
+.expense-amount {
+  font-weight: var(--font-description-weight);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.expense-description > span {
+  display: block;
+  max-width: var(--expense-description-width);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.expense-status,
+.expense-payment {
+  display: inline-flex;
+  min-height: var(--space-20);
+  align-items: center;
+  padding: var(--space-4) var(--space-10);
+  border-radius: var(--radius-20);
+  background: var(--gray-10);
+  color: var(--gray-60);
+  white-space: nowrap;
+}
+
+.expense-status--pending {
+  color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 12%, var(--white));
+}
+
+.expense-status--approved,
+.expense-payment--paid {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 12%, var(--white));
+}
+
+.expense-status--rejected {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 10%, var(--white));
+}
+
+.expense-status-cell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+.expense-status-cell small {
+  max-width: var(--expense-description-width);
+  color: var(--red);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.expense-receipt-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  white-space: nowrap;
+}
+
+.expense-receipt-cell img {
+  width: var(--space-40);
+  height: var(--space-40);
+  border-radius: var(--radius-10);
+  object-fit: cover;
+}
+
+.expense-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.expense-action {
+  min-height: var(--space-20);
+  padding: var(--space-4) var(--space-10);
+  border: 0;
+  border-radius: var(--radius-10);
+  background: var(--gray-10);
+  color: var(--gray-60);
+  font-size: var(--font-body-size);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.expense-action--approve,
+.expense-action--pay {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 12%, var(--white));
+}
+
+.expense-action--reject,
+.expense-action--delete {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 10%, var(--white));
+}
+
+.expense-muted {
+  color: var(--gray-20);
+}
+
+.expense-empty {
+  display: flex;
+  min-height: var(--expense-empty-height);
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-10);
+  color: var(--gray-40);
+}
+
+.expense-empty .icon {
+  width: var(--space-40);
+  height: var(--space-40);
+  color: var(--gray-20);
+}
+
+.expense-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 230;
+  display: grid;
+  place-items: center;
+  padding: var(--space-20);
+  background: var(--expense-overlay-bg);
+}
+
+.expense-modal {
+  display: flex;
+  width: min(92vw, var(--expense-modal-width));
+  max-height: calc(100vh - (var(--space-20) * 2));
+  flex-direction: column;
+  border-radius: var(--radius-20);
+  background: var(--white);
+  box-shadow: var(--expense-popover-shadow);
+  overflow: hidden;
+}
+
+.expense-modal > header,
+.expense-modal > footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-20);
+  padding: var(--space-20);
+}
+
+.expense-modal > header {
+  border-bottom: var(--expense-border-width) solid var(--gray-10);
+}
+
+.expense-modal > header h2 {
+  margin: 0;
+  font-size: var(--font-title-2-size);
+  line-height: var(--lh-tight);
+}
+
+.expense-modal > header button {
+  display: grid;
+  width: var(--expense-close-size);
+  height: var(--expense-close-size);
+  flex: none;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-20);
+  background: var(--gray-5);
+  color: var(--gray-60);
+  font-size: var(--font-title-2-size);
+  cursor: pointer;
+}
+
+.expense-modal__body {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-20);
+  padding: var(--space-20);
+  overflow-y: auto;
+}
+
+.expense-form-grid,
+.expense-amount-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-10);
+}
+
+.expense-amount-fields {
+  grid-template-columns: minmax(var(--expense-currency-width), .6fr) minmax(0, 1fr);
+}
+
+.expense-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-4);
+  color: var(--gray-60);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+}
+
+.expense-field input,
+.expense-field select,
+.expense-field textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--space-40);
+  padding: var(--space-10);
+  border: var(--expense-border-width) solid var(--gray-10);
+  border-radius: var(--radius-10);
+  outline: 0;
+  background: var(--white);
+  color: var(--gray-80);
+  font: inherit;
+}
+
+.expense-field input:focus,
+.expense-field select:focus,
+.expense-field textarea:focus {
+  border-color: var(--blue);
+}
+
+.expense-field textarea {
+  min-height: var(--expense-textarea-height);
+  resize: vertical;
+}
+
+.expense-upload__trigger {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  padding: var(--space-20);
+  border: var(--expense-border-width) dashed var(--gray-15);
+  border-radius: var(--radius-10);
+  background: var(--gray-5);
+  color: var(--gray-60);
+  cursor: pointer;
+}
+
+.expense-upload__trigger .icon {
+  width: var(--space-40);
+  height: var(--space-40);
+  flex: none;
+  color: var(--blue);
+}
+
+.expense-upload__trigger span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.expense-upload__trigger strong,
+.expense-upload__trigger small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.expense-upload__trigger small {
+  color: var(--gray-40);
+  font-weight: var(--font-body-weight);
+}
+
+.expense-upload__trigger input {
+  position: absolute;
+  width: var(--expense-hidden-control-size);
+  height: var(--expense-hidden-control-size);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.expense-preview-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-10);
+  margin-top: var(--space-10);
+}
+
+.expense-preview-list figure {
+  position: relative;
+  width: var(--expense-receipt-size);
+  height: var(--expense-receipt-size);
+  margin: 0;
+}
+
+.expense-preview-list img {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-10);
+  object-fit: cover;
+}
+
+.expense-preview-list button {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  display: grid;
+  width: var(--space-20);
+  height: var(--space-20);
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-20);
+  background: var(--red);
+  color: var(--white);
+  cursor: pointer;
+}
+
+.expense-error {
+  margin: 0;
+  padding: var(--space-10);
+  border-radius: var(--radius-10);
+  background: color-mix(in srgb, var(--red) 10%, var(--white));
+  color: var(--red);
+  font-size: var(--font-description-size);
+}
+
+.expense-modal > footer {
+  justify-content: flex-end;
+  border-top: var(--expense-border-width) solid var(--gray-10);
+}
+
+.expense-button--secondary {
+  background: var(--gray-10);
+  color: var(--gray-60);
+}
+
+@media (max-width: 768px) {
+  .shell-app {
+    min-width: 0;
+  }
+
+  .expense-page {
+    --expense-mobile-page-offset: 96px; /* 手机 shell 顶部与底部安全区合计，无对应复合 token。 */
+
+    min-height: calc(100vh - var(--expense-mobile-page-offset));
+    gap: var(--space-10);
+  }
+
+  .expense-head {
+    display: contents;
+  }
+
+  .expense-head > div {
+    display: none;
+  }
+
+  .expense-add {
+    position: fixed;
+    right: var(--space-20);
+    bottom: var(--space-40);
+    z-index: 60;
+    width: var(--space-40);
+    height: var(--space-40);
+    padding: var(--space-10);
+    border-radius: var(--radius-10);
+    background: var(--3a);
+  }
+
+  .expense-add span {
+    display: none;
+  }
+
+  .expense-segment {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .expense-segment .app-segment {
+    min-width: var(--expense-mobile-segment-width);
+  }
+
+  .expense-table-shell {
+    border-radius: var(--radius-10);
+    overflow: visible;
+  }
+
+  .expense-table {
+    min-width: 0;
+  }
+
+  .expense-table thead {
+    display: none;
+  }
+
+  .expense-table tbody,
+  .expense-table tr,
+  .expense-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .expense-row {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-10);
+    padding: var(--space-10);
+    border-bottom: var(--space-10) solid var(--gray-5);
+  }
+
+  .expense-table .expense-row td {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-4);
+    padding: var(--space-4);
+    border: 0;
+  }
+
+  .expense-table .expense-row td::before {
+    color: var(--gray-40);
+    content: attr(data-label);
+    font-size: var(--font-body-size);
+  }
+
+  .expense-table .expense-description,
+  .expense-table .expense-actions-cell {
+    grid-column: 1 / -1;
+  }
+
+  .expense-description > span {
+    max-width: 100%;
+  }
+
+  .expense-empty-row td {
+    border: 0;
+  }
+
+  .expense-empty {
+    min-height: var(--expense-mobile-empty-height);
+  }
+
+  .expense-overlay {
+    padding: var(--grid-margin-mobile);
+  }
+
+  .expense-modal {
+    width: min(92vw, var(--expense-modal-width));
+    max-height: calc(100vh - (var(--grid-margin-mobile) * 2));
+  }
+
+  .expense-modal > header,
+  .expense-modal > footer,
+  .expense-modal__body {
+    padding: var(--space-10);
+  }
+
+  .expense-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .expense-upload__trigger {
+    padding: var(--space-10);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .expense-add,
+  .expense-button {
+    transition-duration: var(--expense-reduced-duration) !important;
+  }
+}
