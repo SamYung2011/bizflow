@@ -1,0 +1,140 @@
+.print-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-20);
+  background: rgba(0, 0, 0, .5); /* 00-设计规范 §5.4:表单类遮罩黑 50%。 */
+}
+
+.print-dialog {
+  --print-dialog-width: 400px; /* Design system 用户面板桌面宽度档。 */
+  --print-dialog-checkbox-size: 16px; /* 原生 checkbox 视觉尺寸，无对应全局 token。 */
+  --print-dialog-close-size: 20px; /* Design system 弹窗关闭按钮尺寸。 */
+  --print-dialog-close-stroke: 2px; /* 关闭符号线宽，无对应全局 token。 */
+  --print-dialog-close-line: 12px; /* 关闭符号线长，无对应全局 token。 */
+
+  position: relative;
+  display: flex;
+  width: min(var(--print-dialog-width), calc(100vw - (var(--space-20) * 2)));
+  max-height: calc(100vh - (var(--space-20) * 2));
+  flex-direction: column;
+  border-radius: var(--radius-20);
+  background: var(--white);
+  overflow: hidden;
+}
+
+.print-dialog__head,
+.print-dialog__footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-20);
+  padding: var(--space-20);
+}
+
+.print-dialog__title {
+  margin: 0;
+  min-width: 0;
+  color: var(--blue);
+  font-size: var(--font-title-2-size);
+  font-weight: var(--font-title-2-weight);
+  line-height: var(--lh-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.print-dialog__close {
+  position: relative;
+  width: var(--print-dialog-close-size);
+  height: var(--print-dialog-close-size);
+  flex: none;
+  border: 0;
+  border-radius: var(--radius-40);
+  background: var(--3a);
+  cursor: pointer;
+}
+
+.print-dialog__close::before,
+.print-dialog__close::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--print-dialog-close-stroke);
+  height: var(--print-dialog-close-line);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  content: "";
+}
+
+.print-dialog__close::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.print-dialog__close::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.print-dialog__options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-10);
+  padding: 0 var(--space-20) var(--space-20);
+}
+
+.print-dialog__option {
+  display: flex;
+  min-width: 0;
+  min-height: var(--space-40);
+  align-items: center;
+  gap: var(--space-10);
+  padding: var(--space-10);
+  border: 1px solid var(--gray-10);
+  border-radius: var(--radius-10);
+  background: var(--gray-5);
+  color: var(--gray-80);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-body);
+  cursor: pointer;
+}
+
+.print-dialog__option input {
+  width: var(--print-dialog-checkbox-size);
+  height: var(--print-dialog-checkbox-size);
+  flex: none;
+  accent-color: var(--blue);
+}
+
+.print-dialog__option span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.print-dialog__error {
+  margin: 0 var(--space-20) var(--space-20);
+  padding: var(--space-10);
+  border-radius: var(--radius-10);
+  background: color-mix(in srgb, var(--red) 10%, var(--white));
+  color: var(--red);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-body);
+}
+
+.print-dialog__footer {
+  justify-content: flex-end;
+  border-top: 1px solid var(--gray-10);
+}
+
+.print-dialog .orders-primary:disabled {
+  background: var(--gray-10);
+  color: var(--gray-20);
+  cursor: not-allowed;
+}
