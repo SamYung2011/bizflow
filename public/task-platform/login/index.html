@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Task Platform Login</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="../tokens/tokens.css">
+    <link rel="stylesheet" href="../tokens/base.css">
+    <link rel="stylesheet" href="../components/segment.css">
+    <link rel="stylesheet" href="./login.css">
+  </head>
+  <body>
+    <main class="login-screen" data-view="login" data-node-id="676:75908">
+      <section class="login-brand grad-brand" aria-labelledby="brand-name">
+        <p class="login-brand__name" id="brand-name" data-i18n="brand.name"></p>
+        <h1 class="login-brand__slogan" data-i18n-lines="brand.slogan"></h1>
+        <p class="login-brand__copyright" data-i18n="brand.copyright"></p>
+      </section>
+
+      <section class="login-panel" aria-labelledby="login-mode-heading">
+        <div class="login-mobile-brand" data-mobile-brand>
+          <img class="login-mobile-brand__logo" src="../assets/images/brand-avatar.png" alt="">
+          <p class="login-mobile-brand__name" data-i18n="brand.name"></p>
+          <p class="login-mobile-brand__workspace" data-i18n="brand.workspace"></p>
+        </div>
+
+        <div class="login-card">
+          <div class="login-card__head" data-card-head>
+            <h1 class="login-card__title" data-i18n="card.title"></h1>
+            <p class="login-card__subtitle" data-i18n="card.subtitle"></p>
+          </div>
+
+          <div class="app-segment app-segment--login app-segment--sliding" role="tablist" aria-label="mode" data-segment data-active-index="0">
+            <button class="app-segment__button is-active" type="button" role="tab" aria-selected="true" data-view-target="login" data-i18n="mode.login"></button>
+            <button class="app-segment__button" type="button" role="tab" aria-selected="false" data-view-target="register" data-i18n="mode.register"></button>
+          </div>
+
+          <form class="login-form" autocomplete="on">
+            <h2 class="login-form__heading" id="login-mode-heading" data-i18n="form.heading.login"></h2>
+
+            <div class="login-form__fields">
+              <label class="login-field" data-field-views="register">
+                <span class="login-field__label" data-i18n="field.regName"></span>
+                <input class="login-field__input" type="text" name="regName" autocomplete="name" data-placeholder-key="placeholder.regName">
+              </label>
+
+              <label class="login-field" data-field-views="login register forgot">
+                <span class="login-field__label" data-i18n="field.email"></span>
+                <input class="login-field__input" type="email" name="email" autocomplete="email" data-placeholder-key="placeholder.email">
+              </label>
+
+              <label class="login-field" data-field-views="login register">
+                <span class="login-field__label" data-i18n="field.password"></span>
+                <input class="login-field__input" type="password" name="password" autocomplete="current-password">
+              </label>
+
+              <label class="login-field" data-field-views="forgot">
+                <span class="login-field__label" data-i18n="field.newPassword"></span>
+                <input class="login-field__input" type="password" name="newPassword" autocomplete="new-password">
+              </label>
+
+              <label class="login-field" data-field-views="forgot">
+                <span class="login-field__label" data-i18n="field.confirmPassword"></span>
+                <input class="login-field__input" type="password" name="confirmPassword" autocomplete="new-password">
+              </label>
+
+              <label class="login-field" data-field-views="register">
+                <span class="login-field__label" data-i18n="field.company"></span>
+                <input class="login-field__input login-field__input--compact" type="text" name="company" autocomplete="organization" data-placeholder-key="placeholder.company">
+              </label>
+
+              <label class="login-field" data-field-views="register">
+                <span class="login-field__label" data-i18n="field.remark"></span>
+                <textarea class="login-field__input login-field__input--compact login-field__textarea" name="remark" rows="2"></textarea>
+              </label>
+            </div>
+
+            <p class="login-auth-message" role="status" aria-live="polite" hidden></p>
+
+            <div class="login-form__actions">
+              <button class="login-submit" type="submit" data-i18n="action.login"></button>
+              <button class="login-forgot" type="button" data-action="forgot" data-i18n="action.forgot"></button>
+            </div>
+          </form>
+        </div>
+
+        <div class="login-language" role="group" aria-label="language" data-language-row>
+          <button class="login-language__button is-active" type="button" data-lang="zh" data-i18n="lang.zh"></button>
+          <button class="login-language__button" type="button" data-lang="en" data-i18n="lang.en"></button>
+          <button class="login-language__button" type="button" data-lang="fr" data-i18n="lang.fr"></button>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./login.js"></script>
+  </body>
+</html>
