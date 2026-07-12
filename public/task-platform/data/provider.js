@@ -1523,6 +1523,26 @@ export async function getInventoryDetailData(id) {
   };
 }
 
+async function loadGlobalSearchSection(snapshot, loader, pick) {
+  try {
+    const rows = pick(await loader());
+    if (Array.isArray(rows)) return rows;
+  } catch {
+    // The other search sections remain usable when one live builder fails.
+  }
+  warnProviderFallback(`global-search:${snapshot}`, "empty search section");
+  return null;
+}
+
+export async function getGlobalSearchData() {
+  const [customers, products, invoices] = await Promise.all([
+    loadGlobalSearchSection("customers.json", loadCustomersSnapshot, (snapshot) => snapshot?.customers),
+    loadGlobalSearchSection("inventory.json", loadInventorySnapshot, (snapshot) => snapshot?.products),
+    loadGlobalSearchSection("orders.json", loadOrdersSnapshot, (snapshot) => snapshot?.orders)
+  ]);
+  return { customers, products, invoices };
+}
+
 // R11 订单域子页快照;无效时只返回空数据,禁止用演示值填充生产缺口。
 const NORTHBOUND_SNAPSHOT_URL = new URL("./snapshots/northbound.json", import.meta.url);
 const CHARGER_LEADS_SNAPSHOT_URL = new URL("./snapshots/charger-leads.json", import.meta.url);

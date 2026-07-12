@@ -72,6 +72,25 @@
   gap: var(--space-20);
 }
 
+.customers-search {
+  flex: none;
+}
+
+.customers-search:focus-within {
+  border-color: var(--blue);
+  background: var(--white);
+}
+
+.customers-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
 .customers-filter-anchor {
   position: relative;
   display: inline-flex;
@@ -276,6 +295,11 @@
 
   .customers-toolbar > .date-filter {
     flex: 0 0 246px;
+  }
+
+  .customers-search {
+    --component-width: 100%;
+    flex: 0 0 100%;
   }
 
   .customers-filter-anchor--sort {

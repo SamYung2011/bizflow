@@ -790,11 +790,6 @@
   }
 
   // html/shell/shell-search.js
-  var snapshotPaths = {
-    customers: "../data/snapshots/customers.json",
-    products: "../data/snapshots/inventory.json",
-    invoices: "../data/snapshots/orders.json"
-  };
   var state = {
     query: "",
     open: false,
@@ -808,34 +803,16 @@
   function searchable(value) {
     return String(value || "").trim().toLocaleLowerCase();
   }
-  async function fetchSection(path, pick) {
-    try {
-      const response = await fetch(path);
-      if (!response.ok) {
-        console.warn(`[provider] ${path} invalid \u2192 fallback empty search section`);
-        return null;
-      }
-      const section = pick(await response.json());
-      if (!Array.isArray(section)) {
-        console.warn(`[provider] ${path} invalid \u2192 fallback empty search section`);
-        return null;
-      }
-      return section;
-    } catch {
-      console.warn(`[provider] ${path} invalid \u2192 fallback empty search section`);
-      return null;
-    }
-  }
   function ensureSearchData() {
     if (state.datasets) return Promise.resolve(state.datasets);
     if (state.loadPromise) return state.loadPromise;
     state.loading = true;
-    state.loadPromise = Promise.all([
-      fetchSection(snapshotPaths.customers, (data) => data.customers),
-      fetchSection(snapshotPaths.products, (data) => data.products),
-      fetchSection(snapshotPaths.invoices, (data) => data.orders)
-    ]).then(([customers, products, invoices]) => {
-      state.datasets = { customers, products, invoices };
+    const providerPath = "../data/provider.js";
+    state.loadPromise = import(providerPath).then(({ getGlobalSearchData }) => getGlobalSearchData()).catch(() => {
+      console.warn("[provider] global-search provider invalid \u2192 fallback empty search index");
+      return { customers: null, products: null, invoices: null };
+    }).then((datasets) => {
+      state.datasets = datasets;
       state.loading = false;
       return state.datasets;
     });

@@ -36,6 +36,7 @@ const dict = {
     "customers.filter.imeiAll": "全部",
     "customers.filter.imeiHas": "有 IMEI",
     "customers.filter.imeiNone": "無 IMEI",
+    "customers.search": "搜尋客戶 / 電話 / IMEI...",
     "customers.sort.label": "排序",
     "customers.sort.createdDesc": "建立時間·新→舊",
     "customers.sort.createdAsc": "建立時間·舊→新",
@@ -70,6 +71,7 @@ const dict = {
     "customers.filter.imeiAll": "All",
     "customers.filter.imeiHas": "Has IMEI",
     "customers.filter.imeiNone": "No IMEI",
+    "customers.search": "Search customer / phone / IMEI...",
     "customers.sort.label": "Sort",
     "customers.sort.createdDesc": "Created · newest first",
     "customers.sort.createdAsc": "Created · oldest first",
@@ -104,6 +106,7 @@ const dict = {
     "customers.filter.imeiAll": "Tous",
     "customers.filter.imeiHas": "Avec IMEI",
     "customers.filter.imeiNone": "Sans IMEI",
+    "customers.search": "Rechercher client / téléphone / IMEI...",
     "customers.sort.label": "Tri",
     "customers.sort.createdDesc": "Création · récent → ancien",
     "customers.sort.createdAsc": "Création · ancien → récent",
@@ -143,6 +146,7 @@ const state = {
   sort: "createdDesc",
   source: "all",
   imei: "all",
+  search: "",
   page: 1,
   modalOpen: false
 };
@@ -164,7 +168,10 @@ const dateFilter = createDateFilter({
 });
 
 function filteredCustomers() {
+  const query = state.search.trim().toLocaleLowerCase();
   return data.customers.filter((c) => {
+    if (query && ![c.name, c.phone, c.imei]
+      .some((value) => String(value ?? "").toLocaleLowerCase().includes(query))) return false;
     if (state.source !== "all" && c.source !== state.source) return false;
     const hasImei = Boolean(String(c.imei ?? "").trim());
     if (state.imei === "has" && !hasImei) return false;
@@ -223,7 +230,7 @@ function renderFilterDropdown(group, placeholderLabel, options, helpers) {
 }
 
 function renderToolbar(helpers) {
-  const { lang } = helpers;
+  const { escapeHtml, icon, lang } = helpers;
   const sourceOptions = [
     { value: "all", label: pageT(lang, "customers.filter.all") },
     ...["shopify", "framer", "other"].map((key) => ({ value: key, label: pageT(lang, `customers.source.${key}`) }))
@@ -238,6 +245,10 @@ function renderToolbar(helpers) {
     label: pageT(lang, `customers.sort.${key}`)
   }));
   return `<div class="customers-toolbar">
+    <label class="tp-component search-input customers-search" style="--component-width:232px;--component-height:36px">
+      ${icon("icon-nav-search", "icon")}
+      <input type="search" data-customers-search value="${escapeHtml(state.search)}" placeholder="${escapeHtml(pageT(lang, "customers.search"))}" aria-label="${escapeHtml(pageT(lang, "customers.search"))}" autocomplete="off">
+    </label>
     ${dateFilter.render(helpers)}
     ${renderFilterDropdown("sort", pageT(lang, "customers.sort.label"), sortOptions, helpers)}
     ${renderFilterDropdown("source", pageT(lang, "customers.filter.source"), sourceOptions, helpers)}
@@ -309,7 +320,7 @@ export function renderCustomers(helpers) {
     dataAttribute: "data-customers-tab"
   });
 
-  return `<div class="customers-page" data-customers-page data-customers-tab-value="${state.tab}" data-date-open="${dateFilter.isOpen()}" data-current-page="${state.page}">
+  return `<div class="customers-page" data-customers-page data-customers-tab-value="${state.tab}" data-customers-search-value="${escapeHtml(state.search)}" data-date-open="${dateFilter.isOpen()}" data-current-page="${state.page}">
     <header class="customers-head">
       <h1 class="customers-title" title="${escapeHtml(tt("customers.title"))}">${escapeHtml(tt("customers.title"))}</h1>
       ${state.tab === "list" ? `<button type="button" class="customers-add-btn" data-customers-modal-open>
@@ -426,6 +437,18 @@ document.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("input", (event) => {
+  const customerSearch = event.target.closest("[data-customers-search]");
+  if (customerSearch && state.tab === "list") {
+    state.search = customerSearch.value;
+    state.page = 1;
+    rerenderCustomersPage();
+    const nextSearch = document.querySelector("[data-customers-search]");
+    if (nextSearch) {
+      nextSearch.focus();
+      nextSearch.setSelectionRange(nextSearch.value.length, nextSearch.value.length);
+    }
+    return;
+  }
   const search = event.target.closest("[data-warranty-search]");
   if (!search || state.tab !== "warranty" || !setWarrantySearch(search.value)) return;
   rerenderCustomersPage();
