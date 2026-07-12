@@ -5,6 +5,14 @@
 
 import { getCurrentUser as getAuthCurrentUser, getSession } from "./auth.js";
 import { getLiveSnapshot, LIVE_SNAPSHOT_MISS } from "./live-snapshots.js";
+import {
+  getLiveOcppChargingData,
+  getLiveOcppFinanceData,
+  getLiveOcppMonitorData,
+  getLiveOcppMonitorLogsData,
+  getLiveOcppUsersData,
+  LIVE_OCPP_MISS
+} from "./live-ocpp.js";
 import { getReadState, rememberUnreadWatermarks } from "./read-state.js";
 import { buildCustomerGroups } from "./customer-groups.js";
 import { customerSourceFromInvoices } from "./customer-source.js";
@@ -1741,12 +1749,16 @@ async function loadOcppSnapshot() {
 
 // R12 OCPP admin data is read-only. Authentication tokens never enter this snapshot contract.
 export async function getOcppMonitorData() {
+  const live = await getLiveOcppMonitorData();
+  if (live !== LIVE_OCPP_MISS) return live;
   const snapshot = await loadOcppSnapshot();
   if (Object.keys(snapshot).length && typeof snapshot.generated_at !== "string") warnProviderFallback("ocpp.json:generated_at", "empty generatedAt");
   if (Object.keys(snapshot).length && typeof snapshot.__ocppLogsScope !== "string") warnProviderFallback("ocpp.json:__ocppLogsScope", "empty logs scope");
   return {
+    isLive: false,
     generatedAt: typeof snapshot.generated_at === "string" ? snapshot.generated_at : "",
     logsScope: typeof snapshot.__ocppLogsScope === "string" ? snapshot.__ocppLogsScope : "",
+    logsDeferred: false,
     piles: cloneOcppValue(snapshot.piles, [], "piles"),
     logs: cloneOcppValue(snapshot["ocpp/logs"], [], "ocpp/logs"),
     commandLogs: cloneOcppValue(snapshot["command-logs"], [], "command-logs"),
@@ -1754,7 +1766,21 @@ export async function getOcppMonitorData() {
   };
 }
 
+export async function getOcppMonitorLogsData() {
+  const live = await getLiveOcppMonitorLogsData();
+  if (live !== LIVE_OCPP_MISS) return live;
+  const snapshot = await loadOcppSnapshot();
+  return {
+    isLive: false,
+    generatedAt: typeof snapshot.generated_at === "string" ? snapshot.generated_at : "",
+    logsScope: typeof snapshot.__ocppLogsScope === "string" ? snapshot.__ocppLogsScope : "",
+    logs: cloneOcppValue(snapshot["ocpp/logs"], [], "ocpp/logs")
+  };
+}
+
 export async function getOcppChargingData() {
+  const live = await getLiveOcppChargingData();
+  if (live !== LIVE_OCPP_MISS) return live;
   const snapshot = await loadOcppSnapshot();
   return {
     stations: cloneOcppValue(snapshot.stations, [], "stations"),
@@ -1771,6 +1797,8 @@ export async function getOcppChargingData() {
 }
 
 export async function getOcppUsersData() {
+  const live = await getLiveOcppUsersData();
+  if (live !== LIVE_OCPP_MISS) return live;
   const snapshot = await loadOcppSnapshot();
   return {
     users: cloneOcppValue(snapshot["charge-users"], [], "charge-users"),
@@ -1779,6 +1807,8 @@ export async function getOcppUsersData() {
 }
 
 export async function getOcppFinanceData() {
+  const live = await getLiveOcppFinanceData();
+  if (live !== LIVE_OCPP_MISS) return live;
   const snapshot = await loadOcppSnapshot();
   return {
     recharges: cloneOcppValue(snapshot["finance/recharges"], [], "finance/recharges"),

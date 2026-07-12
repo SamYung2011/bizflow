@@ -1,6 +1,7 @@
 import {
   getCurrentUser,
   getOcppMonitorData,
+  getOcppMonitorLogsData,
   getUnread,
 } from "../data/provider.js";
 import {
@@ -21,7 +22,8 @@ import {
 
 const currentUser = await getCurrentUser();
 await requireOcppAccess(currentUser);
-const [data, unread] = await Promise.all([getOcppMonitorData(), getUnread()]);
+const [initialData, unread] = await Promise.all([getOcppMonitorData(), getUnread()]);
+const data = { ...initialData };
 const context = makeOcppContext();
 const state = {
   tab: "status",
@@ -29,6 +31,8 @@ const state = {
   pileQuery: "",
   direction: "all",
   logLimit: 50,
+  logsLoading: false,
+  logsLoaded: !data.logsDeferred,
   expandedLog: null,
 };
 const tabs = [
@@ -74,11 +78,14 @@ function renderStatus() {
         `<tr><td class="ocpp-mono">${e(row.pileNo)}</td><td>${e(row.name)}</td><td>${e(pileTypeKey(row.pileType) === "public" ? t("public") : pileTypeKey(row.pileType) === "private" ? t("private") : t("unassigned"))}</td><td>${statusChip(row.status, { helpers: h, t })}</td><td>${row.onlineStatus ? statusChip("normal", { helpers: h, t, labelKey: "online" }) : statusChip("hidden", { helpers: h, t, labelKey: "offline" })}</td><td>${e(row.connectorTotal)}</td><td>${e(row.availableConnectorTotal)}</td><td>${e(row.faultConnectorTotal)}</td><td>${e(row.threePhase ? t("yes") : t("no"))}</td><td>${e("—")}</td><td>${e("—")}</td><td><div class="ocpp-actions">${["restart", "unlock", "start", "stop", "reserve"].map((key) => `<button type="button" disabled title="${e(t("formalOnly"))}">${e(t(key))}</button>`).join("")}</div></td></tr>`,
     )
     .join("");
-  return `<div class="ocpp-toolbar"><label class="ocpp-check"><input type="checkbox" data-ocpp-auto${state.autoRefresh ? " checked" : ""}><span>${e(t("autoRefresh"))}</span></label><span>${e(t("snapshotOnly"))}</span><strong>${data.piles.length}</strong></div>${renderTable([t("pileNo"), t("name"), t("type"), t("status"), t("onlineStatus"), t("connectors"), t("availableConnectors"), t("faultConnectors"), t("phase"), t("power"), t("energy"), t("actions")], rows, { emptyText: t("empty"), helpers: h, minWidth: "xwide", attrs: 'data-ocpp-command-buttons="155"' })}`;
+  return `<div class="ocpp-toolbar"><label class="ocpp-check"><input type="checkbox" data-ocpp-auto${state.autoRefresh ? " checked" : ""}><span>${e(t("autoRefresh"))}</span></label><span>${e(t(data.isLive ? "liveReadOnly" : "snapshotOnly"))}</span><strong>${data.piles.length}</strong></div>${renderTable([t("pileNo"), t("name"), t("type"), t("status"), t("onlineStatus"), t("connectors"), t("availableConnectors"), t("faultConnectors"), t("phase"), t("power"), t("energy"), t("actions")], rows, { emptyText: t("empty"), helpers: h, minWidth: "xwide", attrs: 'data-ocpp-command-buttons="155"' })}`;
 }
 
 function renderLogs() {
   const h = context.helpers();
+  if (state.logsLoading) {
+    return `<div class="ocpp-empty" role="status" aria-live="polite">${e(t("loadingLogs"))}</div>`;
+  }
   const query = state.pileQuery.trim().toLowerCase();
   const filtered = data.logs.filter(
     (row) =>
@@ -106,6 +113,23 @@ function renderLogs() {
     })
     .join("");
   return `<div class="ocpp-toolbar"><div>${controls}</div><span>${e(t("last7days"))}</span><strong>${e(t("visible", { count: visible.length, total: filtered.length }))}</strong></div>${renderTable([t("time"), t("direction"), t("pileNo"), t("action"), t("messageId"), t("payload")], rows, { emptyText: t("noLogs"), helpers: h, minWidth: "xwide", attrs: `data-ocpp-log-total="${filtered.length}" data-ocpp-log-visible="${visible.length}"` })}${visible.length < filtered.length ? `<button type="button" class="ocpp-primary" data-ocpp-log-more>${e(t("loadMore"))}</button>` : ""}`;
+}
+
+async function loadLiveLogs() {
+  if (state.logsLoaded || state.logsLoading) return;
+  state.logsLoading = true;
+  rerender();
+  try {
+    const result = await getOcppMonitorLogsData();
+    data.logs = result.logs;
+    data.isLive = result.isLive;
+    data.logsScope = result.logsScope;
+    data.generatedAt = result.generatedAt;
+    state.logsLoaded = true;
+  } finally {
+    state.logsLoading = false;
+    rerender();
+  }
 }
 
 function renderCommands() {
@@ -169,6 +193,7 @@ document.addEventListener("click", (event) => {
   if (tab) {
     state.tab = tab.getAttribute("data-ocpp-monitor-tab");
     rerender();
+    if (state.tab === "logs") void loadLiveLogs();
     return;
   }
   const log = event.target.closest("[data-ocpp-log]");
