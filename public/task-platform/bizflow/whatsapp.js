@@ -8,9 +8,12 @@ import { translateWhatsapp } from "./whatsapp-i18n.js";
 import { channelOf, dateOnly, nextLocalId, promptPlaceholdersValid, whatsappTabs, whitelistKinds } from "./whatsapp-model.js";
 
 const [snapshot, currentUser, unread] = await Promise.all([getWhatsappData(), getCurrentUser(), getUnread()]);
+const liveReadOnly = typeof currentUser?.hasPermission === "function";
+// P1 接真写时按现网 isWaAdmin 门控（bizflow_samyung/src/views/Whatsapp.jsx:53-55,130-132）；当前 live 一律只读。
 
 const blankWhitelistDrafts = () => Object.fromEntries(whitelistKinds.map((kind) => [kind, { value: "", note: "" }]));
 const state = {
+  liveReadOnly,
   tab: "settings",
   settings: { ...snapshot.settings },
   savedKnowledge: snapshot.settings.knowledge || "",
@@ -112,8 +115,7 @@ export function renderWhatsapp(helpers) {
     conversations: conversationDateFilter,
     logs: logDateFilter
   });
-  // isWaAdmin:现网仅管理员可访问配置和本地写动作；静态复刻固定为 admin 视角。
-  return `<main class="wa-page" data-wa-page data-wa-active-tab="${helpers.escapeHtml(state.tab)}" data-wa-admin="true">${renderHeader(helpers)}<div class="wa-segment">${segment}</div><div class="wa-content">${body}</div>${renderWhatsappGuide(state, helpers, t)}</main>`;
+  return `<main class="wa-page" data-wa-page data-live-read-only="${liveReadOnly}" data-wa-active-tab="${helpers.escapeHtml(state.tab)}" data-wa-admin="true">${renderHeader(helpers)}<div class="wa-segment">${segment}</div><div class="wa-content">${body}</div>${renderWhatsappGuide(state, helpers, t)}</main>`;
 }
 
 function rerender() {
@@ -138,8 +140,8 @@ function updateKnowledgeMeta() {
     status.classList.toggle("is-dirty", dirty);
   }
   if (count) count.textContent = t("chars", { count: String(state.settings.knowledge || "").length });
-  if (cancel) cancel.disabled = !dirty;
-  if (save) save.disabled = !dirty;
+  if (cancel) cancel.disabled = liveReadOnly || !dirty;
+  if (save) save.disabled = liveReadOnly || !dirty;
 }
 
 function updatePromptValidation() {
@@ -151,7 +153,7 @@ function updatePromptValidation() {
     validation.classList.toggle("is-valid", valid);
     validation.classList.toggle("is-invalid", !valid);
   }
-  if (save) save.disabled = !valid;
+  if (save) save.disabled = liveReadOnly || !valid;
 }
 
 function handleDateFilterClick(event) {
@@ -175,6 +177,7 @@ function handleDateFilterClick(event) {
 
 document.addEventListener("click", (event) => {
   if (handleDateFilterClick(event)) return;
+  if (liveReadOnly && event.target.closest("[data-wa-write]")) return;
 
   const tab = event.target.closest("[data-wa-tab]");
   if (tab) {
@@ -278,6 +281,7 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("input", (event) => {
+  if (liveReadOnly && event.target.closest("[data-wa-write]")) return;
   const setting = event.target.closest("[data-wa-setting]");
   if (setting && setting.type !== "checkbox") {
     const key = setting.getAttribute("data-wa-setting");
@@ -292,11 +296,12 @@ document.addEventListener("input", (event) => {
     const key = draft.getAttribute("data-wa-whitelist-draft");
     state.whitelistDrafts[kind][key] = draft.value;
     const button = document.querySelector(`[data-wa-whitelist-add="${kind}"]`);
-    if (button) button.disabled = !state.whitelistDrafts[kind].value.trim();
+    if (button) button.disabled = liveReadOnly || !state.whitelistDrafts[kind].value.trim();
   }
 });
 
 document.addEventListener("change", (event) => {
+  if (liveReadOnly && event.target.closest("[data-wa-write]")) return;
   const setting = event.target.closest("[data-wa-setting]");
   if (setting?.type === "checkbox") {
     state.settings[setting.getAttribute("data-wa-setting")] = setting.checked;

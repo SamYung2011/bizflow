@@ -365,6 +365,16 @@
   cursor: not-allowed;
 }
 
+.wa-page[data-live-read-only="true"] [data-wa-write]:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.wa-page[data-live-read-only="true"] .wa-toggle-row:has([data-wa-write]:disabled) {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
 .wa-button--secondary {
   border: var(--wa-line-width) solid var(--gray-10);
   background: var(--white);
