@@ -20,6 +20,7 @@ const dict = {
     "home.viewAll": "查看全部 →",
     "home.myTasks": "我的任務",
     "home.filter.inProgress": "正在進行",
+    "home.tasks.empty": "暫無任務",
     "home.teamFeed": "團隊動態",
     "home.feed.posted": "發布了新任務",
     "home.feed.commented": "評論了",
@@ -55,6 +56,7 @@ const dict = {
     "home.viewAll": "View all →",
     "home.myTasks": "My tasks",
     "home.filter.inProgress": "In progress",
+    "home.tasks.empty": "No tasks",
     "home.teamFeed": "Team activity",
     "home.feed.posted": "posted a new task",
     "home.feed.commented": "commented on",
@@ -90,6 +92,7 @@ const dict = {
     "home.viewAll": "Tout voir →",
     "home.myTasks": "Mes tâches",
     "home.filter.inProgress": "En cours",
+    "home.tasks.empty": "Aucune tâche",
     "home.teamFeed": "Activité de l'équipe",
     "home.feed.posted": "a publié une nouvelle tâche",
     "home.feed.commented": "a commenté",
@@ -116,12 +119,13 @@ import { navigationPresetKeys, setNavigationPreset } from "../components/navigat
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 
 // 数据全走接口层(煊煊 2026-07-08:不写死样板,留好数据接口)
-const [homeData, orderMetricRows, inventoryMetricProducts, warrantyData, customerData] = await Promise.all([
+const [homeData, orderMetricRows, inventoryMetricProducts, warrantyData, customerData, currentUser] = await Promise.all([
   getHomeData(),
   getHomeOrderMetricRows(),
   getInventoryMetricProducts(),
   getWarrantyData(),
-  getCustomersPageData()
+  getCustomersPageData(),
+  getCurrentUser()
 ]);
 const data = {
   ...homeData,
@@ -143,6 +147,7 @@ const revenueMetrics = orderMetricRows
   : null;
 const shippingMetrics = orderMetricRows ? aggregateShippingCounts(orderMetricRows) : null;
 const inventoryMetrics = inventoryMetricProducts ? aggregateInventoryStock(inventoryMetricProducts) : null;
+const showRevenue = currentUser?.canViewRevenue !== false;
 
 data.stock
   .map((item) => item.image)
@@ -233,13 +238,13 @@ export function renderHome({ icon, escapeHtml, lang }) {
       </div>
     </div>`;
 
-  return `<div class="home-page" data-home-monthly-revenue="${revenueMetrics?.totalRevenue ?? ""}" data-home-inventory-carriers="${inventoryMetrics?.carrierCount ?? ""}" data-home-inventory-active="${inventoryMetrics?.activeSkuCount ?? ""}" data-home-inventory-total="${inventoryMetrics?.totalQuantity ?? ""}" data-home-inventory-low="${inventoryMetrics?.lowStockCount ?? ""}" data-home-shipping-pending="${shippingMetrics?.pending ?? ""}" data-home-shipping-transit="${shippingMetrics?.in_transit ?? ""}" data-home-shipping-overdue="${shippingMetrics?.exception ?? ""}">
+  return `<div class="home-page" data-home-monthly-revenue="${showRevenue ? (revenueMetrics?.totalRevenue ?? "") : ""}" data-home-inventory-carriers="${inventoryMetrics?.carrierCount ?? ""}" data-home-inventory-active="${inventoryMetrics?.activeSkuCount ?? ""}" data-home-inventory-total="${inventoryMetrics?.totalQuantity ?? ""}" data-home-inventory-low="${inventoryMetrics?.lowStockCount ?? ""}" data-home-shipping-pending="${shippingMetrics?.pending ?? ""}" data-home-shipping-transit="${shippingMetrics?.in_transit ?? ""}" data-home-shipping-overdue="${shippingMetrics?.exception ?? ""}">
     <header class="home-head">
       <h1 class="home-title">HONNMONO</h1>
     </header>
 
     <section class="home-stats">
-      ${statCard({ titleKey: "home.stat.revenue", value: revenueMetrics ? money(revenueMetrics.totalRevenue) : "—", href: "./orders.html", preset: "orders-revenue", sub: month })}
+      ${showRevenue ? statCard({ titleKey: "home.stat.revenue", value: revenueMetrics ? money(revenueMetrics.totalRevenue) : "—", href: "./orders.html", preset: "orders-revenue", sub: month }) : ""}
       ${statCard({ titleKey: "home.stat.inventory", value: inventoryMetrics ? String(inventoryMetrics.activeSkuCount) : "—", href: "./inventory.html", sub: inventoryMetrics ? replace(th("home.inventory.summary"), { total: inventoryMetrics.totalQuantity }) : "", warning: inventoryMetrics?.lowStockCount ? replace(th("home.inventory.low"), { count: inventoryMetrics.lowStockCount }) : "" })}
       ${data.stats.map((s) => statCard({
         mod: STAT_TONE_CLASS[s.tone] ?? "",
@@ -266,7 +271,7 @@ export function renderHome({ icon, escapeHtml, lang }) {
             ${icon("icon-arrow-down", "icon icon--sm")}
           </div>
         </div>
-        <div class="home-card__list">${data.tasks.map(taskItem).join("")}</div>
+        <div class="home-card__list">${data.tasks.length ? data.tasks.map(taskItem).join("") : `<div class="tp-muted">${e(th("home.tasks.empty"))}</div>`}</div>
       </section>
 
       <section class="home-card">
@@ -332,7 +337,7 @@ export function renderHome({ icon, escapeHtml, lang }) {
 // bizflow 站菜单(煊煊 2026-07-08:两站分离;team 站无主页、其主页=任务管理 558:20995,
 // 故 Home 仪表盘归 bizflow 站;顶栏消息钮=快跳 team 未读)
 window.__shellMenu = createBizflowMenu("home");
-window.__shellData = { unread: await getUnread(), user: await getCurrentUser() };
+window.__shellData = { unread: await getUnread(), user: currentUser };
 window.__shellContent = renderHome;
 
 document.addEventListener("click", (event) => {

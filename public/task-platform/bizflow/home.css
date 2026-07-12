@@ -42,7 +42,7 @@
   margin-left: auto;
 }
 
-/* 统计卡行:营收/库存 + 原有 4 张，共 6 张等宽看板卡。 */
+/* 统计卡行:有营收权限时为营收/库存 + 原有 4 张，最多 6 张等宽看板卡。 */
 .home-stats {
   display: flex;
   gap: var(--space-20);
