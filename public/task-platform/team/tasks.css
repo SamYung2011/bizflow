@@ -1,0 +1,1647 @@
+/* team 站任务管理桌面屏(Figma 558:20995) */
+
+.shell-app {
+  min-width: 1200px;
+}
+
+.team-task-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+
+  /* 本屏优先级配色 = 任务分类组件(507:15102)实测的 Figma 档外精确值。
+     只动 tasks.*,不进全局 tokens.css;照 Figma 落此处并注释(色差审计见 team/README)。
+     蓝/绿列前景直接命中 --blue/--green,唯红为 #E01010(≠ 全局 --red #DC2626),故单列。 */
+  --team-col-high-bg: #FBDECE;   /* 高列底  I558:21605 red background(salmon,≠ red 14% 混色) */
+  --team-col-medium-bg: #D5EEFD; /* 中列底  I558:21606 blue background */
+  --team-col-low-bg: #D4F1D4;    /* 低列底  I558:21607 green background */
+  --team-high-fg: #E01010;       /* 高列标题/徽标前景  Figma 用 #E01010,非 --red #DC2626 */
+  --team-add-border: #0099FF;    /* 列底新增钮描边  Figma add 组件 border #09f(= 卡片蓝头部渐变尾色) */
+}
+
+.team-task-title {
+  margin: 0;
+  color: var(--black);
+  font-size: var(--font-display-size); /* Figma 558:21556「任务管理」实测 40 Semi Bold */
+  font-weight: var(--font-title-2-weight); /* 600 Semi Bold(≠ Title1 700) */
+  line-height: var(--lh-num);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-task-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-20);
+}
+
+.team-stat-card {
+  display: flex;
+  min-height: 117px;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: flex-start; /* Figma 558:21570 内容顶对齐(items-start) */
+  gap: var(--space-10);
+  padding: var(--space-20);
+  border-radius: var(--radius-20);
+  background: var(--white);
+  color: var(--3a);
+}
+
+.team-stat-card--blue,
+.team-stat-card--yellow {
+  color: var(--white);
+}
+
+.team-stat-card--blue {
+  background: var(--blue);
+}
+
+.team-stat-card--yellow {
+  background: var(--yellow);
+}
+
+.team-stat-card__title {
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-body-weight); /* Figma 271:1043 实测 16 Regular(≠ Title3 Medium) */
+  line-height: var(--lh-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-stat-card__value {
+  font-size: var(--font-display-size); /* 看板数字实测 40 Bold */
+  font-weight: var(--font-title-1-weight);
+  line-height: var(--lh-num);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-board {
+  display: flex;
+  min-height: 720px;
+  min-width: 0;
+  border-radius: var(--radius-20);
+  background: var(--white);
+  overflow: hidden;
+}
+
+.team-member-rail {
+  display: flex;
+  width: 360px;
+  min-width: 360px;
+  flex-direction: column;
+  gap: var(--space-20);
+  padding: var(--space-20);
+  background: var(--gray-5);
+}
+
+.team-member-list {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-20);
+}
+
+.team-member-task {
+  display: flex;
+  width: 100%;
+  min-height: 80px;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-10);
+  padding: var(--space-10);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  color: var(--black);
+}
+
+.team-member-task--active {
+  color: var(--white);
+  background: var(--blue);
+}
+
+.team-member-task__avatar {
+  font-size: var(--font-title-1-size); /* Figma 员工任务 I…;275:828 实测 60 头像内首字母 32 Bold */
+  font-weight: var(--font-title-1-weight);
+}
+
+.team-member-task__body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-self: stretch;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: var(--space-4) 0;
+}
+
+.team-member-task__top,
+.team-member-task__meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.team-member-task__top {
+  gap: var(--space-4);
+}
+
+.team-member-task__meta {
+  gap: var(--space-4);
+}
+
+.team-member-task__name {
+  color: var(--blue);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-1-weight);
+  line-height: var(--lh-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-member-task--active .team-member-task__name {
+  color: var(--white);
+}
+
+.team-member-task__dept,
+.team-member-task__meta {
+  font-size: var(--font-description-size);
+  font-weight: var(--font-body-weight);
+  line-height: var(--lh-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-member-task__meta span:first-child {
+  font-size: var(--font-title-3-size);
+}
+
+.team-member-task__arrow {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  color: var(--gray-20);
+}
+
+.team-member-task--active .team-member-task__arrow {
+  color: var(--white);
+}
+
+.team-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4) var(--space-10); /* Figma 徽标 px10 py5(hug);py5 归最近档 4 */
+  border-radius: var(--radius-20);
+  background: var(--red);
+  color: var(--gray-5); /* Figma #F5F5F5 → gray-5 */
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-2-weight); /* 16 Semi Bold */
+  line-height: var(--lh-tight);
+  white-space: nowrap;
+}
+
+/* 空徽标槽:Figma 任务块空徽标 opacity-0 仍占位,保证同列各卡"…"钮纵向对齐固定 */
+.team-count-badge--empty {
+  visibility: hidden;
+}
+
+.team-member-add {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-10);
+  background: var(--white);
+  color: var(--gray-15);
+}
+
+.team-member-add .icon {
+  width: 20px;
+  height: 20px;
+}
+
+.team-kanban {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-20);
+  padding: var(--space-20);
+}
+
+.team-kanban-toolbar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-20);
+}
+
+.team-kanban-filters {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--space-40);
+}
+
+/* Figma 帧宽 1920 时三筛选各 280;窄于此(常见笔电宽)按比例收窄不溢出,上限锁 280 */
+.team-filter-anchor {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 280px;
+}
+
+.team-filter-anchor--member {
+  display: none;
+}
+
+.team-filter {
+  display: flex;
+  width: 100%;
+  height: 39px; /* Figma 文本&下拉 267:324 / Frame317 实测 280×39(有余量时) */
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-10);
+  padding: var(--space-10);
+  border: 0;
+  border-radius: var(--radius-10);
+  background: var(--gray-5); /* Figma #F0F0F0 → gray-5(00-设计规范 §2.1 收编) */
+  color: var(--gray-80); /* Figma #0B1F3A(近黑navy)→ gray-80 最近档 */
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+  line-height: var(--lh-tight);
+  cursor: pointer;
+}
+
+/* ---------- 筛选浮层:Frame784 容器 + 弹窗按钮选项行(复用 .dropdown-item / .menu-popover) ---------- */
+.team-filter-menu {
+  --task-filter-viewport-reserve: 240px; /* 手机筛选触发器到视口底部的安全余量，无对应 token。 */
+
+  left: 0; /* 左对齐触发器(覆盖 .menu-popover 默认 right:0) */
+  right: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  width: 280px;
+  max-height: calc(100vh - var(--task-filter-viewport-reserve));
+  padding: var(--space-10);
+  overflow-y: auto;
+  border-radius: var(--radius-20);
+  background: var(--gray-5); /* Figma Frame784 #F5F5F5 → gray-5 */
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .12);
+}
+
+.team-filter-menu .team-filter-option {
+  width: 100%;
+  height: 39px; /* 弹窗按钮 506:14878 选项行 260×39 → 满容器宽 */
+  flex: none;
+  border: 0;
+  background: transparent; /* Default 态透明,露容器底 */
+  cursor: pointer;
+}
+
+.team-filter-menu .team-filter-option:hover {
+  background: var(--gray-10);
+}
+
+.team-filter-menu .team-filter-option.dropdown-item--selected {
+  background: var(--blue); /* Figma 582:27440-27487 筛选子态选中实心蓝。 */
+  color: var(--white);
+}
+
+.team-filter-anchor--member .team-filter-menu {
+  --task-member-filter-height: 255px; /* Figma 582:27457 成员筛选弹层实测高，无对应 token。 */
+
+  max-height: min(var(--task-member-filter-height), calc(100vh - var(--task-filter-viewport-reserve)));
+}
+
+.team-filter span,
+.team-new-task span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-filter .icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.team-new-task {
+  display: flex;
+  height: 36px; /* Figma 新增任务 558:21603 实测 ~100×36(宽 hug 内容) */
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-10);
+  padding: var(--space-10);
+  border: 0;
+  border-radius: var(--radius-10);
+  background: var(--blue);
+  color: var(--white);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-tight);
+}
+
+.team-new-task .icon {
+  width: 16px; /* Figma 377:2736 加号 16×16 */
+  height: 16px;
+  flex: none;
+}
+
+.team-kanban-grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-20);
+  align-items: start;
+}
+
+.team-kanban-column {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-20);
+  padding: var(--space-10);
+  border: 1px solid var(--gray-15);
+  border-radius: var(--radius-10);
+}
+
+.team-kanban-column--high {
+  background: var(--team-col-high-bg); /* #FBDECE 实测,原 color-mix 偏粉(≈#FAE1E1)有色差 */
+}
+
+.team-kanban-column--medium {
+  background: var(--team-col-medium-bg); /* #D5EEFD 实测 */
+}
+
+.team-kanban-column--low {
+  background: var(--team-col-low-bg); /* #D4F1D4 实测 */
+}
+
+.team-kanban-column__head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-20);
+  padding: var(--space-10);
+}
+
+.team-kanban-column__title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-10);
+  font-size: var(--font-title-3-size);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+}
+
+.team-kanban-column__title span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-kanban-column--high .team-kanban-column__title,
+.team-task-card--high .team-count-badge {
+  color: var(--team-high-fg); /* Figma 高列前景 #E01010(≠ --red #DC2626) */
+}
+
+.team-kanban-column--medium .team-kanban-column__title,
+.team-task-card--medium .team-count-badge {
+  color: var(--blue);
+}
+
+.team-kanban-column--low .team-kanban-column__title,
+.team-task-card--low .team-count-badge {
+  color: var(--green);
+}
+
+.team-kanban-column--high > .team-kanban-column__head .team-count-badge {
+  background: var(--team-high-fg); /* #E01010 与列标题同红,消色差 */
+}
+
+.team-kanban-column--medium > .team-kanban-column__head .team-count-badge {
+  background: var(--blue);
+}
+
+.team-kanban-column--low > .team-kanban-column__head .team-count-badge {
+  background: var(--green);
+}
+
+.team-kanban-column__tasks {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-20);
+}
+
+.team-task-card {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: var(--space-20);
+  padding: var(--space-10);
+  border-radius: var(--radius-10);
+  background: var(--white);
+}
+
+.team-task-card--action-open {
+  z-index: 2;
+}
+
+.team-task-card__body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-10);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.team-task-card__title {
+  margin: 0;
+  color: var(--black);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+  line-height: var(--lh-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-task-card__meta {
+  display: flex;
+  min-width: 0;
+  gap: var(--space-10);
+  color: var(--black);
+  font-size: var(--font-body-size);
+  font-weight: var(--font-body-weight);
+  line-height: var(--lh-body);
+  white-space: nowrap;
+}
+
+.team-task-card__meta span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.team-task-card__actions {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-10);
+}
+
+.team-task-card .team-count-badge {
+  color: var(--gray-5);
+}
+
+.team-task-card--high .team-count-badge {
+  background: var(--team-high-fg); /* #E01010 与列同红,消色差 */
+}
+
+.team-task-card--medium .team-count-badge {
+  background: var(--blue);
+}
+
+.team-task-card--low .team-count-badge {
+  background: var(--green);
+}
+
+.team-more-button {
+  display: flex;
+  width: 43px;
+  height: 25px;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  border: 0;
+  border-radius: var(--radius-20);
+  background: var(--white);
+  color: var(--gray-40);
+  box-shadow: 0 4px 5px rgba(0, 0, 0, .1);
+}
+
+.team-more-button span {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-40);
+  background: currentColor;
+}
+
+.task-action-popover {
+  --task-action-width: 280px; /* Figma 582:27478 任务操作弹层实测宽，无对应 token。 */
+  --task-action-height: 108px; /* Figma 582:27478 任务操作弹层实测高，无对应 token。 */
+  --task-action-row-height: 39px; /* Figma 582:27478 弹层选项实测高，无对应 token。 */
+  --task-action-border-width: 1px; /* Figma 操作弹层描边宽，无对应 token。 */
+
+  position: absolute;
+  top: calc(var(--space-10) * -1);
+  right: 0;
+  z-index: 70;
+  display: flex;
+  width: min(var(--task-action-width), calc(100vw - var(--space-40)));
+  height: var(--task-action-height);
+  flex-direction: column;
+  gap: var(--space-10);
+  padding: var(--space-10);
+  border: var(--task-action-border-width) solid var(--gray-15);
+  border-radius: var(--radius-20);
+  outline: 0;
+  background: var(--white);
+  box-shadow: 0 4px 5px rgba(0, 0, 0, .15), 0 10px 30px rgba(0, 0, 0, .08);
+  animation: task-action-enter var(--transition-fast) both;
+}
+
+.task-action-popover button {
+  width: 100%;
+  height: var(--task-action-row-height);
+  flex: none;
+  padding: 0 var(--space-10);
+  border: 0;
+  border-radius: var(--radius-10);
+  outline: 0;
+  background: transparent;
+  color: var(--gray-60);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-description-weight);
+  text-align: left;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.task-action-popover button:not(.task-action-popover__delete):hover,
+.task-action-popover button:not(.task-action-popover__delete):focus-visible {
+  background: var(--blue);
+  color: var(--white);
+}
+
+.task-action-popover .task-action-popover__delete {
+  color: var(--red);
+}
+
+.task-action-popover .task-action-popover__delete:hover,
+.task-action-popover .task-action-popover__delete:focus-visible {
+  background: var(--gray-10);
+}
+
+.task-action-popover button:disabled {
+  background: transparent;
+  color: var(--gray-20);
+  cursor: not-allowed;
+}
+
+@keyframes task-action-enter {
+  from {
+    opacity: 0;
+    transform: translateY(calc(var(--space-4) * -1));
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-action-popover {
+    animation: none;
+  }
+}
+
+.team-column-add {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--team-add-border); /* Figma Add 组件描边 #0099FF */
+  border-radius: var(--radius-10);
+  background: var(--white);
+  color: var(--gray-15);
+}
+
+/* 筛选后无卡片的列(如「已完成」库无数据):如实空态,不编数据 */
+.team-kanban-empty {
+  margin: 0;
+  padding: var(--space-20) var(--space-10);
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-body);
+  text-align: center;
+}
+
+.team-column-add .icon {
+  width: 20px;
+  height: 20px;
+}
+
+.team-column-expand {
+  display: flex;
+  width: 40px;
+  height: 40px;
+  align-self: center;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  border: 0;
+  border-radius: var(--radius-40);
+  background: var(--white);
+  color: var(--gray-60);
+  box-shadow: 0 4px 5px rgba(0, 0, 0, .1);
+}
+
+.team-column-expand .icon {
+  width: 18px;
+  height: 12px;
+  margin-block: -3px;
+}
+
+.team-kanban--detail {
+  min-height: 0;
+}
+
+.team-task-detail-view {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-20);
+}
+
+.task-detail-back {
+  display: flex;
+  width: fit-content;
+  height: var(--space-40);
+  align-items: center;
+  gap: var(--space-4);
+  padding: 0 var(--space-20);
+  border: 0;
+  border-radius: var(--radius-10);
+  background: var(--gray-40);
+  color: var(--white);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+  cursor: pointer;
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.task-detail-back:hover {
+  opacity: .92;
+}
+
+.task-detail-back .icon {
+  width: var(--space-20);
+  height: var(--space-20);
+}
+
+.task-detail {
+  --task-detail-desktop-min-height: 730px; /* Figma 571:20554 桌面详情首屏可见内容高，无对应 token。 */
+  --task-detail-mobile-width: 369px; /* Figma 582:22446/23142 手机详情面板实测宽，无对应 token。 */
+  --task-detail-mobile-content-min-height: 1180px; /* Figma 任务内容 mobile 长表单首段高度，无对应 token。 */
+  --task-detail-mobile-feedback-height: 708px; /* 组件卡 495:10922 反馈 mobile 变体实测总高，无对应 token。 */
+  --task-detail-mobile-feedback-panel-min-height: 560px; /* Figma 582:23142 手机反馈内容区实测高，无对应 token。 */
+  --task-detail-control-height: 40px; /* Figma 详情输入、状态与分段控件实测高，无对应 token。 */
+  --task-detail-content-height: 100px; /* Figma 任务内容多行框实测高，无对应 token。 */
+  --task-detail-close-size: 24px; /* Figma 582:22446 手机关闭按钮实测尺寸，无对应 token。 */
+  --task-detail-close-stroke: 2px; /* Figma 详情关闭图标线宽，无对应 token。 */
+  --task-detail-close-line: 12px; /* Figma 详情关闭图标线长，无对应 token。 */
+  --task-detail-feedback-min-height: 620px; /* Figma 571:20554 桌面反馈栏首屏实测高，无对应 token。 */
+  --task-detail-head-height: 68px; /* Figma 571:20554 详情标题栏实测高，无对应 token。 */
+  --task-detail-border-width: 1px; /* Figma 详情分隔与输入描边宽，无对应 token。 */
+  --task-detail-author-max-width: 120px; /* Figma 495:11439 对话作者名最大宽，无对应 token。 */
+  --task-detail-bubble-max-width: 256px; /* Figma 495:11439 气泡正文最大宽，无对应 token。 */
+  --task-detail-composer-height: 116px; /* Figma 582:23142 反馈输入框实测高，无对应 token。 */
+  --task-detail-composer-body-height: 56px; /* Figma 反馈输入正文区实测最小高，无对应 token。 */
+  --task-detail-action-height: 35px; /* Figma 582:23142 發送按钮实测高，无对应 token。 */
+  --task-detail-hover-offset: 1px; /* 全站微动效按钮轻抬位移，无 spacing token。 */
+  --task-status-in-progress: #F97306; /* Figma 571:20554 进行中状态条精确橙色，无全局 token。 */
+
+  display: flex;
+  width: 100%;
+  min-height: var(--task-detail-desktop-min-height);
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--radius-20);
+  background: var(--white);
+}
+
+.task-detail__head {
+  display: flex;
+  min-height: var(--task-detail-head-height);
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-20);
+  padding: var(--space-20);
+  border-bottom: var(--task-detail-border-width) solid var(--gray-10);
+}
+
+.task-detail__head h2 {
+  min-width: 0;
+  margin: 0;
+  color: var(--blue);
+  font-size: var(--font-title-2-size);
+  font-weight: var(--font-title-2-weight);
+  line-height: var(--lh-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-detail__close {
+  position: relative;
+  display: none;
+  width: var(--task-detail-close-size);
+  height: var(--task-detail-close-size);
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-40);
+  background: var(--3a);
+  cursor: pointer;
+}
+
+.task-detail__close::before,
+.task-detail__close::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--task-detail-close-stroke);
+  height: var(--task-detail-close-line);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  content: "";
+}
+
+.task-detail__close::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.task-detail__close::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.task-detail .task-detail__tabs {
+  display: none;
+}
+
+.task-detail .task-detail__body {
+  display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-20);
+  padding: var(--space-20);
+}
+
+.task-detail__content,
+.task-detail__feedback {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.task-detail__content {
+  gap: var(--space-40);
+  padding-right: var(--space-20);
+  border-right: var(--task-detail-border-width) solid var(--gray-10);
+}
+
+.task-detail__field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-10);
+  color: var(--gray-80);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-tight);
+}
+
+.task-detail__control,
+.task-detail__status {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--task-detail-control-height);
+  align-items: center;
+  padding: 0 var(--space-10);
+  border-radius: var(--radius-10);
+  background: var(--gray-5);
+  color: var(--gray-40);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-body-weight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-detail__control--multiline {
+  min-height: var(--task-detail-content-height);
+  align-items: flex-start;
+  padding-block: var(--space-10);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.task-detail__control--select::after {
+  width: var(--space-10);
+  height: var(--space-10);
+  margin-left: auto;
+  border-right: var(--task-detail-close-stroke) solid currentColor;
+  border-bottom: var(--task-detail-close-stroke) solid currentColor;
+  content: "";
+  transform: translateY(calc(var(--space-4) * -1)) rotate(45deg);
+}
+
+.task-detail__status {
+  color: var(--white);
+  font-weight: var(--font-title-3-weight);
+}
+
+.task-detail__status--inProgress {
+  background: var(--task-status-in-progress);
+}
+
+.task-detail__status--completed {
+  background: var(--green);
+}
+
+.task-detail__status--overdue {
+  background: var(--red);
+}
+
+.task-detail__priority {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-20);
+}
+
+.task-detail__priority span {
+  display: flex;
+  min-width: 0;
+  height: var(--task-detail-control-height);
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-10);
+  border-radius: var(--radius-10);
+  background: var(--gray-5);
+  color: var(--gray-80);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-description-weight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-detail__priority .task-detail__priority--active {
+  background: var(--blue);
+  color: var(--white);
+}
+
+.task-detail__feedback {
+  min-height: var(--task-detail-feedback-min-height);
+  gap: var(--space-10);
+  padding: var(--space-20);
+  border-radius: var(--radius-10);
+  background: var(--gray-5);
+}
+
+.task-detail__feedback h3 {
+  margin: 0;
+  padding-bottom: var(--space-10);
+  border-bottom: var(--task-detail-border-width) solid var(--gray-15);
+  color: var(--gray-80);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+  line-height: var(--lh-tight);
+}
+
+.task-detail__thread {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-10);
+  overflow: auto;
+}
+
+.task-detail .chat-bubble {
+  --chat-avatar-size: 40px; /* Figma 495:11439 对话头像实测尺寸，无对应 token。 */
+  --chat-menu-width: 33px; /* Figma 495:11439 三点操作胶囊实测宽，无对应 token。 */
+  --chat-menu-height: 15px; /* Figma 495:11439 三点操作胶囊实测高，无对应 token。 */
+
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  align-items: flex-start;
+  gap: var(--space-10);
+}
+
+.chat-bubble__avatar {
+  display: inline-flex;
+  width: var(--chat-avatar-size);
+  height: var(--chat-avatar-size);
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-10);
+  background: var(--blue);
+  color: var(--white);
+}
+
+.chat-bubble__content {
+  display: flex;
+  min-width: 0;
+  max-width: calc(100% - var(--chat-avatar-size) - var(--space-10));
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+.chat-bubble--own .chat-bubble__content {
+  align-items: flex-end;
+}
+
+.chat-bubble__meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-10);
+  font-size: var(--font-body-size);
+  line-height: var(--lh-tight);
+}
+
+.chat-bubble__meta strong {
+  max-width: var(--task-detail-author-max-width);
+  color: var(--blue);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-bubble__meta time {
+  flex: none;
+  color: var(--gray-60);
+  white-space: nowrap;
+}
+
+.chat-bubble__menu {
+  display: flex;
+  width: var(--chat-menu-width);
+  height: var(--chat-menu-height);
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: 0;
+  border: var(--task-detail-border-width) solid var(--gray-15);
+  border-radius: var(--radius-20);
+  background: var(--white);
+}
+
+.chat-bubble__menu span {
+  width: var(--space-4);
+  height: var(--space-4);
+  border-radius: var(--radius-40);
+  background: var(--gray-40);
+}
+
+.task-detail .chat-bubble__body {
+  max-width: var(--task-detail-bubble-max-width);
+  margin: 0;
+  padding: var(--space-10);
+  border-radius: var(--radius-10);
+  background: var(--gray-10);
+  color: var(--black);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-body);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.task-detail__attachment-count {
+  align-self: flex-start;
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+  line-height: var(--lh-body);
+}
+
+.task-detail .chat-bubble--own .chat-bubble__body {
+  background: var(--blue);
+  color: var(--white);
+}
+
+.task-detail__composer {
+  display: flex;
+  min-height: var(--task-detail-composer-height);
+  flex: none;
+  flex-direction: column;
+  gap: var(--space-10);
+  margin-top: auto;
+  padding: var(--space-10);
+  border: var(--task-detail-border-width) solid var(--gray-15);
+  border-radius: var(--radius-20);
+  background: var(--white);
+}
+
+.task-detail__composer textarea {
+  width: 100%;
+  min-height: var(--task-detail-composer-body-height);
+  resize: none;
+  border: 0;
+  outline: 0;
+  color: var(--gray-80);
+  background: transparent;
+  font: inherit;
+  font-size: var(--font-description-size);
+}
+
+.task-detail__composer footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-20);
+}
+
+.task-detail__attachment {
+  display: flex;
+  width: var(--space-20);
+  height: var(--space-20);
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-40);
+  background: var(--gray-15);
+  color: var(--gray-80);
+  font-size: var(--font-body-size);
+}
+
+.task-detail__composer button {
+  height: var(--task-detail-action-height);
+  padding: 0 var(--space-20);
+  border: 0;
+  border-radius: var(--radius-10);
+  background: var(--blue);
+  color: var(--white);
+  cursor: pointer;
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.task-detail__composer button:hover {
+  opacity: .92;
+  transform: translateY(calc(var(--task-detail-hover-offset) * -1));
+}
+
+.task-submit-overlay {
+  --task-submit-overlay-top: 80px; /* Figma 582:24446/25734 弹窗顶边距实测值，无对应 token。 */
+  --task-submit-width: 800px; /* 组件卡 506:14324 desktop 任务提交表实测宽，无对应 token。 */
+  --task-submit-height: 1426px; /* 组件卡 506:14324 desktop 任务提交表实测高，无对应 token。 */
+  --task-submit-control-height: 40px; /* Figma 任务提交表输入与分段控件实测高，无对应 token。 */
+  --task-submit-content-height: 100px; /* Figma 任务内容多行框实测高，无对应 token。 */
+  --task-submit-close-size: 20px; /* Figma 582:24446 关闭按钮实测尺寸，无对应 token。 */
+  --task-submit-close-stroke: 2px; /* Figma 任务提交关闭图标线宽，无对应 token。 */
+  --task-submit-close-line: 10px; /* Figma 任务提交关闭图标线长，无对应 token。 */
+  --task-submit-border-width: 1px; /* Figma 任务提交分隔与输入描边宽，无对应 token。 */
+  --task-submit-footer-height: 40px; /* Figma 任务提交底部按钮实测高，无对应 token。 */
+  --task-submit-head-height: 78px; /* Figma 582:24446 提交表标题区实测高，无对应 token。 */
+  --task-submit-visually-hidden-size: 1px; /* 原生 radio 的可访问视觉隐藏尺寸，无对应 token。 */
+
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--task-submit-overlay-top) var(--space-20) var(--space-20);
+  background: rgba(0, 0, 0, .5); /* 00-设计规范 §5.4 表单类遮罩黑 50%。 */
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity var(--transition), visibility var(--transition);
+}
+
+.task-submit-overlay--open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.form-task-submit {
+  width: min(92vw, var(--task-submit-width));
+  height: min(var(--task-submit-height), calc(100vh - var(--task-submit-overlay-top) - var(--space-20)));
+  min-height: 0;
+  max-height: calc(100vh - var(--task-submit-overlay-top) - var(--space-20));
+  padding: 0;
+  overflow: auto;
+  border-radius: var(--radius-20);
+  background: var(--white);
+}
+
+.form-task-submit__head {
+  display: flex;
+  min-height: var(--task-submit-head-height);
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-20);
+  padding: var(--space-20);
+  border-bottom: var(--task-submit-border-width) solid var(--gray-15);
+}
+
+.form-task-submit__head h2 {
+  min-width: 0;
+  margin: 0;
+  color: var(--blue);
+  font-size: var(--font-title-2-size);
+  font-weight: var(--font-title-2-weight);
+  line-height: var(--lh-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.form-task-submit__close {
+  position: relative;
+  width: var(--task-submit-close-size);
+  height: var(--task-submit-close-size);
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-40);
+  background: var(--3a);
+  cursor: pointer;
+}
+
+.form-task-submit__close::before,
+.form-task-submit__close::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--task-submit-close-stroke);
+  height: var(--task-submit-close-line);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  content: "";
+}
+
+.form-task-submit__close::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.form-task-submit__close::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.form-task-submit .form-task-submit__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-40);
+  padding: var(--space-20);
+}
+
+.form-task-submit__field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-10);
+  color: var(--gray-80);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-tight);
+}
+
+.form-task-submit__field input,
+.form-task-submit__field textarea,
+.form-task-submit__field select {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--task-submit-control-height);
+  padding: 0 var(--space-10);
+  border: var(--task-submit-border-width) solid transparent;
+  border-radius: var(--radius-10);
+  outline: 0;
+  background: var(--gray-5);
+  color: var(--gray-60);
+  font: inherit;
+  font-weight: var(--font-body-weight);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.form-task-submit__field textarea {
+  min-height: var(--task-submit-content-height);
+  padding-block: var(--space-10);
+  resize: vertical;
+}
+
+.form-task-submit__field input:focus,
+.form-task-submit__field textarea:focus,
+.form-task-submit__field select:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 var(--task-submit-close-stroke) color-mix(in srgb, var(--blue) 12%, transparent);
+}
+
+.form-task-submit__segment {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: var(--space-20);
+}
+
+.form-task-submit__segment label {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  height: var(--task-submit-control-height);
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-10);
+  border-radius: var(--radius-10);
+  background: var(--gray-5);
+  color: var(--gray-80);
+  overflow: hidden;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.form-task-submit__segment label.form-task-submit__segment--active {
+  background: var(--blue);
+  color: var(--white);
+}
+
+.form-task-submit__segment input {
+  position: absolute;
+  width: var(--task-submit-visually-hidden-size);
+  height: var(--task-submit-visually-hidden-size);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.form-task-submit__segment span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.form-task-submit__attachment {
+  display: flex;
+  width: 100%;
+  height: var(--task-submit-control-height);
+  align-items: center;
+  justify-content: center;
+  border: var(--task-submit-border-width) solid var(--team-add-border);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  color: var(--blue);
+  font-size: var(--font-title-2-size);
+  cursor: pointer;
+}
+
+.form-task-submit__attachment-list {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.form-task-submit__attachment-chip {
+  max-width: 100%;
+  padding: var(--space-4) var(--space-10);
+  border-radius: var(--radius-20);
+  background: var(--gray-10);
+  color: var(--gray-60);
+  font-size: var(--font-description-size);
+  line-height: var(--lh-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.form-task-submit__footer {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-20);
+  padding: var(--space-20);
+}
+
+.form-task-submit__button {
+  display: flex;
+  min-width: 0;
+  height: var(--task-submit-footer-height);
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-10);
+  border: 0;
+  border-radius: var(--radius-10);
+  color: var(--white);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.form-task-submit__button:hover {
+  opacity: .92;
+}
+
+.form-task-submit__button:active {
+  transform: scale(.98);
+}
+
+.form-task-submit__button--cancel {
+  background: var(--gray-40);
+}
+
+.form-task-submit__button--confirm {
+  background: var(--blue);
+}
+
+@media (max-width: 1399px) {
+  .team-kanban-filters {
+    gap: var(--space-20);
+  }
+
+  .team-member-rail {
+    width: 320px;
+    min-width: 320px;
+  }
+}
+
+@media (max-width: 768px) {
+  .shell-app {
+    min-width: 0;
+  }
+
+  .team-task-page {
+    --team-task-mobile-stat-min-height: 54px; /* Figma 377:2383 统计容器内容高，无对应 token。 */
+
+    gap: var(--space-10);
+  }
+
+  .team-task-title,
+  .team-member-rail {
+    display: none;
+  }
+
+  .team-task-page--detail .team-task-stats {
+    display: none;
+  }
+
+  .team-task-stats {
+    display: flex;
+    gap: var(--space-20);
+    padding: var(--space-10);
+    border-radius: var(--radius-10);
+    background: var(--white);
+  }
+
+  .team-stat-card {
+    min-height: var(--team-task-mobile-stat-min-height);
+    flex: 1 1 0;
+    gap: var(--space-10);
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--3a);
+  }
+
+  .team-stat-card:first-child {
+    padding-right: var(--space-20);
+    border-right: 1px solid var(--gray-15);
+  }
+
+  .team-stat-card--blue {
+    display: none;
+  }
+
+  .team-stat-card--yellow {
+    background: transparent;
+    color: var(--3a);
+  }
+
+  .team-stat-card__title {
+    font-size: var(--font-description-size);
+  }
+
+  .team-stat-card__value {
+    font-size: var(--font-title-2-size);
+  }
+
+  .team-board {
+    display: block;
+    min-height: 0;
+    border-radius: 0;
+    background: transparent;
+    overflow: visible;
+  }
+
+  .team-kanban {
+    gap: var(--space-10);
+    padding: 0;
+  }
+
+  .team-kanban--detail,
+  .team-task-detail-view {
+    width: 100%;
+  }
+
+  .task-detail-back {
+    display: none;
+  }
+
+  .task-detail {
+    width: min(100%, var(--task-detail-mobile-width));
+    min-height: var(--task-detail-mobile-content-min-height);
+  }
+
+  .task-detail--feedback {
+    min-height: var(--task-detail-mobile-feedback-height);
+  }
+
+  .task-detail__head {
+    min-height: var(--task-detail-head-height);
+  }
+
+  .task-detail__close {
+    display: block;
+  }
+
+  .task-detail .task-detail__tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-10);
+    margin: var(--space-10);
+    padding: var(--space-4);
+    border-radius: var(--radius-20);
+    background: var(--gray-15);
+  }
+
+  .task-detail__tabs button {
+    min-width: 0;
+    height: var(--space-40);
+    padding: 0 var(--space-10);
+    border: 0;
+    border-radius: var(--radius-10);
+    background: transparent;
+    color: var(--gray-60);
+    font-size: var(--font-title-3-size);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+
+  .task-detail__tabs .task-detail__tab--active {
+    background: var(--blue);
+    color: var(--white);
+  }
+
+  html[lang="fr"] .task-detail__tabs button {
+    font-size: var(--font-description-size);
+  }
+
+  .task-detail .task-detail__body {
+    display: block;
+    padding: 0 var(--space-10) var(--space-10);
+  }
+
+  .task-detail__body--content .task-detail__feedback,
+  .task-detail__body--feedback .task-detail__content {
+    display: none;
+  }
+
+  .task-detail__content {
+    min-height: var(--task-detail-mobile-content-min-height);
+    gap: var(--space-40);
+    padding: var(--space-10) 0;
+    border-right: 0;
+  }
+
+  .task-detail__feedback {
+    min-height: var(--task-detail-mobile-feedback-panel-min-height);
+    padding: var(--space-10);
+  }
+
+  .task-detail__body--feedback {
+    min-height: var(--task-detail-mobile-feedback-panel-min-height);
+  }
+
+  .task-detail__priority {
+    gap: var(--space-20);
+  }
+
+  .team-kanban-toolbar {
+    display: block;
+  }
+
+  .team-kanban-filters {
+    width: 100%;
+    gap: var(--space-10);
+  }
+
+  .team-filter-anchor {
+    max-width: none;
+  }
+
+  .team-filter-anchor--member {
+    display: flex;
+  }
+
+  .team-filter-anchor--priority {
+    display: none;
+  }
+
+  .team-filter {
+    height: 40px;
+    background: var(--blue);
+    color: var(--white);
+  }
+
+  html[lang="fr"] .team-filter {
+    font-size: var(--font-description-size);
+  }
+
+  html[lang="fr"] .team-filter span {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .team-filter-menu {
+    width: min(280px, calc(100vw - (var(--grid-margin-mobile) * 2)));
+  }
+
+  .team-filter-anchor--status .team-filter-menu {
+    left: 50%;
+    translate: -50% 0;
+  }
+
+  .team-filter-anchor--view .team-filter-menu {
+    right: 0;
+    left: auto;
+  }
+
+  .team-new-task {
+    position: fixed;
+    right: var(--space-20);
+    bottom: var(--space-40);
+    z-index: 60;
+    width: 40px;
+    height: 40px;
+    padding: var(--space-10);
+    background: var(--3a);
+  }
+
+  .team-new-task span {
+    display: none;
+  }
+
+  .team-new-task .icon {
+    width: 20px;
+    height: 20px;
+  }
+
+  html[lang="fr"] .form-task-submit__segment label {
+    font-size: var(--font-description-size);
+  }
+
+  .team-kanban-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-20);
+  }
+}
