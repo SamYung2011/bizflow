@@ -103,6 +103,7 @@ const presetShipping = consumeNavigationPreset(navigationPresetKeys.ordersShippi
 const presetSearch = consumeNavigationPreset(navigationPresetKeys.ordersSearch) ?? "";
 const shippingFilters = ["all", "pending", "in_transit", "exception", "delivered"];
 const canViewRevenue = currentUser?.canViewRevenue !== false;
+const liveReadOnly = typeof currentUser?.hasPermission === "function";
 const domainTabs = ["list", "northbound", "chargerLeads", ...(canViewRevenue ? ["revenue"] : [])];
 
 const state = {
@@ -300,7 +301,7 @@ function renderOrderList(helpers) {
 }
 
 function renderDomainContent(helpers) {
-  if (state.tab === "northbound") return renderNorthbound(helpers);
+  if (state.tab === "northbound") return renderNorthbound({ ...helpers, liveReadOnly });
   if (state.tab === "chargerLeads") return renderChargerLeads(helpers);
   if (state.tab === "revenue" && canViewRevenue) return renderRevenue(helpers);
   return renderOrderList(helpers);
@@ -311,10 +312,10 @@ export function renderOrders(helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const e = escapeHtml;
   const tt = (key) => pageT(lang, key);
-  return `<div class="orders-page" data-orders-page data-orders-tab="${state.tab}" data-orders-shipping-value="${state.shipping}" data-orders-search-value="${e(state.search)}" data-date-open="${dateFilter.isOpen()}" data-current-page="${state.page}">
+  return `<div class="orders-page" data-orders-page data-live-read-only="${liveReadOnly}" data-orders-tab="${state.tab}" data-orders-shipping-value="${state.shipping}" data-orders-search-value="${e(state.search)}" data-date-open="${dateFilter.isOpen()}" data-current-page="${state.page}">
     <header class="orders-head">
       <h1 class="orders-title" title="${e(tt("orders.title"))}">${e(tt("orders.title"))}</h1>
-      ${state.tab === "list" ? `<button type="button" class="orders-new" data-orders-create>
+      ${state.tab === "list" ? `<button type="button" class="orders-new" data-orders-create data-orders-write${liveReadOnly ? ' disabled aria-disabled="true"' : ""}>
         ${icon("icon-add-line-add", "icon")}
         <span>${e(tt("orders.new"))}</span>
       </button>` : ""}
@@ -354,6 +355,7 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (event.target.closest("[data-orders-create]")) {
+    if (liveReadOnly) return;
     window.location.href = "./orders-create.html";
     return;
   }

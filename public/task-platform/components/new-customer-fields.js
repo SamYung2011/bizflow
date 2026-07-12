@@ -40,13 +40,14 @@ function autocomplete(key) {
   return "off";
 }
 
-export function renderNewCustomerFields({ lang, escapeHtml, label, idPrefix }) {
+export function renderNewCustomerFields({ lang, escapeHtml, label, idPrefix, disabled = false }) {
   const text = placeholders[lang] ?? placeholders.zh;
+  const disabledAttributes = disabled ? ' disabled aria-disabled="true"' : "";
   const renderField = (key) => {
     const id = `${idPrefix}-${key}`;
     return `<div class="form-new-customer__field">
       <label class="form-new-customer__label" for="${escapeHtml(id)}">${escapeHtml(label(key))}</label>
-      <input class="form-new-customer__value" id="${escapeHtml(id)}" name="${escapeHtml(key)}" type="${inputType(key)}" autocomplete="${autocomplete(key)}" data-new-customer-field="${escapeHtml(key)}" placeholder="${escapeHtml(text[key])}">
+      <input class="form-new-customer__value" id="${escapeHtml(id)}" name="${escapeHtml(key)}" type="${inputType(key)}" autocomplete="${autocomplete(key)}" data-new-customer-field="${escapeHtml(key)}" placeholder="${escapeHtml(text[key])}"${disabledAttributes}>
     </div>`;
   };
   const [name, phone, ...stacked] = fields;
@@ -55,6 +56,6 @@ export function renderNewCustomerFields({ lang, escapeHtml, label, idPrefix }) {
     ${stacked.map(renderField).join("")}
     <div class="form-new-customer__field">
       <label class="form-new-customer__address-label" for="${escapeHtml(addressId)}">${escapeHtml(label("address"))}</label>
-      <textarea class="form-new-customer__address" id="${escapeHtml(addressId)}" name="address" autocomplete="street-address" data-new-customer-field="address" placeholder="${escapeHtml(text.address)}"></textarea>
+      <textarea class="form-new-customer__address" id="${escapeHtml(addressId)}" name="address" autocomplete="street-address" data-new-customer-field="address" placeholder="${escapeHtml(text.address)}"${disabledAttributes}></textarea>
     </div>`;
 }

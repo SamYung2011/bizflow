@@ -190,7 +190,9 @@ const dict = {
   }
 };
 
-const data = await getOrderCreateData();
+const [data, currentUser] = await Promise.all([getOrderCreateData(), getCurrentUser()]);
+const liveReadOnly = typeof currentUser?.hasPermission === "function";
+const writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
 const draftCreatedAt = new Date();
 const CUSTOMER_RESULTS_LIMIT = 20; // 联想下拉只渲染前 20 条匹配,避免 4198 行 DOM。
 
@@ -248,7 +250,7 @@ function renderLineRows(helpers) {
     </span>
     <span class="orders-qty-box">${escapeHtml(String(item.quantity))}</span>
     <span class="orders-line-price">${escapeHtml(formatMoney(item.price * item.quantity))}</span>
-    <button type="button" class="orders-remove-dot" data-remove-line="${escapeHtml(item.id)}" aria-label="${escapeHtml(pageT(lang, "orders.cancel"))}"></button>
+    <button type="button" class="orders-remove-dot" data-remove-line="${escapeHtml(item.id)}" data-orders-write aria-label="${escapeHtml(pageT(lang, "orders.cancel"))}"${writeAttributes}></button>
   </div>`).join("");
   return `<div class="orders-create-lines">${realRows || `<div class="orders-create-empty">${escapeHtml(pageT(lang, "orders.emptyLine"))}</div>`}</div>`;
 }
@@ -265,7 +267,7 @@ function renderProductModal(helpers) {
       </header>
       <label class="orders-product-search">
         ${icon("icon-nav-search", "icon")}
-        <input type="search" data-product-search value="${escapeHtml(state.productSearch)}" placeholder="${escapeHtml(pageT(lang, "orders.modal.search"))}">
+        <input type="search" data-product-search data-orders-write value="${escapeHtml(state.productSearch)}" placeholder="${escapeHtml(pageT(lang, "orders.modal.search"))}"${writeAttributes}>
       </label>
       <div class="orders-product-list">
         ${groups.map((group) => `<div class="orders-product-group">
@@ -273,7 +275,7 @@ function renderProductModal(helpers) {
           ${group.options.map((option) => {
             const label = option.label;
             return `<label class="orders-product-option" title="${escapeHtml(label)}">
-              <input type="checkbox" data-product-option data-option-id="${escapeHtml(option.id)}"${state.selectedOptions.has(option.id) ? " checked" : ""}>
+              <input type="checkbox" data-product-option data-orders-write data-option-id="${escapeHtml(option.id)}"${state.selectedOptions.has(option.id) ? " checked" : ""}${writeAttributes}>
               <span class="orders-product-option__text">${escapeHtml(label)}</span>
               <span class="orders-product-option__price">${escapeHtml(formatMoney(option.price))}</span>
             </label>`;
@@ -282,7 +284,7 @@ function renderProductModal(helpers) {
       </div>
       <footer class="orders-product-modal__footer">
         <button type="button" class="orders-secondary" data-product-modal-close>${escapeHtml(pageT(lang, "orders.cancel"))}</button>
-        <button type="button" class="orders-primary" data-product-modal-add>${escapeHtml(pageT(lang, "orders.modal.add"))}</button>
+        <button type="button" class="orders-primary" data-product-modal-add data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.modal.add"))}</button>
       </footer>
     </section>
   </div>`;
@@ -291,18 +293,18 @@ function renderProductModal(helpers) {
 function renderCustomerSelect(helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const customer = selectedCustomer();
-  const options = matchingCustomers().map((item) => `<button type="button" role="option" aria-selected="${item.id === state.selectedCustomerId}" class="dropdown-item${item.id === state.selectedCustomerId ? " dropdown-item--selected" : ""}" data-customer-option="${escapeHtml(item.id)}" title="${escapeHtml([item.name, item.phone].filter(Boolean).join(" · "))}">
+  const options = matchingCustomers().map((item) => `<button type="button" role="option" aria-selected="${item.id === state.selectedCustomerId}" class="dropdown-item${item.id === state.selectedCustomerId ? " dropdown-item--selected" : ""}" data-customer-option="${escapeHtml(item.id)}" data-orders-write title="${escapeHtml([item.name, item.phone].filter(Boolean).join(" · "))}"${writeAttributes}>
     <span class="tp-line">${escapeHtml([item.name, item.phone].filter(Boolean).join(" · "))}</span>
   </button>`).join("");
   return `<div class="orders-select menu-anchor">
-    <button type="button" class="orders-select__trigger" data-customer-trigger aria-expanded="${state.customerMenuOpen}" title="${escapeHtml(customer?.name ?? pageT(lang, "orders.selectCustomer"))}">
+    <button type="button" class="orders-select__trigger" data-customer-trigger data-orders-write aria-expanded="${state.customerMenuOpen}" title="${escapeHtml(customer?.name ?? pageT(lang, "orders.selectCustomer"))}"${writeAttributes}>
       <span>${escapeHtml(customer?.name ?? pageT(lang, "orders.selectCustomer"))}</span>
       ${icon("icon-arrow-down", "icon")}
     </button>
     <div class="menu-popover orders-select__menu${state.customerMenuOpen ? " menu-popover--open" : ""}" data-customer-menu>
       <label class="orders-customer-search">
         ${icon("icon-nav-search", "icon")}
-        <input type="search" data-customer-search value="${escapeHtml(state.customerSearch)}" placeholder="${escapeHtml(pageT(lang, "orders.searchCustomer"))}" aria-label="${escapeHtml(pageT(lang, "orders.searchCustomer"))}">
+        <input type="search" data-customer-search data-orders-write value="${escapeHtml(state.customerSearch)}" placeholder="${escapeHtml(pageT(lang, "orders.searchCustomer"))}" aria-label="${escapeHtml(pageT(lang, "orders.searchCustomer"))}"${writeAttributes}>
       </label>
       <div class="orders-customer-results" role="listbox">
         ${options || `<span class="orders-customer-empty">${escapeHtml(pageT(lang, "orders.customerNoResults"))}</span>`}
@@ -322,12 +324,13 @@ function renderAddCustomerModal(helpers) {
           lang,
           escapeHtml,
           label: (key) => pageT(lang, `orders.field.${key}`),
-          idPrefix: "orders-new-customer"
+          idPrefix: "orders-new-customer",
+          disabled: liveReadOnly
         })}
       </div>
       <div class="form-new-customer__footer">
         <button type="button" class="btn--hug btn--hug--gray" data-customer-modal-close>${escapeHtml(pageT(lang, "orders.cancel"))}</button>
-        <button type="button" class="btn--hug btn--hug--blue" data-customer-modal-close>${escapeHtml(pageT(lang, "orders.action.submit"))}</button>
+        <button type="button" class="btn--hug btn--hug--blue" data-customer-modal-close data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.action.submit"))}</button>
       </div>
     </section>
   </div>`;
@@ -338,7 +341,7 @@ function renderCreateCheckControl(key, value, helpers) {
   const checked = state.feesEnabled[key];
   return `<div class="orders-payment-check-row">
     <label class="orders-figma-check">
-      <input type="checkbox" data-fee-toggle="${key}"${checked ? " checked" : ""}>
+      <input type="checkbox" data-fee-toggle="${key}" data-orders-write${checked ? " checked" : ""}${writeAttributes}>
       <span class="orders-figma-check__box" aria-hidden="true"></span>
       <span>${escapeHtml(pageT(lang, `orders.${key}`))}</span>
     </label>
@@ -357,7 +360,7 @@ function renderCreatePaymentBox(helpers, sum) {
     </div>
     <div class="orders-payment-line">
       <span>${escapeHtml(pageT(lang, "orders.shippingFee"))}</span>
-      <button type="button" class="orders-free-select">${escapeHtml(pageT(lang, "orders.free"))}${icon("icon-arrow-down", "icon")}</button>
+      <button type="button" class="orders-free-select" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.free"))}${icon("icon-arrow-down", "icon")}</button>
       <strong><span>HKD$</span>0.00</strong>
     </div>
     <div class="orders-payment-divider"></div>
@@ -427,7 +430,7 @@ function renderCreate(helpers) {
   currentHelpers = helpers;
   const { escapeHtml, icon, lang } = helpers;
   const sum = total();
-  return `<div class="orders-workspace" data-orders-create-page>
+  return `<div class="orders-workspace" data-orders-create-page data-live-read-only="${liveReadOnly}">
     <header class="orders-workspace__head">
       <div>
         <nav class="orders-breadcrumb" aria-label="${escapeHtml(pageT(lang, "orders.root"))}">
@@ -442,7 +445,7 @@ function renderCreate(helpers) {
     <section class="orders-detail-card orders-shipping-card">
       <div class="orders-card-head">
         <span class="orders-chip orders-chip--shipping">${escapeHtml(pageT(lang, "orders.unshipped"))}</span>
-        <button type="button" class="orders-dark" data-product-modal-open>${icon("icon-add-line-add", "icon")}${escapeHtml(pageT(lang, "orders.addProduct"))}</button>
+        <button type="button" class="orders-dark" data-product-modal-open data-orders-write${writeAttributes}>${icon("icon-add-line-add", "icon")}${escapeHtml(pageT(lang, "orders.addProduct"))}</button>
       </div>
       ${renderLineRows(helpers)}
     </section>
@@ -450,7 +453,7 @@ function renderCreate(helpers) {
     <section class="orders-detail-card">
       ${renderCreatePaymentBox(helpers, sum)}
       <div class="orders-card-actions orders-card-actions--end">
-        <button type="button" class="orders-primary">${escapeHtml(pageT(lang, "orders.markPaid"))}</button>
+        <button type="button" class="orders-primary" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.markPaid"))}</button>
       </div>
     </section>
 
@@ -462,7 +465,7 @@ function renderCreate(helpers) {
     <section class="orders-detail-card">
       <h2 class="orders-card-title">${escapeHtml(pageT(lang, "orders.customer"))}</h2>
       ${renderCustomerSelect(helpers)}
-      <button type="button" class="orders-primary orders-full-btn" data-customer-modal-open>${escapeHtml(pageT(lang, "orders.addCustomer"))}</button>
+      <button type="button" class="orders-primary orders-full-btn" data-customer-modal-open data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.addCustomer"))}</button>
       ${renderSelectedCustomerInfo(helpers)}
     </section>
 
@@ -471,16 +474,16 @@ function renderCreate(helpers) {
     <section class="orders-detail-card">
       <h2 class="orders-card-title">${escapeHtml(pageT(lang, "orders.logistics"))}</h2>
       <div class="orders-logistics-segment" role="tablist">
-        <button type="button" class="${state.shippingMode === "delivery" ? "is-active" : ""}" data-shipping-mode="delivery">${escapeHtml(pageT(lang, "orders.delivery"))}</button>
-        <button type="button" class="${state.shippingMode === "pickup" ? "is-active" : ""}" data-shipping-mode="pickup">${escapeHtml(pageT(lang, "orders.pickup"))}</button>
+        <button type="button" class="${state.shippingMode === "delivery" ? "is-active" : ""}" data-shipping-mode="delivery" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.delivery"))}</button>
+        <button type="button" class="${state.shippingMode === "pickup" ? "is-active" : ""}" data-shipping-mode="pickup" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.pickup"))}</button>
       </div>
       <div class="orders-field">
         <span class="orders-field__label">${escapeHtml(pageT(lang, "orders.trackingNo"))}</span>
         <span class="orders-select-like">${escapeHtml(pageT(lang, "orders.unshipped"))}</span>
       </div>
       <div class="orders-card-actions orders-card-actions--end">
-        <button type="button" class="orders-secondary">${escapeHtml(pageT(lang, "orders.cancel"))}</button>
-        <button type="button" class="orders-primary">${escapeHtml(pageT(lang, "orders.confirmTracking"))}</button>
+        <button type="button" class="orders-secondary" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.cancel"))}</button>
+        <button type="button" class="orders-primary" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.confirmTracking"))}</button>
       </div>
     </section>
 
@@ -522,6 +525,7 @@ function closeCustomerModal() {
 }
 
 document.addEventListener("click", (event) => {
+  if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
   if (event.target.closest("[data-product-modal-open]")) {
     state.productModalOpen = true;
     state.customerMenuOpen = false;
@@ -590,6 +594,7 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("change", (event) => {
+  if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
   const option = event.target.closest("[data-product-option]");
   if (option) {
     const id = option.getAttribute("data-option-id");
@@ -605,6 +610,7 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("input", (event) => {
+  if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
   const productSearch = event.target.closest("[data-product-search]");
   if (productSearch) {
     state.productSearch = productSearch.value;
@@ -629,6 +635,6 @@ document.addEventListener("keydown", (event) => {
 });
 
 window.__shellMenu = createBizflowMenu("orders");
-window.__shellData = { unread: await getUnread(), user: await getCurrentUser() };
+window.__shellData = { unread: await getUnread(), user: currentUser };
 window.__shellContent = renderCreate;
 await import("../shell/shell.js");

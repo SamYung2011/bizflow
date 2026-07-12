@@ -174,8 +174,13 @@ const dict = {
 };
 
 const params = new URLSearchParams(window.location.search);
-const detailData = await getOrderDetailData(params.get("id"));
-const pickerData = detailData ? await getOrderCreateData() : { productGroups: [] };
+const [detailData, currentUser] = await Promise.all([
+  getOrderDetailData(params.get("id")),
+  getCurrentUser()
+]);
+const liveReadOnly = typeof currentUser?.hasPermission === "function";
+const pickerData = detailData && !liveReadOnly ? await getOrderCreateData() : { productGroups: [] };
+const writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
 
 const state = {
   productModalOpen: false,
@@ -252,7 +257,7 @@ function renderProductModal(helpers) {
     ${group.options.map((option) => {
       const label = option.label;
       return `<label class="orders-product-option" title="${escapeHtml(label)}">
-        <input type="checkbox" data-product-option data-option-id="${escapeHtml(option.id)}"${state.selectedOptions.has(option.id) ? " checked" : ""}>
+        <input type="checkbox" data-product-option data-orders-write data-option-id="${escapeHtml(option.id)}"${state.selectedOptions.has(option.id) ? " checked" : ""}${writeAttributes}>
         <span class="orders-product-option__text">${escapeHtml(label)}</span>
         <span class="orders-product-option__price">${escapeHtml(formatMoney(option.price))}</span>
       </label>`;
@@ -266,12 +271,12 @@ function renderProductModal(helpers) {
       </header>
       <label class="orders-product-search">
         ${icon("icon-nav-search", "icon")}
-        <input type="search" data-product-search value="${escapeHtml(state.productSearch)}" placeholder="${escapeHtml(pageT(lang, "orders.modal.search"))}">
+        <input type="search" data-product-search data-orders-write value="${escapeHtml(state.productSearch)}" placeholder="${escapeHtml(pageT(lang, "orders.modal.search"))}"${writeAttributes}>
       </label>
       <div class="orders-product-list">${body || `<div class="orders-product-group">${escapeHtml(pageT(lang, "orders.empty"))}</div>`}</div>
       <footer class="orders-product-modal__footer">
         <button type="button" class="orders-secondary" data-product-modal-close>${escapeHtml(pageT(lang, "orders.cancel"))}</button>
-        <button type="button" class="orders-primary" data-product-modal-add>${escapeHtml(pageT(lang, "orders.modal.add"))}</button>
+        <button type="button" class="orders-primary" data-product-modal-add data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.modal.add"))}</button>
       </footer>
     </section>
   </div>`;
@@ -282,7 +287,7 @@ function renderCheckControl(key, value, helpers) {
   const checked = state.feesEnabled[key];
   return `<div class="orders-payment-check-row">
     <label class="orders-figma-check">
-      <input type="checkbox" data-fee-toggle="${key}"${checked ? " checked" : ""}>
+      <input type="checkbox" data-fee-toggle="${key}" data-orders-write${checked ? " checked" : ""}${writeAttributes}>
       <span class="orders-figma-check__box" aria-hidden="true"></span>
       <span>${escapeHtml(pageT(lang, `orders.${key}`))}</span>
     </label>
@@ -303,7 +308,7 @@ function renderPaymentBox(helpers, subtotal, totalAmount) {
     </div>
     <div class="orders-payment-line">
       <span>${escapeHtml(pageT(lang, "orders.shippingFee"))}</span>
-      <button type="button" class="orders-free-select">${escapeHtml(shippingFee === 0 ? pageT(lang, "orders.free") : formatMoney(shippingFee))}${icon("icon-arrow-down", "icon")}</button>
+      <button type="button" class="orders-free-select" data-orders-write${writeAttributes}>${escapeHtml(shippingFee === 0 ? pageT(lang, "orders.free") : formatMoney(shippingFee))}${icon("icon-arrow-down", "icon")}</button>
       <strong><span>HKD$</span>${escapeHtml(moneyValue(shippingFee))}</strong>
     </div>
     <div class="orders-payment-divider"></div>
@@ -382,7 +387,7 @@ function renderCustomerInfo(helpers) {
   return `<section class="orders-detail-card">
     <div class="orders-card-head">
       <h2 class="orders-card-title">${escapeHtml(pageT(lang, "orders.customer"))}</h2>
-      <button type="button" class="orders-primary orders-hug-small">${escapeHtml(pageT(lang, "orders.edit"))}</button>
+      <button type="button" class="orders-primary orders-hug-small" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.edit"))}</button>
     </div>
     <div class="orders-customer-info">
       <div class="orders-customer-line">
@@ -411,8 +416,8 @@ function renderTrackingCard(helpers) {
     <h2 class="orders-card-title">${escapeHtml(pageT(lang, "orders.trackingNo"))}</h2>
     <span class="orders-select-like">${escapeHtml(value)}</span>
     <div class="orders-card-actions orders-card-actions--end">
-      <button type="button" class="orders-secondary">${escapeHtml(pageT(lang, "orders.cancel"))}</button>
-      <button type="button" class="orders-primary">${escapeHtml(pageT(lang, "orders.confirmTracking"))}</button>
+      <button type="button" class="orders-secondary" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.cancel"))}</button>
+      <button type="button" class="orders-primary" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.confirmTracking"))}</button>
     </div>
   </section>`;
 }
@@ -434,7 +439,7 @@ function renderDetail(helpers) {
   const { escapeHtml, icon, lang } = helpers;
   if (!detailData) {
     const notFound = pageT(lang, "orders.notFound");
-    return `<div class="orders-workspace" data-orders-detail-page data-order-not-found>
+    return `<div class="orders-workspace" data-orders-detail-page data-live-read-only="${liveReadOnly}" data-order-not-found>
       <header class="orders-workspace__head">
         <nav class="orders-breadcrumb" aria-label="${escapeHtml(pageT(lang, "orders.root"))}">
           <a href="./orders.html">${escapeHtml(pageT(lang, "orders.root"))}</a>
@@ -450,7 +455,7 @@ function renderDetail(helpers) {
   const shippingStatus = shippingStatusLabel(detail.shippingStatus, lang);
   const shipped = detail.shippingStatus !== "unshipped";
   const { subtotal, paymentTotal } = currentTotals();
-  return `<div class="orders-workspace" data-orders-detail-page>
+  return `<div class="orders-workspace" data-orders-detail-page data-live-read-only="${liveReadOnly}">
     <header class="orders-workspace__head">
       <div>
         <nav class="orders-breadcrumb" aria-label="${escapeHtml(pageT(lang, "orders.root"))}">
@@ -470,12 +475,12 @@ function renderDetail(helpers) {
     <section class="orders-detail-card orders-shipping-card">
       <div class="orders-card-head">
         <span class="orders-chip orders-chip--shipping">${escapeHtml(shippingStatus)}</span>
-        <button type="button" class="orders-dark" data-product-modal-open>${icon("icon-add-line-add", "icon")}${escapeHtml(pageT(lang, "orders.addProduct"))}</button>
+        <button type="button" class="orders-dark" data-product-modal-open data-orders-write${writeAttributes}>${icon("icon-add-line-add", "icon")}${escapeHtml(pageT(lang, "orders.addProduct"))}</button>
       </div>
       ${renderLineRows(helpers)}
       <div class="orders-figma-total-row"><span>${escapeHtml(pageT(lang, "orders.total"))}</span><strong><span>HKD$</span>${escapeHtml(moneyValue(subtotal))}</strong></div>
       <div class="orders-card-actions orders-card-actions--end">
-        <button type="button" class="orders-primary">${escapeHtml(pageT(lang, "orders.markShipped"))}</button>
+        <button type="button" class="orders-primary" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.markShipped"))}</button>
       </div>
     </section>
 
@@ -485,8 +490,8 @@ function renderDetail(helpers) {
       </div>
       ${renderPaymentBox(helpers, subtotal, paymentTotal)}
       <div class="orders-card-actions orders-card-actions--end">
-        <button type="button" class="orders-secondary">${escapeHtml(pageT(lang, "orders.cancelChange"))}</button>
-        <button type="button" class="orders-primary">${escapeHtml(pageT(lang, "orders.saveChange"))}</button>
+        <button type="button" class="orders-secondary" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.cancelChange"))}</button>
+        <button type="button" class="orders-primary" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.saveChange"))}</button>
       </div>
     </section>
 
@@ -529,6 +534,7 @@ document.addEventListener("click", (event) => {
     printDialog.open(printableOrder(), printOpen.getAttribute("data-print-open"), printOpen);
     return;
   }
+  if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
   if (event.target.closest("[data-product-modal-open]")) {
     state.productModalOpen = true;
     rerender({ focusProductSearch: true });
@@ -555,6 +561,7 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("change", (event) => {
+  if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
   const option = event.target.closest("[data-product-option]");
   if (option) {
     const id = option.getAttribute("data-option-id");
@@ -570,6 +577,7 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("input", (event) => {
+  if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
   const search = event.target.closest("[data-product-search]");
   if (search) {
     state.productSearch = search.value;
@@ -582,6 +590,6 @@ document.addEventListener("keydown", (event) => {
 });
 
 window.__shellMenu = createBizflowMenu("orders");
-window.__shellData = { unread: await getUnread(), user: await getCurrentUser() };
+window.__shellData = { unread: await getUnread(), user: currentUser };
 window.__shellContent = renderDetail;
 await import("../shell/shell.js");

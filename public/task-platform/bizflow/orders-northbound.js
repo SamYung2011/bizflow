@@ -169,6 +169,10 @@ function safeColor(value) {
   return /^#[0-9a-f]{6}$/i.test(String(value || "")) ? value : LOCAL_STATUS_COLORS.at(-1);
 }
 
+function liveReadOnly() {
+  return currentHelpers?.liveReadOnly === true;
+}
+
 export function normalizeNorthboundStatusLabel(label) {
   const uniqueParts = [...new Set(String(label || "").split(/[,，]/).map((part) => part.trim()).filter(Boolean))];
   return uniqueParts.at(-1) ?? "";
@@ -248,9 +252,10 @@ function editValue(record, field) {
 
 function renderEditableCell(record, field, content, helpers, className = "") {
   const { escapeHtml, lang } = helpers;
-  const editing = state.edit?.rowId === record.id && state.edit.field === field;
+  const editing = !helpers.liveReadOnly && state.edit?.rowId === record.id && state.edit.field === field;
   if (!editing) {
-    return `<td class="northbound-cell ${className}" data-northbound-edit-cell data-row-id="${escapeHtml(record.id)}" data-field="${escapeHtml(field)}">${content}</td>`;
+    const editAttributes = helpers.liveReadOnly ? "" : ` data-northbound-edit-cell data-row-id="${escapeHtml(record.id)}" data-field="${escapeHtml(field)}"`;
+    return `<td class="northbound-cell ${className}"${editAttributes}>${content}</td>`;
   }
   if (field === "statusId") {
     return `<td class="northbound-cell ${className}" data-northbound-edit-active>
@@ -292,7 +297,7 @@ function renderRecord(record, helpers) {
     ${renderEditableCell(record, "hrpNo", escapeHtml(displayValue(record.hrpNo)), helpers)}
     ${renderEditableCell(record, "remarks", escapeHtml(displayValue(record.remarks)), helpers, "northbound-cell--long")}
     <td class="northbound-cell northbound-cell--nowrap">${escapeHtml(displayValue(record.createdAt))}</td>
-    <td class="northbound-cell"><button type="button" class="northbound-delete" data-northbound-delete="${escapeHtml(record.id)}">${escapeHtml(t(lang, "delete"))}</button></td>
+    <td class="northbound-cell"><button type="button" class="northbound-delete" data-northbound-delete="${escapeHtml(record.id)}" data-orders-write${helpers.liveReadOnly ? ' disabled aria-disabled="true"' : ""}>${escapeHtml(t(lang, "delete"))}</button></td>
   </tr>`;
 }
 
@@ -306,8 +311,8 @@ function renderFormField(key, type, helpers, wide = false) {
   return `<label class="northbound-form-field${wide ? " northbound-form-field--wide" : ""}">
     <span>${escapeHtml(t(lang, labelKey))}${key === "name" ? " *" : ""}</span>
     ${type === "textarea"
-      ? `<textarea rows="2" data-northbound-form-field="${escapeHtml(key)}">${escapeHtml(state.form[key] || "")}</textarea>`
-      : `<input type="${type}" data-northbound-form-field="${escapeHtml(key)}" value="${escapeHtml(state.form[key] || "")}">`}
+      ? `<textarea rows="2" data-northbound-form-field="${escapeHtml(key)}" data-orders-write${helpers.liveReadOnly ? ' disabled aria-disabled="true"' : ""}>${escapeHtml(state.form[key] || "")}</textarea>`
+      : `<input type="${type}" data-northbound-form-field="${escapeHtml(key)}" data-orders-write value="${escapeHtml(state.form[key] || "")}"${helpers.liveReadOnly ? ' disabled aria-disabled="true"' : ""}>`}
   </label>`;
 }
 
@@ -334,21 +339,21 @@ function renderModal(helpers) {
           ${renderFormField("remarks", "textarea", helpers, true)}
           <label class="northbound-form-field northbound-form-field--wide">
             <span>${escapeHtml(t(lang, "status"))}</span>
-            <select data-northbound-form-field="statusId">
+            <select data-northbound-form-field="statusId" data-orders-write${helpers.liveReadOnly ? ' disabled aria-disabled="true"' : ""}>
               <option value="">${escapeHtml(t(lang, "noStatus"))}</option>
               ${normalizedStatuses().map((status) => `<option value="${escapeHtml(status.id)}"${normalizedStatusById(state.form.statusId)?.key === status.key ? " selected" : ""}>${escapeHtml(status.label)}</option>`).join("")}
             </select>
           </label>
           <div class="northbound-new-status northbound-form-field--wide">
-            <input type="text" data-northbound-new-status value="${escapeHtml(state.newStatusLabel)}" placeholder="${escapeHtml(t(lang, "newStatusPlaceholder"))}">
-            <button type="button" data-northbound-create-status>${escapeHtml(t(lang, "newStatus"))}</button>
+            <input type="text" data-northbound-new-status data-orders-write value="${escapeHtml(state.newStatusLabel)}" placeholder="${escapeHtml(t(lang, "newStatusPlaceholder"))}"${helpers.liveReadOnly ? ' disabled aria-disabled="true"' : ""}>
+            <button type="button" data-northbound-create-status data-orders-write${helpers.liveReadOnly ? ' disabled aria-disabled="true"' : ""}>${escapeHtml(t(lang, "newStatus"))}</button>
           </div>
         </div>
         ${state.formError ? `<p class="northbound-form-error">${escapeHtml(state.formError)}</p>` : ""}
       </div>
       <footer class="northbound-modal__footer">
         <button type="button" class="northbound-secondary" data-northbound-modal-close>${escapeHtml(t(lang, "cancel"))}</button>
-        <button type="submit" class="northbound-primary">${escapeHtml(t(lang, "save"))}</button>
+        <button type="submit" class="northbound-primary" data-orders-write${helpers.liveReadOnly ? ' disabled aria-disabled="true"' : ""}>${escapeHtml(t(lang, "save"))}</button>
       </footer>
     </form>
   </div>`;
@@ -371,10 +376,10 @@ export function renderNorthbound(helpers) {
   const filtered = filteredRecords();
   const visible = filtered.slice(0, state.visibleLimit);
   const counts = statusCounts();
-  return `<section class="orders-domain-panel northbound-page" data-northbound-page data-record-count="${state.records.length}" data-visible-count="${filtered.length}">
+  return `<section class="orders-domain-panel northbound-page" data-northbound-page data-live-read-only="${helpers.liveReadOnly === true}" data-record-count="${state.records.length}" data-visible-count="${filtered.length}">
     <header class="orders-domain-panel__head">
       <div><h2>${escapeHtml(t(lang, "title"))}</h2><p>${escapeHtml(t(lang, "description"))}</p></div>
-      <button type="button" class="orders-domain-primary" data-northbound-add>${icon("icon-add-line-add", "icon")}<span>${escapeHtml(t(lang, "add"))}</span></button>
+      <button type="button" class="orders-domain-primary" data-northbound-add data-orders-write${helpers.liveReadOnly ? ' disabled aria-disabled="true"' : ""}>${icon("icon-add-line-add", "icon")}<span>${escapeHtml(t(lang, "add"))}</span></button>
     </header>
     <div class="northbound-toolbar">
       <label class="northbound-search">${icon("icon-nav-search", "icon")}<input type="search" data-northbound-search value="${escapeHtml(state.search)}" placeholder="${escapeHtml(t(lang, "search"))}"></label>
@@ -403,6 +408,7 @@ export function renderNorthbound(helpers) {
 }
 
 function commitInlineEdit() {
+  if (liveReadOnly()) return;
   if (!state.edit) return;
   const { rowId, field } = state.edit;
   const record = state.records.find((item) => item.id === rowId);
@@ -421,6 +427,7 @@ function commitInlineEdit() {
 }
 
 function openModal() {
+  if (liveReadOnly()) return;
   modalReturnFocus = document.activeElement;
   state.form = emptyForm();
   state.formError = "";
@@ -443,6 +450,7 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
   attached = true;
 
   document.addEventListener("click", (event) => {
+    if (liveReadOnly() && event.target.closest("[data-orders-write]")) return;
     if (event.target.closest("[data-northbound-add]")) return openModal();
     if (event.target.closest("[data-northbound-modal-close]") || event.target.matches("[data-northbound-modal-overlay]")) return closeModal();
     if (event.target.closest("[data-northbound-load-more]")) {
@@ -485,6 +493,7 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
   });
 
   document.addEventListener("dblclick", (event) => {
+    if (liveReadOnly()) return;
     const cell = event.target.closest("[data-northbound-edit-cell]");
     if (!cell) return;
     state.edit = { rowId: cell.getAttribute("data-row-id"), field: cell.getAttribute("data-field") };
@@ -506,9 +515,9 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
       return;
     }
     const formField = event.target.closest("[data-northbound-form-field]");
-    if (formField) state.form[formField.getAttribute("data-northbound-form-field")] = formField.value;
+    if (formField && !liveReadOnly()) state.form[formField.getAttribute("data-northbound-form-field")] = formField.value;
     const newStatus = event.target.closest("[data-northbound-new-status]");
-    if (newStatus) state.newStatusLabel = newStatus.value;
+    if (newStatus && !liveReadOnly()) state.newStatusLabel = newStatus.value;
   });
 
   document.addEventListener("change", (event) => {
@@ -520,9 +529,9 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
       return;
     }
     const inlineStatus = event.target.closest('[data-northbound-inline-input][data-field="statusId"]');
-    if (inlineStatus) commitInlineEdit();
+    if (inlineStatus && !liveReadOnly()) commitInlineEdit();
     const formField = event.target.closest("[data-northbound-form-field]");
-    if (formField) state.form[formField.getAttribute("data-northbound-form-field")] = formField.value;
+    if (formField && !liveReadOnly()) state.form[formField.getAttribute("data-northbound-form-field")] = formField.value;
   });
 
   document.addEventListener("keydown", (event) => {
@@ -532,6 +541,7 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
       return;
     }
     if (!event.target.closest("[data-northbound-inline-input]")) return;
+    if (liveReadOnly()) return;
     if (event.key === "Escape") {
       event.preventDefault();
       state.edit = null;
@@ -544,7 +554,7 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
 
   document.addEventListener("focusout", (event) => {
     const input = event.target.closest("[data-northbound-inline-input]");
-    if (!input || !state.edit) return;
+    if (!input || !state.edit || liveReadOnly()) return;
     const activeEdit = state.edit;
     setTimeout(() => {
       if (state.edit !== activeEdit) return;
@@ -557,6 +567,7 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
   document.addEventListener("submit", (event) => {
     if (!event.target.matches("[data-northbound-form]")) return;
     event.preventDefault();
+    if (liveReadOnly()) return;
     if (!String(state.form.name || "").trim()) {
       state.formError = t(currentHelpers?.lang, "requiredName");
       rerender();
