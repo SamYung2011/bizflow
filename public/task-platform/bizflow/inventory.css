@@ -263,6 +263,18 @@ img.inventory-detail-image {
   font-weight: var(--font-description-weight);
 }
 
+.inventory-product-card--low-stock .inventory-stock-count {
+  color: var(--red);
+}
+
+.inventory-page[data-live-read-only="true"] [data-inventory-write]:disabled,
+.inventory-page[data-live-read-only="true"] [data-inventory-write][aria-disabled="true"],
+.inventory-detail-page[data-live-read-only="true"] [data-inventory-write]:disabled,
+.inventory-detail-page[data-live-read-only="true"] [data-inventory-write][aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
 .inventory-status-chip {
   display: inline-flex;
   flex: none;

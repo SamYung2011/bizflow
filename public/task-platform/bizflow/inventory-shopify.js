@@ -115,6 +115,11 @@ const state = {
 let rerender = () => {};
 let currentProducts = [];
 let attached = false;
+let liveReadOnly = false;
+
+function writeAttributes(disabled = liveReadOnly) {
+  return disabled ? ' disabled aria-disabled="true"' : "";
+}
 
 function t(lang, key) {
   return copy[lang]?.[key] ?? copy.zh[key] ?? key;
@@ -184,12 +189,12 @@ function renderVariant(variant, helpers) {
   const { escapeHtml, lang } = helpers;
   const chips = variant.links.map((link) => `<span class="shopify-link-chip" data-shopify-link-chip="${escapeHtml(link.id)}">
     <span title="${escapeHtml(link.bizflowProductName || link.bizflowProductId)}">${escapeHtml(link.bizflowProductName || link.bizflowProductId)} ×${escapeHtml(String(link.qty))}</span>
-    <button type="button" data-shopify-unlink="${escapeHtml(link.id)}" aria-label="${escapeHtml(t(lang, "unlink"))}" title="${escapeHtml(t(lang, "unlink"))}">×</button>
+    <button type="button" data-shopify-unlink="${escapeHtml(link.id)}" data-inventory-write aria-label="${escapeHtml(t(lang, "unlink"))}" title="${escapeHtml(t(lang, "unlink"))}"${writeAttributes()}>×</button>
   </span>`).join("");
   return `<div class="shopify-variant-row" data-shopify-variant="${escapeHtml(variant.shopifyVariantId)}">
     <div><strong>${escapeHtml(t(lang, "variant"))} ${escapeHtml(suffix(variant.shopifyVariantId))}</strong><span>${escapeHtml(t(lang, "sku"))}: ${escapeHtml(variant.shopifySku || "—")}</span></div>
     <div class="shopify-variant-row__links">${chips}</div>
-    <button type="button" class="inventory-domain-button inventory-domain-button--small inventory-domain-button--secondary" data-shopify-link data-variant-id="${escapeHtml(variant.shopifyVariantId)}" data-product-id="${escapeHtml(variant.shopifyProductId)}" data-sku="${escapeHtml(variant.shopifySku)}">+ ${escapeHtml(t(lang, "link"))}</button>
+    <button type="button" class="inventory-domain-button inventory-domain-button--small inventory-domain-button--secondary" data-shopify-link data-inventory-write data-variant-id="${escapeHtml(variant.shopifyVariantId)}" data-product-id="${escapeHtml(variant.shopifyProductId)}" data-sku="${escapeHtml(variant.shopifySku)}"${writeAttributes()}>+ ${escapeHtml(t(lang, "link"))}</button>
   </div>`;
 }
 
@@ -222,20 +227,21 @@ function renderLinkModal(helpers) {
       <header><h2>${escapeHtml(t(lang, "linkTitle"))}</h2><button type="button" data-shopify-close aria-label="${escapeHtml(t(lang, "close"))}">×</button></header>
       <div class="inventory-domain-modal__body">
         <p class="inventory-domain-hint">${escapeHtml(t(lang, "variant"))}: ${escapeHtml(suffix(state.modal.variantId))}</p>
-        <label class="inventory-domain-search inventory-domain-search--wide">${icon("icon-nav-search", "icon")}<input type="search" data-shopify-product-search value="${escapeHtml(state.productSearch)}" placeholder="${escapeHtml(t(lang, "findProduct"))}"></label>
-        <div class="shopify-product-options">${products.map((product) => `<button type="button" class="shopify-product-option${product.id === state.selectedProductId ? " is-selected" : ""}" data-shopify-product-option="${escapeHtml(product.id)}"><span title="${escapeHtml(product.name)}">${escapeHtml(product.name)}</span><small>${escapeHtml(product.category || "—")}</small></button>`).join("")}</div>
+        <label class="inventory-domain-search inventory-domain-search--wide">${icon("icon-nav-search", "icon")}<input type="search" data-shopify-product-search data-inventory-write value="${escapeHtml(state.productSearch)}" placeholder="${escapeHtml(t(lang, "findProduct"))}"${writeAttributes()}></label>
+        <div class="shopify-product-options">${products.map((product) => `<button type="button" class="shopify-product-option${product.id === state.selectedProductId ? " is-selected" : ""}" data-shopify-product-option="${escapeHtml(product.id)}" data-inventory-write${writeAttributes()}><span title="${escapeHtml(product.name)}">${escapeHtml(product.name)}</span><small>${escapeHtml(product.category || "—")}</small></button>`).join("")}</div>
         <div class="shopify-link-selection"><span>${escapeHtml(t(lang, "selected"))}</span><strong>${escapeHtml(selected?.name || "—")}</strong></div>
-        <label class="inventory-domain-field"><span>${escapeHtml(t(lang, "quantity"))}</span><input type="number" min="1" data-shopify-link-qty value="${escapeHtml(String(state.qty))}"></label>
+        <label class="inventory-domain-field"><span>${escapeHtml(t(lang, "quantity"))}</span><input type="number" min="1" data-shopify-link-qty data-inventory-write value="${escapeHtml(String(state.qty))}"${writeAttributes()}></label>
       </div>
-      <footer><button type="button" class="inventory-domain-button inventory-domain-button--secondary" data-shopify-close>${escapeHtml(t(lang, "cancel"))}</button><button type="submit" class="inventory-domain-button"${selected ? "" : " disabled"}>${escapeHtml(t(lang, "confirm"))}</button></footer>
+      <footer><button type="button" class="inventory-domain-button inventory-domain-button--secondary" data-shopify-close>${escapeHtml(t(lang, "cancel"))}</button><button type="submit" class="inventory-domain-button" data-inventory-write${writeAttributes(liveReadOnly || !selected)}>${escapeHtml(t(lang, "confirm"))}</button></footer>
     </form>
   </div>`;
 }
 
 export function renderShopify(helpers, products) {
+  liveReadOnly = helpers.liveReadOnly === true;
   currentProducts = products;
   if (!state.loaded) return `<div class="inventory-domain-empty">${helpers.escapeHtml(t(helpers.lang, "loading"))}</div>`;
-  return `<section class="inventory-domain-page shopify-page" data-shopify-page>${renderSettings(helpers)}${renderAssociations(helpers)}${renderLinkModal(helpers)}</section>`;
+  return `<section class="inventory-domain-page shopify-page" data-shopify-page data-live-read-only="${liveReadOnly}">${renderSettings(helpers)}${renderAssociations(helpers)}${renderLinkModal(helpers)}</section>`;
 }
 
 function closeModal() {
@@ -251,6 +257,7 @@ export function attachShopifyBehaviors({ rerender: nextRerender }) {
   if (attached) return;
   attached = true;
   document.addEventListener("click", (event) => {
+    if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     const group = event.target.closest("[data-shopify-group]");
     if (group) {
       const id = group.getAttribute("data-shopify-group");
@@ -284,6 +291,7 @@ export function attachShopifyBehaviors({ rerender: nextRerender }) {
     if (event.target.closest("[data-shopify-close]") || event.target.matches("[data-shopify-overlay]")) closeModal();
   });
   document.addEventListener("input", (event) => {
+    if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     const search = event.target.closest("[data-shopify-search]");
     if (search) {
       state.search = search.value;
@@ -304,6 +312,7 @@ export function attachShopifyBehaviors({ rerender: nextRerender }) {
   document.addEventListener("submit", (event) => {
     if (!event.target.matches("[data-shopify-link-form]") || !state.modal || !state.selectedProductId) return;
     event.preventDefault();
+    if (liveReadOnly) return;
     const product = currentProducts.find((item) => item.id === state.selectedProductId);
     if (!product) return;
     const existing = state.links.find((item) => item.shopifyVariantId === state.modal.variantId && item.bizflowProductId === product.id);

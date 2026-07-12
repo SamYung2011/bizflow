@@ -95,6 +95,11 @@ const state = {
 
 let rerender = () => {};
 let attached = false;
+let liveReadOnly = false;
+
+function writeAttributes() {
+  return liveReadOnly ? ' disabled aria-disabled="true"' : "";
+}
 
 function t(lang, key) {
   return copy[lang]?.[key] ?? copy.zh[key] ?? key;
@@ -138,7 +143,7 @@ function renderCard(supplier, helpers) {
     ${supplier.contactPerson ? `<div class="supplier-card__contact">${icon("icon-nav-user", "icon")}<span>${escapeHtml(t(lang, "contact"))}: ${escapeHtml(supplier.contactPerson)}</span></div>` : ""}
     ${contactUrl ? `<a class="supplier-card__link" href="${escapeHtml(contactUrl)}" target="_blank" rel="noopener noreferrer">${icon("icon-arrow-right", "icon")}<span>${escapeHtml(t(lang, "openContact"))}</span></a>` : ""}
     ${supplier.note ? `<p>${escapeHtml(supplier.note)}</p>` : ""}
-    <div class="supplier-card__actions"><button type="button" data-supplier-edit="${escapeHtml(supplier.id)}">${icon("icon-edit-default", "icon")}<span>${escapeHtml(t(lang, "edit"))}</span></button><button type="button" data-supplier-delete="${escapeHtml(supplier.id)}" aria-label="${escapeHtml(t(lang, "remove"))}" title="${escapeHtml(t(lang, "remove"))}">×</button></div>
+    <div class="supplier-card__actions"><button type="button" data-supplier-edit="${escapeHtml(supplier.id)}" data-inventory-write${writeAttributes()}>${icon("icon-edit-default", "icon")}<span>${escapeHtml(t(lang, "edit"))}</span></button><button type="button" data-supplier-delete="${escapeHtml(supplier.id)}" data-inventory-write aria-label="${escapeHtml(t(lang, "remove"))}" title="${escapeHtml(t(lang, "remove"))}"${writeAttributes()}>×</button></div>
   </article>`;
 }
 
@@ -146,7 +151,7 @@ function renderModal(helpers) {
   if (!state.draft) return "";
   const { escapeHtml, lang } = helpers;
   const draft = state.draft;
-  const field = (key, type = "input") => `<label class="inventory-domain-field"><span>${escapeHtml(t(lang, key))}${key === "name" ? " *" : ""}</span>${type === "textarea" ? `<textarea data-supplier-field="${key}">${escapeHtml(draft[key])}</textarea>` : `<input data-supplier-field="${key}" value="${escapeHtml(draft[key])}">`}</label>`;
+  const field = (key, type = "input") => `<label class="inventory-domain-field"><span>${escapeHtml(t(lang, key))}${key === "name" ? " *" : ""}</span>${type === "textarea" ? `<textarea data-supplier-field="${key}" data-inventory-write${writeAttributes()}>${escapeHtml(draft[key])}</textarea>` : `<input data-supplier-field="${key}" data-inventory-write value="${escapeHtml(draft[key])}"${writeAttributes()}>`}</label>`;
   return `<div class="inventory-domain-overlay" data-supplier-overlay>
     <form class="inventory-domain-modal" data-supplier-form role="dialog" aria-modal="true" aria-label="${escapeHtml(t(lang, draft.id ? "editTitle" : "newTitle"))}">
       <header><h2>${escapeHtml(t(lang, draft.id ? "editTitle" : "newTitle"))}</h2><button type="button" data-supplier-close aria-label="${escapeHtml(t(lang, "close"))}">×</button></header>
@@ -159,18 +164,19 @@ function renderModal(helpers) {
         ${field("note", "textarea")}
         ${state.error ? `<p class="inventory-domain-error">${escapeHtml(state.error)}</p>` : ""}
       </div>
-      <footer><button type="button" class="inventory-domain-button inventory-domain-button--secondary" data-supplier-close>${escapeHtml(t(lang, "cancel"))}</button><button type="submit" class="inventory-domain-button">${escapeHtml(t(lang, "save"))}</button></footer>
+      <footer><button type="button" class="inventory-domain-button inventory-domain-button--secondary" data-supplier-close>${escapeHtml(t(lang, "cancel"))}</button><button type="submit" class="inventory-domain-button" data-inventory-write${writeAttributes()}>${escapeHtml(t(lang, "save"))}</button></footer>
     </form>
   </div>`;
 }
 
 export function renderSuppliers(helpers) {
+  liveReadOnly = helpers.liveReadOnly === true;
   const { escapeHtml, icon, lang } = helpers;
   if (!state.loaded) return `<div class="inventory-domain-empty">${escapeHtml(t(lang, "loading"))}</div>`;
   const supplierCategories = categories();
   const suppliers = filteredSuppliers();
-  return `<section class="inventory-domain-page suppliers-page" data-suppliers-page data-supplier-count="${state.suppliers.length}">
-    <div class="inventory-domain-heading"><h2>${escapeHtml(t(lang, "title"))}<span>${escapeHtml(`${state.suppliers.length} ${t(lang, "count")}`)}</span></h2><button type="button" class="inventory-domain-button" data-supplier-new>+ ${escapeHtml(t(lang, "add"))}</button></div>
+  return `<section class="inventory-domain-page suppliers-page" data-suppliers-page data-live-read-only="${liveReadOnly}" data-supplier-count="${state.suppliers.length}">
+    <div class="inventory-domain-heading"><h2>${escapeHtml(t(lang, "title"))}<span>${escapeHtml(`${state.suppliers.length} ${t(lang, "count")}`)}</span></h2><button type="button" class="inventory-domain-button" data-supplier-new data-inventory-write${writeAttributes()}>+ ${escapeHtml(t(lang, "add"))}</button></div>
     <label class="inventory-domain-search inventory-domain-search--wide">${icon("icon-nav-search", "icon")}<input type="search" data-supplier-search value="${escapeHtml(state.search)}" placeholder="${escapeHtml(t(lang, "search"))}"></label>
     ${supplierCategories.length ? `<div class="supplier-categories"><button type="button" class="${state.category === "all" ? "is-active" : ""}" data-supplier-category="all">${escapeHtml(t(lang, "all"))}</button>${supplierCategories.map((category) => `<button type="button" class="${state.category === category ? "is-active" : ""}" data-supplier-category="${escapeHtml(category)}">${escapeHtml(category)}</button>`).join("")}</div>` : ""}
     ${suppliers.length ? `<div class="supplier-grid">${suppliers.map((supplier) => renderCard(supplier, helpers)).join("")}</div>` : `<div class="inventory-domain-empty inventory-domain-empty--card">${escapeHtml(state.suppliers.length ? t(lang, "noMatch") : t(lang, "empty"))}</div>`}
@@ -193,6 +199,7 @@ export function attachSupplierBehaviors({ rerender: nextRerender }) {
   if (attached) return;
   attached = true;
   document.addEventListener("click", (event) => {
+    if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     if (event.target.closest("[data-supplier-new]")) {
       state.draft = blankSupplier();
       rerender();
@@ -221,6 +228,7 @@ export function attachSupplierBehaviors({ rerender: nextRerender }) {
     if (event.target.closest("[data-supplier-close]") || event.target.matches("[data-supplier-overlay]")) closeModal();
   });
   document.addEventListener("input", (event) => {
+    if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     const search = event.target.closest("[data-supplier-search]");
     if (search) {
       state.search = search.value;
@@ -237,6 +245,7 @@ export function attachSupplierBehaviors({ rerender: nextRerender }) {
   document.addEventListener("submit", (event) => {
     if (!event.target.matches("[data-supplier-form]") || !state.draft) return;
     event.preventDefault();
+    if (liveReadOnly) return;
     const name = state.draft.name.trim();
     if (!name) {
       state.error = t(currentLang(), "required");

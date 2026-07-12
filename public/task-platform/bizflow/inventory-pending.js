@@ -58,6 +58,7 @@ const state = {
 
 let rerender = () => {};
 let attached = false;
+let liveReadOnly = false;
 
 function t(lang, key) {
   return copy[lang]?.[key] ?? copy.zh[key] ?? key;
@@ -100,11 +101,12 @@ function renderInvoice(invoice, helpers) {
       <div class="pending-deduction-row__customer"><strong title="${escapeHtml(invoice.customer)}">${escapeHtml(invoice.customer)}</strong><span>${escapeHtml(invoice.phone)}</span><span>${escapeHtml(invoice.date)}</span></div>
       <div class="pending-deduction-row__items">${invoice.items.slice(0, 2).map((item) => `<span title="${escapeHtml(item.name)}">${escapeHtml(item.name)} ×${escapeHtml(String(item.qty))}</span>`).join("")}</div>
     </div>
-    <div class="pending-deduction-row__tail"><strong>HKD$ ${escapeHtml(Number(invoice.amount).toLocaleString("en-US"))}</strong><div><button type="button" class="inventory-domain-button inventory-domain-button--small" data-pending-review="${escapeHtml(invoice.orderNo)}">${escapeHtml(t(lang, "review"))}</button><button type="button" class="inventory-domain-button inventory-domain-button--small inventory-domain-button--danger" data-pending-dismiss="${escapeHtml(invoice.orderNo)}">${escapeHtml(t(lang, "dismiss"))}</button></div></div>
+    <div class="pending-deduction-row__tail"><strong>HKD$ ${escapeHtml(Number(invoice.amount).toLocaleString("en-US"))}</strong><div><button type="button" class="inventory-domain-button inventory-domain-button--small" data-pending-review="${escapeHtml(invoice.orderNo)}" data-inventory-write${liveReadOnly ? ' disabled aria-disabled="true"' : ""}>${escapeHtml(t(lang, "review"))}</button><button type="button" class="inventory-domain-button inventory-domain-button--small inventory-domain-button--danger" data-pending-dismiss="${escapeHtml(invoice.orderNo)}" data-inventory-write${liveReadOnly ? ' disabled aria-disabled="true"' : ""}>${escapeHtml(t(lang, "dismiss"))}</button></div></div>
   </article>`;
 }
 
 export function renderPendingDeduction(helpers) {
+  liveReadOnly = helpers.liveReadOnly === true;
   const { escapeHtml, icon, lang } = helpers;
   if (!state.loaded) return `<div class="inventory-domain-empty">${escapeHtml(t(lang, "loading"))}</div>`;
   const content = state.invoices.length
@@ -118,6 +120,7 @@ export function renderPendingDeduction(helpers) {
 }
 
 function removeInvoice(orderNo) {
+  if (liveReadOnly) return;
   state.invoices = state.invoices.filter((invoice) => invoice.orderNo !== orderNo);
   rerender();
 }
@@ -127,6 +130,7 @@ export function attachPendingDeductionBehaviors({ rerender: nextRerender }) {
   if (attached) return;
   attached = true;
   document.addEventListener("click", (event) => {
+    if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     const review = event.target.closest("[data-pending-review]");
     if (review && window.confirm(t(currentLang(), "reviewConfirm"))) {
       // Local-only demonstration. Production deduction and audit writes require the future API.

@@ -129,11 +129,14 @@ const dict = {
   }
 };
 
-const [data, , unreadWatermarks] = await Promise.all([
+const [data, , unreadWatermarks, currentUser] = await Promise.all([
   getInventoryPageData(),
   ensurePendingDeductionData(),
-  getUnreadWatermarks()
+  getUnreadWatermarks(),
+  getCurrentUser()
 ]);
+const liveReadOnly = typeof currentUser?.hasPermission === "function";
+const writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
 markRead("inventory", unreadWatermarks.inventory);
 const presetSearch = consumeNavigationPreset(navigationPresetKeys.inventorySearch) ?? "";
 const tabs = ["products", "itemMap", "shopify", "suppliers", "pending"];
@@ -249,13 +252,15 @@ function renderToolbar(helpers) {
 function renderProductCard(product, helpers) {
   const { escapeHtml, lang } = helpers;
   const inactive = product.status === "draft" || product.status === "discontinued";
+  // Mirrors bizflow Products.jsx lowStockSkus and the Dashboard threshold used by order-metrics.js.
+  const lowStock = product.status !== "discontinued" && Number(product.stock) < 50;
   const statusLabel = pageT(lang, `inventory.status.${product.status}`);
   const image = product.imageUrl
     ? `<img class="inventory-thumb" src="${escapeHtml(product.imageUrl)}" alt="" loading="lazy">`
     : `<span class="inventory-thumb" aria-hidden="true"></span>`;
   const tag = product.localOnly ? "article" : "button";
   const attributes = product.localOnly ? ' data-local-product aria-disabled="true"' : ` type="button" data-inventory-product data-product-id="${escapeHtml(product.id)}"`;
-  return `<${tag} class="management-list__row inventory-product-card"${attributes} title="${escapeHtml(product.name)}">
+  return `<${tag} class="management-list__row inventory-product-card${lowStock ? " inventory-product-card--low-stock" : ""}"${attributes} data-low-stock="${lowStock}" title="${escapeHtml(product.name)}">
     ${image}
     <span class="inventory-product-main">
       <span class="inventory-product-name" title="${escapeHtml(product.name)}">${escapeHtml(product.name)}</span>
@@ -265,7 +270,7 @@ function renderProductCard(product, helpers) {
       <span class="inventory-stock-label">${escapeHtml(pageT(lang, "inventory.stock"))}</span>
       <span class="inventory-stock-count">${escapeHtml(String(product.stock))}</span>
     </span>
-    <span class="inventory-status-chip${inactive ? " inventory-status-chip--draft" : ""}" title="${escapeHtml(statusLabel)}">${escapeHtml(statusLabel)}</span>
+    <span class="inventory-status-chip${inactive ? " inventory-status-chip--draft" : ""}" data-inventory-write aria-disabled="${liveReadOnly}" title="${escapeHtml(statusLabel)}">${escapeHtml(statusLabel)}</span>
   </${tag}>`;
 }
 
@@ -289,29 +294,29 @@ function renderAddProductModal(helpers) {
         <div class="inventory-modal-grid">
           <label class="inventory-modal-field inventory-modal-field--wide">
             <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.name"))}</span>
-            <input class="inventory-modal-input" name="name" data-inventory-add-name required>
+            <input class="inventory-modal-input" name="name" data-inventory-add-name data-inventory-write required${writeAttributes}>
           </label>
           <label class="inventory-modal-field">
             <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.category"))}</span>
-            <select class="inventory-modal-input" name="category" required>${categoryOptionsHtml}</select>
+            <select class="inventory-modal-input" name="category" data-inventory-write required${writeAttributes}>${categoryOptionsHtml}</select>
           </label>
           <label class="inventory-modal-field">
             <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.price"))}</span>
-            <input class="inventory-modal-input" name="price" type="number" min="0" step="0.01" required>
+            <input class="inventory-modal-input" name="price" type="number" min="0" step="0.01" data-inventory-write required${writeAttributes}>
           </label>
           <label class="inventory-modal-field">
             <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.specs"))}</span>
-            <input class="inventory-modal-input" name="specs">
+            <input class="inventory-modal-input" name="specs" data-inventory-write${writeAttributes}>
           </label>
           <label class="inventory-modal-field">
             <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.warranty"))}</span>
-            <input class="inventory-modal-input" name="warrantyMonths" type="number" min="0" step="1" required>
+            <input class="inventory-modal-input" name="warrantyMonths" type="number" min="0" step="1" data-inventory-write required${writeAttributes}>
           </label>
         </div>
       </div>
       <div class="inventory-subitem-modal__footer">
         <button type="button" class="inventory-modal-cancel" data-inventory-add-close>${escapeHtml(pageT(lang, "inventory.addModal.cancel"))}</button>
-        <button type="submit" class="inventory-modal-confirm">${escapeHtml(pageT(lang, "inventory.addModal.confirm"))}</button>
+        <button type="submit" class="inventory-modal-confirm" data-inventory-write${writeAttributes}>${escapeHtml(pageT(lang, "inventory.addModal.confirm"))}</button>
       </div>
     </form>
   </div>`;
@@ -346,10 +351,11 @@ function renderProductsPanel(helpers) {
 }
 
 function renderPanel(helpers) {
-  if (state.tab === "itemMap") return renderItemMap(helpers, data.mappingProducts);
-  if (state.tab === "shopify") return renderShopify(helpers, data.mappingProducts);
-  if (state.tab === "suppliers") return renderSuppliers(helpers);
-  if (state.tab === "pending") return renderPendingDeduction(helpers);
+  const domainHelpers = { ...helpers, liveReadOnly };
+  if (state.tab === "itemMap") return renderItemMap(domainHelpers, data.mappingProducts);
+  if (state.tab === "shopify") return renderShopify(domainHelpers, data.mappingProducts);
+  if (state.tab === "suppliers") return renderSuppliers(domainHelpers);
+  if (state.tab === "pending") return renderPendingDeduction(domainHelpers);
   return renderProductsPanel(helpers);
 }
 
@@ -358,10 +364,10 @@ export function renderInventory(helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const pages = totalPages();
   state.page = Math.min(Math.max(state.page, 1), pages);
-  return `<div class="inventory-page" data-node-id="676:99455" data-inventory-page data-tab="${escapeHtml(state.tab)}" data-category-open="${state.categoryOpen}" data-current-page="${state.page}">
+  return `<div class="inventory-page" data-node-id="676:99455" data-inventory-page data-live-read-only="${liveReadOnly}" data-tab="${escapeHtml(state.tab)}" data-category-open="${state.categoryOpen}" data-current-page="${state.page}">
     <header class="inventory-head">
       <h1 class="inventory-title" title="${escapeHtml(pageT(lang, "inventory.title"))}">${escapeHtml(pageT(lang, "inventory.title"))}</h1>
-      ${state.tab === "products" ? `<button type="button" class="inventory-primary-btn" data-inventory-add title="${escapeHtml(pageT(lang, "inventory.add"))}">
+      ${state.tab === "products" ? `<button type="button" class="inventory-primary-btn" data-inventory-add data-inventory-write title="${escapeHtml(pageT(lang, "inventory.add"))}"${writeAttributes}>
         ${icon("icon-add-line-add", "icon")}
         <span>${escapeHtml(pageT(lang, "inventory.add"))}</span>
       </button>` : ""}
@@ -405,6 +411,7 @@ function closeCategoryMenu() {
 }
 
 document.addEventListener("click", (event) => {
+  if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
   if (event.target.closest("[data-inventory-add]")) {
     state.addModalOpen = true;
     state.categoryOpen = false;
@@ -493,6 +500,7 @@ document.addEventListener("submit", (event) => {
   const form = event.target.closest("[data-inventory-add-form]");
   if (!form) return;
   event.preventDefault();
+  if (liveReadOnly) return;
   const values = new FormData(form);
   const name = String(values.get("name") || "").trim();
   const category = String(values.get("category") || "");
@@ -526,6 +534,6 @@ attachSupplierBehaviors({ rerender: rerenderInventoryPage });
 attachPendingDeductionBehaviors({ rerender: rerenderInventoryPage });
 
 window.__shellMenu = createBizflowMenu("inventory");
-window.__shellData = { unread: await getUnread(), user: await getCurrentUser() };
+window.__shellData = { unread: await getUnread(), user: currentUser };
 window.__shellContent = renderInventory;
 await import("../shell/shell.js");

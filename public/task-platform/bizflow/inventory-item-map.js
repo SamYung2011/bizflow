@@ -125,6 +125,11 @@ const state = {
 let rerender = () => {};
 let currentProducts = [];
 let attached = false;
+let liveReadOnly = false;
+
+function writeAttributes(disabled = liveReadOnly) {
+  return disabled ? ' disabled aria-disabled="true"' : "";
+}
 
 function t(lang, key, values = {}) {
   const template = copy[lang]?.[key] ?? copy.zh[key] ?? key;
@@ -225,7 +230,7 @@ function renderUnmatched(helpers) {
   const rows = items.slice(0, 50).map(([name, count]) => `<div class="item-map-unmatched__row">
     <span title="${escapeHtml(name)}">${escapeHtml(name)}</span>
     <span>${escapeHtml(`${count} ${t(lang, "occurrences")}`)}</span>
-    <button type="button" class="inventory-domain-button inventory-domain-button--small" data-item-map-new data-alias-name="${escapeHtml(name)}">+ ${escapeHtml(t(lang, "map"))}</button>
+    <button type="button" class="inventory-domain-button inventory-domain-button--small" data-item-map-new data-inventory-write data-alias-name="${escapeHtml(name)}"${writeAttributes()}>+ ${escapeHtml(t(lang, "map"))}</button>
   </div>`).join("");
   return `<section class="item-map-unmatched" data-item-map-unmatched-count="${items.length}">
     <h2>${escapeHtml(t(lang, "unmatched"))}<span>${escapeHtml(String(items.length))}</span></h2>
@@ -242,9 +247,9 @@ function renderAliasRow(alias, helpers) {
     <div class="item-map-row__name"><strong title="${escapeHtml(alias.aliasName)}">${escapeHtml(alias.aliasName)}</strong>${alias.verified ? "" : `<span>${escapeHtml(t(lang, "pendingCheck"))}</span>`}${mapped ? `<small title="${escapeHtml(mapped)}">${escapeHtml(mapped)}</small>` : ""}</div>
     <span class="item-map-row__note" title="${escapeHtml(alias.note)}">${escapeHtml(alias.note)}</span>
     <div class="item-map-row__actions">
-      ${alias.verified ? "" : `<button type="button" data-item-map-verify="${escapeHtml(alias.id)}" title="${escapeHtml(t(lang, "confirm"))}">✓ ${escapeHtml(t(lang, "confirm"))}</button>`}
-      <button type="button" data-item-map-edit="${escapeHtml(alias.id)}" aria-label="${escapeHtml(t(lang, "edit"))}" title="${escapeHtml(t(lang, "edit"))}">${icon("icon-edit-default", "icon")}</button>
-      <button type="button" data-item-map-delete="${escapeHtml(alias.id)}" aria-label="${escapeHtml(t(lang, "remove"))}" title="${escapeHtml(t(lang, "remove"))}">×</button>
+      ${alias.verified ? "" : `<button type="button" data-item-map-verify="${escapeHtml(alias.id)}" data-inventory-write title="${escapeHtml(t(lang, "confirm"))}"${writeAttributes()}>✓ ${escapeHtml(t(lang, "confirm"))}</button>`}
+      <button type="button" data-item-map-edit="${escapeHtml(alias.id)}" data-inventory-write aria-label="${escapeHtml(t(lang, "edit"))}" title="${escapeHtml(t(lang, "edit"))}"${writeAttributes()}>${icon("icon-edit-default", "icon")}</button>
+      <button type="button" data-item-map-delete="${escapeHtml(alias.id)}" data-inventory-write aria-label="${escapeHtml(t(lang, "remove"))}" title="${escapeHtml(t(lang, "remove"))}"${writeAttributes()}>×</button>
     </div>
   </div>`;
 }
@@ -279,31 +284,32 @@ function renderModal(helpers) {
     <form class="inventory-domain-modal" data-item-map-form role="dialog" aria-modal="true" aria-label="${escapeHtml(t(lang, draft.id ? "editTitle" : "newTitle"))}">
       <header><h2>${escapeHtml(t(lang, draft.id ? "editTitle" : "newTitle"))}</h2><button type="button" data-item-map-close aria-label="${escapeHtml(t(lang, "close"))}">×</button></header>
       <div class="inventory-domain-modal__body">
-        <label class="inventory-domain-field"><span>${escapeHtml(t(lang, "aliasField"))}</span><input data-item-map-field="aliasName" value="${escapeHtml(draft.aliasName)}" placeholder="${escapeHtml(t(lang, "aliasPlaceholder"))}"${draft.id ? " readonly" : ""}></label>
+        <label class="inventory-domain-field"><span>${escapeHtml(t(lang, "aliasField"))}</span><input data-item-map-field="aliasName" data-inventory-write value="${escapeHtml(draft.aliasName)}" placeholder="${escapeHtml(t(lang, "aliasPlaceholder"))}"${draft.id ? " readonly" : ""}${writeAttributes()}></label>
         ${draft.id ? `<p class="inventory-domain-hint">${escapeHtml(t(lang, "aliasLocked"))}</p>` : ""}
-        <label class="inventory-domain-check"><input type="checkbox" data-item-map-skip${draft.skip ? " checked" : ""}><span>${escapeHtml(t(lang, "skipHint"))}</span></label>
+        <label class="inventory-domain-check"><input type="checkbox" data-item-map-skip data-inventory-write${draft.skip ? " checked" : ""}${writeAttributes()}><span>${escapeHtml(t(lang, "skipHint"))}</span></label>
         ${draft.skip ? "" : `<div class="inventory-domain-field"><span>${escapeHtml(t(lang, "products"))} · ${escapeHtml(t(lang, "bundleHint"))}</span>
           <div class="item-map-product-rows">${draft.products.map((row, index) => `<div class="item-map-product-row">
-            <select data-item-map-product="${index}"><option value="">${escapeHtml(t(lang, "chooseProduct"))}</option>${sortedProducts.map((product) => `<option value="${escapeHtml(product.id)}"${row.product_id === product.id ? " selected" : ""}>${escapeHtml(product.name)}</option>`).join("")}</select>
-            <input type="number" min="1" data-item-map-qty="${index}" value="${escapeHtml(String(row.qty))}" aria-label="${escapeHtml(t(lang, "quantity"))}">
-            <button type="button" data-item-map-remove-row="${index}" aria-label="${escapeHtml(t(lang, "remove"))}" title="${escapeHtml(t(lang, "remove"))}"${draft.products.length === 1 ? " disabled" : ""}>×</button>
+            <select data-item-map-product="${index}" data-inventory-write${writeAttributes()}><option value="">${escapeHtml(t(lang, "chooseProduct"))}</option>${sortedProducts.map((product) => `<option value="${escapeHtml(product.id)}"${row.product_id === product.id ? " selected" : ""}>${escapeHtml(product.name)}</option>`).join("")}</select>
+            <input type="number" min="1" data-item-map-qty="${index}" data-inventory-write value="${escapeHtml(String(row.qty))}" aria-label="${escapeHtml(t(lang, "quantity"))}"${writeAttributes()}>
+            <button type="button" data-item-map-remove-row="${index}" data-inventory-write aria-label="${escapeHtml(t(lang, "remove"))}" title="${escapeHtml(t(lang, "remove"))}"${writeAttributes(liveReadOnly || draft.products.length === 1)}>×</button>
           </div>`).join("")}</div>
-          <button type="button" class="inventory-domain-button inventory-domain-button--secondary" data-item-map-add-row>+ ${escapeHtml(t(lang, "addRow"))}</button>
+          <button type="button" class="inventory-domain-button inventory-domain-button--secondary" data-item-map-add-row data-inventory-write${writeAttributes()}>+ ${escapeHtml(t(lang, "addRow"))}</button>
         </div>`}
-        <label class="inventory-domain-field"><span>${escapeHtml(t(lang, "note"))}</span><textarea data-item-map-field="note" placeholder="${escapeHtml(t(lang, "notePlaceholder"))}">${escapeHtml(draft.note)}</textarea></label>
+        <label class="inventory-domain-field"><span>${escapeHtml(t(lang, "note"))}</span><textarea data-item-map-field="note" data-inventory-write placeholder="${escapeHtml(t(lang, "notePlaceholder"))}"${writeAttributes()}>${escapeHtml(draft.note)}</textarea></label>
       </div>
-      <footer><button type="button" class="inventory-domain-button inventory-domain-button--secondary" data-item-map-close>${escapeHtml(t(lang, "cancel"))}</button><button type="submit" class="inventory-domain-button">${escapeHtml(t(lang, "save"))}</button></footer>
+      <footer><button type="button" class="inventory-domain-button inventory-domain-button--secondary" data-item-map-close>${escapeHtml(t(lang, "cancel"))}</button><button type="submit" class="inventory-domain-button" data-inventory-write${writeAttributes()}>${escapeHtml(t(lang, "save"))}</button></footer>
     </form>
   </div>`;
 }
 
 export function renderItemMap(helpers, products) {
+  liveReadOnly = helpers.liveReadOnly === true;
   currentProducts = products;
   if (!state.loaded) return `<div class="inventory-domain-empty">${helpers.escapeHtml(t(helpers.lang, "loading"))}</div>`;
   const counts = itemMapGroupCounts();
-  return `<section class="inventory-domain-page item-map-page" data-item-map-page data-alias-count="${state.aliases.length}" data-single-count="${counts.single}" data-bundle-count="${counts.bundle}" data-skip-count="${counts.skip}" data-no-product-count="${counts.noProduct}">
+  return `<section class="inventory-domain-page item-map-page" data-item-map-page data-live-read-only="${liveReadOnly}" data-alias-count="${state.aliases.length}" data-single-count="${counts.single}" data-bundle-count="${counts.bundle}" data-skip-count="${counts.skip}" data-no-product-count="${counts.noProduct}">
     ${renderUnmatched(helpers)}
-    <div class="inventory-domain-heading"><h2>${helpers.escapeHtml(t(helpers.lang, "configured"))}<span>${state.aliases.length}</span></h2><button type="button" class="inventory-domain-button" data-item-map-new>+ ${helpers.escapeHtml(t(helpers.lang, "add"))}</button></div>
+    <div class="inventory-domain-heading"><h2>${helpers.escapeHtml(t(helpers.lang, "configured"))}<span>${state.aliases.length}</span></h2><button type="button" class="inventory-domain-button" data-item-map-new data-inventory-write${writeAttributes()}>+ ${helpers.escapeHtml(t(helpers.lang, "add"))}</button></div>
     ${renderGroups(helpers)}
     ${renderModal(helpers)}
   </section>`;
@@ -319,6 +325,7 @@ export function attachItemMapBehaviors({ rerender: nextRerender }) {
   if (attached) return;
   attached = true;
   document.addEventListener("click", (event) => {
+    if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     const toggle = event.target.closest("[data-item-map-group-toggle]");
     if (toggle) {
       const key = toggle.getAttribute("data-item-map-group-toggle");
@@ -366,6 +373,7 @@ export function attachItemMapBehaviors({ rerender: nextRerender }) {
     }
   });
   document.addEventListener("input", (event) => {
+    if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     if (!state.draft) return;
     const field = event.target.closest("[data-item-map-field]");
     if (field) state.draft[field.getAttribute("data-item-map-field")] = field.value;
@@ -373,6 +381,7 @@ export function attachItemMapBehaviors({ rerender: nextRerender }) {
     if (qty) state.draft.products[Number(qty.getAttribute("data-item-map-qty"))].qty = Math.max(1, Number(qty.value) || 1);
   });
   document.addEventListener("change", (event) => {
+    if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     if (!state.draft) return;
     if (event.target.matches("[data-item-map-skip]")) {
       state.draft.skip = event.target.checked;
@@ -385,6 +394,7 @@ export function attachItemMapBehaviors({ rerender: nextRerender }) {
   document.addEventListener("submit", (event) => {
     if (!event.target.matches("[data-item-map-form]") || !state.draft) return;
     event.preventDefault();
+    if (liveReadOnly) return;
     const aliasName = state.draft.aliasName.trim();
     if (!aliasName) return;
     const products = state.draft.skip ? [] : state.draft.products

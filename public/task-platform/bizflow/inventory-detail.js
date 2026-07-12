@@ -110,7 +110,12 @@ const dict = {
 };
 
 const params = new URLSearchParams(window.location.search);
-const detail = await getInventoryDetailData(params.get("id"));
+const [detail, currentUser] = await Promise.all([
+  getInventoryDetailData(params.get("id")),
+  getCurrentUser()
+]);
+const liveReadOnly = typeof currentUser?.hasPermission === "function";
+const writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
 const statusOptions = ["active", "discontinued"].includes(detail.product.status)
   ? ["active", "discontinued"]
   : ["enabled", "draft"];
@@ -156,7 +161,7 @@ function renderField({ labelKey, value, wide = false }, helpers) {
   const { escapeHtml, lang } = helpers;
   return `<label class="inventory-field${wide ? " inventory-field--wide" : ""}">
     <span class="inventory-field__label" title="${escapeHtml(pageT(lang, labelKey))}">${escapeHtml(pageT(lang, labelKey))}</span>
-    <input class="inventory-input" value="${escapeHtml(value)}">
+    <input class="inventory-input" data-inventory-write value="${escapeHtml(value)}"${writeAttributes}>
   </label>`;
 }
 
@@ -166,12 +171,12 @@ function renderStatusSelect(helpers) {
   const options = statusOptions.map((status) => {
     const selected = state.status === status;
     const optionLabel = pageT(lang, `inventory.status.${status}`);
-    return `<button type="button" role="option" aria-selected="${selected}" class="dropdown-item${selected ? " dropdown-item--selected" : ""}" data-detail-status-option data-status="${escapeHtml(status)}" title="${escapeHtml(optionLabel)}">
+    return `<button type="button" role="option" aria-selected="${selected}" class="dropdown-item${selected ? " dropdown-item--selected" : ""}" data-detail-status-option data-inventory-write data-status="${escapeHtml(status)}" title="${escapeHtml(optionLabel)}"${writeAttributes}>
       <span class="tp-line">${escapeHtml(optionLabel)}</span>
     </button>`;
   }).join("");
   return `<span class="inventory-select-anchor" data-detail-status-menu>
-    <button type="button" class="inventory-select-trigger" data-detail-status-trigger aria-haspopup="listbox" aria-expanded="${state.statusOpen}" title="${escapeHtml(label)}">
+    <button type="button" class="inventory-select-trigger" data-detail-status-trigger data-inventory-write aria-haspopup="listbox" aria-expanded="${state.statusOpen}" title="${escapeHtml(label)}"${writeAttributes}>
       <span>${escapeHtml(label)}</span>
       ${icon("icon-arrow-down", "icon")}
     </button>
@@ -208,10 +213,10 @@ function renderStatusCard(helpers) {
 function renderSubitemRow(item, helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const name = item.name ?? pageT(lang, item.nameKey);
-  return `<div class="inventory-subitem-row" role="button" tabindex="0" data-subitem-row data-subitem-id="${escapeHtml(item.id)}" title="${escapeHtml(name)}">
+  return `<div class="inventory-subitem-row" role="button" tabindex="${liveReadOnly ? "-1" : "0"}" data-subitem-row data-inventory-write data-subitem-id="${escapeHtml(item.id)}" aria-disabled="${liveReadOnly}" title="${escapeHtml(name)}">
     <span class="inventory-subitem-image" aria-hidden="true"></span>
     <span class="inventory-subitem-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
-    <input class="inventory-quantity-input" value="${escapeHtml(item.quantity)}" aria-label="${escapeHtml(pageT(lang, "inventory.field.stock"))}">
+    <input class="inventory-quantity-input" data-inventory-write value="${escapeHtml(item.quantity)}" aria-label="${escapeHtml(pageT(lang, "inventory.field.stock"))}"${writeAttributes}>
     <span class="inventory-subitem-price" title="${escapeHtml(formatHkd(item.price))}">${escapeHtml(formatHkd(item.price))}</span>
     <span class="inventory-subitem-icon">${icon("icon-add-surface-add", "icon")}</span>
   </div>`;
@@ -225,7 +230,7 @@ function renderSubitemsCard(helpers) {
   return `<section class="inventory-detail-card">
     <div class="inventory-card-head">
       <span class="inventory-card-title" title="${escapeHtml(pageT(lang, "inventory.subitems.title"))}">${escapeHtml(pageT(lang, "inventory.subitems.title"))}</span>
-      <button type="button" class="inventory-subitem-add" data-subitem-new title="${escapeHtml(pageT(lang, "inventory.subitems.add"))}">
+      <button type="button" class="inventory-subitem-add" data-subitem-new data-inventory-write title="${escapeHtml(pageT(lang, "inventory.subitems.add"))}"${writeAttributes}>
         ${icon("icon-add-line-add", "icon")}
         <span>${escapeHtml(pageT(lang, "inventory.subitems.add"))}</span>
       </button>
@@ -249,7 +254,7 @@ function renderSeriesCard(helpers) {
     <span class="inventory-card-title" title="${escapeHtml(pageT(lang, "inventory.series.title"))}">${escapeHtml(pageT(lang, "inventory.series.title"))}</span>
     <div class="inventory-series-list">
       ${rows}
-      <button type="button" class="inventory-series-add" data-series-add aria-label="${escapeHtml(pageT(lang, "inventory.series.title"))}">
+      <button type="button" class="inventory-series-add" data-series-add data-inventory-write aria-label="${escapeHtml(pageT(lang, "inventory.series.title"))}"${writeAttributes}>
         ${icon("icon-add-surface-add", "icon")}
       </button>
     </div>
@@ -263,12 +268,12 @@ function renderWarehouseSelect(row, index, helpers) {
   const options = warehouseOptions.map((key) => {
     const selected = row.key === key;
     const optionLabel = pageT(lang, `inventory.warehouse.${key}`);
-    return `<button type="button" role="option" aria-selected="${selected}" class="dropdown-item${selected ? " dropdown-item--selected" : ""}" data-modal-warehouse-option data-warehouse-index="${index}" data-warehouse="${escapeHtml(key)}" title="${escapeHtml(optionLabel)}">
+    return `<button type="button" role="option" aria-selected="${selected}" class="dropdown-item${selected ? " dropdown-item--selected" : ""}" data-modal-warehouse-option data-inventory-write data-warehouse-index="${index}" data-warehouse="${escapeHtml(key)}" title="${escapeHtml(optionLabel)}"${writeAttributes}>
       <span class="tp-line">${escapeHtml(optionLabel)}</span>
     </button>`;
   }).join("");
   return `<span class="inventory-select-anchor" data-modal-warehouse-menu>
-    <button type="button" class="inventory-select-trigger" data-modal-warehouse-trigger data-warehouse-index="${index}" aria-haspopup="listbox" aria-expanded="${open}" title="${escapeHtml(label)}">
+    <button type="button" class="inventory-select-trigger" data-modal-warehouse-trigger data-inventory-write data-warehouse-index="${index}" aria-haspopup="listbox" aria-expanded="${open}" title="${escapeHtml(label)}"${writeAttributes}>
       <span>${escapeHtml(label)}</span>
       ${icon("icon-arrow-down", "icon")}
     </button>
@@ -289,24 +294,24 @@ function renderSubitemModal(helpers) {
         <div class="inventory-modal-grid">
           <label class="inventory-modal-field">
             <span class="inventory-modal-label" title="${escapeHtml(pageT(lang, "inventory.modal.price"))}">${escapeHtml(pageT(lang, "inventory.modal.price"))}</span>
-            <input class="inventory-modal-input" data-modal-price value="${escapeHtml(item.editPrice)}">
+            <input class="inventory-modal-input" data-modal-price data-inventory-write value="${escapeHtml(item.editPrice)}"${writeAttributes}>
           </label>
           <label class="inventory-modal-field">
             <span class="inventory-modal-label" title="${escapeHtml(pageT(lang, "inventory.modal.warranty"))}">${escapeHtml(pageT(lang, "inventory.modal.warranty"))}</span>
-            <input class="inventory-modal-input" data-modal-warranty value="${escapeHtml(item.warrantyYears)}">
+            <input class="inventory-modal-input" data-modal-warranty data-inventory-write value="${escapeHtml(item.warrantyYears)}"${writeAttributes}>
           </label>
         </div>
         <div class="inventory-warehouse-block">
           <span class="inventory-warehouse-title" title="${escapeHtml(pageT(lang, "inventory.modal.warehouseQuantity"))}">${escapeHtml(pageT(lang, "inventory.modal.warehouseQuantity"))}</span>
           ${item.warehouses.length ? item.warehouses.map((row, index) => `<div class="inventory-warehouse-row">
             ${renderWarehouseSelect(row, index, helpers)}
-            <input class="inventory-quantity-input" data-modal-warehouse-qty="${index}" value="${escapeHtml(row.quantity)}">
+            <input class="inventory-quantity-input" data-modal-warehouse-qty="${index}" data-inventory-write value="${escapeHtml(row.quantity)}"${writeAttributes}>
           </div>`).join("") : `<p class="inventory-detail-empty">${escapeHtml(pageT(lang, "inventory.empty.warehouses"))}</p>`}
         </div>
       </div>
       <div class="inventory-subitem-modal__footer">
         <button type="button" class="inventory-modal-cancel" data-modal-close>${escapeHtml(pageT(lang, "inventory.cancel"))}</button>
-        <button type="button" class="inventory-modal-confirm" data-modal-confirm>${escapeHtml(pageT(lang, "inventory.confirm"))}</button>
+        <button type="button" class="inventory-modal-confirm" data-modal-confirm data-inventory-write${writeAttributes}>${escapeHtml(pageT(lang, "inventory.confirm"))}</button>
       </div>
     </section>
   </div>`;
@@ -315,22 +320,22 @@ function renderSubitemModal(helpers) {
 export function renderInventoryDetail(helpers) {
   currentHelpers = helpers;
   const { escapeHtml, icon, lang } = helpers;
-  return `<div class="inventory-detail-page" data-node-id="676:99575" data-inventory-detail-page data-detail-id="${escapeHtml(detail.requestedId)}" data-modal-open="${state.modalOpen}" data-status-open="${state.statusOpen}">
+  return `<div class="inventory-detail-page" data-node-id="676:99575" data-inventory-detail-page data-live-read-only="${liveReadOnly}" data-detail-id="${escapeHtml(detail.requestedId)}" data-modal-open="${state.modalOpen}" data-status-open="${state.statusOpen}">
     <header class="inventory-detail-head">
       <nav class="inventory-breadcrumb" aria-label="${escapeHtml(pageT(lang, "inventory.detail.product"))}">
         <button type="button" class="inventory-breadcrumb__link" data-detail-back title="${escapeHtml(pageT(lang, "inventory.detail.product"))}">${escapeHtml(pageT(lang, "inventory.detail.product"))}</button>
         ${icon("icon-arrow-right", "icon")}
         <span class="inventory-breadcrumb__current" title="${escapeHtml(detail.product.breadcrumbName)}">${escapeHtml(detail.product.breadcrumbName)}</span>
       </nav>
-      <button type="button" class="inventory-detail-action" data-detail-back title="${escapeHtml(pageT(lang, "inventory.detail.save"))}">${escapeHtml(pageT(lang, "inventory.detail.save"))}</button>
+      <button type="button" class="inventory-detail-action" data-detail-back data-inventory-write title="${escapeHtml(pageT(lang, "inventory.detail.save"))}"${writeAttributes}>${escapeHtml(pageT(lang, "inventory.detail.save"))}</button>
     </header>
     ${renderBasicCard(helpers)}
     ${renderStatusCard(helpers)}
     ${renderSubitemsCard(helpers)}
     ${renderSeriesCard(helpers)}
     <footer class="inventory-detail-footer">
-      <button type="button" class="inventory-detail-danger" data-detail-delete title="${escapeHtml(pageT(lang, "inventory.delete"))}">${escapeHtml(pageT(lang, "inventory.delete"))}</button>
-      <button type="button" class="inventory-detail-confirm" data-detail-back title="${escapeHtml(pageT(lang, "inventory.confirmModify"))}">${escapeHtml(pageT(lang, "inventory.confirmModify"))}</button>
+      <button type="button" class="inventory-detail-danger" data-detail-delete data-inventory-write title="${escapeHtml(pageT(lang, "inventory.delete"))}"${writeAttributes}>${escapeHtml(pageT(lang, "inventory.delete"))}</button>
+      <button type="button" class="inventory-detail-confirm" data-detail-back data-inventory-write title="${escapeHtml(pageT(lang, "inventory.confirmModify"))}"${writeAttributes}>${escapeHtml(pageT(lang, "inventory.confirmModify"))}</button>
     </footer>
     ${renderSubitemModal(helpers)}
   </div>`;
@@ -365,6 +370,7 @@ function closeModal() {
 }
 
 function openModal(item) {
+  if (liveReadOnly) return;
   state.modalOpen = true;
   state.modalItem = cloneModalItem(item);
   state.warehouseOpen = null;
@@ -373,6 +379,7 @@ function openModal(item) {
 }
 
 document.addEventListener("click", (event) => {
+  if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
   if (event.target.closest("[data-detail-back]")) {
     window.location.href = "./inventory.html";
     return;
@@ -447,6 +454,7 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("input", (event) => {
+  if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
   if (!state.modalItem) return;
   const price = event.target.closest("[data-modal-price]");
   const warranty = event.target.closest("[data-modal-warranty]");
@@ -470,6 +478,6 @@ document.addEventListener("keydown", (event) => {
 });
 
 window.__shellMenu = createBizflowMenu("inventory");
-window.__shellData = { unread: await getUnread(), user: await getCurrentUser() };
+window.__shellData = { unread: await getUnread(), user: currentUser };
 window.__shellContent = renderInventoryDetail;
 await import("../shell/shell.js");
