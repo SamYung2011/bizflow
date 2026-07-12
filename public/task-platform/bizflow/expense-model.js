@@ -1,6 +1,14 @@
 export const expenseFilters = ["pending", "approved", "rejected", "paid", "mine", "all"];
 export const expenseCurrencies = ["RMB", "HKD", "USD"];
 export const expenseCategories = ["Food", "Transport", "Office", "Material", "Communication", "Other"];
+export const expenseCategoryDbValues = {
+  Food: "餐飲",
+  Transport: "交通",
+  Office: "辦公",
+  Material: "物料",
+  Communication: "通訊",
+  Other: "其他"
+};
 export const expenseCategoryKeys = {
   Food: "categoryFood",
   Transport: "categoryTransport",
@@ -10,6 +18,10 @@ export const expenseCategoryKeys = {
   Other: "categoryOther"
 };
 
+const expenseCategoryByDbValue = Object.fromEntries(
+  Object.entries(expenseCategoryDbValues).map(([key, value]) => [value, key])
+);
+
 export function normalizeExpenseRows(items) {
   return items.map((item, index) => ({
     id: String(item.id ?? `snapshot-expense-${index + 1}`),
@@ -18,7 +30,7 @@ export function normalizeExpenseRows(items) {
     date: String(item.date ?? item.expenseDate ?? item.expense_date ?? ""),
     currency: expenseCurrencies.includes(item.currency) ? item.currency : "RMB",
     amount: Number(item.amount) || 0,
-    category: String(item.category || "Other"),
+    category: expenseCategoryByDbValue[item.category] ?? (expenseCategories.includes(item.category) ? item.category : "Other"),
     description: String(item.description || ""),
     receipts: Array.isArray(item.receiptUrls ?? item.receipt_urls)
       ? (item.receiptUrls ?? item.receipt_urls).map((url) => ({ url: String(url), name: "" }))

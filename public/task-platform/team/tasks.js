@@ -11,6 +11,7 @@ import { calendarRelatedTasks, isTaskCreator, memberIdentity, openAssignedTaskCo
 import { attachTaskDomainController } from "./tasks-domain-controller.js";
 import { renderTaskBoardGrid, renderTaskToolbar } from "./tasks-board.js";
 import { getSessionValue, setSessionValue } from "../data/session-state.js";
+import { completeLiveTask, createLiveTask, setLiveTaskParticipation, updateLiveTask } from "../data/live-task-writes.js";
 
 const data = await getTeamTaskData();
 const currentUser = await getCurrentUser();
@@ -45,9 +46,10 @@ const state = {
     ...column,
     tasks: column.tasks.map((task) => clonedTaskById.get(task.id)).filter(Boolean)
   })),
-  currentUser: { ...currentUser, id: currentMember?.id || "" },
+  currentUser: { ...currentUser, id: currentUser.employeeId || currentMember?.id || "" },
   permissions,
   liveReadOnly: authenticated,
+  liveTaskWrites: authenticated,
   mode: "overview",
   overviewExpanded: new Set(),
   onlyMine: getSessionValue("team-tasks-only-mine") === "1",
@@ -59,7 +61,13 @@ const state = {
   selectedTaskId: null,
   detailTab: "content",
   submitOpen: false,
+  submitMode: "create",
+  submitTaskId: null,
+  submitCanAssignOthers: permissions.canAssignOthers,
   submitDraft: { ...data.form.defaults, attachments: [] },
+  submitError: "",
+  writeBusy: false,
+  writeError: "",
   actionTaskId: null
 };
 
@@ -151,6 +159,7 @@ export function renderTaskManagement(helpers) {
         : `<div class="team-kanban-grid">${renderTaskBoardGrid({ state, filterState, helpers })}</div>`;
   return `<div class="team-task-page${state.detailOpen ? " team-task-page--detail" : ""}" data-task-view="${escapeHtml(filterState.view)}" data-task-mode="${escapeHtml(state.mode)}" data-only-mine="${state.onlyMine}">
     <h1 class="team-task-title" title="${escapeHtml(tt("tasks.title"))}">${escapeHtml(tt("tasks.title"))}</h1>
+    ${state.writeError ? `<p class="team-task-write-error" role="alert">${escapeHtml(tt(state.writeError))}</p>` : ""}
     <section class="team-task-stats">${stats.map((stat) => renderStatCard(stat, helpers)).join("")}</section>
     ${state.detailOpen ? "" : renderTaskToolbar({ state, filterState, members: state.members, featureAiBatch: data.featureAiBatch, helpers })}
     <section class="team-board${calendarView ? " team-board--calendar" : ""}">
@@ -209,19 +218,56 @@ function closeTaskDetail() {
 }
 
 function openTaskSubmit() {
-  if (!state.permissions.canCreate || state.liveReadOnly) return;
+  if (!state.permissions.canCreate || (state.liveReadOnly && !state.liveTaskWrites)) return;
   state.actionTaskId = null;
   state.submitOpen = true;
+  state.submitMode = "create";
+  state.submitTaskId = null;
+  state.submitCanAssignOthers = state.permissions.canAssignOthers;
+  state.submitError = "";
   state.submitDraft = {
     ...data.form.defaults,
+    owner: authenticated ? state.currentUser.name : data.form.defaults.owner,
     attachments: [],
     content: data.form.defaults.content ?? (data.form.defaults.contentKey ? pageT(currentHelpers.lang, data.form.defaults.contentKey) : "")
   };
   rerenderTaskPage({ focusSubmit: true });
 }
 
+function canEditTask(task) {
+  return Boolean(task) && (isTaskCreator(task, state.currentUser) || state.currentUser.isSuperAdmin ||
+    state.currentUser.isAdminOfActive || state.permissions.canEditOthers);
+}
+
+function openTaskEdit(taskId) {
+  if (!state.liveTaskWrites || state.writeBusy) return;
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (!canEditTask(task)) return;
+  state.actionTaskId = null;
+  state.submitOpen = true;
+  state.submitMode = "edit";
+  state.submitTaskId = task.id;
+  state.submitCanAssignOthers = isTaskCreator(task, state.currentUser) || state.currentUser.isSuperAdmin ||
+    state.currentUser.isAdminOfActive || state.permissions.canAssignOthers;
+  state.submitError = "";
+  state.submitDraft = {
+    title: task.title,
+    content: task.content,
+    priority: task.priority,
+    visibility: task.visibility,
+    owner: task.assignees[0]?.name || "",
+    requiresReview: task.requiresReview ? "yes" : "no",
+    members: task.assignees.slice(1).map((assignee) => assignee.name).join(", "),
+    due: String(task.due || "").replaceAll("/", "-"),
+    attachments: []
+  };
+  rerenderTaskPage({ focusSubmit: true });
+}
+
 function closeTaskSubmit() {
+  if (state.writeBusy) return;
   state.submitOpen = false;
+  state.submitError = "";
   rerenderTaskPage({ restoreSubmitFocus: true });
 }
 
@@ -279,15 +325,45 @@ function completeWholeTask(task, completedAt) {
   }
 }
 
-function performTaskAction(taskId, action) {
-  if (state.liveReadOnly) return;
+async function performTaskAction(taskId, action) {
+  if (state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites)) return;
   const location = taskLocation(taskId);
   if (!location) return;
   const { column, index, task } = location;
   if (action === "complete" && !task.done) {
-    const completedAt = localTimestamp();
     const scopedMember = selectedActionMember();
     const scopedAssignee = scopedMember ? taskAssignee(task, scopedMember) : null;
+    const currentAssignee = taskAssignee(task, state.currentUser);
+    const targetAssignee = scopedAssignee ?? (!scopedMember ? currentAssignee : null);
+    const wholeTask = !scopedMember && isTaskCreator(task, state.currentUser);
+    if (state.liveTaskWrites) {
+      if (!wholeTask && !targetAssignee) return;
+      state.writeBusy = true;
+      state.writeError = "";
+      rerenderTaskPage();
+      try {
+        const result = await completeLiveTask({
+          taskId: task.id,
+          targetEmployeeId: targetAssignee?.employeeId,
+          wholeTask,
+          needsApproval: task.requiresReview
+        });
+        if (result.wholeTask) completeWholeTask(task, result.completedAt);
+        else {
+          targetAssignee.completedAt = result.completedAt;
+          targetAssignee.abandonedAt = null;
+        }
+      } catch (error) {
+        console.warn("Task completion failed", error);
+        state.writeError = "tasks.write.failed";
+      } finally {
+        state.writeBusy = false;
+      }
+      state.actionTaskId = null;
+      rerenderTaskPage({ focusBoard: true });
+      return;
+    }
+    const completedAt = localTimestamp();
     // Mirrors bizflow_samyung/team/src/views/Tasks.jsx:368-385: member scope completes one assignee row.
     if (scopedAssignee) {
       scopedAssignee.completedAt = completedAt;
@@ -324,11 +400,54 @@ function localTimestamp() {
   }).format(new Date());
 }
 
-document.addEventListener("click", (event) => {
+async function toggleTaskParticipation(task) {
+  if (!state.liveTaskWrites || state.writeBusy) return;
+  const assignee = taskAssignee(task, state.currentUser);
+  if (!assignee) return;
+  const abandoned = assignee.abandonedAt != null || ((task.assignees?.length ?? 0) === 1 && task.status === "abandoned");
+  const nextAbandoned = !abandoned;
+  const singleAssignee = task.assignees.length === 1 && !task.requiresReview;
+  state.writeBusy = true;
+  state.writeError = "";
+  rerenderTaskPage();
+  try {
+    const result = await setLiveTaskParticipation({
+      taskId: task.id,
+      employeeId: assignee.employeeId,
+      abandoned: nextAbandoned,
+      singleAssignee
+    });
+    assignee.abandonedAt = result.changedAt;
+    assignee.completedAt = null;
+    if (singleAssignee) {
+      task.status = nextAbandoned ? "abandoned" : "inProgress";
+      task.done = false;
+      task.completedAt = result.changedAt || "";
+      state.summary.inProgress = Math.max(0, state.summary.inProgress + (nextAbandoned ? -1 : 1));
+      adjustOpenTaskCounts(task, nextAbandoned ? -1 : 1);
+    }
+    if (nextAbandoned) state.detailOpen = false;
+  } catch (error) {
+    console.warn("Task participation update failed", error);
+    state.writeError = "tasks.write.failed";
+  } finally {
+    state.writeBusy = false;
+  }
+  rerenderTaskPage({ focusDetail: state.detailOpen, focusBoard: !state.detailOpen });
+}
+
+document.addEventListener("click", async (event) => {
   const completeAction = event.target.closest("[data-task-action-complete]");
   if (completeAction) {
-    if (completeAction.disabled || state.liveReadOnly) return;
-    performTaskAction(completeAction.getAttribute("data-task-action-complete"), "complete");
+    if (completeAction.disabled || (state.liveReadOnly && !state.liveTaskWrites)) return;
+    await performTaskAction(completeAction.getAttribute("data-task-action-complete"), "complete");
+    return;
+  }
+
+  const editAction = event.target.closest("[data-task-action-edit]");
+  if (editAction) {
+    if (editAction.disabled) return;
+    openTaskEdit(editAction.getAttribute("data-task-action-edit"));
     return;
   }
 
@@ -450,29 +569,138 @@ document.addEventListener("keydown", (event) => {
   filterTrigger?.focus();
 });
 
-document.addEventListener("submit", (event) => {
+document.addEventListener("submit", async (event) => {
   const taskForm = event.target.closest("[data-task-submit-form]");
   if (taskForm) {
     event.preventDefault();
-    if (state.liveReadOnly || !state.permissions.canCreate) return;
+    const editingTask = state.submitMode === "edit"
+      ? state.tasks.find((task) => task.id === state.submitTaskId)
+      : null;
+    if (state.writeBusy || (state.submitMode === "create" && !state.permissions.canCreate) ||
+      (state.submitMode === "edit" && !canEditTask(editingTask)) ||
+      (state.liveReadOnly && !state.liveTaskWrites)) return;
     const values = new FormData(taskForm);
     const priority = String(values.get("priority") || "high");
-    const owner = String(values.get("owner") || "");
-    const members = String(values.get("members") || "").split(",").map((name) => name.trim()).filter(Boolean);
+    const owner = String(values.get("owner") ?? state.submitDraft.owner ?? "");
+    const members = String(values.get("members") ?? state.submitDraft.members ?? "").split(",").map((name) => name.trim()).filter(Boolean);
     const assignedMembers = [...new Set([owner, ...members].filter(Boolean))];
+    const assignedRows = state.submitCanAssignOthers
+      ? assignedMembers.map((name) => state.members.find((member) => member.name === name)).filter(Boolean)
+      : state.submitMode === "edit"
+        ? (state.tasks.find((task) => task.id === state.submitTaskId)?.assignees ?? [])
+          .map((assignee) => state.members.find((member) => member.id === assignee.employeeId)).filter(Boolean)
+        : state.members.filter((member) => member.id === state.currentUser.id);
+    if (!assignedRows.length || (state.submitCanAssignOthers && assignedRows.length !== assignedMembers.length)) {
+      state.submitError = assignedRows.length ? "tasks.submit.invalidAssignee" : "tasks.submit.assigneeRequired";
+      rerenderTaskPage({ focusSubmit: true });
+      return;
+    }
+    const title = String(values.get("title") || "").trim();
+    const content = String(values.get("content") || "").trim();
+    const due = String(values.get("due") || "");
+    const requiresReview = values.get("requiresReview") === "yes";
+    if (state.liveTaskWrites) {
+      state.writeBusy = true;
+      state.submitError = "";
+      rerenderTaskPage();
+      try {
+        if (state.submitMode === "edit") {
+          const task = state.tasks.find((item) => item.id === state.submitTaskId);
+          if (!task || !canEditTask(task)) throw new Error("Task edit permission required");
+          await updateLiveTask(task.id, {
+            title,
+            content,
+            priority: task.dbPriority === "none" && task.priority === "low" && priority === "low" ? "none" : priority,
+            due,
+            requiresReview,
+            assigneeIds: assignedRows.map((member) => member.id),
+            originalTitle: task.title,
+            trackTitleEdit: !isTaskCreator(task, state.currentUser)
+          });
+          task.title = title;
+          task.content = content;
+          task.priority = priority;
+          task.dbPriority = task.dbPriority === "none" && priority === "low" ? "none" : priority === "medium" ? "mid" : priority;
+          task.due = due;
+          task.requiresReview = requiresReview;
+          task.assignees = assignedRows.map((member) => ({
+            employeeId: member.id,
+            name: member.name,
+            completedAt: task.assignees.find((assignee) => assignee.employeeId === member.id)?.completedAt ?? null,
+            abandonedAt: task.assignees.find((assignee) => assignee.employeeId === member.id)?.abandonedAt ?? null
+          }));
+          task.members = task.assignees.map((assignee) => assignee.name);
+          task.owner = task.members.join("、") || "—";
+        } else {
+          const result = await createLiveTask({
+            title,
+            content,
+            priority,
+            due,
+            requiresReview,
+            assigneeIds: assignedRows.map((member) => member.id),
+            files: state.submitDraft.attachments.map((attachment) => attachment.file).filter(Boolean)
+          });
+          const column = state.board.find((item) => item.key === priority) ?? state.board[0];
+          const newTask = {
+            id: result.task.id,
+            title,
+            content,
+            due,
+            owner: assignedRows.map((member) => member.name).join("、"),
+            priority: column.key,
+            dbPriority: column.key === "medium" ? "mid" : column.key,
+            status: "inProgress",
+            done: false,
+            countBadge: "",
+            visibility: "team",
+            requiresReview,
+            members: assignedRows.map((member) => member.name),
+            feedback: [],
+            startDate: "",
+            createdAt: localTimestamp(),
+            completedAt: "",
+            creator: state.currentUser.name,
+            creatorId: state.currentUser.id,
+            parentId: null,
+            visibilityDepartment: "",
+            approvedAt: "",
+            approvedBy: "",
+            attachmentCount: result.attachments.length,
+            assignees: assignedRows.map((member) => ({ employeeId: member.id, name: member.name, completedAt: null, abandonedAt: null })),
+            subtasks: []
+          };
+          column.tasks.unshift(newTask);
+          state.tasks.unshift(newTask);
+          state.summary.total += 1;
+          state.summary.inProgress += 1;
+          adjustOpenTaskCounts(newTask, 1);
+        }
+        state.submitOpen = false;
+        state.submitTaskId = null;
+        state.submitError = "";
+      } catch (error) {
+        console.warn("Task save failed", error);
+        state.submitError = "tasks.write.failed";
+      } finally {
+        state.writeBusy = false;
+      }
+      rerenderTaskPage({ focusBoard: !state.submitOpen, focusSubmit: state.submitOpen });
+      return;
+    }
     const column = state.board.find((item) => item.key === priority) ?? state.board[0];
     const newTask = {
       id: `local-task-${Date.now()}`,
-      title: String(values.get("title") || "").trim(),
-      content: String(values.get("content") || "").trim(),
-      due: String(values.get("due") || ""),
+      title,
+      content,
+      due,
       owner,
       priority: column.key,
       status: "inProgress",
       done: false,
       countBadge: "",
       visibility: String(values.get("visibility") || "team"),
-      requiresReview: values.get("requiresReview") === "yes",
+      requiresReview,
       members: assignedMembers,
       feedback: [],
       startDate: "",
@@ -534,11 +762,11 @@ document.addEventListener("input", (event) => {
 document.addEventListener("change", (event) => {
   const attachmentInput = event.target.closest("[data-task-submit-file]");
   if (attachmentInput) {
-    if (state.liveReadOnly) return;
+    if ((state.liveReadOnly && !state.liveTaskWrites) || state.submitMode === "edit") return;
     const currentNames = new Set((state.submitDraft.attachments ?? []).map((file) => file.name));
     const nextFiles = [...attachmentInput.files]
       .filter((file) => !currentNames.has(file.name))
-      .map((file) => ({ name: file.name, size: file.size, type: file.type }));
+      .map((file) => ({ file, name: file.name, size: file.size, type: file.type }));
     state.submitDraft.attachments = [...(state.submitDraft.attachments ?? []), ...nextFiles];
     rerenderTaskPage();
     document.querySelector("[data-task-submit-attachment]")?.focus();
@@ -560,7 +788,8 @@ attachTaskDomainController({
   rerender: rerenderTaskPage,
   closeTaskDetail,
   adjustOpenTaskCounts,
-  localTimestamp
+  localTimestamp,
+  toggleTaskParticipation
 });
 
 window.__shellMenu = [

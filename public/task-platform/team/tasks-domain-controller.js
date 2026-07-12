@@ -9,7 +9,8 @@ export function attachTaskDomainController({
   rerender,
   closeTaskDetail,
   adjustOpenTaskCounts,
-  localTimestamp
+  localTimestamp,
+  toggleTaskParticipation
 }) {
   const taskById = (taskId) => state.tasks.find((task) => task.id === taskId) ?? null;
 
@@ -27,7 +28,7 @@ export function attachTaskDomainController({
     }
   }
 
-  document.addEventListener("click", (event) => {
+  document.addEventListener("click", async (event) => {
     if (event.target.closest("[data-task-overview-open]")) {
       state.mode = "overview";
       filterState.view = "board";
@@ -112,8 +113,12 @@ export function attachTaskDomainController({
 
     const abandon = event.target.closest("[data-task-abandon]");
     if (abandon) {
-      if (state.liveReadOnly || abandon.disabled) return;
+      if (abandon.disabled || (state.liveReadOnly && !state.liveTaskWrites)) return;
       const task = taskById(abandon.getAttribute("data-task-abandon"));
+      if (state.liveTaskWrites) {
+        if (task) await toggleTaskParticipation(task);
+        return;
+      }
       if (task && task.status !== "abandoned") {
         const previousStatus = task.status;
         task.status = "abandoned";

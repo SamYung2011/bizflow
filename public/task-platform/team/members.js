@@ -75,6 +75,7 @@ const state = {
     id: session?.user?.id || currentUser?.userId || "",
     name: currentUser?.name || data.currentUserName || ""
   },
+  updateLogsLive: authenticated,
   companies: data.companies.map((company) => ({ ...company })),
   editingCompanyId: null,
   summary: { ...data.summary, reviewPending: data.reviews.length + data.joinPending.length },

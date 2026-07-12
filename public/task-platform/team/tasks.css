@@ -574,7 +574,7 @@
   z-index: 70;
   display: flex;
   width: min(var(--task-action-width), calc(100vw - var(--space-40)));
-  height: var(--task-action-height);
+  min-height: var(--task-action-height);
   flex-direction: column;
   gap: var(--space-10);
   padding: var(--space-10);
@@ -584,6 +584,14 @@
   background: var(--white);
   box-shadow: 0 4px 5px rgba(0, 0, 0, .15), 0 10px 30px rgba(0, 0, 0, .08);
   animation: task-action-enter var(--transition-fast) both;
+}
+
+.team-task-write-error,
+.form-task-submit__error {
+  margin: 0;
+  color: var(--red);
+  font-size: var(--font-description-size);
+  line-height: var(--lh-body);
 }
 
 .task-action-popover button {

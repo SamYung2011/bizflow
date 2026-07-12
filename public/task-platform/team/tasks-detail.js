@@ -55,11 +55,17 @@ function renderApproval(task, state, helpers) {
   const tt = (key, values) => taskT(lang, key, values);
   const waiting = isWaitingApproval(task);
   const isCreator = String(task.creator).toLocaleLowerCase() === String(state.currentUser.name).toLocaleLowerCase();
-  const isAssignee = (task.assignees ?? []).some((assignee) => String(assignee.name).toLocaleLowerCase() === String(state.currentUser.name).toLocaleLowerCase());
+  const ownAssignee = (task.assignees ?? []).find((assignee) => assignee.employeeId
+    ? assignee.employeeId === state.currentUser.id
+    : String(assignee.name).toLocaleLowerCase() === String(state.currentUser.name).toLocaleLowerCase());
+  const isAssignee = Boolean(ownAssignee);
   const approved = task.approvedAt ? `<div class="task-detail__approved">${icon("icon-task-done", "icon")}<span><strong>${escapeHtml(tt("tasks.detail.approved"))}</strong>${escapeHtml(tt("tasks.detail.approvedBy", { name: task.approvedBy || "—", time: task.approvedAt }))}</span></div>` : "";
   const canApprove = isCreator || state.permissions.canValidate;
   const pending = waiting ? `<div class="task-detail__approval-banner">${icon("icon-task-alert", "icon")}<span>${escapeHtml(tt("tasks.detail.approvalPending"))}</span>${canApprove ? `<button type="button" data-task-approve="${escapeHtml(task.id)}"${state.liveReadOnly ? " disabled" : ""}>${escapeHtml(tt("tasks.detail.approve"))}</button>` : ""}</div>` : "";
-  const abandon = isAssignee && task.status !== "abandoned" ? `<button type="button" class="task-detail__abandon" data-task-abandon="${escapeHtml(task.id)}"${state.liveReadOnly ? " disabled" : ""}>${escapeHtml(tt("tasks.detail.abandon"))}</button>` : "";
+  const abandoned = ownAssignee?.abandonedAt != null || ((task.assignees?.length ?? 0) === 1 && task.status === "abandoned");
+  const showParticipation = isAssignee && (state.liveTaskWrites || task.status !== "abandoned");
+  const participationDisabled = state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites);
+  const abandon = showParticipation ? `<button type="button" class="task-detail__abandon" data-task-abandon="${escapeHtml(task.id)}"${participationDisabled ? " disabled" : ""}>${escapeHtml(tt(abandoned ? "tasks.detail.resume" : "tasks.detail.abandon"))}</button>` : "";
   return `${pending}${approved}${abandon}`;
 }
 

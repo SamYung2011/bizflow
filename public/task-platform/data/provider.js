@@ -416,6 +416,7 @@ function normalizeFullTask(task, currentUserName, today) {
     owner: members.join("、") || "—",
     members,
     priority,
+    dbPriority: task.priority,
     status,
     done: task.status === "done",
     due: task.due || "",

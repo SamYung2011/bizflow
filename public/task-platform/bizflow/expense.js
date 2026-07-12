@@ -3,6 +3,7 @@ import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { renderSegment } from "../components/segment.js";
 import {
   expenseCategories as categories,
+  expenseCategoryDbValues,
   expenseCategoryKeys as categoryKeys,
   expenseCounts,
   expenseCurrencies as currencies,
@@ -10,6 +11,7 @@ import {
   filterExpenseRows,
   normalizeExpenseRows
 } from "./expense-model.js";
+import { createLiveExpense } from "../data/live-expense-writes.js";
 
 const copy = {
   zh: {
@@ -54,6 +56,7 @@ const copy = {
     descriptionPlaceholder: "選填，描述用途",
     receiptHint: "選擇收據圖片",
     receiptLocal: "僅本地預覽，不會上傳",
+    receiptUpload: "提交後上傳到報銷收據庫",
     removeReceipt: "移除收據",
     cancel: "取消",
     submit: "提交",
@@ -61,6 +64,7 @@ const copy = {
     dateRequired: "請選擇日期",
     amountRequired: "金額必須大於 0",
     categoryRequired: "請選擇類別",
+    saveFailed: "提交失敗，請稍後重試",
     noDescription: "—",
     receiptCount: "{count} 張"
   },
@@ -106,6 +110,7 @@ const copy = {
     descriptionPlaceholder: "Optional purpose description",
     receiptHint: "Choose receipt images",
     receiptLocal: "Local preview only. Nothing is uploaded.",
+    receiptUpload: "Uploaded to the receipt store on submit.",
     removeReceipt: "Remove receipt",
     cancel: "Cancel",
     submit: "Submit",
@@ -113,6 +118,7 @@ const copy = {
     dateRequired: "Select a date",
     amountRequired: "Amount must be greater than 0",
     categoryRequired: "Select a category",
+    saveFailed: "Submission failed. Please try again.",
     noDescription: "—",
     receiptCount: "{count} images"
   },
@@ -158,6 +164,7 @@ const copy = {
     descriptionPlaceholder: "Description facultative de l'usage",
     receiptHint: "Choisir des images de reçus",
     receiptLocal: "Aperçu local uniquement. Aucun envoi.",
+    receiptUpload: "Envoyé au stockage des reçus lors de la soumission.",
     removeReceipt: "Retirer le reçu",
     cancel: "Annuler",
     submit: "Envoyer",
@@ -165,6 +172,7 @@ const copy = {
     dateRequired: "Sélectionnez une date",
     amountRequired: "Le montant doit être supérieur à 0",
     categoryRequired: "Sélectionnez une catégorie",
+    saveFailed: "Échec de l’envoi. Réessayez.",
     noDescription: "—",
     receiptCount: "{count} images"
   }
@@ -174,7 +182,7 @@ const [snapshot, currentUser, unread] = await Promise.all([getExpenseData(), get
 const authenticated = typeof currentUser?.hasPermission === "function";
 const isAdmin = !authenticated || currentUser?.isBfAdmin === true;
 const liveReadOnly = authenticated;
-const writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
+const localWriteAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
 const ownerKey = String(currentUser.employeeId || currentUser.email || currentUser.name || "");
 const currencySymbols = { RMB: "¥", HKD: "HK$", USD: "US$" };
 
@@ -182,7 +190,8 @@ const state = {
   rows: normalizeExpenseRows(snapshot.reimbursements),
   filter: isAdmin ? "pending" : "mine",
   draft: null,
-  error: ""
+  error: "",
+  writeBusy: false
 };
 
 let currentHelpers = null;
@@ -247,15 +256,15 @@ function renderActions(row, helpers) {
   if (!row.local) return `<span class="expense-muted">—</span>`;
   const pending = row.status === "pending";
   return `<span class="expense-actions">
-    ${pending ? `<button type="button" class="expense-action expense-action--approve" data-expense-approve="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "approve"))}</button><button type="button" class="expense-action expense-action--reject" data-expense-reject="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "reject"))}</button>` : ""}
-    <button type="button" class="expense-action expense-action--delete" data-expense-delete="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "remove"))}</button>
+    ${pending ? `<button type="button" class="expense-action expense-action--approve" data-expense-approve="${escapeHtml(row.id)}" data-expense-write${localWriteAttributes}>${escapeHtml(t(lang, "approve"))}</button><button type="button" class="expense-action expense-action--reject" data-expense-reject="${escapeHtml(row.id)}" data-expense-write${localWriteAttributes}>${escapeHtml(t(lang, "reject"))}</button>` : ""}
+    <button type="button" class="expense-action expense-action--delete" data-expense-delete="${escapeHtml(row.id)}" data-expense-write${localWriteAttributes}>${escapeHtml(t(lang, "remove"))}</button>
   </span>`;
 }
 
 function renderPayment(row, helpers) {
   const { escapeHtml, lang } = helpers;
   if (row.paid) return `<span class="expense-payment expense-payment--paid">${escapeHtml(t(lang, "paid"))}</span>`;
-  if (row.local && row.status === "approved") return `<button type="button" class="expense-action expense-action--pay" data-expense-pay="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "markPaid"))}</button>`;
+  if (row.local && row.status === "approved") return `<button type="button" class="expense-action expense-action--pay" data-expense-pay="${escapeHtml(row.id)}" data-expense-write${localWriteAttributes}>${escapeHtml(t(lang, "markPaid"))}</button>`;
   return `<span class="expense-payment">${escapeHtml(t(lang, "unpaid"))}</span>`;
 }
 
@@ -298,27 +307,28 @@ function renderModal(helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const e = escapeHtml;
   const draft = state.draft;
+  const createWriteAttributes = state.writeBusy ? ' disabled aria-disabled="true"' : "";
   const options = (values, selected, label) => values.map((value) => `<option value="${e(value)}"${selected === value ? " selected" : ""}>${e(label(value))}</option>`).join("");
   return `<div class="expense-overlay" data-expense-overlay>
     <form class="expense-modal" data-expense-form role="dialog" aria-modal="true" aria-label="${e(t(lang, "modalTitle"))}">
-      <header><h2>${e(t(lang, "modalTitle"))}</h2><button type="button" data-expense-close aria-label="${e(t(lang, "close"))}">×</button></header>
+      <header><h2>${e(t(lang, "modalTitle"))}</h2><button type="button" data-expense-close data-expense-create-write aria-label="${e(t(lang, "close"))}"${createWriteAttributes}>×</button></header>
       <div class="expense-modal__body">
         <div class="expense-form-grid">
-          ${renderField("date", "date", `<input type="date" data-expense-field="date" data-expense-write value="${e(draft.date)}"${writeAttributes}>`, helpers)}
+          ${renderField("date", "date", `<input type="date" data-expense-field="date" data-expense-create-write value="${e(draft.date)}"${createWriteAttributes}>`, helpers)}
           <div class="expense-amount-fields">
-            ${renderField("currency", "currency", `<select data-expense-field="currency" data-expense-write${writeAttributes}>${options(currencies, draft.currency, (value) => value)}</select>`, helpers)}
-            ${renderField("amount", "amount", `<input type="number" min="0" step="0.01" inputmode="decimal" data-expense-field="amount" data-expense-write value="${e(draft.amount)}" placeholder="0.00"${writeAttributes}>`, helpers)}
+            ${renderField("currency", "currency", `<select data-expense-field="currency" data-expense-create-write${createWriteAttributes}>${options(currencies, draft.currency, (value) => value)}</select>`, helpers)}
+            ${renderField("amount", "amount", `<input type="number" min="0" step="0.01" inputmode="decimal" data-expense-field="amount" data-expense-create-write value="${e(draft.amount)}" placeholder="0.00"${createWriteAttributes}>`, helpers)}
           </div>
         </div>
-        ${renderField("category", "category", `<select data-expense-field="category" data-expense-write${writeAttributes}>${options(categories, draft.category, (value) => t(lang, categoryKeys[value]))}</select>`, helpers)}
-        ${renderField("description", "description", `<textarea data-expense-field="description" data-expense-write placeholder="${e(t(lang, "descriptionPlaceholder"))}"${writeAttributes}>${e(draft.description)}</textarea>`, helpers)}
+        ${renderField("category", "category", `<select data-expense-field="category" data-expense-create-write${createWriteAttributes}>${options(categories, draft.category, (value) => t(lang, categoryKeys[value]))}</select>`, helpers)}
+        ${renderField("description", "description", `<textarea data-expense-field="description" data-expense-create-write placeholder="${e(t(lang, "descriptionPlaceholder"))}"${createWriteAttributes}>${e(draft.description)}</textarea>`, helpers)}
         <div class="expense-upload">
-          <label class="expense-upload__trigger">${icon("icon-nav-file", "icon")}<span><strong>${e(t(lang, "receiptHint"))}</strong><small>${e(t(lang, "receiptLocal"))}</small></span><input type="file" accept="image/*" multiple data-expense-receipts data-expense-write${writeAttributes}></label>
-          ${draft.receipts.length ? `<div class="expense-preview-list">${draft.receipts.map((receipt, index) => `<figure><img src="${e(receipt.url)}" alt="${e(receipt.name)}"><button type="button" data-expense-receipt-remove="${index}" data-expense-write aria-label="${e(t(lang, "removeReceipt"))}"${writeAttributes}>×</button></figure>`).join("")}</div>` : ""}
+          <label class="expense-upload__trigger">${icon("icon-nav-file", "icon")}<span><strong>${e(t(lang, "receiptHint"))}</strong><small>${e(t(lang, authenticated ? "receiptUpload" : "receiptLocal"))}</small></span><input type="file" accept="image/*" multiple data-expense-receipts data-expense-create-write${createWriteAttributes}></label>
+          ${draft.receipts.length ? `<div class="expense-preview-list">${draft.receipts.map((receipt, index) => `<figure><img src="${e(receipt.url)}" alt="${e(receipt.name)}"><button type="button" data-expense-receipt-remove="${index}" data-expense-create-write aria-label="${e(t(lang, "removeReceipt"))}"${createWriteAttributes}>×</button></figure>`).join("")}</div>` : ""}
         </div>
         ${state.error ? `<p class="expense-error" role="alert">${e(t(lang, state.error))}</p>` : ""}
       </div>
-      <footer><button type="button" class="expense-button expense-button--secondary" data-expense-close>${e(t(lang, "cancel"))}</button><button type="submit" class="expense-button" data-expense-write${writeAttributes}>${e(t(lang, "submit"))}</button></footer>
+      <footer><button type="button" class="expense-button expense-button--secondary" data-expense-close data-expense-create-write${createWriteAttributes}>${e(t(lang, "cancel"))}</button><button type="submit" class="expense-button" data-expense-create-write${createWriteAttributes}>${e(t(lang, "submit"))}</button></footer>
     </form>
   </div>`;
 }
@@ -337,7 +347,7 @@ export function renderExpense(helpers) {
     dataAttribute: "data-expense-filter"
   }) : "";
   return `<div class="expense-page" data-expense-page data-live-read-only="${liveReadOnly}" data-expense-admin="${isAdmin}" data-expense-filter-value="${escapeHtml(state.filter)}" data-expense-visible="${rows.length}" ${filters.map((filter) => `data-expense-count-${filter}="${filterCounts[filter]}"`).join(" ")}>
-    <header class="expense-head"><div><h1>${escapeHtml(t(lang, "title"))}</h1><p>${escapeHtml(t(lang, isAdmin ? "subtitleAdmin" : "subtitleMine"))}</p></div><button type="button" class="expense-add" data-expense-new data-expense-write${writeAttributes}>${icon("icon-add-line-add", "icon")}<span>${escapeHtml(t(lang, "add"))}</span></button></header>
+    <header class="expense-head"><div><h1>${escapeHtml(t(lang, "title"))}</h1><p>${escapeHtml(t(lang, isAdmin ? "subtitleAdmin" : "subtitleMine"))}</p></div><button type="button" class="expense-add" data-expense-new data-expense-create-write${state.writeBusy ? ' disabled aria-disabled="true"' : ""}>${icon("icon-add-line-add", "icon")}<span>${escapeHtml(t(lang, "add"))}</span></button></header>
     ${isAdmin ? `<div class="expense-segment">${segment}</div>` : `<div class="expense-mine-summary">${escapeHtml(t(lang, "mineSummary", { count: rows.length }))}</div>`}
     ${renderStats(rows, helpers)}
     ${renderTable(rows, helpers)}
@@ -357,6 +367,7 @@ function revokeReceipts(receipts) {
 }
 
 function closeModal() {
+  if (state.writeBusy) return;
   if (state.draft) revokeReceipts(state.draft.receipts);
   state.draft = null;
   state.error = "";
@@ -369,6 +380,7 @@ function findLocalRow(id) {
 
 document.addEventListener("click", (event) => {
   if (liveReadOnly && event.target.closest("[data-expense-write]")) return;
+  if (state.writeBusy && event.target.closest("[data-expense-create-write]")) return;
   const filter = event.target.closest("[data-expense-filter]");
   if (filter) {
     const value = filter.getAttribute("data-expense-filter");
@@ -440,6 +452,7 @@ document.addEventListener("click", (event) => {
 
 document.addEventListener("input", (event) => {
   if (liveReadOnly && event.target.closest("[data-expense-write]")) return;
+  if (state.writeBusy && event.target.closest("[data-expense-create-write]")) return;
   const field = event.target.closest("[data-expense-field]");
   if (!field || !state.draft) return;
   state.draft[field.getAttribute("data-expense-field")] = field.value;
@@ -448,6 +461,7 @@ document.addEventListener("input", (event) => {
 
 document.addEventListener("change", (event) => {
   if (liveReadOnly && event.target.closest("[data-expense-write]")) return;
+  if (state.writeBusy && event.target.closest("[data-expense-create-write]")) return;
   const field = event.target.closest("[data-expense-field]");
   if (field && state.draft) {
     state.draft[field.getAttribute("data-expense-field")] = field.value;
@@ -456,19 +470,47 @@ document.addEventListener("change", (event) => {
   const fileInput = event.target.closest("[data-expense-receipts]");
   if (!fileInput || !state.draft) return;
   [...fileInput.files].filter((file) => file.type.startsWith("image/")).forEach((file) => {
-    state.draft.receipts.push({ url: URL.createObjectURL(file), name: file.name });
+    state.draft.receipts.push({ file, url: URL.createObjectURL(file), name: file.name });
   });
   rerender();
 });
 
-document.addEventListener("submit", (event) => {
+document.addEventListener("submit", async (event) => {
   if (!event.target.matches("[data-expense-form]") || !state.draft) return;
   event.preventDefault();
-  if (liveReadOnly) return;
+  if (state.writeBusy) return;
   const amount = Number(state.draft.amount);
   if (!state.draft.date) state.error = "dateRequired";
   else if (!Number.isFinite(amount) || amount <= 0) state.error = "amountRequired";
   else if (!categories.includes(state.draft.category)) state.error = "categoryRequired";
+  else if (authenticated) {
+    state.writeBusy = true;
+    state.error = "";
+    rerender();
+    try {
+      const result = await createLiveExpense({
+        date: state.draft.date,
+        amount,
+        currency: state.draft.currency,
+        category: expenseCategoryDbValues[state.draft.category],
+        description: state.draft.description.trim(),
+        files: state.draft.receipts.map((receipt) => receipt.file).filter(Boolean)
+      });
+      const row = normalizeExpenseRows([{ ...result.row, employee: currentUser.name }])[0];
+      revokeReceipts(state.draft.receipts);
+      state.rows.unshift(row);
+      state.filter = isAdmin ? "pending" : "mine";
+      state.draft = null;
+      state.error = "";
+    } catch (error) {
+      console.warn("Expense submission failed", error);
+      state.error = "saveFailed";
+    } finally {
+      state.writeBusy = false;
+    }
+    rerender();
+    return;
+  }
   else {
     state.rows.unshift({
       id: `local-expense-${Date.now()}`,
