@@ -143,6 +143,11 @@
   background: var(--gray-40);
 }
 
+.member-updates :is(input, textarea, button):disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
 .member-updates,
 .member-update-timeline {
   display: grid;

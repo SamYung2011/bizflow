@@ -557,6 +557,7 @@ async function buildTeamExtrasSnapshot() {
       edited: timestamp(log.updated_at) > timestamp(log.created_at) + 60_000,
       comments: (commentsByLog.get(log.id) ?? []).map((comment) => ({
         id: comment.id,
+        authorUserId: asText(comment.author_user_id) || null,
         author: asText(comment.author_name, "—"),
         body: asText(comment.body),
         parentId: comment.parent_comment_id ?? null,

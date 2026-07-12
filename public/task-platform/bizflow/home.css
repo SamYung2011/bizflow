@@ -224,6 +224,13 @@
   gap: var(--space-10);
 }
 
+.home-card__list > .tp-muted {
+  color: var(--gray-40);
+  font-size: var(--font-body-size);
+  font-weight: var(--font-body-weight);
+  line-height: var(--lh-body);
+}
+
 .home-card__list .task-item .tp-title,
 .home-card__list .task-item .tp-muted {
   display: block;

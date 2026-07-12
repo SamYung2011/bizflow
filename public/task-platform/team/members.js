@@ -1,6 +1,7 @@
 // team 站团队成员桌面屏(Figma 443:5035)。成员与统计只读 provider 契约,不直写样板数据。
 
 import { getTeamMembersData, getCurrentUser, getUnread } from "../data/provider.js";
+import { getSession } from "../data/auth.js";
 import { memberT as pageT } from "./members-i18n.js";
 import { renderMemberDetailDialog } from "./members-detail.js";
 import { attachMemberReviewController, renderMemberReviews } from "./members-review.js";
@@ -11,9 +12,10 @@ import { attachMemberCommissionController, renderMemberCommission } from "./memb
 import { attachMemberUpdateLogController, renderMemberUpdateLogs } from "./members-update-logs.js";
 import { attachMemberCompanyController, renderMemberCompanies } from "./members-companies.js";
 
-const data = await getTeamMembersData();
-const currentUser = await getCurrentUser();
+const HELEN_EMAIL = "a1017339632@gmail.com";
+const [data, currentUser, session] = await Promise.all([getTeamMembersData(), getCurrentUser(), getSession()]);
 const authenticated = typeof currentUser?.hasPermission === "function";
+const sessionEmail = String(session?.user?.email || "").toLowerCase();
 // Mirrors bizflow_samyung/team/src/admin.jsx:28,32: sales can always view their own commission.
 const canViewCommission = !authenticated || currentUser.isSuperAdmin === true ||
   currentUser.hasPermission("can_view_commission") || currentUser.role === "銷售";
@@ -23,6 +25,9 @@ const memberAccess = {
   canViewCommission,
   canManageRoles: !authenticated || currentUser.hasPermission("can_manage_roles"),
   canManageCompanies: !authenticated || currentUser.isSuperAdmin === true,
+  // Mirrors bizflow_samyung/team/src/views/UpdateLog.jsx:8,16.
+  canWriteUpdates: !authenticated || currentUser.isBfAdmin === true || sessionEmail === HELEN_EMAIL,
+  canAdministerUpdateComments: !authenticated || currentUser.isBfAdmin === true,
   // Mirrors bizflow_samyung/team/src/admin.jsx:50-52: every authenticated non-super user is self-only.
   commissionLockedEmployeeId: authenticated && currentUser.isSuperAdmin !== true ? currentUser.id : null
 };
@@ -64,6 +69,10 @@ const state = {
     comments: entry.comments.map((comment) => ({ ...comment }))
   })),
   editingUpdateId: null,
+  updateLogUser: {
+    id: session?.user?.id || currentUser?.userId || "",
+    name: currentUser?.name || data.currentUserName || ""
+  },
   companies: data.companies.map((company) => ({ ...company })),
   editingCompanyId: null,
   summary: { ...data.summary, reviewPending: data.reviews.length + data.joinPending.length },
@@ -614,7 +623,7 @@ window.__shellMenu = [
   { key: "nav.team", icon: "icon-nav-user", href: "./members.html", active: true }
 ];
 attachMemberCommissionController({ state, rerender: rerenderMembers });
-attachMemberUpdateLogController({ state, currentUserName: data.currentUserName, rerender: rerenderMembers });
+attachMemberUpdateLogController({ state, rerender: rerenderMembers });
 attachMemberReviewController({ state, rerender: rerenderMembers });
 attachMemberCompanyController({ state, rerender: rerenderMembers });
 window.__shellData = { unread: await getUnread(), user: currentUser };

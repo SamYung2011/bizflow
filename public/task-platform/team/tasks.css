@@ -365,7 +365,8 @@
 }
 
 .team-new-task:disabled,
-.team-column-add:disabled {
+.team-column-add:disabled,
+.team-member-add:disabled {
   cursor: not-allowed;
   opacity: .5;
 }

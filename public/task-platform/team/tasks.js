@@ -141,6 +141,7 @@ export function renderTaskManagement(helpers) {
     : state.tasks;
   const calendarTasks = calendarRelatedTasks(state.tasks, { onlyMine: state.onlyMine, currentUser: state.currentUser });
   const calendarView = filterState.view === "calendar" && !state.detailOpen;
+  // Figma member-rail Add uses the generic add-surface component but has no authored flow; live P0 keeps it disabled.
   const content = state.detailOpen
     ? renderTaskDetail({ state, helpers })
     : calendarView
@@ -155,7 +156,7 @@ export function renderTaskManagement(helpers) {
     <section class="team-board${calendarView ? " team-board--calendar" : ""}">
       ${calendarView ? "" : `<aside class="team-member-rail">
         <div class="team-member-list">${renderOverviewEntry(helpers)}${state.members.map((member) => renderMember(member, scopedTasks, helpers)).join("")}</div>
-        <button type="button" class="team-member-add" tabindex="-1" aria-label="add">${icon("icon-add-surface-add")}</button>
+        <button type="button" class="team-member-add" tabindex="-1" aria-label="add"${state.liveReadOnly ? " disabled aria-disabled=\"true\"" : ""}>${icon("icon-add-surface-add")}</button>
       </aside>`}
       <main class="team-kanban${state.detailOpen ? " team-kanban--detail" : ""}">
         ${content}
