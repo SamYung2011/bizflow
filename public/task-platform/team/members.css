@@ -1,0 +1,1666 @@
+/* team 站团队成员桌面屏(Figma 443:5035) */
+
+.shell-app {
+  min-width: 1200px;
+}
+
+.team-members-page {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-20);
+}
+
+.team-members-title {
+  margin: 0;
+  color: var(--black);
+  font-size: var(--font-display-size); /* Figma 443:5035 页面标题实测 */
+  font-weight: var(--font-title-2-weight); /* 582:36393 实测 Inter Semi Bold(600),非 Title1 的 700 */
+  line-height: var(--lh-num);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-members-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-20);
+}
+
+.team-members-stat {
+  display: flex;
+  min-height: 117px;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-10);
+  padding: var(--space-20);
+  border-radius: var(--radius-20);
+  background: var(--white);
+  color: var(--3a);
+}
+
+.team-members-stat--blue,
+.team-members-stat--yellow,
+.team-members-stat--gray {
+  color: var(--white);
+}
+
+.team-members-stat--blue {
+  background: var(--blue);
+}
+
+.team-members-stat--yellow {
+  background: var(--yellow);
+}
+
+.team-members-stat--gray {
+  background: var(--gray-15);
+}
+
+.team-members-stat__title {
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-body-weight); /* 582:36407 白卡"所有成员"实测 Regular(400) */
+  line-height: var(--lh-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-members-stat--blue .team-members-stat__title,
+.team-members-stat--yellow .team-members-stat__title,
+.team-members-stat--gray .team-members-stat__title {
+  font-weight: var(--font-title-3-weight); /* 582:36408~410 彩卡实测 Medium(500) */
+}
+
+.team-members-stat__value {
+  font-size: var(--font-display-size); /* Figma 443:5035 指标数字实测 */
+  font-weight: var(--font-title-1-weight);
+  line-height: var(--lh-num);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-members-panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-20);
+  min-height: 706px;
+  padding: var(--space-20);
+  border-radius: var(--radius-20);
+  background: var(--gray-5);
+}
+
+.team-members-tabs {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-20);
+}
+
+.team-members-tab {
+  position: relative;
+  display: flex;
+  height: 35px;
+  min-width: 100px;
+  max-width: 180px;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-10);
+  padding: 0 var(--space-10);
+  border: 0;
+  border-radius: var(--radius-10);
+  background: var(--white); /* 582:36414~36416 未选中态实测:白底 chip,非透明 */
+  color: var(--3a);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-tight);
+  white-space: nowrap;
+}
+
+.team-members-tab--active {
+  /* 582:36413 design_context 实测:选中=纯蓝底白字(此前「白底蓝描边」系小屿目测错判,已纠) */
+  color: var(--white);
+  background: var(--blue);
+}
+
+.team-members-tab span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-members-tab .tp-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+}
+
+.team-members-grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(7, 180px);
+  gap: var(--space-20);
+  align-items: start;
+}
+
+.team-member-card {
+  --component-width: 180px;
+  --component-height: 200px;
+  display: flex;
+  width: 180px;
+  min-height: 200px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-10);
+  padding: var(--space-20);
+  border: 0;
+  color: var(--gray-80);
+}
+
+.team-member-card__avatar {
+  display: block;
+  width: 60px;
+  height: 60px;
+  flex: none;
+  border-radius: var(--radius-40);
+  object-fit: cover;
+  background: var(--grad-brand);
+}
+
+.team-member-card__body {
+  display: grid;
+  min-width: 0;
+  justify-items: center;
+  gap: var(--space-4);
+  width: 100%;
+}
+
+.team-member-card__name {
+  width: 100%;
+  margin: 0;
+  color: var(--gray-80);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+  line-height: var(--lh-tight);
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-member-card__meta {
+  width: 100%;
+  margin: 0;
+  color: var(--gray-40);
+  font-size: var(--font-body-size);
+  font-weight: var(--font-body-weight);
+  line-height: var(--lh-body);
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-member-card__pill {
+  display: flex;
+  width: 100%;
+  min-height: 30px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-10);
+  border-radius: var(--radius-10); /* 443:6600 pill 实测圆角 10,非 20 */
+  font-size: var(--font-body-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-member-card__pill--green {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 16%, var(--white));
+}
+
+.team-member-card__pill--neutral {
+  /* 443:6601 离职 pill 实测 #777(白字),取最近 token gray-40;路径待命,当前无离职数据不触发 */
+  color: var(--white);
+  background: var(--gray-40);
+}
+
+.team-member-card--off {
+  background: var(--gray-10);
+}
+
+.team-member-card--add {
+  /* 帧 582:35461 的成员网格里没有新增卡实例;跟随最后一张成员卡走网格自然流(煊煊验收:不许单独钉死在角落) */
+  /* 443:6600 新增成员变体实测:实线边框 #d9d9d9(取近 gray-10)、文字/图标 #979797(取近 gray-20);组件卡文档写"虚线"与本次 Figma 实测不符,按 00-设计规范"与 Figma 冲突以 Figma 为准"改,文档待回改 */
+  border: 1px solid var(--gray-10);
+  background: var(--white);
+  color: var(--gray-20);
+}
+
+.team-member-card--add:hover {
+  color: var(--blue);
+  border-color: var(--blue);
+}
+
+.team-member-card__add-icon {
+  width: 40px;
+  height: 40px;
+  color: currentColor;
+}
+
+.team-member-card__add-label {
+  max-width: 100%;
+  color: currentColor;
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+  line-height: var(--lh-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1399px) {
+  .team-members-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .team-members-grid {
+    grid-template-columns: repeat(4, 180px);
+  }
+}
+
+.team-member-card__avatar-initial {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-title-2-size);
+}
+
+.team-member-card__pill--blue {
+  background: var(--blue);
+  color: var(--white);
+}
+
+.members-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-20);
+  background: rgba(0, 0, 0, .5); /* 00-设计规范 §5.4 表单类遮罩黑 50%。 */
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity var(--transition), visibility var(--transition);
+}
+
+.members-modal-overlay--open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.form-new-member {
+  --member-form-width: 560px; /* Figma 582:41641 新增成员弹窗实测宽，无对应 token。 */
+  --member-form-height: 629px; /* Figma 582:41641/41713 弹窗实测高，无对应 token。 */
+  --member-form-control-height: 35px; /* Figma 表单输入与下拉实测高，无对应 token。 */
+  --member-form-avatar-size: 64px; /* Figma 582:41641/41713 表单头像实测尺寸，无对应 token。 */
+  --member-form-close-stroke-width: 2px; /* Figma 关闭图标线宽，无对应 token。 */
+  --member-form-close-stroke-height: 12px; /* Figma 关闭图标线长，无对应 token。 */
+  --member-form-focus-border: 1px; /* Figma 表单聚焦描边宽，无对应 token。 */
+
+  position: relative;
+  display: flex;
+  width: min(100%, var(--member-form-width));
+  height: min(var(--member-form-height), calc(100vh - (var(--space-20) * 2)));
+  min-height: min(var(--member-form-height), calc(100vh - (var(--space-20) * 2)));
+  max-height: calc(100vh - (var(--space-20) * 2));
+  flex-direction: column;
+  gap: var(--space-20);
+  overflow: auto;
+}
+
+.form-new-member__close {
+  position: absolute;
+  top: var(--space-20);
+  right: var(--space-20);
+  width: var(--space-20);
+  height: var(--space-20);
+  border: 0;
+  border-radius: var(--radius-40);
+  background: var(--3a);
+  cursor: pointer;
+}
+
+.form-new-member__close::before,
+.form-new-member__close::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--member-form-close-stroke-width);
+  height: var(--member-form-close-stroke-height);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  content: "";
+}
+
+.form-new-member__close::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.form-new-member__close::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.form-new-member__avatar {
+  display: inline-flex;
+  width: var(--member-form-avatar-size);
+  height: var(--member-form-avatar-size);
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  margin-top: var(--space-20);
+  border-radius: 50%;
+  background: var(--blue);
+  color: var(--white);
+  font-size: var(--font-title-1-size);
+  font-weight: var(--font-title-1-weight);
+  line-height: var(--lh-num);
+}
+
+.form-new-member__fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+}
+
+.form-new-member__row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-20);
+}
+
+.form-new-member__field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-10);
+}
+
+.form-new-member__label {
+  color: var(--gray-80);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.form-new-member__control {
+  width: 100%;
+  min-width: 0;
+  height: var(--member-form-control-height);
+  padding: 0 var(--space-10);
+  border: var(--member-form-focus-border) solid transparent;
+  border-radius: var(--radius-10);
+  outline: 0;
+  background: var(--gray-5);
+  color: var(--gray-80);
+  font: inherit;
+  font-size: var(--font-description-size);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.form-new-member__control:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 var(--member-form-close-stroke-width) color-mix(in srgb, var(--blue) 12%, transparent);
+}
+
+.form-new-member__footer {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-20);
+  margin-top: auto;
+}
+
+.form-new-member__button {
+  display: flex;
+  min-width: 0;
+  height: var(--space-40);
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-10);
+  border: 0;
+  border-radius: var(--radius-10);
+  color: var(--white);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+  line-height: var(--lh-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.form-new-member__button:hover {
+  opacity: .92;
+  transform: translateY(calc(var(--member-form-focus-border) * -1));
+}
+
+.form-new-member__button:active {
+  transform: scale(.98);
+}
+
+.form-new-member__button--cancel {
+  background: var(--gray-40);
+}
+
+.form-new-member__button--submit {
+  background: var(--blue);
+}
+
+.member-panel {
+  --member-panel-width: 560px; /* Figma 582:40786 成员详情弹窗实测宽，无对应 token。 */
+  --member-panel-height: 640px; /* Figma 582:40786/41163 成员详情弹窗实测高，无对应 token。 */
+  --member-panel-head-height: 120px; /* Figma 成员详情渐变头实测高，无对应 token。 */
+  --member-panel-avatar-size: 80px; /* Figma 582:40786/41163 详情头像实测尺寸，无对应 token。 */
+  --member-panel-control-height: 35px; /* Figma 详情输入与下拉实测高，无对应 token。 */
+  --member-panel-stroke-width: 2px; /* Figma 详情关闭图标线宽，无对应 token。 */
+  --member-panel-stroke-height: 16px; /* Figma 详情关闭图标线长，无对应 token。 */
+  --member-panel-chip-max-width: 120px; /* Figma 详情身份 chip 最大宽，无对应 token。 */
+  --member-panel-border-width: 1px; /* Figma 详情头像与表单描边宽，无对应 token。 */
+  --member-panel-mobile-tab-fr-size: 9px; /* 393px 法语三 tab 同行完整显示所需字阶，无全局 token。 */
+
+  position: relative;
+  display: flex;
+  width: min(100%, var(--member-panel-width));
+  height: min(var(--member-panel-height), calc(100vh - (var(--space-20) * 2)));
+  min-height: min(var(--member-panel-height), calc(100vh - (var(--space-20) * 2)));
+  max-height: calc(100vh - (var(--space-20) * 2));
+  flex-direction: column;
+}
+
+.member-panel__head {
+  position: relative;
+  min-height: var(--member-panel-head-height);
+  flex: none;
+}
+
+.member-panel__avatar {
+  display: inline-flex;
+  width: var(--member-panel-avatar-size);
+  height: var(--member-panel-avatar-size);
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: var(--member-panel-border-width) solid var(--white);
+  border-radius: 50%;
+  background: var(--blue);
+  color: var(--white);
+  font-size: var(--font-title-1-size);
+  font-weight: var(--font-title-1-weight);
+}
+
+.member-panel__identity {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-10);
+}
+
+.member-panel__identity h2 {
+  margin: 0;
+  color: var(--white);
+  font-size: var(--font-title-2-size);
+  font-weight: var(--font-title-2-weight);
+  line-height: var(--lh-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-panel__chips {
+  display: flex;
+  min-width: 0;
+  gap: var(--space-10);
+}
+
+.member-panel__chips span {
+  max-width: var(--member-panel-chip-max-width);
+  padding: var(--space-4) var(--space-10);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  color: var(--gray-80);
+  font-size: var(--font-body-size);
+  font-weight: var(--font-body-weight);
+  line-height: var(--lh-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-panel__close {
+  position: absolute;
+  top: var(--space-20);
+  right: var(--space-20);
+  width: var(--space-40);
+  height: var(--space-40);
+  border: 0;
+  border-radius: var(--radius-40);
+  background: var(--3a);
+  cursor: pointer;
+}
+
+.member-panel__close::before,
+.member-panel__close::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--member-panel-stroke-width);
+  height: var(--member-panel-stroke-height);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  content: "";
+}
+
+.member-panel__close::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.member-panel__close::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.member-panel__content {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.member-panel .member-panel__tabs {
+  display: flex;
+  width: fit-content;
+  max-width: calc(100% - (var(--space-20) * 2));
+  gap: var(--space-10);
+  margin: var(--space-20) var(--space-20) 0;
+  padding: var(--space-4);
+  border-radius: var(--radius-10);
+  background: var(--gray-10);
+}
+
+.member-panel .tab-chip {
+  min-width: 0;
+  border: 0;
+  font-size: var(--font-description-size);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.member-panel__divider {
+  height: var(--member-panel-border-width);
+  margin: var(--space-10) var(--space-20) 0;
+  background: var(--gray-15);
+}
+
+.member-panel .member-panel__body {
+  display: block;
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: var(--space-20);
+  overflow: auto;
+}
+
+.member-panel__form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-40);
+}
+
+.member-panel__field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-10);
+  color: var(--gray-80);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+}
+
+.member-panel__field input,
+.member-panel__field select {
+  width: 100%;
+  min-width: 0;
+  height: var(--member-panel-control-height);
+  padding: 0 var(--space-10);
+  border: var(--member-panel-border-width) solid transparent;
+  border-radius: var(--radius-10);
+  outline: 0;
+  background: var(--gray-5);
+  color: var(--gray-80);
+  font: inherit;
+  transition: border-color var(--transition-fast);
+}
+
+.member-panel__field input:focus,
+.member-panel__field select:focus {
+  border-color: var(--blue);
+}
+
+.member-panel__footer {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-20);
+  padding: var(--space-20);
+}
+
+.member-panel__button {
+  display: flex;
+  min-width: 0;
+  height: var(--space-40);
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-10);
+  border: 0;
+  border-radius: var(--radius-10);
+  color: var(--white);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.member-panel__button:hover {
+  opacity: .92;
+}
+
+.member-panel__button--remove {
+  background: var(--red);
+}
+
+.member-panel__button--save {
+  background: var(--blue);
+}
+
+.member-panel__tasks {
+  display: grid;
+  gap: var(--space-10);
+}
+
+.member-panel__task {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-10);
+  padding: var(--space-10);
+  border-radius: var(--radius-10);
+  background: var(--gray-5);
+}
+
+.member-panel__task-title {
+  min-width: 0;
+  color: var(--gray-80);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-panel__task-due,
+.member-panel__empty {
+  color: var(--gray-40);
+  font-size: var(--font-body-size);
+  line-height: var(--lh-body);
+}
+
+.member-panel__task-due {
+  flex: none;
+  white-space: nowrap;
+}
+
+.member-panel__empty {
+  margin: 0;
+  text-align: center;
+}
+
+.team-members-content {
+  min-width: 0;
+}
+
+.team-members-reviews {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-40);
+}
+
+.review-card {
+  --review-card-desktop-height: 337px; /* Figma 人员审核组件 desktop 443:8048 实测高，无对应 token。 */
+  --review-card-mobile-height: 512px; /* Figma 人员审核组件 mobile 443:8048 实测高，无对应 token。 */
+  --review-card-avatar-size: 80px; /* Figma 582:42477/42547 审核头像实测尺寸，无对应 token。 */
+  --review-card-control-height: 35px; /* Figma 审核输入、下拉与申请条实测高，无对应 token。 */
+  --review-card-border-width: 1px; /* Figma 审核表单聚焦描边宽，无对应 token。 */
+
+  width: 100%;
+  min-height: var(--review-card-desktop-height);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-40);
+}
+
+.review-card__identity,
+.review-card__fields {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-20);
+}
+
+.review-card__person {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-20);
+}
+
+.review-card__avatar {
+  display: inline-flex;
+  width: var(--review-card-avatar-size);
+  height: var(--review-card-avatar-size);
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--blue);
+  color: var(--white);
+  font-size: var(--font-title-1-size);
+  font-weight: var(--font-title-1-weight);
+}
+
+.review-card__person-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-10);
+}
+
+.review-card__person-copy h2 {
+  margin: 0;
+  color: var(--black);
+  font-size: var(--font-title-2-size);
+  font-weight: var(--font-title-2-weight);
+  line-height: var(--lh-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-card__person-copy span,
+.review-card__field {
+  color: var(--gray-80);
+  font-size: var(--font-body-size);
+  line-height: var(--lh-body);
+}
+
+.review-card__person-copy span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-card__application {
+  display: flex;
+  height: var(--review-card-control-height);
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-10);
+  background: var(--gray-10);
+  color: var(--blue);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+}
+
+.review-card__field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-10);
+}
+
+.review-card__field input,
+.review-card__field select {
+  width: 100%;
+  min-width: 0;
+  height: var(--review-card-control-height);
+  padding: 0 var(--space-10);
+  border: var(--review-card-border-width) solid transparent;
+  border-radius: var(--radius-10);
+  outline: 0;
+  background: var(--gray-10);
+  color: var(--gray-80);
+  font: inherit;
+  transition: border-color var(--transition-fast);
+}
+
+.review-card__field input:focus,
+.review-card__field select:focus {
+  border-color: var(--blue);
+}
+
+.review-card__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-20);
+  margin-top: auto;
+}
+
+.review-card__button {
+  display: flex;
+  min-width: 0;
+  height: var(--space-40);
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-10);
+  border: 0;
+  border-radius: var(--radius-10);
+  color: var(--white);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.review-card__button:hover {
+  opacity: .92;
+}
+
+.review-card__button--reject {
+  background: var(--red);
+}
+
+.review-card__button--approve {
+  background: var(--blue);
+}
+
+.team-members-empty {
+  --team-members-empty-min-height: 320px; /* Figma 管理 tab 空态最小内容高，无对应 token。 */
+
+  display: flex;
+  min-height: var(--team-members-empty-min-height);
+  align-items: center;
+  justify-content: center;
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+}
+
+.team-members-departments {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-20);
+}
+
+.team-members-departments .dept-card {
+  --dept-card-height: 194px; /* Figma 部门组件 456:6425 默认态实测高，无对应 token。 */
+  --dept-card-icon-size: 60px; /* Figma 582:43357/43408 部门图标底实测尺寸，无对应 token。 */
+  --dept-card-action-height: 35px; /* Figma 部门卡操作按钮实测高，无对应 token。 */
+  --dept-card-count-height: 40px; /* Figma 部门人数条实测高，无对应 token。 */
+
+  width: 100%;
+  min-height: var(--dept-card-height);
+  grid-template-rows: auto var(--dept-card-count-height) var(--dept-card-action-height);
+  gap: var(--space-20);
+  padding: var(--space-10);
+}
+
+.dept-card__head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-10);
+}
+
+.dept-card__icon {
+  width: var(--dept-card-icon-size);
+  height: var(--dept-card-icon-size);
+  flex: none;
+  background: var(--blue);
+  color: var(--white);
+}
+
+.dept-card__icon .icon {
+  width: var(--space-40);
+  height: var(--space-40);
+}
+
+.dept-card__identity {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.dept-card__identity h2 {
+  margin: 0;
+  color: var(--gray-80);
+  font-size: var(--font-title-2-size);
+  font-weight: var(--font-title-2-weight);
+  line-height: var(--lh-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dept-card__identity span {
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+  line-height: var(--lh-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dept-card__count {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-10);
+  padding: 0 var(--space-10);
+  border-radius: var(--radius-10);
+  background: var(--gray-5);
+  color: var(--gray-60);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+}
+
+.dept-card__count strong {
+  color: var(--blue);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+}
+
+.dept-card__actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-10);
+}
+
+.dept-card__button {
+  display: flex;
+  min-width: 0;
+  height: var(--dept-card-action-height);
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-10);
+  border: 0;
+  border-radius: var(--radius-10);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.dept-card__button:hover {
+  opacity: .92;
+}
+
+.dept-card__button--view {
+  background: var(--blue);
+  color: var(--white);
+}
+
+.dept-card__button--edit {
+  background: var(--gray-10);
+  color: var(--gray-80);
+}
+
+.dept-card__button--remove {
+  background: color-mix(in srgb, var(--red) 18%, var(--white));
+  color: var(--red);
+}
+
+.team-members-departments .dept-card--add {
+  display: flex;
+  min-height: var(--dept-card-height);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-10);
+  border: 0;
+  color: var(--gray-20);
+  cursor: pointer;
+}
+
+.dept-card__add-icon {
+  width: var(--space-40);
+  height: var(--space-40);
+}
+
+.team-members-departments .dept-card--add span {
+  max-width: 100%;
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.permission-matrix-scroll {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  border-radius: var(--radius-20);
+  overscroll-behavior-inline: contain;
+}
+
+.permission-matrix {
+  --permission-matrix-height: 618px; /* Figma 582:44206 权限矩阵白卡实测高，无对应 token。 */
+  --permission-matrix-role-height: 43px; /* Figma 权限角色 chip 实测高，无对应 token。 */
+  --permission-matrix-spacer-height: 19px; /* Figma 角色头与首行权限间距校准，无对应 token。 */
+  --permission-matrix-label-min-width: 220px; /* Figma 桌面权限名称列实测下限，无对应 token。 */
+  --permission-matrix-role-min-width: 160px; /* Figma 桌面权限角色列实测下限，无对应 token。 */
+  --permission-matrix-add-width: 100px; /* Figma 582:44206 新增角色格实测宽，无对应 token。 */
+  --permission-matrix-mobile-width: 900px; /* Figma 582:44266 手机横向矩阵内容宽校准，无对应 token。 */
+  --permission-matrix-toggle-size: 40px; /* Figma 权限勾选按钮实测尺寸，无对应 token。 */
+  --permission-matrix-check-width: 11px; /* Figma 权限勾线横向尺寸，无对应 token。 */
+  --permission-matrix-check-height: 18px; /* Figma 权限勾线纵向尺寸，无对应 token。 */
+  --permission-matrix-check-stroke: 3px; /* Figma 权限勾线线宽，无对应 token。 */
+  --permission-matrix-dash-width: 20px; /* Figma 未授权短横线实测宽，无对应 token。 */
+  --permission-matrix-dash-height: 3px; /* Figma 未授权短横线实测高，无对应 token。 */
+  --permission-matrix-role-action-size: 18px; /* Figma 角色编辑与删除图标实测尺寸，无对应 token。 */
+  --permission-matrix-role-remove-stroke: 2px; /* Figma 角色删除图标线宽，无对应 token。 */
+  --permission-matrix-role-remove-line: 10px; /* Figma 角色删除图标线长，无对应 token。 */
+
+  display: grid;
+  width: 100%;
+  min-height: var(--permission-matrix-height);
+  grid-template-columns: minmax(var(--permission-matrix-label-min-width), 1fr) repeat(var(--permission-role-count), minmax(var(--permission-matrix-role-min-width), 1fr)) minmax(var(--permission-matrix-add-width), .3fr);
+  grid-template-rows: var(--permission-matrix-role-height) var(--permission-matrix-spacer-height) repeat(var(--permission-row-count), var(--permission-matrix-toggle-size));
+  gap: var(--space-20) var(--space-10);
+  align-items: center;
+  padding: var(--space-20);
+  border-radius: var(--radius-20);
+  background: var(--white);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .06); /* 组件基础卡片阴影，沿用 components/styles.css。 */
+}
+
+.permission-matrix__spacer {
+  grid-column: 1 / -1;
+}
+
+.permission-matrix__role,
+.permission-matrix__add-role {
+  display: flex;
+  min-width: 0;
+  height: var(--permission-matrix-role-height);
+  align-items: center;
+  justify-content: center;
+  justify-self: center;
+  border-radius: var(--radius-10);
+  background: var(--gray-5);
+}
+
+.permission-matrix__role {
+  width: fit-content;
+  max-width: 100%;
+  gap: var(--space-4);
+  padding: 0 var(--space-10);
+}
+
+.permission-matrix__role strong {
+  min-width: 0;
+  color: var(--blue);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+  line-height: var(--lh-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.permission-matrix__role-action {
+  position: relative;
+  width: var(--permission-matrix-role-action-size);
+  height: var(--permission-matrix-role-action-size);
+  flex: none;
+  padding: 0;
+  border-radius: var(--radius-40);
+  background: transparent;
+  color: var(--gray-20);
+  cursor: pointer;
+}
+
+.permission-matrix__role-edit .icon {
+  width: var(--permission-matrix-role-action-size);
+  height: var(--permission-matrix-role-action-size);
+}
+
+.permission-matrix__role-remove {
+  background: var(--gray-40);
+}
+
+.permission-matrix__role-remove::before,
+.permission-matrix__role-remove::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--permission-matrix-role-remove-stroke);
+  height: var(--permission-matrix-role-remove-line);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  content: "";
+}
+
+.permission-matrix__role-remove::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.permission-matrix__role-remove::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.permission-matrix__role--editing {
+  width: min(100%, calc(var(--permission-matrix-role-min-width) * 1.25));
+  padding: var(--space-4);
+}
+
+.permission-matrix__role--editing input {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  padding: 0 var(--space-10);
+  border: var(--permission-matrix-role-remove-stroke) solid var(--blue);
+  border-radius: var(--radius-10);
+  outline: 0;
+  background: var(--white);
+  color: var(--gray-80);
+  font: inherit;
+}
+
+.permission-matrix__add-role {
+  position: relative;
+  width: min(100%, var(--permission-matrix-add-width));
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+}
+
+.permission-matrix__add-role::before,
+.permission-matrix__add-role::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: var(--radius-10);
+  background: var(--gray-40);
+  content: "";
+}
+
+.permission-matrix__add-role::before {
+  width: var(--space-20);
+  height: var(--permission-matrix-check-stroke);
+  transform: translate(-50%, -50%);
+}
+
+.permission-matrix__add-role::after {
+  width: var(--permission-matrix-check-stroke);
+  height: var(--space-20);
+  transform: translate(-50%, -50%);
+}
+
+.permission-matrix__label {
+  min-width: 0;
+  padding-left: var(--space-10);
+  color: var(--black);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+  line-height: var(--lh-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.permission-matrix__toggle {
+  position: relative;
+  display: flex;
+  width: var(--permission-matrix-toggle-size);
+  height: var(--permission-matrix-toggle-size);
+  align-items: center;
+  justify-content: center;
+  justify-self: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-10);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--transition-fast), transform var(--transition-fast);
+}
+
+.permission-matrix__toggle::before {
+  width: var(--permission-matrix-dash-width);
+  height: var(--permission-matrix-dash-height);
+  border-radius: var(--radius-10);
+  background: var(--gray-20);
+  content: "";
+}
+
+.permission-matrix__toggle--on {
+  background: var(--blue);
+}
+
+.permission-matrix__toggle--on::before {
+  width: var(--permission-matrix-check-width);
+  height: var(--permission-matrix-check-height);
+  border-right: var(--permission-matrix-check-stroke) solid var(--white);
+  border-bottom: var(--permission-matrix-check-stroke) solid var(--white);
+  border-radius: 0;
+  background: transparent;
+  transform: translateY(calc(var(--space-4) * -1)) rotate(45deg);
+}
+
+.permission-matrix__toggle:active {
+  transform: scale(.96);
+}
+
+.permission-matrix__row-end {
+  width: 100%;
+}
+
+.modal-add-dept {
+  --department-modal-width: 560px; /* Figma 582:45159 部门修改弹窗实测宽，无对应 token。 */
+  --department-modal-height: 430px; /* Figma 582:45159/45219 部门修改弹窗实测高，无对应 token。 */
+  --department-modal-icon-size: 60px; /* Figma 部门标题图标底实测尺寸，无对应 token。 */
+  --department-modal-control-height: 35px; /* Figma 部门名称、主管与成员行实测高，无对应 token。 */
+  --department-modal-border-width: 1px; /* Figma 部门弹窗表单描边宽，无对应 token。 */
+  --department-modal-remove-size: 18px; /* Figma 成员移除按钮实测尺寸，无对应 token。 */
+  --department-modal-remove-stroke: 2px; /* Figma 成员移除图标线宽，无对应 token。 */
+  --department-modal-remove-stroke-height: 10px; /* Figma 成员移除图标线长，无对应 token。 */
+
+  display: flex;
+  width: min(100%, var(--department-modal-width));
+  height: min(var(--department-modal-height), calc(100vh - (var(--space-20) * 2)));
+  min-height: min(var(--department-modal-height), calc(100vh - (var(--space-20) * 2)));
+  max-height: calc(100vh - (var(--space-20) * 2));
+  flex-direction: column;
+  gap: var(--space-10);
+  overflow: auto;
+}
+
+.modal-add-dept__title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-10);
+}
+
+.modal-add-dept__icon {
+  width: var(--department-modal-icon-size);
+  height: var(--department-modal-icon-size);
+  flex: none;
+  background: var(--blue);
+  color: var(--white);
+}
+
+.modal-add-dept__icon .icon {
+  width: var(--space-40);
+  height: var(--space-40);
+}
+
+.modal-add-dept__name {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--space-10);
+  padding: 0 var(--space-10);
+  border-radius: var(--radius-10);
+  background: var(--gray-5);
+}
+
+.modal-add-dept__name input,
+.modal-add-dept__field select {
+  min-width: 0;
+  height: var(--department-modal-control-height);
+  border: var(--department-modal-border-width) solid transparent;
+  outline: 0;
+  background: transparent;
+  color: var(--gray-80);
+  font: inherit;
+  font-size: var(--font-description-size);
+  transition: border-color var(--transition-fast);
+}
+
+.modal-add-dept__name input {
+  width: 100%;
+  flex: 1 1 auto;
+}
+
+.modal-add-dept__name .icon {
+  width: var(--space-20);
+  height: var(--space-20);
+  flex: none;
+  color: var(--gray-40);
+}
+
+.modal-add-dept__name:focus-within,
+.modal-add-dept__field select:focus {
+  border-color: var(--blue);
+}
+
+.modal-add-dept__field,
+.modal-add-dept__members {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-4);
+  color: var(--gray-80);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-tight);
+}
+
+.modal-add-dept__field select {
+  width: 100%;
+  padding: 0 var(--space-10);
+  border-radius: var(--radius-10);
+  background: var(--gray-5);
+}
+
+.modal-add-dept__member-list {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--space-4);
+  overflow: auto;
+}
+
+.modal-add-dept__member {
+  display: flex;
+  min-height: var(--department-modal-control-height);
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-10);
+  padding: 0 var(--space-10);
+  border-radius: var(--radius-10);
+  background: var(--gray-5);
+}
+
+.modal-add-dept__member span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal-add-dept__member button {
+  position: relative;
+  width: var(--department-modal-remove-size);
+  height: var(--department-modal-remove-size);
+  flex: none;
+  border: 0;
+  border-radius: var(--radius-40);
+  background: var(--gray-40);
+  cursor: pointer;
+}
+
+.modal-add-dept__member button::before,
+.modal-add-dept__member button::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--department-modal-remove-stroke);
+  height: var(--department-modal-remove-stroke-height);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  content: "";
+}
+
+.modal-add-dept__member button::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.modal-add-dept__member button::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.modal-add-dept__add-member {
+  display: flex;
+  width: 100%;
+  min-height: var(--department-modal-control-height);
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-10);
+  background: var(--blue);
+  color: var(--white);
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.modal-add-dept__add-member:hover,
+.modal-add-dept__button:hover {
+  opacity: .92;
+}
+
+.modal-add-dept__add-member .icon {
+  width: var(--space-20);
+  height: var(--space-20);
+}
+
+.modal-add-dept__footer {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-10);
+  margin-top: auto;
+}
+
+.modal-add-dept__button {
+  display: flex;
+  min-width: 0;
+  height: var(--department-modal-control-height);
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-10);
+  border: 0;
+  border-radius: var(--radius-10);
+  color: var(--white);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.modal-add-dept__button--back {
+  background: var(--gray-40);
+}
+
+.modal-add-dept__button--delete {
+  background: var(--red);
+}
+
+.modal-add-dept__button--confirm {
+  background: var(--blue);
+}
+
+@media (max-width: 768px) {
+  .shell-app {
+    min-width: 0;
+  }
+
+  .team-members-page {
+    --team-members-mobile-stat-min-height: 54px; /* Figma 443:6806 统计容器内容高，无对应 token。 */
+
+    gap: var(--space-20);
+  }
+
+  .team-members-title {
+    display: none;
+  }
+
+  .team-members-stats {
+    display: flex;
+    gap: var(--space-20);
+    padding: var(--space-10);
+    border-radius: var(--radius-10);
+    background: var(--white);
+  }
+
+  .team-members-stat {
+    min-height: var(--team-members-mobile-stat-min-height);
+    flex: 1 1 0;
+    justify-content: flex-start;
+    gap: var(--space-10);
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--3a);
+  }
+
+  .team-members-stat:first-child,
+  .team-members-stat:last-child {
+    display: none;
+  }
+
+  .team-members-stat:nth-child(2) {
+    padding-right: var(--space-20);
+    border-right: 1px solid var(--gray-15);
+  }
+
+  .team-members-stat__title {
+    font-size: var(--font-description-size);
+    font-weight: var(--font-body-weight);
+  }
+
+  .team-members-stat__value {
+    font-size: var(--font-title-2-size);
+  }
+
+  .team-members-panel {
+    min-height: 0;
+    gap: var(--space-20);
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .team-members-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-20) var(--space-10);
+  }
+
+  .team-members-tab {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .team-members-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-10);
+  }
+
+  .team-member-card {
+    --component-width: 100%;
+    width: 100%;
+    min-height: 200px;
+    padding: var(--space-20);
+  }
+
+  .members-modal-overlay {
+    padding: var(--grid-margin-mobile);
+  }
+
+  .form-new-member {
+    width: min(92vw, var(--member-form-width));
+    height: min(var(--member-form-height), calc(100vh - (var(--grid-margin-mobile) * 2)));
+    min-height: min(var(--member-form-height), calc(100vh - (var(--grid-margin-mobile) * 2)));
+    max-height: calc(100vh - (var(--grid-margin-mobile) * 2));
+  }
+
+  .member-panel {
+    width: min(92vw, var(--member-panel-width));
+    height: min(var(--member-panel-height), calc(100vh - (var(--grid-margin-mobile) * 2)));
+    min-height: min(var(--member-panel-height), calc(100vh - (var(--grid-margin-mobile) * 2)));
+    max-height: calc(100vh - (var(--grid-margin-mobile) * 2));
+  }
+
+  .modal-add-dept {
+    width: min(92vw, var(--department-modal-width));
+    height: min(var(--department-modal-height), calc(100vh - (var(--grid-margin-mobile) * 2)));
+    min-height: min(var(--department-modal-height), calc(100vh - (var(--grid-margin-mobile) * 2)));
+    max-height: calc(100vh - (var(--grid-margin-mobile) * 2));
+  }
+
+  html[lang="fr"] .modal-add-dept__button {
+    padding: 0 var(--space-4);
+    font-size: var(--font-body-size);
+  }
+
+  .member-panel__form-grid {
+    gap: var(--space-40);
+  }
+
+  html[lang="fr"] .member-panel .tab-chip {
+    padding: 0 var(--space-4);
+    font-size: var(--member-panel-mobile-tab-fr-size);
+  }
+
+  .team-members-reviews {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-20);
+  }
+
+  .review-card {
+    min-height: var(--review-card-mobile-height);
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-20);
+  }
+
+  .team-members-departments {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .permission-matrix {
+    width: var(--permission-matrix-mobile-width);
+    grid-template-columns: calc(var(--permission-matrix-label-min-width) - var(--space-20)) repeat(var(--permission-role-count), minmax(var(--permission-matrix-role-min-width), 1fr)) minmax(var(--permission-matrix-add-width), .3fr);
+  }
+
+  html[lang="fr"] .dept-card__button {
+    padding: 0 var(--space-4);
+    font-size: var(--font-body-size);
+  }
+}
