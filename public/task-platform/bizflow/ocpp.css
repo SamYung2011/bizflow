@@ -1,0 +1,419 @@
+.shell-app {
+  --ocpp-shell-min-width: 1200px;
+  min-width: var(--ocpp-shell-min-width);
+}
+.ocpp-page {
+  --ocpp-page-offset: 104px;
+  --ocpp-line: 1px;
+  --ocpp-segment-width: 1040px;
+  --ocpp-inner-segment-width: 760px;
+  --ocpp-mobile-segment-width: 720px;
+  --ocpp-table-compact: 720px;
+  --ocpp-table-wide: 1180px;
+  --ocpp-table-xwide: 1560px;
+  --ocpp-control-height: 35px; /* docs/01 base Button hug 271:1104。 */
+  --ocpp-filter-width: 220px;
+  --ocpp-cell-width: 260px;
+  --ocpp-preview-width: 360px;
+  --ocpp-preview-height: 320px;
+  --ocpp-detail-label-width: 100px;
+  --ocpp-empty-height: 240px;
+  --ocpp-modal-width: 960px;
+  --ocpp-modal-height: 88vh;
+  --ocpp-close-size: 40px; /* docs/01 add-surface 267:270 图标按钮规格。 */
+  --ocpp-overlay: rgba(0, 0, 0, 0.5);
+  --ocpp-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+  --ocpp-reduced: 0.01ms;
+  display: flex;
+  min-width: 0;
+  min-height: calc(100vh - var(--ocpp-page-offset));
+  flex-direction: column;
+  gap: var(--space-20);
+}
+.ocpp-head h1 {
+  margin: 0;
+  color: var(--black);
+  font-size: var(--font-display-size);
+  font-weight: var(--font-title-2-weight);
+  line-height: var(--lh-num);
+}
+.ocpp-head p {
+  margin: var(--space-4) 0 0;
+  color: var(--gray-40);
+}
+.ocpp-segment,
+.ocpp-inner-segment {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.ocpp-segment .app-segment {
+  width: min(100%, var(--ocpp-segment-width));
+}
+.ocpp-inner-segment {
+  margin-bottom: var(--space-20);
+}
+.ocpp-inner-segment .app-segment {
+  width: min(100%, var(--ocpp-inner-segment-width));
+}
+.ocpp-content {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-20);
+}
+.ocpp-panel {
+  padding: var(--space-20);
+  border: var(--ocpp-line) solid var(--gray-10);
+  border-radius: var(--radius-20);
+  background: var(--white);
+}
+.ocpp-panel p {
+  margin: 0;
+  color: var(--gray-60);
+}
+.ocpp-toolbar {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-10);
+  padding: var(--space-10) var(--space-20);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  color: var(--gray-40);
+}
+.ocpp-toolbar > div {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-10);
+}
+.ocpp-toolbar strong {
+  color: var(--gray-60);
+  white-space: nowrap;
+}
+.ocpp-filter-control {
+  min-width: 0;
+  min-height: var(--ocpp-control-height);
+  padding: var(--space-4) var(--space-10);
+  border: var(--ocpp-line) solid var(--gray-10);
+  border-radius: var(--radius-10);
+  outline: 0;
+  background: var(--white);
+  color: var(--gray-60);
+}
+input.ocpp-filter-control {
+  min-width: var(--ocpp-filter-width);
+}
+.ocpp-filter-control:focus {
+  border-color: var(--blue);
+}
+.ocpp-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-10);
+  color: var(--gray-60);
+}
+.ocpp-check input {
+  accent-color: var(--blue);
+}
+.ocpp-table-shell {
+  max-width: 100%;
+  border: var(--ocpp-line) solid var(--gray-10);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  overflow-x: auto;
+}
+.ocpp-table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--gray-60);
+  font-size: var(--font-description-size);
+}
+.ocpp-table--compact {
+  min-width: var(--ocpp-table-compact);
+}
+.ocpp-table--wide {
+  min-width: var(--ocpp-table-wide);
+}
+.ocpp-table--xwide {
+  min-width: var(--ocpp-table-xwide);
+}
+.ocpp-table th,
+.ocpp-table td {
+  padding: var(--space-10);
+  border-bottom: var(--ocpp-line) solid var(--gray-10);
+  text-align: left;
+  vertical-align: top;
+}
+.ocpp-table th {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  background: var(--gray-5);
+  color: var(--gray-40);
+  font-weight: var(--font-description-weight);
+  white-space: nowrap;
+}
+.ocpp-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.ocpp-table td {
+  max-width: var(--ocpp-cell-width);
+  overflow-wrap: anywhere;
+}
+.ocpp-mono,
+.ocpp-table pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--font-body-size);
+}
+.ocpp-table td.ocpp-preview {
+  max-width: var(--ocpp-preview-width);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ocpp-click-row {
+  cursor: pointer;
+}
+.ocpp-click-row:hover {
+  background: color-mix(in srgb, var(--blue) 5%, var(--white));
+}
+.ocpp-expanded td {
+  padding: var(--space-20);
+  background: var(--gray-5);
+}
+.ocpp-expanded pre {
+  max-height: var(--ocpp-preview-height);
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ocpp-chip {
+  display: inline-flex;
+  min-height: var(--space-20);
+  align-items: center;
+  padding: var(--space-4) var(--space-10);
+  border-radius: var(--radius-20);
+  background: var(--gray-10);
+  color: var(--gray-60);
+  font-size: var(--font-body-size);
+  white-space: nowrap;
+}
+.ocpp-chip--normal {
+  background: color-mix(in srgb, var(--green) 14%, var(--white));
+  color: var(--green);
+}
+.ocpp-chip--hidden {
+  background: color-mix(in srgb, var(--red) 10%, var(--white));
+  color: var(--red);
+}
+.ocpp-chip--unknown {
+  background: color-mix(in srgb, var(--yellow) 14%, var(--white));
+  color: var(--yellow);
+}
+.ocpp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+.ocpp-actions button,
+.ocpp-pager button,
+.ocpp-primary,
+.ocpp-link {
+  min-height: var(--ocpp-control-height);
+  padding: var(--space-4) var(--space-10);
+  border: var(--ocpp-line) solid var(--gray-10);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  color: var(--gray-60);
+  font-size: var(--font-description-size);
+  white-space: nowrap;
+  transition:
+    opacity var(--transition-fast),
+    transform var(--transition-fast);
+}
+.ocpp-actions button:disabled {
+  background: var(--gray-5);
+  color: var(--gray-20);
+  cursor: not-allowed;
+}
+.ocpp-link {
+  min-height: var(--space-20);
+  border-color: color-mix(in srgb, var(--blue) 20%, var(--white));
+  color: var(--blue);
+}
+.ocpp-primary {
+  align-self: flex-start;
+  margin-top: var(--space-10);
+  border: 0;
+  background: var(--blue);
+  color: var(--white);
+  font-size: var(--font-description-size);
+}
+.ocpp-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-10);
+  margin-top: var(--space-10);
+  color: var(--gray-40);
+}
+.ocpp-pager button:disabled {
+  background: var(--gray-5);
+  color: var(--gray-20);
+  cursor: not-allowed;
+}
+.ocpp-empty {
+  display: flex;
+  min-height: var(--ocpp-empty-height);
+  align-items: center;
+  justify-content: center;
+  border: var(--ocpp-line) dashed var(--gray-10);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  color: var(--gray-40);
+}
+.ocpp-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-10) var(--space-20);
+  margin: 0;
+}
+.ocpp-detail-grid div {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(var(--ocpp-detail-label-width), 0.5fr) minmax(
+      0,
+      1fr
+    );
+  gap: var(--space-10);
+}
+.ocpp-detail-grid dt {
+  color: var(--gray-40);
+}
+.ocpp-detail-grid dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--gray-80);
+  overflow-wrap: anywhere;
+}
+.money-text {
+  white-space: nowrap;
+}
+.money-text--in {
+  color: var(--green);
+  font-weight: var(--font-title-2-weight);
+}
+.money-text--out {
+  color: var(--red);
+  font-weight: var(--font-title-2-weight);
+}
+.ocpp-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 230;
+  display: grid;
+  place-items: center;
+  padding: var(--space-20);
+  background: var(--ocpp-overlay);
+}
+.ocpp-modal {
+  width: min(94vw, var(--ocpp-modal-width));
+  max-height: var(--ocpp-modal-height);
+  padding: var(--space-20);
+  border-radius: var(--radius-20);
+  background: var(--white);
+  box-shadow: var(--ocpp-shadow);
+  overflow-y: auto;
+}
+.ocpp-modal > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-20);
+  margin-bottom: var(--space-20);
+}
+.ocpp-modal h2,
+.ocpp-modal h3 {
+  margin: 0;
+}
+.ocpp-modal h3 {
+  margin-top: var(--space-20);
+  margin-bottom: var(--space-10);
+  font-size: var(--font-title-3-size);
+}
+.ocpp-modal > header button {
+  display: grid;
+  width: var(--ocpp-close-size);
+  height: var(--ocpp-close-size);
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-40); /* docs/01 add-surface 267:270。 */
+  background: var(--gray-5);
+  color: var(--gray-60);
+}
+@media (max-width: 768px) {
+  .shell-app {
+    min-width: 0;
+  }
+  .ocpp-page {
+    --ocpp-mobile-offset: 96px;
+    min-height: calc(100vh - var(--ocpp-mobile-offset));
+    gap: var(--space-10);
+  }
+  .ocpp-head {
+    display: none;
+  }
+  .ocpp-segment .app-segment,
+  .ocpp-inner-segment .app-segment {
+    width: max-content;
+    min-width: var(--ocpp-mobile-segment-width);
+  }
+  .ocpp-content {
+    gap: var(--space-10);
+  }
+  .ocpp-toolbar {
+    align-items: stretch;
+    padding: var(--space-10);
+    flex-direction: column;
+  }
+  .ocpp-toolbar > div {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .ocpp-filter-control {
+    flex: none;
+  }
+  input.ocpp-filter-control {
+    min-width: var(--ocpp-filter-width);
+  }
+  .ocpp-table-shell {
+    border-radius: var(--radius-10);
+  }
+  .ocpp-pager {
+    justify-content: space-between;
+  }
+  .ocpp-detail-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ocpp-modal {
+    width: min(94vw, var(--ocpp-modal-width));
+    padding: var(--space-10);
+  }
+  .ocpp-overlay {
+    padding: var(--grid-margin-mobile);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ocpp-actions button,
+  .ocpp-pager button,
+  .ocpp-primary,
+  .ocpp-link {
+    transition-duration: var(--ocpp-reduced) !important;
+  }
+}
