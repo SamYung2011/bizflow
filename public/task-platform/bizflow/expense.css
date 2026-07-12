@@ -90,6 +90,21 @@
   width: min(100%, var(--expense-segment-width));
 }
 
+.expense-mine-summary {
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+}
+
+.expense-page[data-live-read-only="true"] [data-expense-write]:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.expense-page[data-live-read-only="true"] .expense-upload__trigger:has([data-expense-write]:disabled) {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
 .expense-stats {
   display: flex;
   min-width: 0;

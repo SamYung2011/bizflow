@@ -14,7 +14,8 @@ import {
 const copy = {
   zh: {
     title: "財務",
-    subtitle: "審批與打款管理",
+    subtitleAdmin: "審批 / 打款 / 查看所有員工報銷",
+    subtitleMine: "提交自己的報銷，等待審批與打款",
     add: "新增報銷",
     pending: "待審批",
     approved: "已通過",
@@ -22,6 +23,7 @@ const copy = {
     paid: "已打款",
     mine: "我的報銷",
     all: "全部",
+    mineSummary: "我的報銷 · 共 {count} 筆",
     visible: "可見 {count} 筆",
     approvedTotal: "已通過總額",
     empty: "暫無報銷記錄",
@@ -64,7 +66,8 @@ const copy = {
   },
   en: {
     title: "Finance",
-    subtitle: "Approval and payment management",
+    subtitleAdmin: "Approve, pay and view all employee reimbursements",
+    subtitleMine: "Submit your reimbursements for approval and payment",
     add: "Add reimbursement",
     pending: "Pending",
     approved: "Approved",
@@ -72,6 +75,7 @@ const copy = {
     paid: "Paid",
     mine: "My reimbursements",
     all: "All",
+    mineSummary: "My reimbursements · {count} entries",
     visible: "{count} visible",
     approvedTotal: "Approved total",
     empty: "No reimbursement records",
@@ -114,7 +118,8 @@ const copy = {
   },
   fr: {
     title: "Finance",
-    subtitle: "Gestion des validations et paiements",
+    subtitleAdmin: "Valider, payer et consulter tous les remboursements",
+    subtitleMine: "Soumettez vos remboursements pour validation et paiement",
     add: "Ajouter un remboursement",
     pending: "En attente",
     approved: "Approuvé",
@@ -122,6 +127,7 @@ const copy = {
     paid: "Payé",
     mine: "Mes remboursements",
     all: "Tous",
+    mineSummary: "Mes remboursements · {count} entrées",
     visible: "{count} visibles",
     approvedTotal: "Total approuvé",
     empty: "Aucun remboursement",
@@ -165,12 +171,16 @@ const copy = {
 };
 
 const [snapshot, currentUser, unread] = await Promise.all([getExpenseData(), getCurrentUser(), getUnread()]);
-const ownerKey = currentUser.email || currentUser.name;
+const authenticated = typeof currentUser?.hasPermission === "function";
+const isAdmin = !authenticated || currentUser?.isBfAdmin === true;
+const liveReadOnly = authenticated;
+const writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
+const ownerKey = String(currentUser.employeeId || currentUser.email || currentUser.name || "");
 const currencySymbols = { RMB: "¥", HKD: "HK$", USD: "US$" };
 
 const state = {
   rows: normalizeExpenseRows(snapshot.reimbursements),
-  filter: "pending",
+  filter: isAdmin ? "pending" : "mine",
   draft: null,
   error: ""
 };
@@ -237,15 +247,15 @@ function renderActions(row, helpers) {
   if (!row.local) return `<span class="expense-muted">—</span>`;
   const pending = row.status === "pending";
   return `<span class="expense-actions">
-    ${pending ? `<button type="button" class="expense-action expense-action--approve" data-expense-approve="${escapeHtml(row.id)}">${escapeHtml(t(lang, "approve"))}</button><button type="button" class="expense-action expense-action--reject" data-expense-reject="${escapeHtml(row.id)}">${escapeHtml(t(lang, "reject"))}</button>` : ""}
-    <button type="button" class="expense-action expense-action--delete" data-expense-delete="${escapeHtml(row.id)}">${escapeHtml(t(lang, "remove"))}</button>
+    ${pending ? `<button type="button" class="expense-action expense-action--approve" data-expense-approve="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "approve"))}</button><button type="button" class="expense-action expense-action--reject" data-expense-reject="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "reject"))}</button>` : ""}
+    <button type="button" class="expense-action expense-action--delete" data-expense-delete="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "remove"))}</button>
   </span>`;
 }
 
 function renderPayment(row, helpers) {
   const { escapeHtml, lang } = helpers;
   if (row.paid) return `<span class="expense-payment expense-payment--paid">${escapeHtml(t(lang, "paid"))}</span>`;
-  if (row.local && row.status === "approved") return `<button type="button" class="expense-action expense-action--pay" data-expense-pay="${escapeHtml(row.id)}">${escapeHtml(t(lang, "markPaid"))}</button>`;
+  if (row.local && row.status === "approved") return `<button type="button" class="expense-action expense-action--pay" data-expense-pay="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "markPaid"))}</button>`;
   return `<span class="expense-payment">${escapeHtml(t(lang, "unpaid"))}</span>`;
 }
 
@@ -256,7 +266,7 @@ function renderRow(row, helpers) {
   const categoryKey = categoryKeys[row.category];
   return `<tr class="expense-row" data-expense-row="${e(row.id)}" data-expense-status="${e(row.status)}" data-expense-paid="${row.paid}">
     ${cell("date", e(row.date))}
-    ${cell("employee", e(row.employee))}
+    ${isAdmin ? cell("employee", e(row.employee)) : ""}
     ${cell("category", e(categoryKey ? t(lang, categoryKey) : row.category))}
     ${cell("amount", e(formatCurrency(row.currency, row.amount)), "expense-amount")}
     ${cell("description", `<span title="${e(row.description || t(lang, "noDescription"))}">${e(row.description || t(lang, "noDescription"))}</span>`, "expense-description")}
@@ -269,11 +279,11 @@ function renderRow(row, helpers) {
 
 function renderTable(rows, helpers) {
   const { escapeHtml, icon, lang } = helpers;
-  const headers = ["date", "employee", "category", "amount", "description", "receipt", "status", "payment", "actions"];
+  const headers = ["date", ...(isAdmin ? ["employee"] : []), "category", "amount", "description", "receipt", "status", "payment", "actions"];
   return `<div class="expense-table-shell">
     <table class="expense-table">
       <thead><tr>${headers.map((key) => `<th>${escapeHtml(t(lang, key))}</th>`).join("")}</tr></thead>
-      <tbody>${rows.length ? rows.map((row) => renderRow(row, helpers)).join("") : `<tr class="expense-empty-row"><td colspan="9"><div class="expense-empty">${icon("icon-nav-sales", "icon")}<span>${escapeHtml(t(lang, "empty"))}</span></div></td></tr>`}</tbody>
+      <tbody>${rows.length ? rows.map((row) => renderRow(row, helpers)).join("") : `<tr class="expense-empty-row"><td colspan="${headers.length}"><div class="expense-empty">${icon("icon-nav-sales", "icon")}<span>${escapeHtml(t(lang, "empty"))}</span></div></td></tr>`}</tbody>
     </table>
   </div>`;
 }
@@ -294,21 +304,21 @@ function renderModal(helpers) {
       <header><h2>${e(t(lang, "modalTitle"))}</h2><button type="button" data-expense-close aria-label="${e(t(lang, "close"))}">×</button></header>
       <div class="expense-modal__body">
         <div class="expense-form-grid">
-          ${renderField("date", "date", `<input type="date" data-expense-field="date" value="${e(draft.date)}">`, helpers)}
+          ${renderField("date", "date", `<input type="date" data-expense-field="date" data-expense-write value="${e(draft.date)}"${writeAttributes}>`, helpers)}
           <div class="expense-amount-fields">
-            ${renderField("currency", "currency", `<select data-expense-field="currency">${options(currencies, draft.currency, (value) => value)}</select>`, helpers)}
-            ${renderField("amount", "amount", `<input type="number" min="0" step="0.01" inputmode="decimal" data-expense-field="amount" value="${e(draft.amount)}" placeholder="0.00">`, helpers)}
+            ${renderField("currency", "currency", `<select data-expense-field="currency" data-expense-write${writeAttributes}>${options(currencies, draft.currency, (value) => value)}</select>`, helpers)}
+            ${renderField("amount", "amount", `<input type="number" min="0" step="0.01" inputmode="decimal" data-expense-field="amount" data-expense-write value="${e(draft.amount)}" placeholder="0.00"${writeAttributes}>`, helpers)}
           </div>
         </div>
-        ${renderField("category", "category", `<select data-expense-field="category">${options(categories, draft.category, (value) => t(lang, categoryKeys[value]))}</select>`, helpers)}
-        ${renderField("description", "description", `<textarea data-expense-field="description" placeholder="${e(t(lang, "descriptionPlaceholder"))}">${e(draft.description)}</textarea>`, helpers)}
+        ${renderField("category", "category", `<select data-expense-field="category" data-expense-write${writeAttributes}>${options(categories, draft.category, (value) => t(lang, categoryKeys[value]))}</select>`, helpers)}
+        ${renderField("description", "description", `<textarea data-expense-field="description" data-expense-write placeholder="${e(t(lang, "descriptionPlaceholder"))}"${writeAttributes}>${e(draft.description)}</textarea>`, helpers)}
         <div class="expense-upload">
-          <label class="expense-upload__trigger">${icon("icon-nav-file", "icon")}<span><strong>${e(t(lang, "receiptHint"))}</strong><small>${e(t(lang, "receiptLocal"))}</small></span><input type="file" accept="image/*" multiple data-expense-receipts></label>
-          ${draft.receipts.length ? `<div class="expense-preview-list">${draft.receipts.map((receipt, index) => `<figure><img src="${e(receipt.url)}" alt="${e(receipt.name)}"><button type="button" data-expense-receipt-remove="${index}" aria-label="${e(t(lang, "removeReceipt"))}">×</button></figure>`).join("")}</div>` : ""}
+          <label class="expense-upload__trigger">${icon("icon-nav-file", "icon")}<span><strong>${e(t(lang, "receiptHint"))}</strong><small>${e(t(lang, "receiptLocal"))}</small></span><input type="file" accept="image/*" multiple data-expense-receipts data-expense-write${writeAttributes}></label>
+          ${draft.receipts.length ? `<div class="expense-preview-list">${draft.receipts.map((receipt, index) => `<figure><img src="${e(receipt.url)}" alt="${e(receipt.name)}"><button type="button" data-expense-receipt-remove="${index}" data-expense-write aria-label="${e(t(lang, "removeReceipt"))}"${writeAttributes}>×</button></figure>`).join("")}</div>` : ""}
         </div>
         ${state.error ? `<p class="expense-error" role="alert">${e(t(lang, state.error))}</p>` : ""}
       </div>
-      <footer><button type="button" class="expense-button expense-button--secondary" data-expense-close>${e(t(lang, "cancel"))}</button><button type="submit" class="expense-button">${e(t(lang, "submit"))}</button></footer>
+      <footer><button type="button" class="expense-button expense-button--secondary" data-expense-close>${e(t(lang, "cancel"))}</button><button type="submit" class="expense-button" data-expense-write${writeAttributes}>${e(t(lang, "submit"))}</button></footer>
     </form>
   </div>`;
 }
@@ -316,19 +326,19 @@ function renderModal(helpers) {
 export function renderExpense(helpers) {
   currentHelpers = helpers;
   const { escapeHtml, icon, lang } = helpers;
-  const rows = filterExpenseRows(state.rows, state.filter, ownerKey);
+  // Mirrors bizflow_samyung/src/views/Expense.jsx:223-229: non-admins can only see their own rows.
+  const rows = isAdmin ? filterExpenseRows(state.rows, state.filter, ownerKey) : filterExpenseRows(state.rows, "mine", ownerKey);
   const filterCounts = expenseCounts(state.rows, ownerKey);
-  // isBfAdmin:现网仅管理员可见六筛选和审批动作；静态复刻固定为 admin 视角。
-  const segment = renderSegment({
+  const segment = isAdmin ? renderSegment({
     items: filters.map((filter) => ({ key: filter, label: t(lang, filter), badge: filterCounts[filter] })),
     active: state.filter,
     ariaLabel: t(lang, "title"),
     escapeHtml,
     dataAttribute: "data-expense-filter"
-  });
-  return `<div class="expense-page" data-expense-page data-expense-filter-value="${escapeHtml(state.filter)}" data-expense-visible="${rows.length}" ${filters.map((filter) => `data-expense-count-${filter}="${filterCounts[filter]}"`).join(" ")}>
-    <header class="expense-head"><div><h1>${escapeHtml(t(lang, "title"))}</h1><p>${escapeHtml(t(lang, "subtitle"))}</p></div><button type="button" class="expense-add" data-expense-new>${icon("icon-add-line-add", "icon")}<span>${escapeHtml(t(lang, "add"))}</span></button></header>
-    <div class="expense-segment">${segment}</div>
+  }) : "";
+  return `<div class="expense-page" data-expense-page data-live-read-only="${liveReadOnly}" data-expense-admin="${isAdmin}" data-expense-filter-value="${escapeHtml(state.filter)}" data-expense-visible="${rows.length}" ${filters.map((filter) => `data-expense-count-${filter}="${filterCounts[filter]}"`).join(" ")}>
+    <header class="expense-head"><div><h1>${escapeHtml(t(lang, "title"))}</h1><p>${escapeHtml(t(lang, isAdmin ? "subtitleAdmin" : "subtitleMine"))}</p></div><button type="button" class="expense-add" data-expense-new data-expense-write${writeAttributes}>${icon("icon-add-line-add", "icon")}<span>${escapeHtml(t(lang, "add"))}</span></button></header>
+    ${isAdmin ? `<div class="expense-segment">${segment}</div>` : `<div class="expense-mine-summary">${escapeHtml(t(lang, "mineSummary", { count: rows.length }))}</div>`}
     ${renderStats(rows, helpers)}
     ${renderTable(rows, helpers)}
     ${renderModal(helpers)}
@@ -358,6 +368,7 @@ function findLocalRow(id) {
 }
 
 document.addEventListener("click", (event) => {
+  if (liveReadOnly && event.target.closest("[data-expense-write]")) return;
   const filter = event.target.closest("[data-expense-filter]");
   if (filter) {
     const value = filter.getAttribute("data-expense-filter");
@@ -428,6 +439,7 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("input", (event) => {
+  if (liveReadOnly && event.target.closest("[data-expense-write]")) return;
   const field = event.target.closest("[data-expense-field]");
   if (!field || !state.draft) return;
   state.draft[field.getAttribute("data-expense-field")] = field.value;
@@ -435,6 +447,7 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("change", (event) => {
+  if (liveReadOnly && event.target.closest("[data-expense-write]")) return;
   const field = event.target.closest("[data-expense-field]");
   if (field && state.draft) {
     state.draft[field.getAttribute("data-expense-field")] = field.value;
@@ -451,6 +464,7 @@ document.addEventListener("change", (event) => {
 document.addEventListener("submit", (event) => {
   if (!event.target.matches("[data-expense-form]") || !state.draft) return;
   event.preventDefault();
+  if (liveReadOnly) return;
   const amount = Number(state.draft.amount);
   if (!state.draft.date) state.error = "dateRequired";
   else if (!Number.isFinite(amount) || amount <= 0) state.error = "amountRequired";
@@ -471,7 +485,7 @@ document.addEventListener("submit", (event) => {
       rejectReason: "",
       local: true
     });
-    state.filter = "pending";
+    state.filter = isAdmin ? "pending" : "mine";
     state.draft = null;
     state.error = "";
   }
