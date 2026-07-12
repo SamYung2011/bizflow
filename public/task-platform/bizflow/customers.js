@@ -136,7 +136,9 @@ function pageT(lang, key) {
   return dict[lang]?.[key] ?? dict.zh[key] ?? key;
 }
 
-const data = await getCustomersPageData();
+const [data, currentUser, unread] = await Promise.all([getCustomersPageData(), getCurrentUser(), getUnread()]);
+const liveReadOnly = typeof currentUser?.hasPermission === "function";
+const writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
 const presetTab = consumeNavigationPreset(navigationPresetKeys.customersTab);
 const presetWarrantySearch = consumeNavigationPreset(navigationPresetKeys.warrantySearch) ?? "";
 
@@ -271,12 +273,13 @@ function renderAddCustomerModal(helpers) {
           lang,
           escapeHtml,
           label: (key) => tt(`customers.field.${key}`),
-          idPrefix: "customers-new"
+          idPrefix: "customers-new",
+          disabled: liveReadOnly
         })}
       </div>
       <div class="form-new-customer__footer">
         <button type="button" class="btn--hug btn--hug--gray" data-customers-modal-close>${escapeHtml(tt("customers.action.cancel"))}</button>
-        <button type="button" class="btn--hug btn--hug--blue" data-customers-modal-close>${escapeHtml(tt("customers.action.submit"))}</button>
+        <button type="button" class="btn--hug btn--hug--blue" data-customers-modal-close data-customers-write${writeAttributes}>${escapeHtml(tt("customers.action.submit"))}</button>
       </div>
     </section>
   </div>`;
@@ -320,10 +323,10 @@ export function renderCustomers(helpers) {
     dataAttribute: "data-customers-tab"
   });
 
-  return `<div class="customers-page" data-customers-page data-customers-tab-value="${state.tab}" data-customers-search-value="${escapeHtml(state.search)}" data-date-open="${dateFilter.isOpen()}" data-current-page="${state.page}">
+  return `<div class="customers-page" data-customers-page data-live-read-only="${liveReadOnly}" data-customers-tab-value="${state.tab}" data-customers-search-value="${escapeHtml(state.search)}" data-date-open="${dateFilter.isOpen()}" data-current-page="${state.page}">
     <header class="customers-head">
       <h1 class="customers-title" title="${escapeHtml(tt("customers.title"))}">${escapeHtml(tt("customers.title"))}</h1>
-      ${state.tab === "list" ? `<button type="button" class="customers-add-btn" data-customers-modal-open>
+      ${state.tab === "list" ? `<button type="button" class="customers-add-btn" data-customers-modal-open data-customers-write${writeAttributes}>
         ${icon("icon-add-line-add", "icon")}
         <span>${escapeHtml(tt("customers.add"))}</span>
       </button>` : ""}
@@ -349,6 +352,7 @@ function rerenderCustomersPage() {
 }
 
 document.addEventListener("click", async (event) => {
+  if (liveReadOnly && event.target.closest("[data-customers-write]")) return;
   const customerTab = event.target.closest("[data-customers-tab]");
   if (customerTab) {
     const tab = customerTab.getAttribute("data-customers-tab");
@@ -484,6 +488,6 @@ window.addEventListener("resize", () => {
 });
 
 window.__shellMenu = createBizflowMenu("customers");
-window.__shellData = { unread: await getUnread(), user: await getCurrentUser() };
+window.__shellData = { unread, user: currentUser };
 window.__shellContent = renderCustomers;
 await import("../shell/shell.js");

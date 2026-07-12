@@ -134,7 +134,13 @@ const dict = {
 };
 
 const params = new URLSearchParams(window.location.search);
-const detailData = await getCustomerDetailData(params.get("id"));
+const [detailData, currentUser, unread] = await Promise.all([
+  getCustomerDetailData(params.get("id")),
+  getCurrentUser(),
+  getUnread()
+]);
+const liveReadOnly = typeof currentUser?.hasPermission === "function";
+const writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
 
 const state = {
   actionMenuOpen: false,
@@ -185,14 +191,14 @@ function shippingStatusLabel(value, lang) {
 function renderActionMenu(helpers) {
   const { escapeHtml, lang } = helpers;
   return `<span class="customer-detail-action-anchor">
-    <button type="button" class="orders-primary orders-hug-small" data-customer-actions-trigger aria-haspopup="menu" aria-expanded="${state.actionMenuOpen}" title="${escapeHtml(pageT(lang, "customer.moreActions"))}">
+    <button type="button" class="orders-primary orders-hug-small" data-customer-actions-trigger data-customer-write aria-haspopup="menu" aria-expanded="${state.actionMenuOpen}" title="${escapeHtml(pageT(lang, "customer.moreActions"))}"${writeAttributes}>
       ${escapeHtml(pageT(lang, "customer.moreActions"))}
     </button>
     <div class="menu-popover customers-filter-menu customer-detail-action-menu${state.actionMenuOpen ? " menu-popover--open" : ""}" data-customer-actions-menu role="menu" ${state.actionMenuOpen ? "" : "hidden"}>
-      <button type="button" class="dropdown-item" data-customer-action="merge" role="menuitem" title="${escapeHtml(pageT(lang, "customer.merge"))}">
+      <button type="button" class="dropdown-item" data-customer-action="merge" data-customer-write role="menuitem" title="${escapeHtml(pageT(lang, "customer.merge"))}"${writeAttributes}>
         <span class="tp-line">${escapeHtml(pageT(lang, "customer.merge"))}</span>
       </button>
-      <button type="button" class="dropdown-item customer-detail-action-danger" data-customer-action="delete" role="menuitem" title="${escapeHtml(pageT(lang, "customer.delete"))}">
+      <button type="button" class="dropdown-item customer-detail-action-danger" data-customer-action="delete" data-customer-write role="menuitem" title="${escapeHtml(pageT(lang, "customer.delete"))}"${writeAttributes}>
         <span class="tp-line">${escapeHtml(pageT(lang, "customer.delete"))}</span>
       </button>
     </div>
@@ -226,7 +232,7 @@ function renderCustomerCard(helpers) {
   return `<section class="orders-detail-card">
     <div class="orders-card-head">
       <h2 class="orders-card-title">${escapeHtml(pageT(lang, "customer.customer"))}</h2>
-      <button type="button" class="orders-primary orders-hug-small" data-customer-edit-open>${escapeHtml(pageT(lang, "customer.edit"))}</button>
+      <button type="button" class="orders-primary orders-hug-small" data-customer-edit-open data-customer-write${writeAttributes}>${escapeHtml(pageT(lang, "customer.edit"))}</button>
     </div>
     <div class="orders-customer-info">
       <div class="orders-customer-line customer-detail-customer-line customer-detail-name-line">
@@ -307,7 +313,7 @@ function renderEditInput(key, value, helpers) {
   const { escapeHtml, lang } = helpers;
   return `<div class="form-new-customer__field">
     <label class="form-new-customer__label" for="customer-edit-${escapeHtml(key)}">${escapeHtml(pageT(lang, `customer.field.${key}`))}</label>
-    <input id="customer-edit-${escapeHtml(key)}" class="form-new-customer__value" data-customer-edit-field="${escapeHtml(key)}" value="${escapeHtml(value)}">
+    <input id="customer-edit-${escapeHtml(key)}" class="form-new-customer__value" data-customer-edit-field="${escapeHtml(key)}" value="${escapeHtml(value)}"${writeAttributes}>
   </div>`;
 }
 
@@ -328,12 +334,12 @@ function renderEditModal(helpers) {
         ${renderEditInput("imei", fieldValue(customer.imei, lang), helpers)}
         <div class="form-new-customer__field">
           <label class="form-new-customer__address-label" for="customer-edit-address">${escapeHtml(pageT(lang, "customer.field.address"))}</label>
-          <textarea id="customer-edit-address" class="form-new-customer__address" data-customer-edit-field="address">${escapeHtml(detail.shippingAddress ?? "")}</textarea>
+          <textarea id="customer-edit-address" class="form-new-customer__address" data-customer-edit-field="address"${writeAttributes}>${escapeHtml(detail.shippingAddress ?? "")}</textarea>
         </div>
       </div>
       <div class="form-new-customer__footer">
         <button type="button" class="btn--hug btn--hug--gray" data-customer-edit-close>${escapeHtml(pageT(lang, "customer.action.cancel"))}</button>
-        <button type="button" class="btn--hug btn--hug--blue" data-customer-edit-close>${escapeHtml(pageT(lang, "customer.action.submit"))}</button>
+        <button type="button" class="btn--hug btn--hug--blue" data-customer-edit-close data-customer-write${writeAttributes}>${escapeHtml(pageT(lang, "customer.action.submit"))}</button>
       </div>
     </section>
   </div>`;
@@ -344,7 +350,7 @@ function renderCustomerDetail(helpers) {
   const { escapeHtml, lang } = helpers;
   if (!detailData) {
     const notFound = pageT(lang, "customer.notFound");
-    return `<div class="orders-workspace customer-detail-page" data-customer-detail-page data-customer-not-found>
+    return `<div class="orders-workspace customer-detail-page" data-customer-detail-page data-live-read-only="${liveReadOnly}" data-customer-not-found>
       <header class="orders-workspace__head customer-detail-head">
         <nav class="orders-breadcrumb" aria-label="${escapeHtml(pageT(lang, "customer.root"))}">
           <a href="./customers.html">${escapeHtml(pageT(lang, "customer.root"))}</a>
@@ -356,7 +362,7 @@ function renderCustomerDetail(helpers) {
     </div>`;
   }
   const { customer } = detailData;
-  return `<div class="orders-workspace customer-detail-page" data-customer-detail-page>
+  return `<div class="orders-workspace customer-detail-page" data-customer-detail-page data-live-read-only="${liveReadOnly}">
     <header class="orders-workspace__head customer-detail-head">
       <nav class="orders-breadcrumb" aria-label="${escapeHtml(pageT(lang, "customer.root"))}">
         <a href="./customers.html">${escapeHtml(pageT(lang, "customer.root"))}</a>
@@ -390,6 +396,7 @@ function closeEditModal() {
 }
 
 document.addEventListener("click", async (event) => {
+  if (liveReadOnly && event.target.closest("[data-customer-write]")) return;
   if (event.target.closest("[data-customer-actions-trigger]")) {
     state.actionMenuOpen = !state.actionMenuOpen;
     rerender();
@@ -452,6 +459,6 @@ document.addEventListener("keydown", (event) => {
 });
 
 window.__shellMenu = createBizflowMenu("customers");
-window.__shellData = { unread: await getUnread(), user: await getCurrentUser() };
+window.__shellData = { unread, user: currentUser };
 window.__shellContent = renderCustomerDetail;
 await import("../shell/shell.js");

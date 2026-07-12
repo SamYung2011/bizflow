@@ -59,6 +59,14 @@
   opacity: .92;
 }
 
+.customers-page[data-live-read-only="true"] [data-customers-write]:disabled,
+.customers-page[data-live-read-only="true"] .form-new-customer :disabled,
+.customer-detail-page[data-live-read-only="true"] [data-customer-write]:disabled,
+.customer-detail-page[data-live-read-only="true"] .form-new-customer :disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
 .customers-add-btn .icon {
   display: none;
 }
