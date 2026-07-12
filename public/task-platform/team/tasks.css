@@ -364,6 +364,12 @@
   flex: none;
 }
 
+.team-new-task:disabled,
+.team-column-add:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
 .team-kanban-grid {
   display: grid;
   min-width: 0;

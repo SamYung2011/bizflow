@@ -52,7 +52,7 @@ function renderColumn(column, state, filterState, helpers) {
   return `<section class="team-kanban-column team-kanban-column--${column.key}" data-task-column="${column.key}" data-column-count="${column.count}">
     <header class="team-kanban-column__head"><div class="team-kanban-column__title"><span title="${escapeHtml(title)}">${escapeHtml(title)}</span><span>${column.count}</span></div><span class="team-count-badge">${column.count}</span></header>
     <div class="team-kanban-column__tasks">${body}</div>
-    ${column.key === "high" ? `<button type="button" class="team-column-expand" tabindex="-1" aria-label="expand">${icon("icon-arrow-down")}${icon("icon-arrow-down")}</button>` : `<button type="button" class="team-column-add" tabindex="-1" aria-label="add">${icon("icon-add-surface-add")}</button>`}
+    ${column.key === "high" ? `<button type="button" class="team-column-expand" tabindex="-1" aria-label="expand">${icon("icon-arrow-down")}${icon("icon-arrow-down")}</button>` : `<button type="button" class="team-column-add" tabindex="-1" aria-label="add"${state.liveReadOnly ? " disabled aria-disabled=\"true\"" : ""}>${icon("icon-add-surface-add")}</button>`}
   </section>`;
 }
 
