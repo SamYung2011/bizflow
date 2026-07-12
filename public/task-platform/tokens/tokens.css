@@ -1,0 +1,82 @@
+:root {
+  /* Color styles: docs/00-design spec section 2.1 */
+  --blue: #0468EA;
+  --red: #DC2626;
+  --yellow: #EAB308;
+  --green: #28BA28;
+  --white: #FFFFFF;
+  --black: #000000;
+  --3a: #3A3A3A;
+  --gray-5: #F5F7FA;
+  --gray-8: #F0F0F0; /* Figma 面板/输入底灰,全站高频(management-list/inventory/login 输入底等),2026-07-12 升格;此前部分点位误收编 gray-5 本次纠正 */
+  --gray-10: #E5E7EB;
+  --gray-12: #D9D9D9; /* Figma 控制线/segment 底灰,3+ 模块重复局部声明,2026-07-12 升格 */
+  --gray-15: #C4C4C4; /* 2026-07-08 Home 对屏收编:chip 底/列表分隔线高频实测值,灰阶无近似档(见 00-设计规范 §2.1) */
+  --gray-20: #9CA3AF;
+  --gray-40: #6B7280;
+  --gray-60: #374151;
+  --gray-80: #1F2937;
+
+  /* Department tag colors: docs/00-design spec section 2.3 */
+  --dept-design: rgba(17, 103, 224, .2);
+  --dept-tech: rgba(43, 168, 245, .2);
+  --dept-sales: rgba(40, 186, 40, .2);
+  --dept-finance: rgba(234, 179, 8, .2);
+  --dept-service: rgba(234, 88, 12, .2);
+  --dept-purchase: rgba(220, 38, 38, .2);
+
+  /* Fixed gradients: docs/00-design spec section 2.2 */
+  --grad-brand: linear-gradient(90deg, #1167E0 0%, #2BA8F5 100%);
+  --grad-chart: linear-gradient(180deg, #1167E0 0%, #79A8F5 100%);
+  --grad-menu-active: linear-gradient(180deg, #0974EF 0%, #0468EA 100%);
+  --grad-card-head: linear-gradient(90deg, #0468EA 0%, #0099FF 100%);
+
+  /* Typography: docs/00-design spec section 3 */
+  --font-family-base: Inter, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-display-size: 40px; /* 页级标题/统计大数字,Figma 512:23948/450:11918/558:21556/637:61289/443:5035 实测,2026-07-12 升格全局档 */
+  --font-title-1-size: 32px;
+  --font-title-1-weight: 700;
+  --font-title-2-size: 24px;
+  --font-title-2-weight: 600;
+  --font-title-3-size: 16px;
+  --font-title-3-weight: 500;
+  --font-description-size: 12px;
+  --font-description-weight: 500;
+  --font-body-size: 10px;
+  --font-body-weight: 400;
+  --lh-body: 1.5;
+  --lh-tight: 1.2;
+  --lh-num: 1.1;
+
+  /* Spacing, radius, grids: docs/00-design spec section 4 */
+  --space-4: 4px;
+  --space-10: 10px;
+  --space-20: 20px;
+  --space-40: 40px;
+  --radius-10: 10px;
+  --radius-20: 20px;
+  --radius-40: 40px;
+  --grid-margin-desktop: 20px;
+  --grid-margin-mobile: 12px;
+
+  /* Motion */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-fast: 0.15s var(--ease);
+  --transition: 0.2s var(--ease);
+}
+
+.grad-brand {
+  background: var(--grad-brand);
+}
+
+.grad-chart {
+  background: var(--grad-chart);
+}
+
+.grad-menu-active {
+  background: var(--grad-menu-active);
+}
+
+.grad-card-head {
+  background: var(--grad-card-head);
+}

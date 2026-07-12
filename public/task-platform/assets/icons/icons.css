@@ -1,0 +1,21 @@
+.icon {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  color: currentColor;
+  --fill-0: currentColor;
+  --stroke-0: currentColor;
+}
+
+.icon--sm {
+  width: 20px;
+  height: 20px;
+}
+
+.icon--nav {
+  color: var(--gray-60);
+}
+
+.icon--active {
+  color: var(--white);
+}

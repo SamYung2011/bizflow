@@ -1,0 +1,332 @@
+import { createClient } from "../vendor/supabase-js.esm.js";
+
+const CONFIG_URL = new URL("../config.local.js", import.meta.url);
+const ADMIN_EMAIL = "samyung2011@gmail.com";
+const PAGE_SIZE = 1000;
+
+export const RBAC_KEYS = Object.freeze([
+  "can_create_task",
+  "can_assign_others",
+  "can_edit_others_tasks",
+  "can_delete_others_tasks",
+  "can_validate_task",
+  "can_manage_employees",
+  "can_approve_registration",
+  "can_view_commission",
+  "can_manage_roles"
+]);
+
+let configPromise = null;
+let clientPromise = null;
+let currentUserPromise = null;
+
+function safeLocalStorageGet(key) {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeLocalStorageSet(key, value) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Privacy mode and storage denial keep the current in-memory context usable.
+  }
+}
+
+function decodeJwtPayload(value) {
+  const payload = String(value || "").split(".")[1];
+  if (!payload) return null;
+  try {
+    const normalized = payload.replaceAll("-", "+").replaceAll("_", "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    return JSON.parse(atob(padded));
+  } catch {
+    return null;
+  }
+}
+
+function assertPublicKey(value) {
+  const key = String(value || "").trim();
+  const payload = decodeJwtPayload(key);
+  if (key.startsWith("sb_secret_") || payload?.role === "service_role") {
+    throw new Error("Task Platform refuses privileged Supabase credentials in browser config.");
+  }
+}
+
+function normalizeConfig(module) {
+  const url = String(module?.SUPABASE_URL || "").trim();
+  const anonKey = String(module?.SUPABASE_ANON_KEY || "").trim();
+  assertPublicKey(anonKey);
+  let parsedUrl = null;
+  try {
+    parsedUrl = new URL(url);
+  } catch {
+    return { configured: false, url: "", anonKey: "" };
+  }
+  const placeholder = parsedUrl.hostname === "your-project.supabase.co" || anonKey === "your-anon-key";
+  const protocolAllowed = parsedUrl.protocol === "https:" || parsedUrl.protocol === "http:";
+  return {
+    configured: protocolAllowed && !placeholder && anonKey.length > 0,
+    url: protocolAllowed && !placeholder ? parsedUrl.href.replace(/\/$/, "") : "",
+    anonKey: protocolAllowed && !placeholder ? anonKey : ""
+  };
+}
+
+async function loadConfig() {
+  if (!configPromise) {
+    configPromise = import(CONFIG_URL.href)
+      .then(normalizeConfig)
+      .catch((error) => {
+        if (error?.message?.includes("privileged Supabase credentials")) throw error;
+        return { configured: false, url: "", anonKey: "" };
+      });
+  }
+  return configPromise;
+}
+
+export async function isAuthConfigured() {
+  return (await loadConfig()).configured;
+}
+
+export async function getSupabaseClient() {
+  if (!clientPromise) {
+    clientPromise = loadConfig().then((config) => {
+      if (!config.configured) return null;
+      // Security is enforced by production RLS plus RBAC. Browser checks only control visible UI.
+      const client = createClient(config.url, config.anonKey, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true
+        }
+      });
+      client.auth.onAuthStateChange(() => {
+        currentUserPromise = null;
+      });
+      return client;
+    });
+  }
+  return clientPromise;
+}
+
+function requireClient(client) {
+  if (!client) throw new Error("Supabase Auth is not configured.");
+  return client;
+}
+
+export async function getSession() {
+  const client = await getSupabaseClient();
+  if (!client) return null;
+  const { data, error } = await client.auth.getSession();
+  if (error) throw error;
+  return data.session ?? null;
+}
+
+export async function onAuthStateChange(callback) {
+  const client = await getSupabaseClient();
+  if (!client) return { unsubscribe() {} };
+  const { data } = client.auth.onAuthStateChange((event, session) => {
+    currentUserPromise = null;
+    callback(event, session);
+  });
+  return data.subscription;
+}
+
+export async function signInWithPassword({ email, password }) {
+  const client = requireClient(await getSupabaseClient());
+  const result = await client.auth.signInWithPassword({ email, password });
+  if (result.error) throw result.error;
+  return result.data;
+}
+
+export async function signUp({ email, password, name, companyName, note }) {
+  const client = requireClient(await getSupabaseClient());
+  const result = await client.auth.signUp({ email, password });
+  if (result.error) throw result.error;
+  const pending = await client.from("task_pending").insert({
+    email,
+    name,
+    company_name: companyName,
+    note: note || null,
+    user_id: result.data.user?.id ?? null
+  });
+  if (pending.error) {
+    await client.auth.signOut();
+    throw new Error(`task_pending: ${pending.error.message || pending.error}`);
+  }
+  return result.data;
+}
+
+export async function signOut() {
+  const client = await getSupabaseClient();
+  if (!client) return;
+  const { error } = await client.auth.signOut();
+  if (error) throw error;
+  currentUserPromise = null;
+}
+
+export async function resetPasswordForEmail(email, redirectTo) {
+  const client = requireClient(await getSupabaseClient());
+  const { error } = await client.auth.resetPasswordForEmail(email, redirectTo ? { redirectTo } : undefined);
+  if (error) throw error;
+}
+
+export async function updatePassword(password) {
+  const client = requireClient(await getSupabaseClient());
+  const { data, error } = await client.auth.updateUser({ password });
+  if (error) throw error;
+  return data;
+}
+
+export async function completeForcedPasswordChange(password, employeeId) {
+  const client = requireClient(await getSupabaseClient());
+  await updatePassword(password);
+  const { error } = await client.from("employees").update({ must_change_password: false }).eq("id", employeeId);
+  if (error) throw new Error(`employees.must_change_password: ${error.message || error}`);
+  await signOut();
+}
+
+export async function fetchAllTable(table, orderCol, ascending = true, secondaryOrder = "id") {
+  const client = requireClient(await getSupabaseClient());
+  const { count, error: countError } = await client.from(table).select("*", { count: "exact", head: true });
+  if (countError) throw new Error(`${table} count: ${countError.message || countError}`);
+  const pageCount = Math.max(1, Math.ceil((count || 0) / PAGE_SIZE));
+  const requests = Array.from({ length: pageCount }, (_, index) => {
+    const from = index * PAGE_SIZE;
+    let query = client.from(table).select("*").range(from, from + PAGE_SIZE - 1);
+    if (orderCol) query = query.order(orderCol, { ascending });
+    if (secondaryOrder) query = query.order(secondaryOrder, { ascending: true });
+    return query;
+  });
+  const responses = await Promise.all(requests);
+  const rows = [];
+  const seen = new Set();
+  for (const response of responses) {
+    if (response.error) throw new Error(`${table}: ${response.error.message || response.error}`);
+    for (const row of response.data ?? []) {
+      if (row?.id != null) {
+        if (seen.has(row.id)) continue;
+        seen.add(row.id);
+      }
+      rows.push(row);
+    }
+  }
+  return rows;
+}
+
+function activeCompanyStorageKey(employee) {
+  return `team-active-company-${employee.user_id || employee.id}`;
+}
+
+export function hasPermission(context, key) {
+  if (!RBAC_KEYS.includes(key)) return false;
+  if (context?.isSuperAdmin || context?.isAdminOfActive) return true;
+  return context?.permissions?.[key] === true;
+}
+
+export function deriveAuthContext({ session, employee, bindings, companies, roles, pendingCompanyIds = [] }) {
+  if (!session?.user || !employee) return null;
+  const ownBindings = bindings.filter((binding) => binding.employee_id === employee.id);
+  const defaultBinding = ownBindings.find((binding) => binding.is_default) ?? ownBindings[0] ?? null;
+  const allowedCompanyIds = employee.is_super_admin === true
+    ? companies.map((company) => company.id)
+    : ownBindings.map((binding) => binding.company_id);
+  const rememberedCompanyId = safeLocalStorageGet(activeCompanyStorageKey(employee));
+  const fallbackCompanyId = defaultBinding?.company_id ?? employee.company_id ?? allowedCompanyIds[0] ?? null;
+  const activeCompanyId = allowedCompanyIds.includes(rememberedCompanyId) ? rememberedCompanyId : fallbackCompanyId;
+  if (activeCompanyId) safeLocalStorageSet(activeCompanyStorageKey(employee), activeCompanyId);
+  const activeBinding = ownBindings.find((binding) => binding.company_id === activeCompanyId) ?? null;
+  const activeCompany = companies.find((company) => company.id === activeCompanyId) ?? null;
+  const activeRole = roles.find((role) => role.id === activeBinding?.role_id) ?? null;
+  const isSuperAdmin = employee.is_super_admin === true;
+  const isAdminOfActive = isSuperAdmin || activeBinding?.is_company_admin === true;
+  const isAdminOfAny = isSuperAdmin || ownBindings.some((binding) => binding.is_company_admin === true);
+  const isBfAdmin = employee.is_admin === true || String(session.user.email || "").toLowerCase() === ADMIN_EMAIL;
+  const pending = new Set(pendingCompanyIds);
+  const bound = new Set(ownBindings.map((binding) => binding.company_id));
+  const context = {
+    id: employee.id,
+    employeeId: employee.id,
+    userId: session.user.id,
+    name: employee.name || session.user.email || "",
+    email: employee.email || session.user.email || "",
+    position: activeBinding?.position || employee.role || "",
+    phone: employee.phone || "",
+    note: employee.note || "",
+    role: activeRole?.name || employee.role || "",
+    activeCompanyId,
+    activeCompany,
+    activeBinding,
+    activeRole,
+    bindings: ownBindings,
+    switchableCompanies: companies.filter((company) => allowedCompanyIds.includes(company.id)),
+    availableCompanies: companies
+      .filter((company) => !bound.has(company.id) && !pending.has(company.id))
+      .map(({ id, name }) => ({ id, name })),
+    permissions: activeRole?.permissions && typeof activeRole.permissions === "object" ? { ...activeRole.permissions } : {},
+    isSuperAdmin,
+    isAdminOfActive,
+    isAdminOfAny,
+    isBfAdmin,
+    isAdmin: isBfAdmin,
+    bizflowMainAccess: employee.bizflow_main_access === true,
+    mustChangePassword: employee.must_change_password === true,
+    canShip: employee.can_ship === true,
+    canViewRevenue: employee.can_view_revenue === true
+  };
+  context.hasPermission = (key) => hasPermission(context, key);
+  return context;
+}
+
+async function loadCurrentUser() {
+  const session = await getSession();
+  if (!session) return null;
+  const client = requireClient(await getSupabaseClient());
+  const employeeResult = await client.from("employees").select("*").eq("user_id", session.user.id).maybeSingle();
+  if (employeeResult.error) throw employeeResult.error;
+  if (!employeeResult.data) return null;
+  const employee = employeeResult.data;
+  const [bindings, companies, roles, pendingResult] = await Promise.all([
+    fetchAllTable("employee_companies", "joined_at"),
+    fetchAllTable("companies", "name"),
+    fetchAllTable("roles", "name"),
+    client.from("company_join_pending").select("company_id").eq("employee_id", employee.id).is("approved", null)
+  ]);
+  if (pendingResult.error) throw pendingResult.error;
+  return deriveAuthContext({
+    session,
+    employee,
+    bindings,
+    companies,
+    roles,
+    pendingCompanyIds: (pendingResult.data ?? []).map((row) => row.company_id)
+  });
+}
+
+export async function getCurrentUser({ refresh = false } = {}) {
+  if (refresh) currentUserPromise = null;
+  if (!currentUserPromise) {
+    const promise = loadCurrentUser().catch((error) => {
+      if (currentUserPromise === promise) currentUserPromise = null;
+      throw error;
+    });
+    currentUserPromise = promise;
+  }
+  return currentUserPromise;
+}
+
+export async function setActiveCompany(companyId) {
+  const context = await getCurrentUser();
+  const nextCompanyId = String(companyId || "");
+  if (!context?.switchableCompanies?.some((company) => company.id === nextCompanyId)) {
+    throw new Error("Company is not available for the current user");
+  }
+  safeLocalStorageSet(`team-active-company-${context.userId || context.employeeId}`, nextCompanyId);
+  currentUserPromise = null;
+  return getCurrentUser();
+}

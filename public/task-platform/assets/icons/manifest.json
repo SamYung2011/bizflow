@@ -1,0 +1,254 @@
+[
+  {
+    "name": "icon-nav-honnmono",
+    "file": "raw/nav-honnmono.svg",
+    "figmaNodeId": "217:583",
+    "label": "Honnmono logo"
+  },
+  {
+    "name": "icon-nav-search",
+    "file": "raw/nav-search.svg",
+    "figmaNodeId": "256:120",
+    "label": "Search"
+  },
+  {
+    "name": "icon-nav-messenger",
+    "file": "raw/nav-messenger.svg",
+    "figmaNodeId": "256:145",
+    "label": "Messenger"
+  },
+  {
+    "name": "icon-nav-remix",
+    "file": "raw/nav-remix.svg",
+    "figmaNodeId": "267:39",
+    "label": "Remix"
+  },
+  {
+    "name": "icon-nav-folder",
+    "file": "raw/nav-folder.svg",
+    "figmaNodeId": "478:13431",
+    "label": "Folder"
+  },
+  {
+    "name": "icon-nav-file",
+    "file": "raw/nav-file.svg",
+    "figmaNodeId": "478:13453",
+    "label": "File"
+  },
+  {
+    "name": "icon-nav-home",
+    "file": "raw/nav-home.svg",
+    "figmaNodeId": "217:585",
+    "label": "Home"
+  },
+  {
+    "name": "icon-nav-task",
+    "file": "raw/nav-task.svg",
+    "figmaNodeId": "217:592",
+    "label": "Task"
+  },
+  {
+    "name": "icon-nav-user",
+    "file": "raw/nav-user.svg",
+    "figmaNodeId": "229:140",
+    "label": "User"
+  },
+  {
+    "name": "icon-nav-sales",
+    "file": "raw/nav-sales.svg",
+    "figmaNodeId": "256:83",
+    "label": "Sales"
+  },
+  {
+    "name": "icon-nav-list",
+    "file": "raw/nav-list.svg",
+    "figmaNodeId": "256:88",
+    "label": "List"
+  },
+  {
+    "name": "icon-nav-print",
+    "file": "raw/nav-print.svg",
+    "figmaNodeId": "479:9748",
+    "label": "Print"
+  },
+  {
+    "name": "icon-nav-inventory",
+    "file": "raw/nav-inventory.svg",
+    "figmaNodeId": "256:97",
+    "label": "Inventory"
+  },
+  {
+    "name": "icon-nav-cloud",
+    "file": "raw/nav-cloud.svg",
+    "figmaNodeId": "256:107",
+    "label": "Cloud"
+  },
+  {
+    "name": "icon-nav-language",
+    "file": "raw/nav-language.svg",
+    "figmaNodeId": "256:111",
+    "label": "Language"
+  },
+  {
+    "name": "icon-arrow-up",
+    "file": "raw/arrow-up.svg",
+    "figmaNodeId": "267:192",
+    "label": "Arrow up"
+  },
+  {
+    "name": "icon-arrow-down",
+    "file": "raw/arrow-down.svg",
+    "figmaNodeId": "267:204",
+    "label": "Arrow down"
+  },
+  {
+    "name": "icon-arrow-left",
+    "file": "raw/arrow-left.svg",
+    "figmaNodeId": "267:207",
+    "label": "Arrow left"
+  },
+  {
+    "name": "icon-arrow-right",
+    "file": "raw/arrow-right.svg",
+    "figmaNodeId": "267:210",
+    "label": "Arrow right"
+  },
+  {
+    "name": "icon-arrow-solid-up",
+    "file": "raw/arrow-solid-up.svg",
+    "figmaNodeId": "267:255",
+    "label": "Solid arrow up"
+  },
+  {
+    "name": "icon-arrow-solid-down",
+    "file": "raw/arrow-solid-down.svg",
+    "figmaNodeId": "267:257",
+    "label": "Solid arrow down"
+  },
+  {
+    "name": "icon-arrow-solid-left",
+    "file": "raw/arrow-solid-left.svg",
+    "figmaNodeId": "267:259",
+    "label": "Solid arrow left"
+  },
+  {
+    "name": "icon-arrow-solid-right",
+    "file": "raw/arrow-solid-right.svg",
+    "figmaNodeId": "267:261",
+    "label": "Solid arrow right"
+  },
+  {
+    "name": "icon-add-surface-delete",
+    "file": "raw/add-surface-delete.svg",
+    "figmaNodeId": "267:269",
+    "label": "Surface delete"
+  },
+  {
+    "name": "icon-add-surface-add",
+    "file": "raw/add-surface-add.svg",
+    "figmaNodeId": "267:271",
+    "label": "Surface add"
+  },
+  {
+    "name": "icon-add-surface-remove",
+    "file": "raw/add-surface-remove.svg",
+    "figmaNodeId": "267:277",
+    "label": "Surface remove"
+  },
+  {
+    "name": "icon-add-line-delete",
+    "file": "raw/add-line-delete.svg",
+    "figmaNodeId": "267:298",
+    "label": "Line delete"
+  },
+  {
+    "name": "icon-add-line-add",
+    "file": "raw/add-line-add.svg",
+    "figmaNodeId": "267:300",
+    "label": "Line add"
+  },
+  {
+    "name": "icon-add-line-remove",
+    "file": "raw/add-line-remove.svg",
+    "figmaNodeId": "267:303",
+    "label": "Line remove"
+  },
+  {
+    "name": "icon-task-calendar",
+    "file": "raw/task-calendar.svg",
+    "figmaNodeId": "271:358",
+    "label": "Calendar task"
+  },
+  {
+    "name": "icon-task-list",
+    "file": "raw/task-list.svg",
+    "figmaNodeId": "271:365",
+    "label": "List task"
+  },
+  {
+    "name": "icon-task-done",
+    "file": "raw/task-done.svg",
+    "figmaNodeId": "271:371",
+    "label": "Done task"
+  },
+  {
+    "name": "icon-task-progress",
+    "file": "raw/task-progress.svg",
+    "figmaNodeId": "271:377",
+    "label": "Progress task"
+  },
+  {
+    "name": "icon-task-alert",
+    "file": "raw/task-alert.svg",
+    "figmaNodeId": "271:383",
+    "label": "Alert task"
+  },
+  {
+    "name": "icon-dept-marketing",
+    "file": "raw/dept-marketing.svg",
+    "figmaNodeId": "271:503",
+    "label": "Marketing department"
+  },
+  {
+    "name": "icon-dept-development",
+    "file": "raw/dept-development.svg",
+    "figmaNodeId": "271:505",
+    "label": "Development department"
+  },
+  {
+    "name": "icon-dept-design",
+    "file": "raw/dept-design.svg",
+    "figmaNodeId": "271:509",
+    "label": "Design department"
+  },
+  {
+    "name": "icon-dept-sales",
+    "file": "raw/dept-sales.svg",
+    "figmaNodeId": "271:512",
+    "label": "Sales department"
+  },
+  {
+    "name": "icon-dept-purchase",
+    "file": "raw/dept-purchase.svg",
+    "figmaNodeId": "271:516",
+    "label": "Purchase department"
+  },
+  {
+    "name": "icon-dept-finance",
+    "file": "raw/dept-finance.svg",
+    "figmaNodeId": "271:519",
+    "label": "Finance department"
+  },
+  {
+    "name": "icon-edit-default",
+    "file": "raw/edit-default.svg",
+    "figmaNodeId": "456:6919",
+    "label": "Edit default"
+  },
+  {
+    "name": "icon-open-close-update",
+    "file": "raw/open-close-update.svg",
+    "figmaNodeId": "271:1082",
+    "label": "Sidebar update toggle"
+  }
+]

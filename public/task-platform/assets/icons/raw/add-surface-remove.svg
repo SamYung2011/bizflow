@@ -1,0 +1,12 @@
+<svg preserveAspectRatio="none" width="100%" height="100%" overflow="visible" style="display: block;" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Frame 532">
+<g clip-path="url(#clip0_0_4)">
+<path id="Subtract" d="M20 0C31.0457 0 40 8.95431 40 20C40 31.0457 31.0457 40 20 40C8.95431 40 0 31.0457 0 20C0 8.95431 8.95431 0 20 0ZM12.5361 18.3643C11.4316 18.3643 10.5352 19.2597 10.5352 20.3643C10.5353 21.4687 11.4316 22.3643 12.5361 22.3643H28.5352C29.6396 22.3643 30.535 21.4687 30.5352 20.3643C30.5352 19.2597 29.6397 18.3643 28.5352 18.3643H12.5361Z" fill="var(--fill-0, black)"/>
+</g>
+</g>
+<defs>
+<clipPath id="clip0_0_4">
+<rect width="40" height="40" rx="20" fill="white"/>
+</clipPath>
+</defs>
+</svg>

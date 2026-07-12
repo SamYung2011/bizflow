@@ -1,0 +1,382 @@
+/* menus.css — 顶栏浮层(语言下拉 Frame 784 / 用户面板 Frame 786)专属新样式。
+   仅用 tokens 变量 + 既有组件类修饰(.dropdown-item / .user-panel / .avatar--initial)。
+   通用卡片/组件基类在 components/styles.css,这里只补 Figma 母版里此二浮层独有的部分。 */
+
+/* ---------- 浮层壳(锚点 + 弹出定位 + 0.15s 进出场) ---------- */
+/* 锚点必须确立包含块,否则 absolute 浮层会相对 fixed 顶栏定位,right:0 溢出到视口右缘。
+   壳锚点用 [data-menu] 属性,故一并选中。 */
+.menu-anchor,
+[data-menu] {
+  position: relative;
+  display: inline-flex;
+}
+
+.menu-popover {
+  position: absolute;
+  top: calc(100% + var(--space-10));
+  right: 0; /* 右对齐锚点(顶栏 globe/头像下拉,无遮罩) */
+  z-index: 50;
+  max-width: calc(100vw - 2 * var(--space-10)); /* 永不宽过视口,窄窗自动收 */
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity var(--transition), transform var(--transition), visibility var(--transition);
+  pointer-events: none;
+}
+
+.menu-popover--open {
+  opacity: 1;
+  visibility: visible;
+  /* --menu-nudge 由 attachMenuBehaviors 按 getBoundingClientRect 动态注入,做视口纠偏 */
+  transform: translateX(var(--menu-nudge, 0px));
+  pointer-events: auto;
+}
+
+/* 侧栏场景:左对齐锚点向下弹(与顶栏右对齐区分) */
+.menu-popover--start {
+  right: auto;
+  left: 0;
+}
+
+/* ---------- 触发钮交互态:体系内细蓝描边,禁默认粗黑框 ---------- */
+[data-menu-trigger] {
+  outline: none; /* 去掉鼠标点击后的默认黑色 outline */
+}
+
+/* 键盘 focus 保留一个体系内的细描边(不裸删可见性) */
+[data-menu-trigger]:focus-visible {
+  outline: 1px solid var(--blue);
+  outline-offset: 2px;
+}
+
+/* ---------- 语言下拉:Frame 784 容器 ---------- */
+.lang-menu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  width: 280px;
+  padding: var(--space-10);
+  border-radius: var(--radius-20);
+  background: var(--gray-5); /* Figma #F5F5F5 → gray-5 */
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .12);
+}
+
+/* 选项行 = 复用 .dropdown-item(弹窗按钮 506:14878);行高39/字16/满宽 + Figma 母版态色 */
+.lang-menu .dropdown-item {
+  width: 100%;
+  height: 39px;
+  font-size: var(--font-title-3-size);
+  background: transparent; /* Default 态透明,露出容器底色 */
+  cursor: pointer;
+}
+
+.lang-menu .dropdown-item:hover {
+  color: var(--blue); /* Figma hover:gray-10 底 + 蓝字 */
+  background: var(--gray-10);
+}
+
+.lang-menu .dropdown-item--current,
+.lang-menu .dropdown-item--current:hover {
+  color: var(--white); /* Figma state2(当前):实蓝底 + 白字 */
+  background: var(--blue);
+}
+
+/* ---------- 用户面板:Frame 786(三态) ---------- */
+.user-panel--menu {
+  --user-panel-field-border-width: 1px; /* Figma 表单聚焦描边，无全局边框 token。 */
+
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  width: 400px;
+  border: var(--user-panel-field-border-width) solid var(--gray-10);
+  box-shadow: 0 4px 5px rgba(0, 0, 0, .15), 0 10px 30px rgba(0, 0, 0, .08);
+}
+
+/* 各态高度照 Figma 母版;box-sizing:border-box 全局,已含 padding */
+.user-panel--menu[data-panel-view="menu"] {
+  min-height: 404px;
+}
+
+.user-panel--menu[data-panel-view="password"] {
+  min-height: 492px;
+}
+
+.user-panel--menu[data-panel-view="profile"] {
+  max-height: calc(100vh - var(--space-40) - var(--space-40));
+  min-height: 580px;
+  overflow-y: auto;
+}
+
+/* 态视图:仅当前 data-panel-view 显示,撑满剩余高度让 footer 沉底 */
+.user-panel__view {
+  display: none;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-10);
+}
+
+.user-panel--menu[data-panel-view="menu"] .user-panel__view--menu,
+.user-panel--menu[data-panel-view="password"] .user-panel__view--password,
+.user-panel--menu[data-panel-view="profile"] .user-panel__view--profile {
+  display: flex;
+}
+
+/* 基本信息态照 Figma 无编辑铅笔钮(已在改基本信息) */
+.user-panel--menu[data-panel-view="profile"] .user-panel__edit {
+  display: none;
+}
+
+.user-panel--menu .user-panel__head {
+  align-items: center;
+  gap: var(--space-20); /* Figma 头部 gap 20 */
+}
+
+.user-panel__avatar {
+  width: 60px;
+  height: 60px;
+  font-size: var(--font-title-1-size); /* 60px 头像内首字母 32 Bold */
+}
+
+.user-panel__id {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-4);
+}
+
+.user-panel__name {
+  font-weight: var(--font-description-weight); /* Figma 姓名为常规字重黑字 */
+  color: var(--gray-80);
+}
+
+.user-panel__email {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+  line-height: var(--lh-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-panel__edit {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  padding: 0;
+  color: var(--gray-40);
+  background: transparent;
+  transition: color var(--transition);
+}
+
+.user-panel__edit:hover {
+  color: var(--blue);
+}
+
+.user-panel__divider {
+  height: 1px;
+  flex: 0 0 auto;
+  background: var(--gray-10);
+}
+
+.user-panel__section {
+  display: grid;
+  gap: var(--space-10);
+}
+
+.user-panel__label {
+  margin: 0;
+  padding: 0 var(--space-10);
+  color: var(--3a); /* Figma 段标题 #3A3A3A */
+  font-size: var(--font-title-3-size);
+  line-height: var(--lh-tight);
+}
+
+.user-panel__perm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-10);
+  padding: var(--space-10);
+  border-radius: var(--radius-10);
+  background: var(--gray-5); /* Figma #F5F5F5 → gray-5 */
+  color: var(--gray-80);
+  font-size: var(--font-title-3-size);
+}
+
+.user-panel__role {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.user-panel__footer {
+  display: grid;
+  gap: var(--space-20);
+  margin-top: auto; /* 撑到底,复刻 Figma 菜单态 footer 前的大留白 */
+}
+
+.user-panel__action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: var(--space-10);
+  border-radius: var(--radius-10);
+  color: var(--white);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+  line-height: var(--lh-tight);
+  transition: background var(--transition), opacity var(--transition);
+}
+
+.user-panel__action--primary {
+  background: var(--blue); /* 蓝主按钮 修改密码 */
+}
+
+.user-panel__action--exit {
+  background: var(--3a); /* 深灰退出钮(Figma #5C5C5C → 归 3a 档) */
+}
+
+.user-panel__action:hover {
+  opacity: .92;
+}
+
+/* ---------- 用户面板:密码态 / 基本信息态表单 ---------- */
+.user-panel__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20); /* Figma 字段组间距 20 */
+}
+
+/* 表单内 label 齐左(Figma 表单 label 无横向内边距,区别于菜单态段标题 px-10) */
+.user-panel__form .user-panel__label {
+  padding: 0;
+}
+
+.user-panel__field-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10); /* label → 输入框 间距 10 */
+}
+
+.user-panel__field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-10);
+  padding: var(--space-10);
+  border: var(--user-panel-field-border-width) solid transparent;
+  border-radius: var(--radius-10);
+  background: var(--gray-5); /* Figma #F5F5F5 → gray-5 */
+  color: var(--gray-80);
+  font-size: var(--font-title-3-size);
+}
+
+.user-panel__field--focus {
+  border-color: var(--blue); /* Figma 聚焦态蓝描边(底色不变) */
+}
+
+.user-panel__field-value,
+.user-panel__field-ph {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-panel__field-value {
+  color: var(--gray-80); /* 实值近黑 */
+}
+
+.user-panel__field-ph {
+  color: var(--gray-20); /* 占位灰 */
+}
+
+.user-panel__field-control {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--space-40);
+  padding: var(--space-10);
+  border: var(--user-panel-field-border-width) solid transparent;
+  border-radius: var(--radius-10);
+  outline: 0;
+  background: var(--gray-5);
+  color: var(--gray-80);
+  font: inherit;
+}
+
+textarea.user-panel__field-control {
+  min-height: calc(var(--space-40) + var(--space-40));
+  line-height: var(--lh-body);
+  resize: vertical;
+}
+
+.user-panel__field-control:focus {
+  border-color: var(--blue);
+}
+
+.user-panel__join,
+.user-panel__join-form,
+.user-panel__join-status {
+  display: grid;
+  gap: var(--space-20);
+}
+
+.user-panel__join h3 {
+  margin: 0;
+  color: var(--gray-80);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+}
+
+.user-panel__join-status {
+  padding: var(--space-10);
+  border-radius: var(--radius-10);
+  background: var(--gray-5);
+}
+
+.user-panel__join-status > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-10);
+}
+
+.user-panel__join-status strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--gray-80);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-panel__join-status span {
+  flex: none;
+  color: var(--yellow);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+}
+
+.user-panel__join-status p {
+  margin: 0;
+  color: var(--gray-60);
+  font-size: var(--font-description-size);
+  line-height: var(--lh-body);
+  overflow-wrap: anywhere;
+}
+
+.user-panel__action:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
+@media (max-width: 768px) {
+  .user-panel--menu {
+    width: min(92vw, 400px);
+  }
+}

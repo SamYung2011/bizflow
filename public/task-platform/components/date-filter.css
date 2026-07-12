@@ -1,0 +1,339 @@
+/* Shared desktop date-range filter used by management screens. */
+.date-filter {
+  --date-range-band-radius: 14px; /* 日格高 28px 的一半，软带周段首尾圆角。 */
+  --date-range-band-overlap: -1px; /* 相邻日格轻微重叠，消除抗锯齿白缝。 */
+
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.date-filter__trigger {
+  display: flex;
+  width: 246px;
+  height: 36px;
+  flex: none;
+  align-items: center;
+  gap: var(--space-10);
+  padding: var(--space-10);
+  border: 0;
+  border-radius: var(--radius-10);
+  background: var(--white);
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-tight);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.date-filter__trigger--active {
+  color: var(--blue);
+}
+
+.date-filter__trigger .icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.date-filter__trigger-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-10);
+  overflow: hidden;
+}
+
+.date-filter__trigger-copy > span:not(.date-filter__separator) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.date-filter__chevron {
+  margin-left: auto;
+}
+
+.date-filter__separator {
+  width: 10px;
+  height: 1px;
+  flex: none;
+  background: currentColor;
+}
+
+.date-filter__panel {
+  right: auto;
+  left: 0;
+  display: flex;
+  width: 244px;
+  flex-direction: column;
+  gap: 0;
+  padding: var(--space-10);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .12);
+}
+
+.date-filter__inputs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-10);
+  margin-bottom: var(--space-10);
+}
+
+.date-filter__input {
+  min-width: 0;
+  height: 30px;
+  padding: 0 var(--space-10);
+  border: 1px solid var(--gray-10);
+  border-radius: var(--radius-10);
+  background: var(--gray-5);
+  color: var(--gray-80);
+  font: inherit;
+  line-height: var(--lh-tight);
+  outline: 0;
+}
+
+.date-filter__input--focus,
+.date-filter__input:focus {
+  border-color: var(--blue);
+  box-shadow: inset 0 0 0 1px var(--blue);
+}
+
+.date-filter__input:disabled {
+  color: var(--gray-20);
+  background: var(--gray-10);
+}
+
+.date-filter__calendar-head {
+  display: flex;
+  height: 32px;
+  align-items: center;
+  gap: var(--space-4);
+  color: var(--gray-80);
+}
+
+.date-filter__calendar-head strong {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+  line-height: var(--lh-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.date-filter__today {
+  display: inline-flex;
+  height: 28px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-10);
+  border: 0;
+  background: transparent;
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-tight);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.date-filter__calendar-nav {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--gray-40);
+  cursor: pointer;
+}
+
+.date-filter__calendar-nav .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.date-filter__weekdays,
+.date-filter__calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.date-filter__weekday {
+  display: flex;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  color: var(--gray-40);
+  font-size: var(--font-body-size);
+  font-weight: var(--font-body-weight);
+  line-height: var(--lh-tight);
+  white-space: nowrap;
+}
+
+.date-filter__day {
+  position: relative;
+  display: flex;
+  height: 28px;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--gray-80);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-body-weight);
+  line-height: var(--lh-tight);
+  isolation: isolate;
+  cursor: pointer;
+}
+
+.date-filter__day span {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-10);
+}
+
+.date-filter__day--outside {
+  color: var(--gray-20);
+}
+
+.date-filter__day--range {
+  background: transparent;
+}
+
+.date-filter__day--range::before {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  right: var(--date-range-band-overlap);
+  bottom: 0;
+  left: var(--date-range-band-overlap);
+  background: color-mix(in srgb, var(--blue) 18%, var(--white));
+  content: "";
+}
+
+.date-filter__day--range:first-child::before,
+.date-filter__day--range:nth-child(7n + 1)::before,
+.date-filter__day:not(.date-filter__day--range) + .date-filter__day--range::before {
+  left: 0;
+  border-top-left-radius: var(--date-range-band-radius);
+  border-bottom-left-radius: var(--date-range-band-radius);
+}
+
+.date-filter__day--range:last-child::before,
+.date-filter__day--range:nth-child(7n)::before,
+.date-filter__day--range:has(+ .date-filter__day:not(.date-filter__day--range))::before {
+  right: 0;
+  border-top-right-radius: var(--date-range-band-radius);
+  border-bottom-right-radius: var(--date-range-band-radius);
+}
+
+.date-filter__day--selected span {
+  color: var(--white);
+  background: var(--blue);
+}
+
+.date-filter__day--today:not(.date-filter__day--selected) span {
+  color: var(--white);
+  background: var(--red);
+}
+
+.date-filter__options {
+  display: flex;
+  margin-top: var(--space-10);
+  padding-top: var(--space-10);
+  border-top: 1px solid var(--gray-10);
+  flex-direction: column;
+}
+
+.date-filter__option {
+  display: flex;
+  min-width: 0;
+  min-height: 28px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-10);
+  color: var(--gray-60);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-tight);
+}
+
+.date-filter__option--muted {
+  color: var(--gray-40);
+}
+
+.date-filter__switch {
+  position: relative;
+  display: inline-flex;
+  width: 32px;
+  height: 20px;
+  flex: none;
+  align-items: center;
+  padding: 2px;
+  border: 0;
+  border-radius: var(--radius-10);
+  background: var(--gray-15);
+  transition: background var(--transition);
+  cursor: pointer;
+}
+
+.date-filter__switch span {
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-40);
+  background: var(--white);
+  transition: transform var(--transition);
+}
+
+.date-filter__switch--on {
+  background: var(--blue);
+}
+
+.date-filter__switch--on span {
+  transform: translateX(12px);
+}
+
+.date-filter__clear {
+  display: flex;
+  height: 36px;
+  margin-top: var(--space-10);
+  align-items: center;
+  border: 0;
+  border-top: 1px solid var(--gray-10);
+  background: transparent;
+  color: var(--gray-60);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-tight);
+  cursor: pointer;
+}
+
+@media (max-width: 768px) {
+  .date-filter {
+    min-width: 0;
+  }
+
+  .date-filter__trigger {
+    max-width: 100%;
+  }
+
+  .date-filter__panel {
+    max-width: calc(100vw - (var(--grid-margin-mobile) * 2));
+  }
+}

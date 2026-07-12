@@ -1,0 +1,572 @@
+@import url("../components/menus.css");
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+.shell-auth-overlay {
+  --shell-auth-modal-width: 400px; /* Figma 用户面板同宽，暂无对应全局宽度 token。 */
+  --shell-auth-overlay-bg: rgba(0, 0, 0, .5); /* docs/00 表单遮罩契约。 */
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  padding: var(--space-20);
+  place-items: center;
+  background: var(--shell-auth-overlay-bg);
+}
+
+.shell-auth-modal {
+  display: grid;
+  width: min(100%, var(--shell-auth-modal-width));
+  gap: var(--space-20);
+  padding: var(--space-20);
+  border-radius: var(--radius-20);
+  background: var(--white);
+}
+
+.shell-auth-modal h2 {
+  margin: 0;
+  color: var(--gray-80);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+  line-height: var(--lh-tight);
+}
+
+.shell-app {
+  min-height: 100vh;
+  background: var(--gray-5);
+}
+
+.shell-app.is-drawer-open {
+  overflow: hidden;
+}
+
+.shell-topbar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 40;
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr) auto;
+  width: 100vw;
+  height: 64px;
+  padding: 0 var(--space-20);
+  align-items: center;
+  gap: var(--space-20);
+  background: var(--white);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, .06);
+}
+
+.shell-topbar__brand,
+.shell-topbar__actions,
+.shell-topbar__mobile-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-10);
+}
+
+.shell-topbar__desktop-brand,
+.shell-topbar__mobile-brand {
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-10);
+}
+
+.shell-topbar__desktop-brand {
+  display: flex;
+}
+
+.shell-topbar__mobile-brand,
+.shell-topbar__mobile-actions {
+  display: none;
+}
+
+.shell-topbar__search {
+  position: relative;
+  justify-self: center;
+  width: 320px;
+}
+
+.shell-global-search {
+  --shell-search-popover-width: 480px; /* 搜索三段结果保持可扫描的桌面宽度，无对应全局组件 token。 */
+  --shell-search-viewport-offset: 84px; /* 固定顶栏 64px + 下间距 20px，限制浮层最大高度。 */
+  --shell-search-popover-shadow: 0 10px 30px rgba(0, 0, 0, .12); /* 沿用全站 menu-popover 投影，暂无全局 shadow token。 */
+}
+
+.shell-global-search .search-input {
+  width: 100%;
+}
+
+.shell-global-search .search-input input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--gray-80);
+  font: inherit;
+}
+
+.shell-search-popover {
+  position: absolute;
+  top: calc(100% + var(--space-10));
+  left: 50%;
+  z-index: 55;
+  display: flex;
+  width: min(var(--shell-search-popover-width), calc(100vw - 2 * var(--space-20)));
+  max-height: calc(100vh - var(--shell-search-viewport-offset));
+  flex-direction: column;
+  gap: var(--space-10);
+  padding: var(--space-10);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  box-shadow: var(--shell-search-popover-shadow);
+  overflow-y: auto;
+  transform: translateX(-50%);
+}
+
+.shell-search-section h2 {
+  display: flex;
+  margin: 0;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--gray-40);
+  font-size: var(--font-body-size);
+  font-weight: var(--font-body-weight);
+}
+
+.shell-search-section h2 strong {
+  color: var(--blue);
+}
+
+.shell-search-section > div {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.shell-search-result {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-20);
+  padding: var(--space-10);
+  border: 0;
+  border-radius: var(--radius-10);
+  background: transparent;
+  color: var(--gray-80);
+  text-align: left;
+  cursor: pointer;
+}
+
+.shell-search-result:hover,
+.shell-search-result:focus-visible {
+  outline: 0;
+  background: var(--gray-5);
+  color: var(--blue);
+}
+
+.shell-search-result span,
+.shell-search-result small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shell-search-result span {
+  flex: 1;
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+}
+
+.shell-search-result small {
+  max-width: 48%;
+  color: var(--gray-40);
+  font-size: var(--font-body-size);
+}
+
+.shell-search-empty {
+  margin: 0;
+  padding: var(--space-20);
+  color: var(--gray-40);
+  text-align: center;
+}
+
+.shell-select {
+  display: flex;
+  height: 40px;
+  align-items: center;
+  gap: var(--space-10);
+  padding: 0 var(--space-10);
+  border: 0;
+  border-radius: var(--radius-10);
+  color: var(--gray-60);
+  background: var(--gray-10);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background var(--transition), color var(--transition);
+  white-space: nowrap;
+}
+
+.shell-select:hover {
+  color: var(--blue);
+  background: var(--gray-5);
+}
+
+.shell-select .tp-line {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shell-select::after {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  content: "";
+  transform: rotate(45deg) translateY(-2px);
+}
+
+.shell-company-select,
+.shell-language-select {
+  width: 280px;
+  justify-content: space-between;
+}
+
+.shell-company-anchor {
+  min-width: 0;
+}
+
+.shell-company-menu {
+  --shell-company-menu-gap: 5px; /* Figma 558:17955 企业按钮与浮层实测间距，无对应 token。 */
+  --shell-company-menu-width: 280px; /* Figma 558:17955/19001 浮层实测宽，与既有企业触发钮同宽。 */
+  --shell-company-menu-item-height: 39px; /* Figma 两个企业选项行实测高，无对应 token。 */
+  --shell-company-menu-shadow: 0 4px 5px rgba(0, 0, 0, .15), 0 10px 30px rgba(0, 0, 0, .08); /* Figma 浮层双层投影，无对应 token。 */
+
+  top: calc(100% + var(--shell-company-menu-gap));
+  display: flex;
+  width: var(--shell-company-menu-width);
+  flex-direction: column;
+  gap: var(--space-10);
+  padding: var(--space-10);
+  border-radius: var(--radius-20);
+  background: var(--white);
+  box-shadow: var(--shell-company-menu-shadow);
+}
+
+.shell-company-menu .shell-company-menu__item {
+  width: 100%;
+  height: var(--shell-company-menu-item-height);
+  background: transparent;
+  color: var(--gray-60);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-body-weight);
+  cursor: pointer;
+}
+
+.shell-company-menu .shell-company-menu__item:hover {
+  color: var(--blue);
+  background: var(--gray-10);
+}
+
+.shell-company-menu .shell-company-menu__item.dropdown-item--current,
+.shell-company-menu .shell-company-menu__item.dropdown-item--current:hover {
+  color: var(--gray-20);
+  background: var(--gray-5);
+  cursor: default;
+}
+
+.shell-mobile-company-trigger {
+  display: flex;
+  min-width: 0;
+  height: var(--space-40);
+  align-items: center;
+  gap: var(--space-10);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* 侧栏/抽屉语言下拉锚点:撑满,触发钮维持 pill 满宽 */
+.shell-language-anchor {
+  display: flex;
+  width: 100%;
+}
+
+.shell-language-anchor .shell-language-select {
+  width: 100%;
+}
+
+.shell-icon-button {
+  --component-width: 40px;
+  --component-height: 40px;
+}
+
+/* 顶栏图标触发钮展开态=体系底色变化(hover 同款),替代难看黑框;焦点细描边见 menus.css */
+.shell-icon-button[data-menu-trigger][aria-expanded="true"] {
+  color: var(--blue);
+  background: var(--gray-10);
+}
+
+.shell-avatar {
+  --component-width: 40px;
+  --component-height: 40px;
+}
+
+.shell-topbar .btn-messenger .tp-dot,
+.shell-topbar .btn-toggle-sidebar .tp-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+}
+
+.shell-sidebar {
+  position: fixed;
+  top: 64px;
+  bottom: 0;
+  left: 0;
+  z-index: 30;
+  display: grid;
+  width: 320px;
+  grid-template-rows: auto auto auto;
+  align-content: start;
+  gap: var(--space-10);
+  padding: var(--space-20);
+  overflow: hidden auto;
+  background: var(--white);
+  transition: width var(--transition);
+}
+
+.shell-nav {
+  display: grid;
+  align-content: start;
+  gap: var(--space-10);
+}
+
+.shell-sidebar .menu-item,
+.shell-mobile-drawer .menu-item {
+  --component-width: 280px;
+  --component-height: 40px;
+}
+
+.shell-nav .menu-item .tp-line {
+  flex: 1;
+}
+
+.shell-nav .menu-item .tp-dot {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.shell-add-row {
+  --component-width: 280px;
+  --component-height: 40px;
+  box-sizing: border-box;
+  height: 40px;
+  min-height: 40px;
+  background: var(--gray-5);
+  border-style: solid;
+  box-shadow: none;
+}
+
+.shell-main {
+  min-height: 100vh;
+  margin-left: 320px;
+  padding: 84px var(--space-20) var(--space-20);
+  background: var(--gray-5);
+  transition: margin-left var(--transition);
+}
+
+.shell-page-inner {
+  max-width: 1494px;
+}
+
+.shell-grid {
+  display: grid;
+  max-width: 1494px;
+  grid-template-columns: repeat(2, minmax(0, 737px));
+  gap: var(--space-20);
+}
+
+.shell-card {
+  min-height: 260px;
+  padding: var(--space-20);
+  border-radius: var(--radius-20);
+  background: var(--white);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, .06);
+}
+
+.shell-card--wide {
+  grid-column: 1 / -1;
+  min-height: 760px;
+}
+
+.shell-mobile-overlay {
+  position: fixed;
+  inset: 64px 0 0;
+  z-index: 45;
+  display: none;
+  background: rgba(0, 0, 0, .4);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition);
+}
+
+.shell-mobile-drawer {
+  position: fixed;
+  top: 64px;
+  bottom: 0;
+  left: 0;
+  z-index: 50;
+  display: none;
+  width: 260px;
+  grid-template-rows: auto auto auto;
+  align-content: start;
+  gap: var(--space-10);
+  padding: var(--space-20);
+  overflow: hidden auto;
+  background: var(--white);
+  opacity: 0;
+  transform: translateX(-100%);
+  pointer-events: none;
+  transition: opacity var(--transition), transform var(--transition);
+}
+
+.shell-mobile-drawer .menu-item,
+.shell-mobile-drawer .shell-language-select,
+.shell-mobile-drawer .shell-add-row {
+  --component-width: 220px;
+  width: 220px;
+}
+
+/* 抽屉窄(220 内容),语言浮层收到锚点满宽,避开抽屉 overflow-x 裁切 */
+.shell-mobile-drawer .lang-menu {
+  width: 100%;
+}
+
+.is-drawer-open .shell-mobile-overlay {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.is-drawer-open .shell-mobile-drawer {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.shell-app--mobile .shell-topbar {
+  grid-template-columns: minmax(0, 1fr) auto;
+  height: 64px;
+  padding: 0 var(--space-20);
+  gap: var(--space-10);
+}
+
+.shell-app--mobile .shell-topbar__desktop-brand,
+.shell-app--mobile .shell-topbar__actions,
+.shell-app--mobile .shell-sidebar {
+  display: none;
+}
+
+.shell-app--mobile .shell-topbar__mobile-brand,
+.shell-app--mobile .shell-topbar__mobile-actions {
+  display: flex;
+}
+
+.shell-app--mobile .shell-company-menu {
+  top: calc(100% + var(--space-20));
+  left: calc(var(--grid-margin-mobile) - var(--space-20));
+}
+
+.shell-app--mobile .shell-mobile-overlay {
+  display: block;
+}
+
+.shell-app--mobile .shell-mobile-drawer {
+  display: grid;
+}
+
+.shell-mobile-brand {
+  color: var(--gray-80);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+  line-height: var(--lh-tight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shell-app--mobile .shell-topbar__search {
+  display: none;
+}
+
+.shell-app--mobile .shell-main {
+  margin-left: 0;
+  padding: 84px var(--grid-margin-mobile) var(--grid-margin-mobile);
+}
+
+.shell-app--mobile .shell-page-inner {
+  width: min(100%, 362px);
+  margin: 0 auto;
+}
+
+.shell-app--mobile .shell-grid {
+  max-width: 362px;
+  grid-template-columns: 1fr;
+}
+
+.shell-app--mobile .shell-card {
+  min-height: 220px;
+}
+
+.shell-app--mobile .shell-card--wide {
+  min-height: 520px;
+}
+
+.shell-app--mobile .shell-card--desktop-only {
+  display: none;
+}
+
+.is-viewport-switching .shell-main,
+.is-viewport-switching .shell-sidebar {
+  transition: none;
+}
+
+@media (max-width: 900px) {
+  .shell-app--desktop .shell-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .shell-app--desktop .shell-card--wide {
+    grid-column: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell-sidebar,
+  .shell-main,
+  .shell-mobile-overlay,
+  .shell-mobile-drawer,
+  .shell-select {
+    transition-duration: .01ms !important;
+  }
+}

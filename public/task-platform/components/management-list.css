@@ -1,0 +1,126 @@
+/* Shared order/customer/inventory list frame, row surface, columns and pager. */
+.management-list {
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: stretch;
+  padding: var(--space-10);
+  border-radius: var(--radius-20);
+  background: var(--gray-8);
+}
+
+.management-list__grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-10);
+  flex: 0 0 auto;
+  align-items: start;
+  align-content: start;
+}
+
+.management-list__row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 60px;
+  align-items: center;
+  gap: var(--management-row-gap, var(--space-20));
+  padding: var(--space-10);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, .06);
+  cursor: pointer;
+  transition: box-shadow var(--transition);
+}
+
+.management-list__row--customer {
+  --management-row-gap: var(--space-10);
+}
+
+.management-list__row:hover {
+  background: var(--white);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .08);
+}
+
+.management-list__row:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+.management-list__empty {
+  grid-column: 1 / -1;
+}
+
+.management-list__pager {
+  display: flex;
+  min-width: 0;
+  padding-top: var(--space-10);
+}
+
+.management-list__pager-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  box-shadow: 0 4px 5px rgba(0, 0, 0, .1);
+}
+
+.management-list__pager-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  border: 0;
+  border-radius: var(--radius-10);
+  background: transparent;
+  color: var(--gray-40);
+  transition: color var(--transition);
+  cursor: pointer;
+}
+
+.management-list__pager-btn:hover:not(:disabled) {
+  color: var(--blue);
+}
+
+.management-list__pager-btn:disabled {
+  color: var(--gray-20);
+  cursor: not-allowed;
+}
+
+.management-list__pager-btn .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.management-list__pager-label {
+  padding: 6px var(--space-10);
+  color: var(--3a);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+  line-height: var(--lh-tight);
+  white-space: nowrap;
+}
+
+@media (max-width: 1560px) {
+  .management-list__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .management-list {
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+
+  .management-list__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .management-list__pager {
+    margin-top: auto;
+  }
+}

@@ -1,0 +1,620 @@
+/* Home 桌面屏(Figma 模板帧 512:23927 隐藏内容层 Frame 318 实测) */
+
+/* 煊煊 2026-07-08:web 最小宽 1200,再小切手机端界面。
+   mobile 屏未建前先锁最小宽兜底(窄窗横向滚动),mobile 屏就绪后换真切换。 */
+.shell-app {
+  min-width: 1200px;
+}
+
+.home-page {
+  --home-logistics-card-height: 100px; /* 物流摘要卡紧凑高度，无对应全局组件尺寸 token。 */
+  --home-focus-ring-width: 2px; /* 键盘焦点环需高于 1px 分隔线，无对应 token。 */
+  --home-chart-bar-radius: 6px; /* Figma 512:24015 柱状图柱角实测 6px，档外值保留。 */
+  --home-logistics-card-shadow: inset var(--space-4) 0 var(--home-logistics-accent), 0 1px 0 rgba(0, 0, 0, .06); /* 物流卡左侧语义线 + 既有卡面分隔影。 */
+
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+}
+
+/* 头部:HONNMONO 40 SemiBold + 日期区间 pill + 隐藏的解散团队按钮(Figma opacity 0) */
+.home-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-40);
+}
+
+.home-title {
+  margin: 0;
+  font-size: var(--font-display-size); /* Figma 512:23948 实测 40 SemiBold(页级标题,大数字档) */
+  font-weight: 600;
+  line-height: var(--lh-num);
+  color: var(--black);
+}
+
+
+
+
+
+.home-dissolve {
+  opacity: 0; /* Figma 512:23960 该按钮 opacity-0,占位不显示 */
+  pointer-events: none;
+  margin-left: auto;
+}
+
+/* 统计卡行:营收/库存 + 原有 4 张，共 6 张等宽看板卡。 */
+.home-stats {
+  display: flex;
+  gap: var(--space-20);
+}
+
+.home-stats .board-card {
+  flex: 1;
+  min-width: 0;
+  min-height: 117px; /* Figma 看板 375×117 */
+}
+
+.home-stat-card {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.home-stat-card--detailed .tp-number {
+  font-size: var(--font-title-2-size);
+}
+
+.home-stat-card__sub {
+  display: flex;
+  min-width: 0;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  color: var(--gray-40);
+  font-size: var(--font-body-size);
+}
+
+.home-stat-card__sub strong {
+  color: var(--yellow);
+}
+
+.home-logistics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-20);
+}
+
+.home-logistics-card {
+  --home-logistics-accent: var(--gray-20);
+
+  display: grid;
+  min-width: 0;
+  min-height: var(--home-logistics-card-height);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-content: space-between;
+  gap: var(--space-10);
+  padding: var(--space-20);
+  border-radius: var(--radius-20);
+  background: var(--white);
+  box-shadow: var(--home-logistics-card-shadow);
+  color: var(--gray-60);
+  text-decoration: none;
+  transition: box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+.home-logistics-card--transit {
+  --home-logistics-accent: var(--blue);
+}
+
+.home-logistics-card--overdue {
+  --home-logistics-accent: var(--red);
+}
+
+.home-logistics-card > span {
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+}
+
+.home-logistics-card > strong {
+  color: var(--gray-80);
+  font-size: var(--font-title-2-size);
+}
+
+.home-logistics-card > small {
+  grid-column: 1 / -1;
+  color: var(--gray-40);
+  font-size: var(--font-body-size);
+}
+
+/* 无图标时数字回到第一列,保持 标题上/数字下 的纵排(Figma 结构) */
+.home-stats .board-card .tp-number {
+  grid-column: 1;
+}
+
+.board-card--green {
+  background: var(--green);
+  color: var(--white);
+}
+
+.board-card--yellow {
+  background: var(--yellow);
+  color: var(--white);
+}
+
+.board-card--yellow .icon-task {
+  color: var(--red); /* §2.3 黄卡带红色警示图标 */
+}
+
+/* 双栏卡片栅格:770 + 20 + 770(模板 Frame 586 实测)。
+   minmax(0,1fr):同行两卡永远等宽(煊煊 2026-07-08 图注「拉伸时以同行最宽为准缩放」——
+   纯 1fr 时成员格 min-content 会把右栏撑宽,同行不等宽) */
+.home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-20);
+  /* 同行等高:默认 stretch,矮卡拉伸到同行最高(煊煊 2026-07-08「以同行最长的那个来做规范」) */
+}
+
+.home-card {
+  background: var(--white);
+  border-radius: var(--radius-20);
+  padding: var(--space-20);
+  min-width: 0;
+  transition: box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .home-card:hover,
+  .home-logistics-card:hover {
+    box-shadow: 0 4px 10px rgba(0, 0, 0, .06);
+    transform: translateY(-1px);
+  }
+}
+
+.home-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-20);
+  margin-bottom: var(--space-20);
+}
+
+.home-card__title {
+  margin: 0;
+  font-size: var(--font-title-2-size);
+  font-weight: var(--font-title-2-weight);
+  line-height: var(--lh-tight);
+  color: var(--black);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.home-card__count {
+  font-size: var(--font-title-2-size);
+  font-weight: var(--font-title-2-weight);
+  color: var(--blue);
+}
+
+.home-card__link {
+  flex: none;
+  color: var(--blue);
+  font-size: var(--font-description-size);
+  text-decoration: none;
+}
+
+/* 红色计数徽标(团队动态,Figma 512:23979 带 25% 投影) */
+.home-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px var(--space-10);
+  border-radius: var(--radius-20);
+  background: var(--red);
+  color: var(--gray-5);
+  font-size: var(--font-title-3-size);
+  font-weight: 600;
+  box-shadow: 0 4px 5px rgba(0, 0, 0, 0.25);
+  white-space: nowrap;
+}
+
+.home-card__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+}
+
+.home-card__list .task-item .tp-title,
+.home-card__list .task-item .tp-muted {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.home-card__list .task-item {
+  width: auto;
+  background: var(--gray-5); /* 交互演示 Home 帧 512:26712 实测:任务行浅灰底 */
+  border-radius: var(--radius-10);
+}
+
+/* §2.3 任务卡徽标=饱和色(交互演示帧实测:红底白字),覆盖组件浅色 pill */
+.home-card__list .task-item .tp-pill--red {
+  background: var(--red);
+  color: var(--gray-5);
+}
+
+/* 团队动态行(Figma #F0F0F0 → gray-8 精确收编) */
+.home-feed-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  padding: var(--space-10);
+  border-radius: var(--radius-10);
+  background: var(--gray-8);
+}
+
+.home-feed-row__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.home-feed-row__line {
+  display: flex;
+  gap: var(--space-10);
+  align-items: center;
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  color: var(--black);
+}
+
+.home-feed-row__line .home-feed-name {
+  white-space: nowrap;
+}
+
+.home-feed-row__line .home-feed-action {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.home-feed-row__sub {
+  font-size: var(--font-body-size);
+  font-weight: var(--font-body-weight);
+  color: var(--gray-40);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.home-feed-row__time {
+  display: flex;
+  gap: var(--space-10);
+  font-size: var(--font-body-size);
+  color: var(--gray-40);
+  white-space: nowrap;
+}
+
+/* 订单柱状图:grad-chart 柱(圆角 6px 档外值照 Figma 512:24015)+ 柱下产品名标签 */
+.home-chart {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-around;
+  gap: var(--space-10);
+  margin-top: 56px;
+  min-height: 180px;
+}
+
+.home-chart__col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.home-chart__bar {
+  width: 33px;
+  border-radius: var(--home-chart-bar-radius);
+  background: var(--grad-chart);
+}
+
+.home-chart__value {
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  color: var(--black);
+}
+
+.home-chart__label {
+  max-width: 140px;
+  font-size: var(--font-body-size);
+  color: var(--gray-40);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 订单列表 / 商品库存行:上边线 #C4C4C4 → gray-15 收编 */
+.home-line-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-20);
+  padding: var(--space-10);
+  border-top: 1px solid var(--gray-15);
+}
+
+.home-line-row__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.home-line-row__tag-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  color: var(--black);
+  white-space: nowrap;
+}
+
+.home-line-row__tag-line > span:first-child {
+  flex: none;
+}
+
+.home-chip {
+  display: inline-block;
+  max-width: 100%;
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: var(--radius-10);
+  background: var(--gray-15);
+  color: var(--black);
+  font-size: 8px; /* Figma chip 字号 8(移动端微字同档) */
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+.home-line-row__sub {
+  display: flex;
+  gap: var(--space-10);
+  font-size: var(--font-body-size);
+  color: var(--gray-40);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.home-line-row__meta {
+  display: flex;
+  gap: var(--space-10);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  color: var(--black);
+  white-space: nowrap;
+}
+
+.home-line-row__count {
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+  color: var(--blue);
+  white-space: nowrap;
+}
+
+.home-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 5px; /* Figma 512:24081 档外值照做 */
+  background: var(--gray-10);
+  flex: none;
+}
+
+/* 团队成员格:4×3,Figma #F0F0F0 → gray-8 精确收编。
+   煊煊 2026-07-08:模块宽 <720 只显 3 列,再小逐级收束(最终切手机端版式)。 */
+.home-card--members {
+  container-type: inline-size;
+  cursor: pointer;
+}
+
+.home-line-row--link {
+  cursor: pointer;
+}
+
+.home-line-row--link:focus-visible,
+.home-card--members:focus-visible {
+  outline: var(--home-focus-ring-width) solid var(--blue);
+  outline-offset: var(--home-focus-ring-width);
+}
+
+.home-members-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-10);
+}
+
+/* 断点按模块「外宽」语义(煊煊:模块<720 才 3 列,720+ 4 列)。
+   container query 量的是内容盒=外宽−40 内边距,故 720/540 折算为 680/500。 */
+@container (max-width: 680px) {
+  .home-members-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@container (max-width: 500px) {
+  .home-members-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.home-member {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  padding: var(--space-10);
+  border-radius: var(--radius-10);
+  background: var(--gray-8);
+  min-width: 0;
+  overflow: hidden; /* 窄窗防 chips 溢出;1920 基准下不触发 */
+}
+
+.home-member__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  justify-content: center;
+}
+
+.home-member__name {
+  font-size: var(--font-description-size);
+  font-weight: 600;
+  color: var(--black);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 底部新增卡:白卡 400 高,居中 add-surface 100 */
+.home-add-card {
+  min-height: 400px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.home-add-card .icon {
+  width: 100px;
+  height: 100px;
+  color: var(--gray-15); /* 栅格帧 296:1570:add 圆为灰(模板帧蓝,以栅格帧为准) */
+}
+
+/* 保修到期板块:红标题(栅格帧 296:1570 实测) */
+.home-card__title--warranty {
+  color: var(--red);
+}
+
+/* 库存缩略图真图 */
+.home-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  display: block;
+}
+
+/* 部门 chip(栅格帧 296:1570 明画各部门色;role chip 煊煊 2026-07-08 拍不显示已移除) */
+.home-chip--dept { color: var(--gray-80); font-weight: 500; align-self: flex-start; }
+.home-chip--dept-design { background: var(--dept-design); }
+.home-chip--dept-tech { background: var(--dept-tech); }
+.home-chip--dept-sales { background: var(--dept-sales); }
+.home-chip--dept-finance { background: var(--dept-finance); }
+.home-chip--dept-service { background: var(--dept-service); }
+.home-chip--dept-purchase { background: var(--dept-purchase); }
+
+.home-fab {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .shell-app {
+    min-width: 0;
+  }
+
+  .home-page {
+    padding-bottom: calc(var(--space-40) + var(--space-20));
+  }
+
+  .home-head,
+  .home-stats,
+  .home-logistics {
+    display: none;
+  }
+
+  .home-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .home-card {
+    padding: var(--grid-margin-mobile);
+  }
+
+  .home-card__head {
+    gap: var(--space-10);
+  }
+
+  .home-feed-row__time,
+  .home-line-row__meta {
+    flex-direction: column;
+    align-items: flex-end;
+    gap: var(--space-4);
+  }
+
+  .home-line-row {
+    gap: var(--space-10);
+    padding-right: 0;
+    padding-left: 0;
+  }
+
+  .home-chart {
+    margin-top: var(--space-20);
+  }
+
+  .home-add-card {
+    min-height: 140px;
+  }
+
+  .home-add-card .icon {
+    width: 64px;
+    height: 64px;
+  }
+
+  .home-fab {
+    position: fixed;
+    right: var(--space-20);
+    bottom: var(--space-20);
+    z-index: 35;
+    display: inline-flex;
+    border: 0;
+    border-radius: var(--radius-20);
+    background: var(--blue);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, .2);
+    transition: box-shadow var(--transition-fast), transform var(--transition-fast);
+  }
+
+  .home-fab .icon {
+    width: 24px;
+    height: 24px;
+  }
+
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .home-fab:hover {
+    box-shadow: 0 6px 14px rgba(0, 0, 0, .24);
+    transform: translateY(-1px);
+  }
+}
+
+.home-fab:active {
+  transform: scale(.98);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-card,
+  .home-logistics-card,
+  .home-fab {
+    transition-duration: .01ms !important;
+  }
+}
