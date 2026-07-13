@@ -1,0 +1,7 @@
+{
+  "redirects": [
+    { "source": "/task-platform/login", "destination": "/login/", "permanent": false },
+    { "source": "/task-platform/login/(.*)", "destination": "/login/$1", "permanent": false },
+    { "source": "/task-platform/bizflow/(.*)", "destination": "/bizflow/$1", "permanent": false }
+  ]
+}
