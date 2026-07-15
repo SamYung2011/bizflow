@@ -80,14 +80,14 @@ export async function ensureLiveSession() {
   if (!session) {
     liveUserId = "";
     tablePromises.clear();
-    clearLiveTableCache();
+    await clearLiveTableCache();
     return null;
   }
   if (liveUserId !== session.user.id) {
     liveUserId = session.user.id;
     tablePromises.clear();
   }
-  activateLiveTableCacheUser(session.user.id);
+  await activateLiveTableCacheUser(session.user.id);
   return session;
 }
 
@@ -99,11 +99,11 @@ export function allRows(table, orderCol = "created_at", ascending = true, second
   return tablePromises.get(key);
 }
 
-export function invalidateLiveTables(...tables) {
+export async function invalidateLiveTables(...tables) {
   const targets = new Set(tables.flat().map((table) => String(table || "")).filter(Boolean));
   if (!targets.size) return;
   for (const key of tablePromises.keys()) {
     if (targets.has(key.split(":", 1)[0])) tablePromises.delete(key);
   }
-  invalidateLiveTableCache([...targets]);
+  await invalidateLiveTableCache([...targets]);
 }

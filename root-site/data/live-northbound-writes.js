@@ -53,8 +53,8 @@ function recordPatch(values) {
   return patch;
 }
 
-function invalidateNorthboundReads() {
-  invalidateLiveTables("northbound_records", "northbound_statuses");
+async function invalidateNorthboundReads() {
+  await invalidateLiveTables("northbound_records", "northbound_statuses");
   invalidateLiveSnapshot("northbound.json");
 }
 
@@ -66,7 +66,7 @@ export async function updateLiveNorthboundRecord(id, values) {
     .select("*")
     .single();
   throwIfError(result.error);
-  invalidateNorthboundReads();
+  await invalidateNorthboundReads();
   return result.data;
 }
 
@@ -76,7 +76,7 @@ export async function createLiveNorthboundRecord(values) {
   if (!payload.name) throw new Error("Northbound record requires a name");
   const result = await client.from("northbound_records").insert(payload).select("*").single();
   throwIfError(result.error);
-  invalidateNorthboundReads();
+  await invalidateNorthboundReads();
   return result.data;
 }
 
@@ -84,7 +84,7 @@ export async function deleteLiveNorthboundRecord(id) {
   const { client } = await writeContext();
   const result = await client.from("northbound_records").delete().eq("id", id).select("id").single();
   throwIfError(result.error);
-  invalidateNorthboundReads();
+  await invalidateNorthboundReads();
   return result.data;
 }
 
@@ -96,6 +96,6 @@ export async function createLiveNorthboundStatus({ label, color, sortOrder }) {
     sort_order: Number.isFinite(Number(sortOrder)) ? Number(sortOrder) : 0
   }).select("*").single();
   throwIfError(result.error);
-  invalidateNorthboundReads();
+  await invalidateNorthboundReads();
   return result.data;
 }

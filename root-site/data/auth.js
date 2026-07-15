@@ -114,7 +114,7 @@ export async function getSupabaseClient() {
       });
       client.auth.onAuthStateChange((event) => {
         currentUserPromise = null;
-        if (event === "SIGNED_OUT") clearLiveTableCache();
+        if (event === "SIGNED_OUT") void clearLiveTableCache();
       });
       return client;
     });
@@ -173,13 +173,13 @@ export async function signUp({ email, password, name, companyName, note }) {
 export async function signOut() {
   const client = await getSupabaseClient();
   if (!client) {
-    clearLiveTableCache();
+    await clearLiveTableCache();
     return;
   }
   const { error } = await client.auth.signOut();
   if (error) throw error;
   currentUserPromise = null;
-  clearLiveTableCache();
+  await clearLiveTableCache();
 }
 
 export async function resetPasswordForEmail(email, redirectTo) {
@@ -235,10 +235,10 @@ export async function fetchAllTable(table, orderCol, ascending = true, secondary
   const { data: sessionData, error: sessionError } = await client.auth.getSession();
   if (sessionError) throw sessionError;
   const userId = sessionData.session?.user?.id || "";
-  if (userId) activateLiveTableCacheUser(userId);
+  if (userId) await activateLiveTableCacheUser(userId);
   const cacheArgs = { userId, table, orderCol, ascending, secondaryOrder };
   const cacheVersion = liveTableCacheVersion(table);
-  const cached = userId ? readLiveTableCache(cacheArgs) : null;
+  const cached = userId ? await readLiveTableCache(cacheArgs) : null;
   if (cached && !cached.stale) return cached.rows;
   if (cached) {
     void fetchAllTableFromNetwork(client, table, orderCol, ascending, secondaryOrder)
@@ -247,7 +247,7 @@ export async function fetchAllTable(table, orderCol, ascending = true, secondary
     return cached.rows;
   }
   const rows = await fetchAllTableFromNetwork(client, table, orderCol, ascending, secondaryOrder);
-  if (userId) writeLiveTableCache({ ...cacheArgs, rows, version: cacheVersion });
+  if (userId) await writeLiveTableCache({ ...cacheArgs, rows, version: cacheVersion });
   return rows;
 }
 
