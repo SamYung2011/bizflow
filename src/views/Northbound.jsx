@@ -7,6 +7,8 @@ import { toastError } from "../lib/toast.js";
 
 const RECORD_SELECT = "*, status:northbound_statuses(id,label,color,sort_order)";
 const STATUS_COLORS = ["#f43f5e", "#6382ff", "#16a34a", "#f59e0b", "#8b5cf6", "#0891b2", "#64748b"];
+const PAGE_SIZE = 100;
+const TOUCH_DOUBLE_TAP_MS = 300;
 
 const emptyForm = {
   remarks: "",
@@ -136,6 +138,28 @@ function StatusChip({ status, t }) {
   );
 }
 
+function useTouchDoubleActivate(onActivate) {
+  const lastPointerUpRef = useRef(0);
+
+  const onPointerUp = useCallback((event) => {
+    if (event.pointerType !== "touch" && event.pointerType !== "pen") return;
+    const now = Date.now();
+    if (now - lastPointerUpRef.current <= TOUCH_DOUBLE_TAP_MS) {
+      lastPointerUpRef.current = 0;
+      event.preventDefault();
+      onActivate();
+      return;
+    }
+    lastPointerUpRef.current = now;
+  }, [onActivate]);
+
+  const onPointerCancel = useCallback(() => {
+    lastPointerUpRef.current = 0;
+  }, []);
+
+  return { onPointerUp, onPointerCancel };
+}
+
 function InlineEditableCell({
   row,
   field,
@@ -154,16 +178,19 @@ function InlineEditableCell({
   const editKey = `${row.id}:${field}`;
   const editing = inlineEdit?.rowId === row.id && inlineEdit.field === field;
   const saving = savingKey === editKey;
+  const activateEditor = useCallback(() => onStart(row.id, field), [field, onStart, row.id]);
+  const touchDoubleActivate = useTouchDoubleActivate(activateEditor);
   const cellStyle = {
     ...td,
     ...style,
     cursor: editing ? "default" : "text",
     opacity: saving ? 0.65 : 1,
+    touchAction: "manipulation",
   };
 
   if (!editing) {
     return (
-      <td style={cellStyle} onDoubleClick={() => onStart(row.id, field)}>
+      <td style={cellStyle} onDoubleClick={activateEditor} {...touchDoubleActivate}>
         {children}
       </td>
     );
@@ -225,6 +252,8 @@ function InlineDateRangeCell({
   const editing = dateRangeEdit?.rowId === row.id;
   const saving = dateRangeSaving === editKey;
   const display = formatDateRangeForDisplay(fmtDate(row.submitted_at), fmtDate(row.submitted_end_at));
+  const activateEditor = useCallback(() => onStart(row), [onStart, row]);
+  const touchDoubleActivate = useTouchDoubleActivate(activateEditor);
   const cellStyle = {
     ...td,
     position: "relative",
@@ -232,10 +261,16 @@ function InlineDateRangeCell({
     cursor: editing ? "default" : "text",
     opacity: saving ? 0.65 : 1,
     minWidth: 190,
+    touchAction: "manipulation",
   };
 
   return (
-    <td ref={cellRef} style={cellStyle} onDoubleClick={() => onStart(row)}>
+    <td
+      ref={cellRef}
+      style={cellStyle}
+      onDoubleClick={activateEditor}
+      {...(editing ? {} : touchDoubleActivate)}
+    >
       {display || "—"}
       <DateRangePopover anchorRef={cellRef} panelRef={panelRef} open={editing} onDismiss={onCancel}>
         <DateRangePanel
@@ -409,6 +444,7 @@ export default function NorthboundView() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [currentPage, setCurrentPage] = useState(1);
   const [showForm, setShowForm] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [inlineEdit, setInlineEdit] = useState(null);
@@ -467,6 +503,16 @@ export default function NorthboundView() {
     });
   }, [records, search, statusFilter]);
 
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const pagedRecords = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filtered.slice(start, start + PAGE_SIZE);
+  }, [currentPage, filtered]);
+
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(page, totalPages));
+  }, [totalPages]);
+
   async function createStatus(label) {
     const payload = {
       label,
@@ -490,6 +536,7 @@ export default function NorthboundView() {
       recordsRef.current = next;
       return next;
     });
+    setCurrentPage(1);
     setShowForm(false);
   }
 
@@ -655,11 +702,21 @@ export default function NorthboundView() {
           <input
             placeholder={t("搜尋名稱 / 車牌 / 電話…")}
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setCurrentPage(1);
+            }}
             style={{ border: "none", background: "none", outline: "none", fontSize: 14, width: "100%", minWidth: 0 }}
           />
         </div>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ ...inputStyle, flex: "0 1 240px", minWidth: 180, marginTop: 0, background: "#fff" }}>
+        <select
+          value={statusFilter}
+          onChange={(e) => {
+            setStatusFilter(e.target.value);
+            setCurrentPage(1);
+          }}
+          style={{ ...inputStyle, flex: "0 1 240px", minWidth: 180, marginTop: 0, background: "#fff" }}
+        >
           <option value="all">{t("全部情況")} ({counts.all})</option>
           <option value="none">{t("未設定情況")} ({counts.none})</option>
           {sortedStatuses.map((s) => <option key={s.id} value={s.id}>{t(s.label)} ({counts[s.id] || 0})</option>)}
@@ -697,7 +754,7 @@ export default function NorthboundView() {
               {!loading && filtered.length === 0 && (
                 <tr><td colSpan={12} style={emptyCell}>{t("暫無記錄")}</td></tr>
               )}
-              {!loading && filtered.map((row) => {
+              {!loading && pagedRecords.map((row) => {
                 const status = statusFor(row, sortedStatuses);
                 const inlineCellProps = {
                   row,
@@ -765,6 +822,32 @@ export default function NorthboundView() {
         </div>
       </div>
 
+      {!loading && filtered.length > 0 && (
+        <div style={pagerStyle}>
+          <button
+            type="button"
+            onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+            disabled={currentPage === 1}
+            aria-label={t("上一頁")}
+            style={pagerButtonStyle(currentPage === 1)}
+          >
+            {t("上一頁")}
+          </button>
+          <span style={pagerLabelStyle} aria-live="polite">
+            {t("頁")} {currentPage} / {totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+            disabled={currentPage === totalPages}
+            aria-label={t("下一頁")}
+            style={pagerButtonStyle(currentPage === totalPages)}
+          >
+            {t("下一頁")}
+          </button>
+        </div>
+      )}
+
       {showForm && (
         <NorthboundForm
           t={t}
@@ -786,6 +869,9 @@ const emptyCell = { padding: 34, textAlign: "center", color: "#999" };
 const chipStyle = { display: "inline-block", padding: "3px 10px", borderRadius: 999, border: "1px solid", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" };
 const primaryBtn = { padding: "9px 18px", background: "#6382ff", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: 700 };
 const secondaryBtn = { padding: "8px 14px", border: "1px solid #d8dce5", background: "#fff", color: "#556", borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: 700, whiteSpace: "nowrap" };
+const pagerStyle = { display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 12 };
+const pagerLabelStyle = { minWidth: 82, textAlign: "center", fontSize: 13, color: "#556" };
+const pagerButtonStyle = (disabled) => ({ ...secondaryBtn, opacity: disabled ? 0.5 : 1, cursor: disabled ? "not-allowed" : "pointer" });
 const btnSmRed = { padding: "4px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 12, fontWeight: 700 };
 const inputStyle = { width: "100%", padding: "8px 10px", border: "1px solid #d8dce5", borderRadius: 7, fontSize: 14, boxSizing: "border-box" };
 const inlineInputStyle = { ...inputStyle, minWidth: 130, marginTop: 0, background: "#fff" };
