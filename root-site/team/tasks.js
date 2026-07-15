@@ -2,7 +2,7 @@ import { getTeamTaskData, getCurrentUser, getUnread, getUnreadWatermarks } from 
 import { markRead } from "../data/read-state.js";
 import { taskT as pageT } from "./tasks-i18n.js";
 import { renderTaskDetail } from "./tasks-detail.js";
-import { renderTaskSubmitDialog } from "./tasks-submit.js";
+import { availableTaskDepartments, renderTaskSubmitDialog, taskMembersForDepartment } from "./tasks-submit.js";
 import { isTaskFilterGroup } from "./tasks-filters.js";
 import { renderTaskCalendar } from "./tasks-calendar.js";
 import { renderTaskOverview } from "./tasks-overview.js";
@@ -68,6 +68,7 @@ const state = {
   submitOpen: false,
   submitMode: "create",
   submitTaskId: null,
+  submitOriginalDepartmentId: "",
   submitCanAssignOthers: permissions.canAssignOthers,
   submitDraft: { ...data.form.defaults, attachments: [] },
   submitError: "",
@@ -218,6 +219,35 @@ function selectedTask() {
   return state.tasks.find((task) => task.id === state.selectedTaskId);
 }
 
+function taskSubmitData() {
+  return { ...data, members: state.members };
+}
+
+function taskSubmitDepartment(departmentId) {
+  return data.departments.find((department) => department.id === departmentId) ?? null;
+}
+
+function reconcileTaskSubmitAssignees(departmentId) {
+  const eligibleMembers = taskMembersForDepartment(taskSubmitData(), departmentId);
+  const eligibleNames = new Set(eligibleMembers.map((member) => member.name));
+  if (!state.submitCanAssignOthers && state.submitMode === "edit") {
+    const task = state.tasks.find((item) => item.id === state.submitTaskId);
+    const retained = (task?.assignees ?? []).filter((assignee) => eligibleMembers.some((member) => member.id === assignee.employeeId));
+    state.submitDraft.owner = retained[0]?.name || "";
+    state.submitDraft.members = retained.slice(1).map((assignee) => assignee.name).join(", ");
+    return;
+  }
+  const currentNames = [
+    state.submitDraft.owner,
+    ...String(state.submitDraft.members || "").split(",").map((name) => name.trim()).filter(Boolean)
+  ];
+  const retained = [...new Set(currentNames.filter((name) => eligibleNames.has(name)))];
+  const preferredOwner = eligibleMembers.find((member) => member.id === state.currentUser.id) ?? eligibleMembers[0];
+  const owner = eligibleNames.has(state.submitDraft.owner) ? state.submitDraft.owner : preferredOwner?.name || "";
+  state.submitDraft.owner = owner;
+  state.submitDraft.members = retained.filter((name) => name !== owner).join(", ");
+}
+
 function closeTaskDetail() {
   state.detailOpen = false;
   state.detailTab = "content";
@@ -232,6 +262,7 @@ function openTaskSubmit() {
   state.submitOpen = true;
   state.submitMode = "create";
   state.submitTaskId = null;
+  state.submitOriginalDepartmentId = "";
   state.submitCanAssignOthers = state.permissions.canAssignOthers;
   state.submitError = "";
   state.submitDraft = {
@@ -256,6 +287,7 @@ function openTaskEdit(taskId) {
   state.submitOpen = true;
   state.submitMode = "edit";
   state.submitTaskId = task.id;
+  state.submitOriginalDepartmentId = task.departmentId || "";
   state.submitCanAssignOthers = isTaskCreator(task, state.currentUser) || state.currentUser.isSuperAdmin ||
     state.currentUser.isAdminOfActive || state.permissions.canAssignOthers;
   state.submitError = "";
@@ -264,6 +296,7 @@ function openTaskEdit(taskId) {
     content: task.content,
     priority: task.priority,
     visibility: task.visibility,
+    departmentId: task.departmentId || "",
     owner: task.assignees[0]?.name || "",
     requiresReview: task.requiresReview ? "yes" : "no",
     members: task.assignees.slice(1).map((assignee) => assignee.name).join(", "),
@@ -276,6 +309,7 @@ function openTaskEdit(taskId) {
 function closeTaskSubmit() {
   if (state.writeBusy) return;
   state.submitOpen = false;
+  state.submitOriginalDepartmentId = "";
   state.submitError = "";
   rerenderTaskPage({ restoreSubmitFocus: true });
 }
@@ -615,15 +649,25 @@ document.addEventListener("submit", async (event) => {
       (state.liveReadOnly && !state.liveTaskWrites)) return;
     const values = new FormData(taskForm);
     const priority = String(values.get("priority") || "high");
+    const departmentId = String(values.get("departmentId") ?? state.submitDraft.departmentId ?? "");
+    const availableDepartmentIds = new Set(availableTaskDepartments(state, taskSubmitData()).map((department) => department.id));
+    if (departmentId && !availableDepartmentIds.has(departmentId)) {
+      state.submitError = "tasks.submit.invalidDepartment";
+      rerenderTaskPage({ focusSubmit: true });
+      return;
+    }
+    const eligibleMembers = taskMembersForDepartment(taskSubmitData(), departmentId);
+    const eligibleMemberIds = new Set(eligibleMembers.map((member) => member.id));
     const owner = String(values.get("owner") ?? state.submitDraft.owner ?? "");
     const members = String(values.get("members") ?? state.submitDraft.members ?? "").split(",").map((name) => name.trim()).filter(Boolean);
     const assignedMembers = [...new Set([owner, ...members].filter(Boolean))];
     const assignedRows = state.submitCanAssignOthers
-      ? assignedMembers.map((name) => state.members.find((member) => member.name === name)).filter(Boolean)
+      ? assignedMembers.map((name) => eligibleMembers.find((member) => member.name === name)).filter(Boolean)
       : state.submitMode === "edit"
         ? (state.tasks.find((task) => task.id === state.submitTaskId)?.assignees ?? [])
-          .map((assignee) => state.members.find((member) => member.id === assignee.employeeId)).filter(Boolean)
-        : state.members.filter((member) => member.id === state.currentUser.id);
+          .map((assignee) => state.members.find((member) => member.id === assignee.employeeId))
+          .filter((member) => member && eligibleMemberIds.has(member.id))
+        : eligibleMembers.filter((member) => member.id === state.currentUser.id);
     if (!assignedRows.length || (state.submitCanAssignOthers && assignedRows.length !== assignedMembers.length)) {
       state.submitError = assignedRows.length ? "tasks.submit.invalidAssignee" : "tasks.submit.assigneeRequired";
       rerenderTaskPage({ focusSubmit: true });
@@ -648,6 +692,7 @@ document.addEventListener("submit", async (event) => {
             due,
             requiresReview,
             assigneeIds: assignedRows.map((member) => member.id),
+            departmentId,
             originalTitle: task.title,
             trackTitleEdit: !isTaskCreator(task, state.currentUser),
             attachments: state.submitDraft.attachments
@@ -658,6 +703,9 @@ document.addEventListener("submit", async (event) => {
           task.dbPriority = task.dbPriority === "none" && priority === "low" ? "none" : priority === "medium" ? "mid" : priority;
           task.due = due;
           task.requiresReview = requiresReview;
+          task.departmentId = departmentId;
+          task.visibility = departmentId ? "department" : "team";
+          task.visibilityDepartment = taskSubmitDepartment(departmentId)?.name || "";
           task.assignees = assignedRows.map((member) => ({
             employeeId: member.id,
             name: member.name,
@@ -676,6 +724,7 @@ document.addEventListener("submit", async (event) => {
             due,
             requiresReview,
             assigneeIds: assignedRows.map((member) => member.id),
+            departmentId,
             files: state.submitDraft.attachments.map((attachment) => attachment.file).filter(Boolean)
           });
           const column = state.board.find((item) => item.key === priority) ?? state.board[0];
@@ -690,7 +739,8 @@ document.addEventListener("submit", async (event) => {
             status: "inProgress",
             done: false,
             countBadge: "",
-            visibility: "team",
+            departmentId,
+            visibility: departmentId ? "department" : "team",
             requiresReview,
             members: assignedRows.map((member) => member.name),
             feedback: [],
@@ -700,7 +750,7 @@ document.addEventListener("submit", async (event) => {
             creator: state.currentUser.name,
             creatorId: state.currentUser.id,
             parentId: null,
-            visibilityDepartment: "",
+            visibilityDepartment: taskSubmitDepartment(departmentId)?.name || "",
             approvedAt: "",
             approvedBy: "",
             attachments: result.attachments.map((attachment) => ({ ...attachment })),
@@ -716,6 +766,7 @@ document.addEventListener("submit", async (event) => {
         }
         state.submitOpen = false;
         state.submitTaskId = null;
+        state.submitOriginalDepartmentId = "";
         state.submitError = "";
       } catch (error) {
         console.warn("Task save failed", error);
@@ -737,7 +788,8 @@ document.addEventListener("submit", async (event) => {
       status: "inProgress",
       done: false,
       countBadge: "",
-      visibility: String(values.get("visibility") || "team"),
+      departmentId,
+      visibility: departmentId ? "department" : "team",
       requiresReview,
       members: assignedMembers,
       feedback: [],
@@ -747,7 +799,7 @@ document.addEventListener("submit", async (event) => {
       creator: state.currentUser.name,
       creatorId: state.currentUser.id,
       parentId: null,
-      visibilityDepartment: "",
+      visibilityDepartment: taskSubmitDepartment(departmentId)?.name || "",
       approvedAt: "",
       approvedBy: "",
       attachments: [],
@@ -826,7 +878,7 @@ document.addEventListener("submit", async (event) => {
 
 function syncTaskSubmitDraft(form) {
   const values = new FormData(form);
-  for (const key of ["title", "content", "priority", "visibility", "owner", "requiresReview", "members", "due"]) {
+  for (const key of ["title", "content", "priority", "visibility", "departmentId", "owner", "requiresReview", "members", "due"]) {
     const value = values.get(key);
     if (value != null) state.submitDraft[key] = String(value);
   }
@@ -870,7 +922,12 @@ document.addEventListener("change", (event) => {
   if (!form) return;
   const name = event.target.name;
   const value = event.target.value;
+  const previousDepartmentId = state.submitDraft.departmentId || "";
   syncTaskSubmitDraft(form);
+  if (name === "departmentId" && value !== previousDepartmentId) {
+    state.submitDraft.visibility = value ? "department" : "team";
+    reconcileTaskSubmitAssignees(value);
+  }
   rerenderTaskPage();
   document.querySelector(`[data-task-submit-form] [name="${CSS.escape(name)}"][value="${CSS.escape(value)}"], [data-task-submit-form] [name="${CSS.escape(name)}"]`)?.focus();
 });

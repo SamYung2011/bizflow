@@ -1,5 +1,29 @@
 import { taskT } from "./tasks-i18n.js";
 
+export function availableTaskDepartments(state, data) {
+  const departments = Array.isArray(data.departments) ? data.departments : [];
+  // Match team/src/components/EditTaskModal.jsx:160-195: admins see all; staff see own plus the task's current department.
+  if (state.currentUser?.isSuperAdmin || state.currentUser?.isAdminOfActive) return departments;
+  const currentUserId = String(state.currentUser?.id || "");
+  const originalDepartmentId = String(state.submitOriginalDepartmentId || "");
+  return departments.filter((department) => department.id === originalDepartmentId ||
+    (currentUserId && (department.memberIds ?? []).includes(currentUserId)));
+}
+
+export function taskMembersForDepartment(data, departmentId) {
+  const members = data.members.filter((member) => member.dept !== "all");
+  if (!departmentId) return members;
+  const department = (data.departments ?? []).find((item) => item.id === departmentId);
+  if (!department) return [];
+  const memberIds = new Set(department.memberIds ?? []);
+  return members.filter((member) => memberIds.has(member.id));
+}
+
+function assignableTaskMembers(state, data, departmentId) {
+  return taskMembersForDepartment(data, departmentId).filter((member) =>
+    state.submitCanAssignOthers || member.id === state.currentUser.id);
+}
+
 function renderSegment({ name, values, selected, disabled, helpers }) {
   const { escapeHtml, lang } = helpers;
   return `<div class="form-task-submit__segment">${values.map(({ value, key }) => `<label class="${value === selected ? "form-task-submit__segment--active" : ""}">
@@ -14,8 +38,10 @@ export function renderTaskSubmitDialog({ state, data, helpers }) {
   const tt = (key) => taskT(lang, key);
   const draft = state.submitDraft;
   const attachments = draft.attachments ?? [];
-  const owners = data.members.filter((member) => member.dept !== "all" &&
-    (state.submitCanAssignOthers || member.id === state.currentUser.id));
+  const departmentId = String(draft.departmentId || "");
+  const departments = availableTaskDepartments(state, data);
+  const owners = assignableTaskMembers(state, data, departmentId);
+  const departmentOptions = departments.map((department) => `<option value="${escapeHtml(department.id)}"${department.id === departmentId ? " selected" : ""}>${escapeHtml(department.name)}</option>`).join("");
   const ownerOptions = owners.map((member) => `<option value="${escapeHtml(member.name)}"${member.name === draft.owner ? " selected" : ""}>${escapeHtml(member.name)}</option>`).join("");
   const busy = state.writeBusy ? " disabled" : "";
   const writable = !state.liveReadOnly || state.liveTaskWrites;
@@ -40,7 +66,10 @@ export function renderTaskSubmitDialog({ state, data, helpers }) {
         </div>
         <label class="form-task-submit__field">
           <span>${escapeHtml(tt("tasks.submit.visibility"))}</span>
-          <select name="visibility"${busy}><option value="team">${escapeHtml(tt("tasks.detail.visibility.team"))}</option></select>
+          <select name="departmentId"${busy}>
+            <option value="">${escapeHtml(tt("tasks.detail.visibility.team"))}</option>
+            ${departmentOptions}
+          </select>
         </label>
         <label class="form-task-submit__field">
           <span>${escapeHtml(tt("tasks.submit.assignee"))}</span>

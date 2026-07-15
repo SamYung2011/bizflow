@@ -65,7 +65,7 @@ async function invalidateTaskReads(...tables) {
   }
 }
 
-export async function createLiveTask({ title, content, priority, due, requiresReview, assigneeIds, files = [] }) {
+export async function createLiveTask({ title, content, priority, due, requiresReview, assigneeIds, departmentId = null, files = [] }) {
   const { client, currentUser } = await writeContext();
   const assigned = uniqueIds(assigneeIds);
   if (!assigned.length) throw new Error("Task requires an assignee");
@@ -82,7 +82,7 @@ export async function createLiveTask({ title, content, priority, due, requiresRe
       start_date: null,
       due_date: due || null,
       company_id: currentUser.activeCompanyId,
-      department_id: null
+      department_id: departmentId || null
     }).select("*").single();
     throwIfError(taskResult.error);
     task = taskResult.data;
@@ -116,7 +116,7 @@ export async function createLiveTask({ title, content, priority, due, requiresRe
   }
 }
 
-export async function updateLiveTask(taskId, { title, content, priority, due, requiresReview, assigneeIds, originalTitle, trackTitleEdit, attachments }) {
+export async function updateLiveTask(taskId, { title, content, priority, due, requiresReview, assigneeIds, departmentId = null, originalTitle, trackTitleEdit, attachments }) {
   const { client, currentUser } = await writeContext();
   const assigned = uniqueIds(assigneeIds);
   if (!assigned.length) throw new Error("Task requires an assignee");
@@ -125,7 +125,8 @@ export async function updateLiveTask(taskId, { title, content, priority, due, re
     note: content || null,
     priority: taskPriority(priority),
     due_date: due || null,
-    needs_approval: requiresReview === true
+    needs_approval: requiresReview === true,
+    department_id: departmentId || null
   };
   if (trackTitleEdit && title !== originalTitle) {
     patch.title_edited_by = currentUser.employeeId;

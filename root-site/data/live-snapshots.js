@@ -361,6 +361,7 @@ async function buildTasksSnapshot() {
       needsApproval: task.needs_approval === true,
       approvedAt: formatDateTime(task.approved_at) || null,
       approvedBy: asText(employeeById.get(task.approved_by)?.name) || null,
+      departmentId: task.department_id ?? null,
       visibility: task.department_id
         ? { scope: "department", department: asText(departmentById.get(task.department_id)?.name) || null }
         : { scope: "team", department: null },

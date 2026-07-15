@@ -116,6 +116,7 @@ const teamTaskMock = {
       contentKey: "tasks.demo.content",
       priority: "high",
       visibility: "team",
+      departmentId: "",
       owner: "",
       requiresReview: "no",
       members: "",
@@ -426,6 +427,7 @@ function normalizeFullTask(task, currentUserName, today) {
     creator: task.creator || "—",
     creatorId: task.creatorId || "",
     parentId: task.parentId || null,
+    departmentId: typeof task.departmentId === "string" ? task.departmentId : "",
     visibility: task.visibility?.scope === "department" ? "department" : "team",
     visibilityDepartment: task.visibility?.department || "",
     requiresReview: task.needsApproval === true,
@@ -516,6 +518,13 @@ export async function getTeamTaskData() {
         }))
       ]
     : teamTaskMock.members.map((m) => ({ ...m }));
+  const departments = r9Members
+    ? membersSnap.departments.map((department) => ({
+        id: department.id,
+        name: department.name,
+        memberIds: department.memberIds.slice()
+      }))
+    : [];
 
   // R9 全量 tasks[]:已完成/已放弃/逾期都在同一筛选模型内;none 归低优先级列。
   const fullTasksOk = Array.isArray(snap?.tasks) && (snap.__live === true || snap.tasks.length > 0) && snap.tasks.every(isFullTask);
@@ -565,6 +574,7 @@ export async function getTeamTaskData() {
           content: "",
           priority: "high",
           visibility: "team",
+          departmentId: "",
           owner: "",
           requiresReview: "no",
           members: "",
@@ -579,6 +589,7 @@ export async function getTeamTaskData() {
     filters: { ...teamTaskMock.filters },
     form,
     members,
+    departments,
     board,
     tasks: fullTasksOk ? normalizedTasks : board.flatMap((column) => column.tasks),
     featureAiBatch: Array.isArray(teamExtras?.companies) && teamExtras.companies.some((company) =>
