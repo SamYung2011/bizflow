@@ -1,8 +1,13 @@
-// bizflow 建立訂單桌面屏(Figma 676:93247 / 676:93440 / 676:93614)。草稿不落庫,商品小計只由本頁加入行即時計算。
+// bizflow 建立訂單桌面屏(Figma 676:93247 / 676:93440 / 676:93614)。未登录演示态保持本地草稿；登录态接生产写入。
 
 import { getOrderCreateData, getUnread, getCurrentUser } from "../data/provider.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { renderNewCustomerFields } from "../components/new-customer-fields.js";
+import {
+  createAndPayLiveOrder,
+  createLiveOrderCustomer,
+  getLiveOrderWriteOptions
+} from "../data/live-orders-writes.js";
 
 const dict = {
   zh: {
@@ -64,7 +69,22 @@ const dict = {
     "orders.field.imei": "產品IMEI碼",
     "orders.field.address": "運送地址",
     "orders.action.submit": "提交",
-    "orders.action.close": "關閉"
+    "orders.action.close": "關閉",
+    "orders.salesperson.none": "（無）",
+    "orders.write.saving": "正在保存…",
+    "orders.write.failed": "訂單保存失敗，請重試",
+    "orders.write.recoveryFailed": "訂單保存失敗，且自動還原未完成，請立即核對訂單與庫存",
+    "orders.validation.customer": "請先選擇顧客",
+    "orders.validation.items": "請至少新增一件商品",
+    "orders.validation.total": "訂單總額必須大於 0",
+    "orders.validation.customerName": "請輸入顧客姓名",
+    "orders.validation.imei": "IMEI 必須為 15 位數字",
+    "orders.validation.tracking": "物流單號格式不正確",
+    "orders.customer.created": "顧客已新增",
+    "orders.customer.failed": "新增顧客失敗，請重試",
+    "orders.customer.imeiConflict": "顧客已新增，但 IMEI 已屬於其他顧客",
+    "orders.customer.deviceFailed": "顧客已新增，但 IMEI 未能保存",
+    "orders.tracking.ready": "物流資料會在付款時一併保存"
   },
   en: {
     "orders.root": "Orders",
@@ -125,7 +145,22 @@ const dict = {
     "orders.field.imei": "Product IMEI",
     "orders.field.address": "Shipping address",
     "orders.action.submit": "Submit",
-    "orders.action.close": "Close"
+    "orders.action.close": "Close",
+    "orders.salesperson.none": "(None)",
+    "orders.write.saving": "Saving…",
+    "orders.write.failed": "Could not save the order. Try again.",
+    "orders.write.recoveryFailed": "The order failed and automatic recovery was incomplete. Check the order and stock now.",
+    "orders.validation.customer": "Select a customer first",
+    "orders.validation.items": "Add at least one product",
+    "orders.validation.total": "The order total must be greater than 0",
+    "orders.validation.customerName": "Enter a customer name",
+    "orders.validation.imei": "IMEI must contain 15 digits",
+    "orders.validation.tracking": "The tracking number format is invalid",
+    "orders.customer.created": "Customer added",
+    "orders.customer.failed": "Could not add the customer. Try again.",
+    "orders.customer.imeiConflict": "Customer added, but the IMEI belongs to another customer",
+    "orders.customer.deviceFailed": "Customer added, but the IMEI could not be saved",
+    "orders.tracking.ready": "Shipping details will be saved with the payment"
   },
   fr: {
     "orders.root": "Commandes",
@@ -186,12 +221,32 @@ const dict = {
     "orders.field.imei": "IMEI produit",
     "orders.field.address": "Adresse livraison",
     "orders.action.submit": "Soumettre",
-    "orders.action.close": "Fermer"
+    "orders.action.close": "Fermer",
+    "orders.salesperson.none": "(Aucun)",
+    "orders.write.saving": "Enregistrement…",
+    "orders.write.failed": "Impossible d’enregistrer la commande. Réessayez.",
+    "orders.write.recoveryFailed": "Échec de la commande et restauration automatique incomplète. Vérifiez immédiatement la commande et le stock.",
+    "orders.validation.customer": "Sélectionnez d’abord un client",
+    "orders.validation.items": "Ajoutez au moins un produit",
+    "orders.validation.total": "Le total doit être supérieur à 0",
+    "orders.validation.customerName": "Saisissez le nom du client",
+    "orders.validation.imei": "L’IMEI doit contenir 15 chiffres",
+    "orders.validation.tracking": "Le format du numéro de suivi est incorrect",
+    "orders.customer.created": "Client ajouté",
+    "orders.customer.failed": "Impossible d’ajouter le client. Réessayez.",
+    "orders.customer.imeiConflict": "Client ajouté, mais l’IMEI appartient à un autre client",
+    "orders.customer.deviceFailed": "Client ajouté, mais l’IMEI n’a pas pu être enregistré",
+    "orders.tracking.ready": "Les données d’expédition seront enregistrées avec le paiement"
   }
 };
 
 const [data, currentUser] = await Promise.all([getOrderCreateData(), getCurrentUser()]);
-const liveReadOnly = typeof currentUser?.hasPermission === "function";
+const liveMode = typeof currentUser?.hasPermission === "function";
+const liveWritable = liveMode && currentUser?.bizflowMainAccess === true;
+const liveReadOnly = liveMode && !liveWritable;
+const writeOptions = liveWritable
+  ? await getLiveOrderWriteOptions()
+  : { defaultWarehouseId: null, salespeople: [] };
 const writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
 const draftCreatedAt = new Date();
 const CUSTOMER_RESULTS_LIMIT = 20; // 联想下拉只渲染前 20 条匹配,避免 4198 行 DOM。
@@ -205,8 +260,15 @@ const state = {
   customerSearch: "",
   selectedCustomerId: "",
   customerModalOpen: false,
+  customerDraft: {},
   shippingMode: "delivery",
-  feesEnabled: { deposit: true, discount: false, service: false }
+  trackingNumber: "",
+  salespersonId: "",
+  feesEnabled: { deposit: true, discount: false, service: false },
+  fees: { shipping: 0, deposit: 0, discount: 0, service: 0 },
+  busy: false,
+  notice: "",
+  noticeType: ""
 };
 
 let currentHelpers = null;
@@ -237,8 +299,16 @@ function matchingCustomers() {
   ].some((value) => String(value || "").toLocaleLowerCase().includes(term))).slice(0, CUSTOMER_RESULTS_LIMIT);
 }
 
-function total() {
+function subtotal() {
   return state.lineItems.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0);
+}
+
+function total() {
+  return subtotal()
+    + Number(state.fees.shipping || 0)
+    + (state.feesEnabled.deposit ? Number(state.fees.deposit || 0) : 0)
+    + (state.feesEnabled.service ? Number(state.fees.service || 0) : 0)
+    - (state.feesEnabled.discount ? Number(state.fees.discount || 0) : 0);
 }
 
 function renderLineRows(helpers) {
@@ -248,8 +318,11 @@ function renderLineRows(helpers) {
       <span class="orders-line-thumb" aria-hidden="true"></span>
       <span class="orders-line-name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span>
     </span>
-    <span class="orders-qty-box">${escapeHtml(String(item.quantity))}</span>
-    <span class="orders-line-price">${escapeHtml(formatMoney(item.price * item.quantity))}</span>
+    ${liveWritable
+      ? `<input class="orders-qty-box orders-line-number" type="number" min="1" step="1" data-line-quantity="${escapeHtml(item.id)}" data-orders-write value="${escapeHtml(String(item.quantity))}">
+        <input class="orders-line-price orders-line-number" type="number" min="0" step="0.01" data-line-price="${escapeHtml(item.id)}" data-orders-write value="${escapeHtml(String(item.price))}">`
+      : `<span class="orders-qty-box">${escapeHtml(String(item.quantity))}</span>
+        <span class="orders-line-price">${escapeHtml(formatMoney(item.price * item.quantity))}</span>`}
     <button type="button" class="orders-remove-dot" data-remove-line="${escapeHtml(item.id)}" data-orders-write aria-label="${escapeHtml(pageT(lang, "orders.cancel"))}"${writeAttributes}></button>
   </div>`).join("");
   return `<div class="orders-create-lines">${realRows || `<div class="orders-create-empty">${escapeHtml(pageT(lang, "orders.emptyLine"))}</div>`}</div>`;
@@ -325,12 +398,13 @@ function renderAddCustomerModal(helpers) {
           escapeHtml,
           label: (key) => pageT(lang, `orders.field.${key}`),
           idPrefix: "orders-new-customer",
-          disabled: liveReadOnly
+          disabled: liveReadOnly,
+          values: state.customerDraft
         })}
       </div>
       <div class="form-new-customer__footer">
         <button type="button" class="btn--hug btn--hug--gray" data-customer-modal-close>${escapeHtml(pageT(lang, "orders.cancel"))}</button>
-        <button type="button" class="btn--hug btn--hug--blue" data-customer-modal-close data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.action.submit"))}</button>
+        <button type="button" class="btn--hug btn--hug--blue" data-customer-submit data-orders-write${state.busy ? " disabled aria-disabled=\"true\"" : writeAttributes}>${escapeHtml(pageT(lang, state.busy ? "orders.write.saving" : "orders.action.submit"))}</button>
       </div>
     </section>
   </div>`;
@@ -345,39 +419,44 @@ function renderCreateCheckControl(key, value, helpers) {
       <span class="orders-figma-check__box" aria-hidden="true"></span>
       <span>${escapeHtml(pageT(lang, `orders.${key}`))}</span>
     </label>
-    <span class="orders-money-input${checked ? "" : " orders-money-input--placeholder"}">${escapeHtml(checked ? String(value) : pageT(lang, "orders.valuePlaceholder"))}</span>
+    ${liveWritable && checked
+      ? `<input type="number" min="0" step="0.01" class="orders-money-input" data-fee-amount="${key}" data-orders-write value="${escapeHtml(String(value || ""))}" placeholder="${escapeHtml(pageT(lang, "orders.valuePlaceholder"))}">`
+      : `<span class="orders-money-input${checked ? "" : " orders-money-input--placeholder"}">${escapeHtml(checked ? String(value) : pageT(lang, "orders.valuePlaceholder"))}</span>`}
   </div>`;
 }
 
-function renderCreatePaymentBox(helpers, sum) {
+function renderCreatePaymentBox(helpers, subtotalAmount, totalAmount) {
   const { escapeHtml, icon, lang } = helpers;
-  const totalText = formatMoney(sum).replace("HKD$ ", "");
+  const subtotalText = formatMoney(subtotalAmount).replace("HKD$ ", "");
+  const totalText = formatMoney(totalAmount).replace("HKD$ ", "");
   return `<div class="orders-payment-detail-box">
     <div class="orders-payment-line">
       <span>${escapeHtml(pageT(lang, "orders.subtotal"))}</span>
       <span></span>
-      <strong><span>HKD$</span>${escapeHtml(totalText)}</strong>
+      <strong><span>HKD$</span><output data-create-subtotal>${escapeHtml(subtotalText)}</output></strong>
     </div>
     <div class="orders-payment-line">
       <span>${escapeHtml(pageT(lang, "orders.shippingFee"))}</span>
-      <button type="button" class="orders-free-select" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.free"))}${icon("icon-arrow-down", "icon")}</button>
-      <strong><span>HKD$</span>0.00</strong>
+      ${liveWritable
+        ? `<input type="number" min="0" step="0.01" class="orders-free-select orders-shipping-fee-input" data-shipping-fee data-orders-write value="${escapeHtml(String(state.fees.shipping || ""))}" placeholder="${escapeHtml(pageT(lang, "orders.free"))}">`
+        : `<button type="button" class="orders-free-select" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.free"))}${icon("icon-arrow-down", "icon")}</button>`}
+      <strong><span>HKD$</span><output data-create-shipping>${escapeHtml(Number(state.fees.shipping || 0).toFixed(2))}</output></strong>
     </div>
     <div class="orders-payment-divider"></div>
-    ${renderCreateCheckControl("deposit", 0, helpers)}
-    ${renderCreateCheckControl("discount", 0, helpers)}
-    ${renderCreateCheckControl("service", 0, helpers)}
+    ${renderCreateCheckControl("deposit", state.fees.deposit, helpers)}
+    ${renderCreateCheckControl("discount", state.fees.discount, helpers)}
+    ${renderCreateCheckControl("service", state.fees.service, helpers)}
     <div class="orders-payment-divider"></div>
     <div class="orders-payment-line">
       <span>${escapeHtml(pageT(lang, "orders.total"))}</span>
       <span></span>
-      <strong><span>HKD$</span>${escapeHtml(totalText)}</strong>
+      <strong><span>HKD$</span><output data-create-total>${escapeHtml(totalText)}</output></strong>
     </div>
     <div class="orders-payment-divider"></div>
     <div class="orders-payment-line orders-payment-line--paid">
       <span>${escapeHtml(pageT(lang, "orders.paidAmount"))}</span>
       <span></span>
-      <strong><span>HKD$</span>${escapeHtml(totalText)}</strong>
+      <strong><span>HKD$</span><output data-create-total>${escapeHtml(totalText)}</output></strong>
     </div>
   </div>`;
 }
@@ -395,10 +474,15 @@ function renderSalespersonCard(helpers) {
   const { escapeHtml, icon, lang } = helpers;
   return `<section class="orders-detail-card">
     <h2 class="orders-card-title">${escapeHtml(pageT(lang, "orders.salesperson"))}</h2>
-    <div class="orders-select-like" title="${escapeHtml(pageT(lang, "orders.chooseSalesperson"))}">
-      <span>${escapeHtml(pageT(lang, "orders.chooseSalesperson"))}</span>
-      ${icon("icon-arrow-down", "icon")}
-    </div>
+    ${liveWritable
+      ? `<select class="orders-select-like orders-select-control" data-salesperson-select data-orders-write>
+          <option value="">${escapeHtml(pageT(lang, "orders.salesperson.none"))}</option>
+          ${writeOptions.salespeople.map((person) => `<option value="${escapeHtml(person.id)}"${person.id === state.salespersonId ? " selected" : ""}>${escapeHtml(person.name)}</option>`).join("")}
+        </select>`
+      : `<div class="orders-select-like" title="${escapeHtml(pageT(lang, "orders.chooseSalesperson"))}">
+          <span>${escapeHtml(pageT(lang, "orders.chooseSalesperson"))}</span>
+          ${icon("icon-arrow-down", "icon")}
+        </div>`}
   </section>`;
 }
 
@@ -429,8 +513,10 @@ function renderSelectedCustomerInfo(helpers) {
 function renderCreate(helpers) {
   currentHelpers = helpers;
   const { escapeHtml, icon, lang } = helpers;
+  const subtotalAmount = subtotal();
   const sum = total();
   return `<div class="orders-workspace" data-orders-create-page data-live-read-only="${liveReadOnly}">
+    ${state.notice ? `<p class="orders-write-notice orders-write-notice--${escapeHtml(state.noticeType || "error")}" role="${state.noticeType === "success" ? "status" : "alert"}">${escapeHtml(state.notice)}</p>` : ""}
     <header class="orders-workspace__head">
       <div>
         <nav class="orders-breadcrumb" aria-label="${escapeHtml(pageT(lang, "orders.root"))}">
@@ -451,9 +537,9 @@ function renderCreate(helpers) {
     </section>
 
     <section class="orders-detail-card">
-      ${renderCreatePaymentBox(helpers, sum)}
+      ${renderCreatePaymentBox(helpers, subtotalAmount, sum)}
       <div class="orders-card-actions orders-card-actions--end">
-        <button type="button" class="orders-primary" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.markPaid"))}</button>
+        <button type="button" class="orders-primary" data-order-submit data-orders-write${state.busy ? " disabled aria-disabled=\"true\"" : writeAttributes}>${escapeHtml(pageT(lang, state.busy ? "orders.write.saving" : "orders.markPaid"))}</button>
       </div>
     </section>
 
@@ -474,16 +560,18 @@ function renderCreate(helpers) {
     <section class="orders-detail-card">
       <h2 class="orders-card-title">${escapeHtml(pageT(lang, "orders.logistics"))}</h2>
       <div class="orders-logistics-segment" role="tablist">
-        <button type="button" class="${state.shippingMode === "delivery" ? "is-active" : ""}" data-shipping-mode="delivery" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.delivery"))}</button>
-        <button type="button" class="${state.shippingMode === "pickup" ? "is-active" : ""}" data-shipping-mode="pickup" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.pickup"))}</button>
+        <button type="button" class="${state.shippingMode === "delivery" ? "is-active" : ""}" data-shipping-mode="delivery" data-orders-write${liveMode && currentUser?.canShip !== true ? " disabled aria-disabled=\"true\"" : writeAttributes}>${escapeHtml(pageT(lang, "orders.delivery"))}</button>
+        <button type="button" class="${state.shippingMode === "pickup" ? "is-active" : ""}" data-shipping-mode="pickup" data-orders-write${liveMode && currentUser?.canShip !== true ? " disabled aria-disabled=\"true\"" : writeAttributes}>${escapeHtml(pageT(lang, "orders.pickup"))}</button>
       </div>
       <div class="orders-field">
         <span class="orders-field__label">${escapeHtml(pageT(lang, "orders.trackingNo"))}</span>
-        <span class="orders-select-like">${escapeHtml(pageT(lang, "orders.unshipped"))}</span>
+        ${liveWritable && currentUser?.canShip === true && state.shippingMode === "delivery"
+          ? `<input class="orders-select-like orders-tracking-input" type="text" data-tracking-input data-orders-write value="${escapeHtml(state.trackingNumber)}" placeholder="${escapeHtml(pageT(lang, "orders.unshipped"))}">`
+          : `<span class="orders-select-like">${escapeHtml(state.shippingMode === "pickup" ? pageT(lang, "orders.pickup") : pageT(lang, "orders.unshipped"))}</span>`}
       </div>
       <div class="orders-card-actions orders-card-actions--end">
-        <button type="button" class="orders-secondary" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.cancel"))}</button>
-        <button type="button" class="orders-primary" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.confirmTracking"))}</button>
+        <button type="button" class="orders-secondary" data-tracking-cancel data-orders-write${liveMode && currentUser?.canShip !== true ? " disabled aria-disabled=\"true\"" : writeAttributes}>${escapeHtml(pageT(lang, "orders.cancel"))}</button>
+        <button type="button" class="orders-primary" data-tracking-confirm data-orders-write${liveMode && currentUser?.canShip !== true ? " disabled aria-disabled=\"true\"" : writeAttributes}>${escapeHtml(pageT(lang, "orders.confirmTracking"))}</button>
       </div>
     </section>
 
@@ -521,11 +609,182 @@ function closeProductModal() {
 
 function closeCustomerModal() {
   state.customerModalOpen = false;
+  state.customerDraft = {};
   rerender();
 }
 
-document.addEventListener("click", (event) => {
+function setNotice(message, type = "error") {
+  state.notice = message;
+  state.noticeType = type;
+}
+
+function friendlyWriteError(error, fallbackKey) {
+  const lang = currentHelpers?.lang ?? "zh";
+  const message = String(error?.message || "");
+  if (message.includes("Customer name is required")) return pageT(lang, "orders.validation.customerName");
+  if (message.includes("IMEI")) return pageT(lang, "orders.validation.imei");
+  if (message.includes("customer is required")) return pageT(lang, "orders.validation.customer");
+  if (message.includes("at least one product") || message.includes("product selection")) return pageT(lang, "orders.validation.items");
+  if (message.includes("total must be greater")) return pageT(lang, "orders.validation.total");
+  if (message.includes("tracking number") || message.includes("Invalid tracking")) return pageT(lang, "orders.validation.tracking");
+  if (message.includes("recovery was incomplete")) return pageT(lang, "orders.write.recoveryFailed");
+  return pageT(lang, fallbackKey);
+}
+
+function readNewCustomerFields() {
+  return Object.fromEntries([...document.querySelectorAll("[data-create-customer-overlay] [data-new-customer-field]")]
+    .map((field) => [field.getAttribute("data-new-customer-field"), field.value]));
+}
+
+function syncLiveFormInputs() {
+  if (!liveWritable) return;
+  document.querySelectorAll("[data-line-quantity]").forEach((input) => {
+    const item = state.lineItems.find((row) => row.id === input.getAttribute("data-line-quantity"));
+    if (item) item.quantity = Math.max(1, Math.floor(Number(input.value) || 1));
+  });
+  document.querySelectorAll("[data-line-price]").forEach((input) => {
+    const item = state.lineItems.find((row) => row.id === input.getAttribute("data-line-price"));
+    if (item) item.price = Math.max(0, Number(input.value) || 0);
+  });
+  document.querySelectorAll("[data-fee-amount]").forEach((input) => {
+    state.fees[input.getAttribute("data-fee-amount")] = Math.max(0, Number(input.value) || 0);
+  });
+  const shippingFee = document.querySelector("[data-shipping-fee]");
+  if (shippingFee) state.fees.shipping = Math.max(0, Number(shippingFee.value) || 0);
+  state.trackingNumber = document.querySelector("[data-tracking-input]")?.value ?? state.trackingNumber;
+}
+
+function syncLiveNumberInput(target) {
+  const quantity = target.closest("[data-line-quantity]");
+  if (quantity) {
+    const item = state.lineItems.find((row) => row.id === quantity.getAttribute("data-line-quantity"));
+    if (item) item.quantity = Math.max(1, Math.floor(Number(quantity.value) || 1));
+    return true;
+  }
+  const price = target.closest("[data-line-price]");
+  if (price) {
+    const item = state.lineItems.find((row) => row.id === price.getAttribute("data-line-price"));
+    if (item) item.price = Math.max(0, Number(price.value) || 0);
+    return true;
+  }
+  const feeAmount = target.closest("[data-fee-amount]");
+  if (feeAmount) {
+    state.fees[feeAmount.getAttribute("data-fee-amount")] = Math.max(0, Number(feeAmount.value) || 0);
+    return true;
+  }
+  const shippingFee = target.closest("[data-shipping-fee]");
+  if (shippingFee) {
+    state.fees.shipping = Math.max(0, Number(shippingFee.value) || 0);
+    return true;
+  }
+  return false;
+}
+
+function refreshLiveTotals() {
+  const subtotalText = formatMoney(subtotal()).replace("HKD$ ", "");
+  const totalText = formatMoney(total()).replace("HKD$ ", "");
+  document.querySelectorAll("[data-create-subtotal]").forEach((node) => { node.textContent = subtotalText; });
+  document.querySelectorAll("[data-create-shipping]").forEach((node) => {
+    node.textContent = Number(state.fees.shipping || 0).toFixed(2);
+  });
+  document.querySelectorAll("[data-create-total]").forEach((node) => { node.textContent = totalText; });
+}
+
+async function submitLiveCustomer() {
+  const values = readNewCustomerFields();
+  state.customerDraft = values;
+  state.busy = true;
+  setNotice("");
+  rerender();
+  try {
+    const result = await createLiveOrderCustomer(values);
+    data.customers.unshift({
+      id: result.customer.id,
+      name: result.customer.name || "",
+      phone: result.customer.phone || "",
+      detail: {
+        email: result.customer.email || "",
+        carModel: [result.customer.car_make, result.customer.car_model].filter(Boolean).join(" "),
+        shippingAddress: result.customer.address || ""
+      }
+    });
+    state.selectedCustomerId = result.customer.id;
+    state.customerModalOpen = false;
+    state.customerDraft = {};
+    if (result.deviceError) console.error("[orders-create] customer device write failed", result.deviceError);
+    const noticeKey = result.deviceError
+      ? "orders.customer.deviceFailed"
+      : result.deviceConflicts.length
+        ? "orders.customer.imeiConflict"
+        : "orders.customer.created";
+    setNotice(pageT(currentHelpers?.lang ?? "zh", noticeKey), noticeKey === "orders.customer.created" ? "success" : "error");
+  } catch (error) {
+    console.error("[orders-create] customer write failed", error);
+    setNotice(friendlyWriteError(error, "orders.customer.failed"));
+  } finally {
+    state.busy = false;
+    rerender();
+  }
+}
+
+async function submitLiveOrder() {
+  syncLiveFormInputs();
+  const lang = currentHelpers?.lang ?? "zh";
+  if (!state.selectedCustomerId) {
+    setNotice(pageT(lang, "orders.validation.customer"));
+    rerender();
+    return;
+  }
+  if (!state.lineItems.length) {
+    setNotice(pageT(lang, "orders.validation.items"));
+    rerender();
+    return;
+  }
+  if (total() <= 0) {
+    setNotice(pageT(lang, "orders.validation.total"));
+    rerender();
+    return;
+  }
+  state.busy = true;
+  setNotice("");
+  rerender();
+  try {
+    const result = await createAndPayLiveOrder({
+      customerId: state.selectedCustomerId,
+      salespersonId: state.salespersonId,
+      items: state.lineItems.map((item) => ({ ...item })),
+      fees: {
+        deposit: state.feesEnabled.deposit ? state.fees.deposit : 0,
+        discount: state.feesEnabled.discount ? state.fees.discount : 0,
+        service: state.feesEnabled.service ? state.fees.service : 0,
+        shipping: state.fees.shipping
+      },
+      shipping: currentUser?.canShip === true
+        ? { mode: state.shippingMode, trackingNumber: state.trackingNumber }
+        : null
+    });
+    if (result.deviceConflicts.length) console.warn("[orders-create] item IMEI conflicts", result.deviceConflicts);
+    window.location.href = `./orders-detail.html?id=${encodeURIComponent(result.invoice.id)}`;
+  } catch (error) {
+    console.error("[orders-create] order write failed", error);
+    state.busy = false;
+    setNotice(friendlyWriteError(error, "orders.write.failed"));
+    rerender();
+  }
+}
+
+document.addEventListener("click", async (event) => {
   if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
+  if (state.busy && event.target.closest("[data-orders-write]")) return;
+  if (event.target.closest("[data-order-submit]")) {
+    if (liveWritable && !state.busy) await submitLiveOrder();
+    return;
+  }
+  if (event.target.closest("[data-customer-submit]")) {
+    if (liveWritable && !state.busy) await submitLiveCustomer();
+    else if (!liveMode) closeCustomerModal();
+    return;
+  }
   if (event.target.closest("[data-product-modal-open]")) {
     state.productModalOpen = true;
     state.customerMenuOpen = false;
@@ -542,6 +801,8 @@ document.addEventListener("click", (event) => {
     selected.forEach(({ option }) => {
       state.lineItems.push({
         id: `${option.id}-${Date.now()}-${state.lineItems.length}`,
+        productId: option.id,
+        warehouseId: writeOptions.defaultWarehouseId,
         name: option.label,
         quantity: 1,
         price: option.price
@@ -582,7 +843,24 @@ document.addEventListener("click", (event) => {
   }
   const mode = event.target.closest("[data-shipping-mode]");
   if (mode) {
+    if (liveMode && currentUser?.canShip !== true) return;
     state.shippingMode = mode.getAttribute("data-shipping-mode");
+    rerender();
+    return;
+  }
+  if (event.target.closest("[data-tracking-cancel]")) {
+    state.trackingNumber = "";
+    setNotice("");
+    rerender();
+    return;
+  }
+  if (event.target.closest("[data-tracking-confirm]")) {
+    syncLiveFormInputs();
+    if (liveWritable && state.shippingMode === "delivery" && state.trackingNumber && !/^[A-Za-z0-9]{6,}$/.test(state.trackingNumber)) {
+      setNotice(pageT(currentHelpers?.lang ?? "zh", "orders.validation.tracking"));
+    } else if (liveWritable) {
+      setNotice(pageT(currentHelpers?.lang ?? "zh", "orders.tracking.ready"), "success");
+    }
     rerender();
     return;
   }
@@ -595,6 +873,7 @@ document.addEventListener("click", (event) => {
 
 document.addEventListener("change", (event) => {
   if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
+  if (state.busy && event.target.closest("[data-orders-write]")) return;
   const option = event.target.closest("[data-product-option]");
   if (option) {
     const id = option.getAttribute("data-option-id");
@@ -606,15 +885,59 @@ document.addEventListener("change", (event) => {
   if (fee) {
     state.feesEnabled[fee.getAttribute("data-fee-toggle")] = fee.checked;
     rerender();
+    return;
+  }
+  const salesperson = event.target.closest("[data-salesperson-select]");
+  if (salesperson) {
+    state.salespersonId = salesperson.value;
+    return;
+  }
+  const quantity = event.target.closest("[data-line-quantity]");
+  if (quantity) {
+    syncLiveNumberInput(quantity);
+    refreshLiveTotals();
+    return;
+  }
+  const price = event.target.closest("[data-line-price]");
+  if (price) {
+    syncLiveNumberInput(price);
+    refreshLiveTotals();
+    return;
+  }
+  const feeAmount = event.target.closest("[data-fee-amount]");
+  if (feeAmount) {
+    syncLiveNumberInput(feeAmount);
+    refreshLiveTotals();
+    return;
+  }
+  const shippingFee = event.target.closest("[data-shipping-fee]");
+  if (shippingFee) {
+    syncLiveNumberInput(shippingFee);
+    refreshLiveTotals();
   }
 });
 
 document.addEventListener("input", (event) => {
   if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
+  if (state.busy && event.target.closest("[data-orders-write]")) return;
+  if (syncLiveNumberInput(event.target)) {
+    refreshLiveTotals();
+    return;
+  }
+  const customerField = event.target.closest("[data-create-customer-overlay] [data-new-customer-field]");
+  if (customerField) {
+    state.customerDraft[customerField.getAttribute("data-new-customer-field")] = customerField.value;
+    return;
+  }
   const productSearch = event.target.closest("[data-product-search]");
   if (productSearch) {
     state.productSearch = productSearch.value;
     rerender({ focusProductSearch: true });
+    return;
+  }
+  const trackingInput = event.target.closest("[data-tracking-input]");
+  if (trackingInput) {
+    state.trackingNumber = trackingInput.value;
     return;
   }
   const customerSearch = event.target.closest("[data-customer-search]");

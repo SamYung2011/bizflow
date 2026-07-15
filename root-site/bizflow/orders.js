@@ -103,7 +103,8 @@ const presetShipping = consumeNavigationPreset(navigationPresetKeys.ordersShippi
 const presetSearch = consumeNavigationPreset(navigationPresetKeys.ordersSearch) ?? "";
 const shippingFilters = ["all", "pending", "in_transit", "exception", "delivered"];
 const canViewRevenue = currentUser?.canViewRevenue !== false;
-const liveReadOnly = typeof currentUser?.hasPermission === "function";
+const liveMode = typeof currentUser?.hasPermission === "function";
+const liveReadOnly = liveMode && currentUser?.bizflowMainAccess !== true;
 const domainTabs = ["list", "northbound", "chargerLeads", ...(canViewRevenue ? ["revenue"] : [])];
 
 const state = {
@@ -301,7 +302,7 @@ function renderOrderList(helpers) {
 }
 
 function renderDomainContent(helpers) {
-  if (state.tab === "northbound") return renderNorthbound({ ...helpers, liveMode: liveReadOnly, liveReadOnly: false });
+  if (state.tab === "northbound") return renderNorthbound({ ...helpers, liveMode, liveReadOnly: false });
   if (state.tab === "chargerLeads") return renderChargerLeads(helpers);
   if (state.tab === "revenue" && canViewRevenue) return renderRevenue(helpers);
   return renderOrderList(helpers);

@@ -2,6 +2,13 @@
 
 import { getOrderCreateData, getOrderDetailData, getUnread, getCurrentUser } from "../data/provider.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
+import { renderNewCustomerFields } from "../components/new-customer-fields.js";
+import {
+  getLiveOrderWriteOptions,
+  updateLiveOrder,
+  updateLiveOrderCustomer,
+  updateLiveOrderShipping
+} from "../data/live-orders-writes.js";
 import { createPrintDialog } from "./print/print-dialog.js";
 import { toPrintableOrder } from "./print/print-invoice.js";
 
@@ -59,7 +66,31 @@ const dict = {
     "orders.sample.productName": "DC  aAdaptor Pro GBT-CCS2",
     "orders.empty": "暫無商品",
     "orders.notFound": "該記錄不存在或已合併",
-    "orders.emptyValue": "—"
+    "orders.emptyValue": "—",
+    "orders.salesperson.none": "（無）",
+    "orders.write.saving": "正在保存…",
+    "orders.write.failed": "訂單保存失敗，請重試",
+    "orders.write.saved": "訂單修改已保存",
+    "orders.write.deviceFailed": "訂單修改已保存，但 IMEI 未能同步到顧客資料",
+    "orders.write.deviceConflict": "訂單修改已保存，但 IMEI 已屬於其他顧客",
+    "orders.validation.items": "請至少保留一件商品",
+    "orders.validation.total": "訂單總額必須大於 0",
+    "orders.validation.tracking": "請輸入至少 6 位英數物流單號",
+    "orders.shipping.failed": "物流資料保存失敗，請重試",
+    "orders.shipping.saved": "物流資料已保存",
+    "orders.customerModal.title": "編輯顧客",
+    "orders.customer.saved": "顧客資料已保存",
+    "orders.customer.failed": "顧客資料保存失敗，請重試",
+    "orders.customer.imeiConflict": "顧客資料已保存，但 IMEI 已屬於其他顧客",
+    "orders.customer.deviceFailed": "顧客資料已保存，但 IMEI 未能保存",
+    "orders.field.name": "姓名",
+    "orders.field.phone": "聯絡電話",
+    "orders.field.email": "Email",
+    "orders.field.carModel": "車型",
+    "orders.field.imei": "產品IMEI碼",
+    "orders.field.address": "運送地址",
+    "orders.action.submit": "提交",
+    "orders.action.close": "關閉"
   },
   en: {
     "orders.root": "Orders",
@@ -114,7 +145,31 @@ const dict = {
     "orders.sample.productName": "DC  aAdaptor Pro GBT-CCS2",
     "orders.empty": "No products",
     "orders.notFound": "This record does not exist or has been merged",
-    "orders.emptyValue": "—"
+    "orders.emptyValue": "—",
+    "orders.salesperson.none": "(None)",
+    "orders.write.saving": "Saving…",
+    "orders.write.failed": "Could not save the order. Try again.",
+    "orders.write.saved": "Order changes saved",
+    "orders.write.deviceFailed": "Order changes saved, but the IMEI could not be synced to the customer",
+    "orders.write.deviceConflict": "Order changes saved, but the IMEI belongs to another customer",
+    "orders.validation.items": "Keep at least one product",
+    "orders.validation.total": "The order total must be greater than 0",
+    "orders.validation.tracking": "Enter a tracking number with at least 6 letters or digits",
+    "orders.shipping.failed": "Could not save shipping details. Try again.",
+    "orders.shipping.saved": "Shipping details saved",
+    "orders.customerModal.title": "Edit customer",
+    "orders.customer.saved": "Customer details saved",
+    "orders.customer.failed": "Could not save customer details. Try again.",
+    "orders.customer.imeiConflict": "Customer details saved, but the IMEI belongs to another customer",
+    "orders.customer.deviceFailed": "Customer details saved, but the IMEI could not be saved",
+    "orders.field.name": "Name",
+    "orders.field.phone": "Phone",
+    "orders.field.email": "Email",
+    "orders.field.carModel": "Vehicle model",
+    "orders.field.imei": "Product IMEI",
+    "orders.field.address": "Shipping address",
+    "orders.action.submit": "Submit",
+    "orders.action.close": "Close"
   },
   fr: {
     "orders.root": "Commandes",
@@ -169,7 +224,31 @@ const dict = {
     "orders.sample.productName": "DC  aAdaptor Pro GBT-CCS2",
     "orders.empty": "Aucun produit",
     "orders.notFound": "Cet enregistrement n’existe pas ou a été fusionné",
-    "orders.emptyValue": "—"
+    "orders.emptyValue": "—",
+    "orders.salesperson.none": "(Aucun)",
+    "orders.write.saving": "Enregistrement…",
+    "orders.write.failed": "Impossible d’enregistrer la commande. Réessayez.",
+    "orders.write.saved": "Modifications enregistrées",
+    "orders.write.deviceFailed": "Commande enregistrée, mais l’IMEI n’a pas pu être synchronisé avec le client",
+    "orders.write.deviceConflict": "Commande enregistrée, mais l’IMEI appartient à un autre client",
+    "orders.validation.items": "Conservez au moins un produit",
+    "orders.validation.total": "Le total doit être supérieur à 0",
+    "orders.validation.tracking": "Saisissez un numéro de suivi d’au moins 6 lettres ou chiffres",
+    "orders.shipping.failed": "Impossible d’enregistrer l’expédition. Réessayez.",
+    "orders.shipping.saved": "Données d’expédition enregistrées",
+    "orders.customerModal.title": "Modifier le client",
+    "orders.customer.saved": "Données client enregistrées",
+    "orders.customer.failed": "Impossible d’enregistrer le client. Réessayez.",
+    "orders.customer.imeiConflict": "Client enregistré, mais l’IMEI appartient à un autre client",
+    "orders.customer.deviceFailed": "Client enregistré, mais l’IMEI n’a pas pu être enregistré",
+    "orders.field.name": "Nom",
+    "orders.field.phone": "Téléphone",
+    "orders.field.email": "Email",
+    "orders.field.carModel": "Modèle",
+    "orders.field.imei": "IMEI produit",
+    "orders.field.address": "Adresse livraison",
+    "orders.action.submit": "Soumettre",
+    "orders.action.close": "Fermer"
   }
 };
 
@@ -178,22 +257,55 @@ const [detailData, currentUser] = await Promise.all([
   getOrderDetailData(params.get("id")),
   getCurrentUser()
 ]);
-const liveReadOnly = typeof currentUser?.hasPermission === "function";
-const pickerData = detailData && !liveReadOnly ? await getOrderCreateData() : { productGroups: [] };
+const liveMode = typeof currentUser?.hasPermission === "function";
+const liveWritable = liveMode && currentUser?.bizflowMainAccess === true;
+const liveReadOnly = liveMode && !liveWritable;
+const pickerData = detailData ? await getOrderCreateData() : { productGroups: [] };
+const writeOptions = liveWritable && detailData
+  ? await getLiveOrderWriteOptions(detailData.order.id)
+  : { invoice: null, defaultWarehouseId: null, salespeople: [] };
 const writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
+
+function cloneItems(items) {
+  return items.map((item) => ({ ...item }));
+}
+
+const initialItems = cloneItems(detailData?.detail.items ?? []);
+const initialFees = {
+  shipping: Number(detailData?.detail.fees.shipping || 0),
+  deposit: Number(detailData?.detail.fees.deposit || 0),
+  discount: Math.abs(Number(detailData?.detail.fees.discount || 0)),
+  service: Number(detailData?.detail.fees.service || 0)
+};
 
 const state = {
   productModalOpen: false,
   productSearch: "",
   selectedOptions: new Set(),
-  items: detailData?.detail.items.map((item) => ({ ...item })) ?? [],
+  items: cloneItems(initialItems),
+  savedItems: cloneItems(initialItems),
   feesEnabled: {
     deposit: true,
     discount: Number(detailData?.detail.fees.discount || 0) !== 0,
     service: Number(detailData?.detail.fees.service || 0) !== 0
   },
-  feesTouched: false
+  savedFeesEnabled: null,
+  fees: { ...initialFees },
+  savedFees: { ...initialFees },
+  feesTouched: false,
+  salespersonId: writeOptions.invoice?.salesperson_id ?? detailData?.detail.salespersonId ?? "",
+  savedSalespersonId: writeOptions.invoice?.salesperson_id ?? detailData?.detail.salespersonId ?? "",
+  shippingMode: detailData?.detail.carrier === "self_pickup" ? "pickup" : "delivery",
+  trackingNumber: detailData?.detail.trackingNo ?? "",
+  savedShippingMode: detailData?.detail.carrier === "self_pickup" ? "pickup" : "delivery",
+  savedTrackingNumber: detailData?.detail.trackingNo ?? "",
+  customerModalOpen: false,
+  customerDraft: {},
+  busy: "",
+  notice: "",
+  noticeType: ""
 };
+state.savedFeesEnabled = { ...state.feesEnabled };
 
 let currentHelpers = null;
 const printDialog = createPrintDialog({ getLang: () => currentHelpers?.lang ?? "zh" });
@@ -235,8 +347,11 @@ function renderLineRows(helpers) {
       <span class="orders-line-thumb" aria-hidden="true"></span>
       <span class="orders-line-name" title="${escapeHtml(itemLabel(item, lang))}">${escapeHtml(itemLabel(item, lang))}</span>
     </span>
-    <span class="orders-qty-box">${escapeHtml(String(item.quantity))}</span>
-    <span class="orders-line-price">${escapeHtml(formatMoney(item.price))}</span>
+    ${liveWritable
+      ? `<input class="orders-qty-box orders-line-number" type="number" min="1" step="1" data-line-quantity="${escapeHtml(item.id)}" data-orders-write value="${escapeHtml(String(item.quantity))}">
+        <input class="orders-line-price orders-line-number" type="number" min="0" step="0.01" data-line-price="${escapeHtml(item.id)}" data-orders-write value="${escapeHtml(String(item.price))}">`
+      : `<span class="orders-qty-box">${escapeHtml(String(item.quantity))}</span>
+        <span class="orders-line-price">${escapeHtml(formatMoney(item.price))}</span>`}
   </div>`).join("");
   return `<div class="orders-figma-table">
     <div class="orders-figma-line-row orders-figma-line-row--head">
@@ -291,41 +406,44 @@ function renderCheckControl(key, value, helpers) {
       <span class="orders-figma-check__box" aria-hidden="true"></span>
       <span>${escapeHtml(pageT(lang, `orders.${key}`))}</span>
     </label>
-    <span class="orders-money-input${checked ? "" : " orders-money-input--placeholder"}">${escapeHtml(checked ? String(value) : pageT(lang, "orders.valuePlaceholder"))}</span>
+    ${liveWritable && checked
+      ? `<input type="number" min="0" step="0.01" class="orders-money-input" data-fee-amount="${key}" data-orders-write value="${escapeHtml(String(Math.abs(Number(value || 0)) || ""))}" placeholder="${escapeHtml(pageT(lang, "orders.valuePlaceholder"))}">`
+      : `<span class="orders-money-input${checked ? "" : " orders-money-input--placeholder"}">${escapeHtml(checked ? String(value) : pageT(lang, "orders.valuePlaceholder"))}</span>`}
   </div>`;
 }
 
 function renderPaymentBox(helpers, subtotal, totalAmount) {
   const { escapeHtml, icon, lang } = helpers;
-  const detail = detailData.detail;
-  const shippingFee = Number(detail.fees.shipping || 0);
+  const shippingFee = Number(state.fees.shipping || 0);
   const totalText = moneyValue(totalAmount);
   return `<div class="orders-payment-detail-box">
     <div class="orders-payment-line">
       <span>${escapeHtml(pageT(lang, "orders.subtotal"))}</span>
       <span>${escapeHtml(pageT(lang, "orders.itemCount").replace("{count}", String(state.items.length)))}</span>
-      <strong><span>HKD$</span>${escapeHtml(moneyValue(subtotal))}</strong>
+      <strong><span>HKD$</span><output data-detail-subtotal>${escapeHtml(moneyValue(subtotal))}</output></strong>
     </div>
     <div class="orders-payment-line">
       <span>${escapeHtml(pageT(lang, "orders.shippingFee"))}</span>
-      <button type="button" class="orders-free-select" data-orders-write${writeAttributes}>${escapeHtml(shippingFee === 0 ? pageT(lang, "orders.free") : formatMoney(shippingFee))}${icon("icon-arrow-down", "icon")}</button>
-      <strong><span>HKD$</span>${escapeHtml(moneyValue(shippingFee))}</strong>
+      ${liveWritable
+        ? `<input type="number" min="0" step="0.01" class="orders-free-select orders-shipping-fee-input" data-shipping-fee data-orders-write value="${escapeHtml(String(shippingFee || ""))}" placeholder="${escapeHtml(pageT(lang, "orders.free"))}">`
+        : `<button type="button" class="orders-free-select" data-orders-write${writeAttributes}>${escapeHtml(shippingFee === 0 ? pageT(lang, "orders.free") : formatMoney(shippingFee))}${icon("icon-arrow-down", "icon")}</button>`}
+      <strong><span>HKD$</span><output data-detail-shipping>${escapeHtml(moneyValue(shippingFee))}</output></strong>
     </div>
     <div class="orders-payment-divider"></div>
-    ${renderCheckControl("deposit", detail.fees.deposit, helpers)}
-    ${renderCheckControl("discount", detail.fees.discount, helpers)}
-    ${renderCheckControl("service", detail.fees.service, helpers)}
+    ${renderCheckControl("deposit", state.fees.deposit, helpers)}
+    ${renderCheckControl("discount", state.fees.discount, helpers)}
+    ${renderCheckControl("service", state.fees.service, helpers)}
     <div class="orders-payment-divider"></div>
     <div class="orders-payment-line">
       <span>${escapeHtml(pageT(lang, "orders.total"))}</span>
       <span></span>
-      <strong><span>HKD$</span>${escapeHtml(totalText)}</strong>
+      <strong><span>HKD$</span><output data-detail-total>${escapeHtml(totalText)}</output></strong>
     </div>
     <div class="orders-payment-divider"></div>
     <div class="orders-payment-line orders-payment-line--paid">
       <span>${escapeHtml(pageT(lang, "orders.paidAmount"))}</span>
       <span></span>
-      <strong><span>HKD$</span>${escapeHtml(totalText)}</strong>
+      <strong><span>HKD$</span><output data-detail-total>${escapeHtml(totalText)}</output></strong>
     </div>
   </div>`;
 }
@@ -346,8 +464,10 @@ function currentTotals() {
     0
   );
   const feeTotal = ["deposit", "discount", "service"].reduce(
-    (sum, key) => sum + (state.feesEnabled[key] ? Number(detail.fees[key] || 0) : 0),
-    Number(detail.fees.shipping || 0)
+    (sum, key) => sum + (state.feesEnabled[key]
+      ? (key === "discount" ? -Math.abs(Number(state.fees[key] || 0)) : Number(state.fees[key] || 0))
+      : 0),
+    Number(state.fees.shipping || 0)
   );
   const paymentTotal = !state.feesTouched && Number.isFinite(detail.paymentTotal)
     ? detail.paymentTotal
@@ -371,10 +491,15 @@ function renderSalespersonCard(helpers) {
   const salesperson = fieldValue(detailData.detail.salesperson, lang);
   return `<section class="orders-detail-card">
     <h2 class="orders-card-title">${escapeHtml(pageT(lang, "orders.salesperson"))}</h2>
-    <div class="orders-select-like" title="${escapeHtml(salesperson)}">
-      <span>${escapeHtml(salesperson)}</span>
-      ${icon("icon-arrow-down", "icon")}
-    </div>
+    ${liveWritable
+      ? `<select class="orders-select-like orders-select-control" data-salesperson-select data-orders-write>
+          <option value="">${escapeHtml(pageT(lang, "orders.salesperson.none"))}</option>
+          ${writeOptions.salespeople.map((person) => `<option value="${escapeHtml(person.id)}"${person.id === state.salespersonId ? " selected" : ""}>${escapeHtml(person.name)}</option>`).join("")}
+        </select>`
+      : `<div class="orders-select-like" title="${escapeHtml(salesperson)}">
+          <span>${escapeHtml(salesperson)}</span>
+          ${icon("icon-arrow-down", "icon")}
+        </div>`}
   </section>`;
 }
 
@@ -387,7 +512,7 @@ function renderCustomerInfo(helpers) {
   return `<section class="orders-detail-card">
     <div class="orders-card-head">
       <h2 class="orders-card-title">${escapeHtml(pageT(lang, "orders.customer"))}</h2>
-      <button type="button" class="orders-primary orders-hug-small" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.edit"))}</button>
+      <button type="button" class="orders-primary orders-hug-small" data-customer-edit-open data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.edit"))}</button>
     </div>
     <div class="orders-customer-info">
       <div class="orders-customer-line">
@@ -412,14 +537,48 @@ function renderTrackingCard(helpers) {
   const { escapeHtml, lang } = helpers;
   const { carrier, trackingNo } = detailData.detail;
   const value = trackingNo ? [carrier, trackingNo].filter(Boolean).join(" · ") : fieldValue("", lang);
+  const shippingDisabled = liveMode && currentUser?.canShip !== true;
   return `<section class="orders-detail-card">
     <h2 class="orders-card-title">${escapeHtml(pageT(lang, "orders.trackingNo"))}</h2>
-    <span class="orders-select-like">${escapeHtml(value)}</span>
+    ${liveWritable
+      ? `<div class="orders-logistics-segment" role="tablist">
+          <button type="button" class="${state.shippingMode === "delivery" ? "is-active" : ""}" data-shipping-mode="delivery" data-orders-write${shippingDisabled ? ' disabled aria-disabled="true"' : ""}>${escapeHtml(pageT(lang, "orders.shipping"))}</button>
+          <button type="button" class="${state.shippingMode === "pickup" ? "is-active" : ""}" data-shipping-mode="pickup" data-orders-write${shippingDisabled ? ' disabled aria-disabled="true"' : ""}>${escapeHtml(pageT(lang, "orders.pickup"))}</button>
+        </div>
+        ${state.shippingMode === "delivery"
+          ? `<input class="orders-select-like orders-tracking-input" type="text" data-tracking-input data-orders-write value="${escapeHtml(state.trackingNumber)}" placeholder="${escapeHtml(pageT(lang, "orders.unshipped"))}"${shippingDisabled ? ' disabled aria-disabled="true"' : ""}>`
+          : `<span class="orders-select-like">${escapeHtml(pageT(lang, "orders.pickup"))}</span>`}`
+      : `<span class="orders-select-like">${escapeHtml(value)}</span>`}
     <div class="orders-card-actions orders-card-actions--end">
-      <button type="button" class="orders-secondary" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.cancel"))}</button>
-      <button type="button" class="orders-primary" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.confirmTracking"))}</button>
+      <button type="button" class="orders-secondary" data-shipping-cancel data-orders-write${shippingDisabled ? ' disabled aria-disabled="true"' : writeAttributes}>${escapeHtml(pageT(lang, "orders.cancel"))}</button>
+      <button type="button" class="orders-primary" data-shipping-save data-orders-write${shippingDisabled || state.busy === "shipping" ? ' disabled aria-disabled="true"' : writeAttributes}>${escapeHtml(pageT(lang, state.busy === "shipping" ? "orders.write.saving" : "orders.confirmTracking"))}</button>
     </div>
   </section>`;
+}
+
+function renderCustomerEditModal(helpers) {
+  const { escapeHtml, lang } = helpers;
+  const values = state.customerDraft;
+  return `<div class="customers-modal-overlay${state.customerModalOpen ? " customers-modal-overlay--open" : ""}" data-order-customer-overlay ${state.customerModalOpen ? "" : "hidden"}>
+    <section class="tp-component form-new-customer" role="dialog" aria-modal="true" aria-label="${escapeHtml(pageT(lang, "orders.customerModal.title"))}">
+      <button type="button" class="form-new-customer__close" data-customer-edit-close aria-label="${escapeHtml(pageT(lang, "orders.action.close"))}"></button>
+      <h2 class="form-new-customer__title">${escapeHtml(pageT(lang, "orders.customerModal.title"))}</h2>
+      <div class="form-new-customer__fields">
+        ${renderNewCustomerFields({
+          lang,
+          escapeHtml,
+          label: (key) => pageT(lang, `orders.field.${key}`),
+          idPrefix: "orders-edit-customer",
+          disabled: liveReadOnly,
+          values
+        })}
+      </div>
+      <div class="form-new-customer__footer">
+        <button type="button" class="btn--hug btn--hug--gray" data-customer-edit-close>${escapeHtml(pageT(lang, "orders.cancel"))}</button>
+        <button type="button" class="btn--hug btn--hug--blue" data-customer-edit-save data-orders-write${state.busy === "customer" ? ' disabled aria-disabled="true"' : writeAttributes}>${escapeHtml(pageT(lang, state.busy === "customer" ? "orders.write.saving" : "orders.action.submit"))}</button>
+      </div>
+    </section>
+  </div>`;
 }
 
 function renderTimeline(helpers) {
@@ -456,6 +615,7 @@ function renderDetail(helpers) {
   const shipped = detail.shippingStatus !== "unshipped";
   const { subtotal, paymentTotal } = currentTotals();
   return `<div class="orders-workspace" data-orders-detail-page data-live-read-only="${liveReadOnly}">
+    ${state.notice ? `<p class="orders-write-notice orders-write-notice--${escapeHtml(state.noticeType || "error")}" role="${state.noticeType === "success" ? "status" : "alert"}">${escapeHtml(state.notice)}</p>` : ""}
     <header class="orders-workspace__head">
       <div>
         <nav class="orders-breadcrumb" aria-label="${escapeHtml(pageT(lang, "orders.root"))}">
@@ -478,9 +638,9 @@ function renderDetail(helpers) {
         <button type="button" class="orders-dark" data-product-modal-open data-orders-write${writeAttributes}>${icon("icon-add-line-add", "icon")}${escapeHtml(pageT(lang, "orders.addProduct"))}</button>
       </div>
       ${renderLineRows(helpers)}
-      <div class="orders-figma-total-row"><span>${escapeHtml(pageT(lang, "orders.total"))}</span><strong><span>HKD$</span>${escapeHtml(moneyValue(subtotal))}</strong></div>
+      <div class="orders-figma-total-row"><span>${escapeHtml(pageT(lang, "orders.total"))}</span><strong><span>HKD$</span><output data-detail-subtotal>${escapeHtml(moneyValue(subtotal))}</output></strong></div>
       <div class="orders-card-actions orders-card-actions--end">
-        <button type="button" class="orders-primary" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.markShipped"))}</button>
+        <button type="button" class="orders-primary" data-mark-shipped data-orders-write${(liveMode && currentUser?.canShip !== true) || state.busy === "shipping" ? ' disabled aria-disabled="true"' : writeAttributes}>${escapeHtml(pageT(lang, state.busy === "shipping" ? "orders.write.saving" : "orders.markShipped"))}</button>
       </div>
     </section>
 
@@ -490,8 +650,8 @@ function renderDetail(helpers) {
       </div>
       ${renderPaymentBox(helpers, subtotal, paymentTotal)}
       <div class="orders-card-actions orders-card-actions--end">
-        <button type="button" class="orders-secondary" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.cancelChange"))}</button>
-        <button type="button" class="orders-primary" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.saveChange"))}</button>
+        <button type="button" class="orders-secondary" data-order-changes-cancel data-orders-write${state.busy ? ' disabled aria-disabled="true"' : writeAttributes}>${escapeHtml(pageT(lang, "orders.cancelChange"))}</button>
+        <button type="button" class="orders-primary" data-order-changes-save data-orders-write${state.busy ? ' disabled aria-disabled="true"' : writeAttributes}>${escapeHtml(pageT(lang, state.busy === "order" ? "orders.write.saving" : "orders.saveChange"))}</button>
       </div>
     </section>
 
@@ -505,6 +665,7 @@ function renderDetail(helpers) {
     ${renderTrackingCard(helpers)}
     ${renderTimeline(helpers)}
     ${renderProductModal(helpers)}
+    ${renderCustomerEditModal(helpers)}
   </div>`;
 }
 
@@ -528,13 +689,298 @@ function closeProductModal() {
   rerender();
 }
 
-document.addEventListener("click", (event) => {
+function setNotice(message, type = "error") {
+  state.notice = message;
+  state.noticeType = type;
+}
+
+function friendlyWriteError(error, fallbackKey) {
+  const lang = currentHelpers?.lang ?? "zh";
+  const message = String(error?.message || "");
+  if (message.includes("at least one product")) return pageT(lang, "orders.validation.items");
+  if (message.includes("total must be greater")) return pageT(lang, "orders.validation.total");
+  if (message.includes("Tracking number") || message.includes("tracking number") || message.includes("Invalid tracking")) {
+    return pageT(lang, "orders.validation.tracking");
+  }
+  return pageT(lang, fallbackKey);
+}
+
+function syncLiveFormInputs() {
+  if (!liveWritable) return;
+  let changedInput = false;
+  document.querySelectorAll("[data-line-quantity]").forEach((input) => {
+    const item = state.items.find((row) => row.id === input.getAttribute("data-line-quantity"));
+    const next = Math.max(1, Math.floor(Number(input.value) || 1));
+    if (item && item.quantity !== next) {
+      item.quantity = next;
+      changedInput = true;
+    }
+  });
+  document.querySelectorAll("[data-line-price]").forEach((input) => {
+    const item = state.items.find((row) => row.id === input.getAttribute("data-line-price"));
+    const next = Math.max(0, Number(input.value) || 0);
+    if (item && item.price !== next) {
+      item.price = next;
+      changedInput = true;
+    }
+  });
+  document.querySelectorAll("[data-fee-amount]").forEach((input) => {
+    const key = input.getAttribute("data-fee-amount");
+    const next = Math.max(0, Number(input.value) || 0);
+    if (state.fees[key] !== next) {
+      state.fees[key] = next;
+      changedInput = true;
+    }
+  });
+  const shippingFee = document.querySelector("[data-shipping-fee]");
+  if (shippingFee) {
+    const next = Math.max(0, Number(shippingFee.value) || 0);
+    if (state.fees.shipping !== next) {
+      state.fees.shipping = next;
+      changedInput = true;
+    }
+  }
+  state.trackingNumber = document.querySelector("[data-tracking-input]")?.value ?? state.trackingNumber;
+  if (changedInput) state.feesTouched = true;
+}
+
+function syncLiveNumberInput(target) {
+  const quantity = target.closest("[data-line-quantity]");
+  if (quantity) {
+    const item = state.items.find((row) => row.id === quantity.getAttribute("data-line-quantity"));
+    if (item) item.quantity = Math.max(1, Math.floor(Number(quantity.value) || 1));
+    state.feesTouched = true;
+    return true;
+  }
+  const price = target.closest("[data-line-price]");
+  if (price) {
+    const item = state.items.find((row) => row.id === price.getAttribute("data-line-price"));
+    if (item) item.price = Math.max(0, Number(price.value) || 0);
+    state.feesTouched = true;
+    return true;
+  }
+  const feeAmount = target.closest("[data-fee-amount]");
+  if (feeAmount) {
+    state.fees[feeAmount.getAttribute("data-fee-amount")] = Math.max(0, Number(feeAmount.value) || 0);
+    state.feesTouched = true;
+    return true;
+  }
+  const shippingFee = target.closest("[data-shipping-fee]");
+  if (shippingFee) {
+    state.fees.shipping = Math.max(0, Number(shippingFee.value) || 0);
+    state.feesTouched = true;
+    return true;
+  }
+  return false;
+}
+
+function refreshLiveTotals() {
+  const { subtotal, paymentTotal } = currentTotals();
+  document.querySelectorAll("[data-detail-subtotal]").forEach((node) => {
+    node.textContent = moneyValue(subtotal);
+  });
+  document.querySelectorAll("[data-detail-shipping]").forEach((node) => {
+    node.textContent = moneyValue(state.fees.shipping);
+  });
+  document.querySelectorAll("[data-detail-total]").forEach((node) => {
+    node.textContent = moneyValue(paymentTotal);
+  });
+}
+
+function resetOrderChanges() {
+  state.items = cloneItems(state.savedItems);
+  state.feesEnabled = { ...state.savedFeesEnabled };
+  state.fees = { ...state.savedFees };
+  state.salespersonId = state.savedSalespersonId;
+  state.feesTouched = false;
+  setNotice("");
+  rerender();
+}
+
+async function saveOrderChanges() {
+  syncLiveFormInputs();
+  const lang = currentHelpers?.lang ?? "zh";
+  if (!state.items.length) {
+    setNotice(pageT(lang, "orders.validation.items"));
+    rerender();
+    return;
+  }
+  const totals = currentTotals();
+  if (totals.paymentTotal <= 0) {
+    setNotice(pageT(lang, "orders.validation.total"));
+    rerender();
+    return;
+  }
+  state.busy = "order";
+  setNotice("");
+  rerender();
+  try {
+    const result = await updateLiveOrder(detailData.order.id, {
+      items: cloneItems(state.items),
+      fees: {
+        shipping: state.fees.shipping,
+        deposit: state.feesEnabled.deposit ? state.fees.deposit : 0,
+        discount: state.feesEnabled.discount ? state.fees.discount : 0,
+        service: state.feesEnabled.service ? state.fees.service : 0
+      },
+      salespersonId: state.salespersonId,
+      totalOverride: state.feesTouched ? undefined : detailData.detail.paymentTotal
+    });
+    detailData.detail.paymentTotal = Number(result.invoice.total) || 0;
+    detailData.detail.salespersonId = result.invoice.salesperson_id ?? null;
+    detailData.detail.salesperson = writeOptions.salespeople.find((person) => person.id === state.salespersonId)?.name ?? "";
+    state.savedItems = cloneItems(state.items);
+    state.savedFees = { ...state.fees };
+    state.savedFeesEnabled = { ...state.feesEnabled };
+    state.savedSalespersonId = state.salespersonId;
+    state.feesTouched = false;
+    if (result.deviceError) console.error("[orders-detail] item device write failed", result.deviceError);
+    if (result.deviceConflicts.length) console.warn("[orders-detail] item IMEI conflicts", result.deviceConflicts);
+    const noticeKey = result.deviceError
+      ? "orders.write.deviceFailed"
+      : result.deviceConflicts.length
+        ? "orders.write.deviceConflict"
+        : "orders.write.saved";
+    setNotice(pageT(lang, noticeKey), noticeKey === "orders.write.saved" ? "success" : "error");
+  } catch (error) {
+    console.error("[orders-detail] order write failed", error);
+    setNotice(friendlyWriteError(error, "orders.write.failed"));
+  } finally {
+    state.busy = "";
+    rerender();
+  }
+}
+
+function openCustomerEdit() {
+  state.customerDraft = {
+    name: detailData.order.customer || "",
+    phone: detailData.order.phone || "",
+    email: detailData.detail.email || "",
+    carModel: detailData.detail.carModelValue ?? detailData.detail.carModel ?? "",
+    imei: "",
+    address: detailData.detail.shippingAddress || ""
+  };
+  state.customerModalOpen = true;
+  rerender();
+}
+
+function closeCustomerEdit() {
+  state.customerModalOpen = false;
+  state.customerDraft = {};
+  rerender();
+}
+
+async function saveCustomerEdit() {
+  const lang = currentHelpers?.lang ?? "zh";
+  state.busy = "customer";
+  setNotice("");
+  rerender();
+  try {
+    const result = await updateLiveOrderCustomer(detailData.detail.customerId ?? detailData.order.customerId, state.customerDraft);
+    detailData.order.customer = result.customer.name || "";
+    detailData.order.phone = result.customer.phone || "";
+    detailData.detail.email = result.customer.email || "";
+    detailData.detail.carModelValue = result.customer.car_model || "";
+    detailData.detail.carModel = [detailData.detail.carMake, result.customer.car_model].filter(Boolean).join(" ") || null;
+    detailData.detail.shippingAddress = result.customer.address || "";
+    state.customerModalOpen = false;
+    state.customerDraft = {};
+    if (result.deviceError) console.error("[orders-detail] customer device write failed", result.deviceError);
+    const noticeKey = result.deviceError
+      ? "orders.customer.deviceFailed"
+      : result.deviceConflicts.length
+        ? "orders.customer.imeiConflict"
+        : "orders.customer.saved";
+    setNotice(pageT(lang, noticeKey), noticeKey === "orders.customer.saved" ? "success" : "error");
+  } catch (error) {
+    console.error("[orders-detail] customer write failed", error);
+    setNotice(friendlyWriteError(error, "orders.customer.failed"));
+  } finally {
+    state.busy = "";
+    rerender();
+  }
+}
+
+async function saveShipping() {
+  syncLiveFormInputs();
+  const lang = currentHelpers?.lang ?? "zh";
+  if (state.shippingMode === "delivery" && !/^[A-Za-z0-9]{6,}$/.test(state.trackingNumber.trim())) {
+    setNotice(pageT(lang, "orders.validation.tracking"));
+    rerender();
+    document.querySelector("[data-tracking-input]")?.focus();
+    return;
+  }
+  state.busy = "shipping";
+  setNotice("");
+  rerender();
+  try {
+    const invoice = await updateLiveOrderShipping(detailData.order.id, {
+      mode: state.shippingMode,
+      trackingNumber: state.trackingNumber
+    });
+    detailData.detail.carrier = invoice.carrier || "";
+    detailData.detail.trackingNo = invoice.tracking_number || "";
+    detailData.detail.shippingStatus = invoice.shipping_status || "unshipped";
+    state.trackingNumber = invoice.tracking_number || "";
+    state.savedTrackingNumber = state.trackingNumber;
+    state.savedShippingMode = state.shippingMode;
+    setNotice(pageT(lang, "orders.shipping.saved"), "success");
+  } catch (error) {
+    console.error("[orders-detail] shipping write failed", error);
+    setNotice(friendlyWriteError(error, "orders.shipping.failed"));
+  } finally {
+    state.busy = "";
+    rerender();
+  }
+}
+
+document.addEventListener("click", async (event) => {
   const printOpen = event.target.closest("[data-print-open]");
   if (printOpen) {
     printDialog.open(printableOrder(), printOpen.getAttribute("data-print-open"), printOpen);
     return;
   }
   if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
+  if (state.busy && event.target.closest("[data-orders-write]")) return;
+  if (event.target.closest("[data-order-changes-cancel]")) {
+    if (liveWritable) resetOrderChanges();
+    return;
+  }
+  if (event.target.closest("[data-order-changes-save]")) {
+    if (liveWritable && !state.busy) await saveOrderChanges();
+    return;
+  }
+  if (event.target.closest("[data-customer-edit-open]")) {
+    if (liveWritable) openCustomerEdit();
+    return;
+  }
+  if (event.target.closest("[data-customer-edit-close]") || event.target.matches("[data-order-customer-overlay]")) {
+    closeCustomerEdit();
+    return;
+  }
+  if (event.target.closest("[data-customer-edit-save]")) {
+    if (liveWritable && !state.busy) await saveCustomerEdit();
+    return;
+  }
+  if (event.target.closest("[data-shipping-cancel]")) {
+    state.shippingMode = state.savedShippingMode;
+    state.trackingNumber = state.savedTrackingNumber;
+    setNotice("");
+    rerender();
+    return;
+  }
+  if (event.target.closest("[data-shipping-save]") || event.target.closest("[data-mark-shipped]")) {
+    if (liveWritable && currentUser?.canShip === true && !state.busy) await saveShipping();
+    return;
+  }
+  const shippingMode = event.target.closest("[data-shipping-mode]");
+  if (shippingMode) {
+    if (liveWritable && currentUser?.canShip === true) {
+      state.shippingMode = shippingMode.getAttribute("data-shipping-mode");
+      rerender();
+    }
+    return;
+  }
   if (event.target.closest("[data-product-modal-open]")) {
     state.productModalOpen = true;
     rerender({ focusProductSearch: true });
@@ -549,11 +995,14 @@ document.addEventListener("click", (event) => {
       .filter(({ option }) => state.selectedOptions.has(option.id));
     selected.forEach(({ option }) => {
       state.items.push({
-        id: option.id,
+        id: `${option.id}-${Date.now()}-${state.items.length}`,
+        productId: option.id,
+        warehouseId: writeOptions.defaultWarehouseId,
         name: option.label,
         quantity: 1,
         price: option.price
       });
+      state.feesTouched = true;
     });
     closeProductModal();
     return;
@@ -562,6 +1011,7 @@ document.addEventListener("click", (event) => {
 
 document.addEventListener("change", (event) => {
   if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
+  if (state.busy && event.target.closest("[data-orders-write]")) return;
   const option = event.target.closest("[data-product-option]");
   if (option) {
     const id = option.getAttribute("data-option-id");
@@ -573,11 +1023,55 @@ document.addEventListener("change", (event) => {
     state.feesEnabled[fee.getAttribute("data-fee-toggle")] = fee.checked;
     state.feesTouched = true;
     rerender();
+    return;
+  }
+  const salesperson = event.target.closest("[data-salesperson-select]");
+  if (salesperson) {
+    state.salespersonId = salesperson.value;
+    return;
+  }
+  const quantity = event.target.closest("[data-line-quantity]");
+  if (quantity) {
+    syncLiveNumberInput(quantity);
+    refreshLiveTotals();
+    return;
+  }
+  const price = event.target.closest("[data-line-price]");
+  if (price) {
+    syncLiveNumberInput(price);
+    refreshLiveTotals();
+    return;
+  }
+  const feeAmount = event.target.closest("[data-fee-amount]");
+  if (feeAmount) {
+    syncLiveNumberInput(feeAmount);
+    refreshLiveTotals();
+    return;
+  }
+  const shippingFee = event.target.closest("[data-shipping-fee]");
+  if (shippingFee) {
+    syncLiveNumberInput(shippingFee);
+    refreshLiveTotals();
   }
 });
 
 document.addEventListener("input", (event) => {
   if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
+  if (state.busy && event.target.closest("[data-orders-write]")) return;
+  if (syncLiveNumberInput(event.target)) {
+    refreshLiveTotals();
+    return;
+  }
+  const customerField = event.target.closest("[data-order-customer-overlay] [data-new-customer-field]");
+  if (customerField) {
+    state.customerDraft[customerField.getAttribute("data-new-customer-field")] = customerField.value;
+    return;
+  }
+  const trackingInput = event.target.closest("[data-tracking-input]");
+  if (trackingInput) {
+    state.trackingNumber = trackingInput.value;
+    return;
+  }
   const search = event.target.closest("[data-product-search]");
   if (search) {
     state.productSearch = search.value;
@@ -586,7 +1080,9 @@ document.addEventListener("input", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && state.productModalOpen) closeProductModal();
+  if (event.key !== "Escape") return;
+  if (state.productModalOpen) closeProductModal();
+  else if (state.customerModalOpen) closeCustomerEdit();
 });
 
 window.__shellMenu = createBizflowMenu("orders");

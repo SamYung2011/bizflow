@@ -113,6 +113,8 @@ function buildOrderRow(invoice, sources) {
       time: formatDateTime(event.event_at)
     }));
   return {
+    id: invoice.id,
+    customerId: invoice.customer_id ?? null,
     status: invoice.status === "Paid" ? "completed" : "in-progress",
     customer: asText(customer.name, "—"),
     phone: asText(customer.phone),
@@ -129,11 +131,24 @@ function buildOrderRow(invoice, sources) {
       carrier: asText(invoice.carrier),
       trackingNo: asText(invoice.tracking_number),
       salesperson: asText(sources.employeeById.get(invoice.salesperson_id)?.name),
+      salespersonId: invoice.salesperson_id ?? null,
+      customerId: invoice.customer_id ?? null,
       paymentTotal: asNumber(invoice.total),
       email: asText(customer.email),
       carModel,
+      carMake: asText(customer.car_make),
+      carModelValue: asText(customer.car_model),
       shippingAddress: asText(customer.address),
-      items: items.map((item) => ({ name: item.name, quantity: item.qty, price: item.price })),
+      items: items.map((item, index) => ({
+        id: item.id ?? `${invoice.id}:item:${index}`,
+        name: item.name,
+        quantity: item.qty,
+        price: item.price,
+        productId: item.product_id ?? null,
+        warehouseId: item.warehouse_id ?? null,
+        warrantyMonths: item.warranty_months ?? null,
+        imeiCode: asText(item.imei_code)
+      })),
       fees: invoiceFees(invoice),
       timeline
     }

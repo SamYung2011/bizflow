@@ -723,6 +723,22 @@
   opacity: .5;
 }
 
+.orders-write-notice {
+  margin: 0;
+  padding: var(--space-10) var(--space-20);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-10);
+  background: var(--white);
+  color: var(--orders-red-chip);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-body);
+}
+
+.orders-write-notice--success {
+  color: var(--blue);
+}
+
 .orders-hug-small {
   width: auto;
   min-width: 72px;
@@ -869,6 +885,39 @@
   border: 1px solid var(--orders-gray-d9);
   border-radius: var(--radius-10);
   background: var(--orders-gray-f0);
+}
+
+.orders-line-number {
+  width: 100%;
+  height: 39px;
+  box-sizing: border-box;
+  padding: var(--space-10);
+  border: 1px solid var(--orders-gray-d9);
+  border-radius: var(--radius-10);
+  background: var(--orders-gray-f0);
+  color: var(--3a);
+  font: inherit;
+  outline: none;
+}
+
+.orders-line-number:focus,
+.orders-money-input:focus,
+.orders-select-control:focus,
+.orders-tracking-input:focus {
+  border-color: var(--blue);
+}
+
+.orders-select-control,
+.orders-tracking-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--orders-border);
+  font: inherit;
+  outline: none;
+}
+
+.orders-select-control {
+  appearance: auto;
 }
 
 .orders-figma-total-row {
