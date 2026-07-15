@@ -319,16 +319,25 @@ async function buildWarrantySnapshot() {
 async function buildTasksSnapshot() {
   const currentUser = await getCurrentUser();
   const companyId = currentUser?.activeCompanyId;
-  const [allTasks, employees, assignees, feedbacks, departments] = await Promise.all([
+  const [allTasks, employees, assignees, feedbacks, departments, employeeDepartments] = await Promise.all([
     allRows("employee_tasks", "created_at", false),
     allRows("employees", "created_at"),
     allRows("task_assignees", "created_at", true, null),
     allRows("employee_task_feedbacks", "created_at"),
-    allRows("departments", "name")
+    allRows("departments", "name"),
+    allRows("employee_departments", "created_at", true, null)
   ]);
   const tasks = companyId ? allTasks.filter((task) => task.company_id === companyId) : allTasks;
+  const companyDepartments = companyId ? departments.filter((department) => department.company_id === companyId) : departments;
   const employeeById = new Map(employees.map((employee) => [employee.id, employee]));
-  const departmentById = new Map(departments.map((department) => [department.id, department]));
+  const departmentById = new Map(companyDepartments.map((department) => [department.id, department]));
+  const memberIdsByDepartment = new Map();
+  for (const row of employeeDepartments) {
+    if (!departmentById.has(row.department_id) || !row.employee_id) continue;
+    const members = memberIdsByDepartment.get(row.department_id) ?? new Set();
+    members.add(String(row.employee_id));
+    memberIdsByDepartment.set(row.department_id, members);
+  }
   const assigneesByTask = new Map();
   for (const assignee of assignees) {
     const list = assigneesByTask.get(assignee.task_id) ?? [];
@@ -424,6 +433,11 @@ async function buildTasksSnapshot() {
       low: open.filter((task) => task.priority === "low" || task.priority === "none").length
     },
     kanban,
+    departments: companyDepartments.map((department) => ({
+      id: String(department.id),
+      name: asText(department.name),
+      memberIds: [...(memberIdsByDepartment.get(department.id) ?? [])]
+    })),
     tasks: normalized,
     priorityRule: "none→low"
   };

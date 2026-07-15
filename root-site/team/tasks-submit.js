@@ -1,7 +1,7 @@
 import { taskT } from "./tasks-i18n.js";
 
 export function availableTaskDepartments(state, data) {
-  const departments = Array.isArray(data.departments) ? data.departments : [];
+  const departments = Array.isArray(data?.departments) ? data.departments : [];
   // Match team/src/components/EditTaskModal.jsx:160-195: admins see all; staff see own plus the task's current department.
   if (state.currentUser?.isSuperAdmin || state.currentUser?.isAdminOfActive) return departments;
   const currentUserId = String(state.currentUser?.id || "");
@@ -11,9 +11,10 @@ export function availableTaskDepartments(state, data) {
 }
 
 export function taskMembersForDepartment(data, departmentId) {
-  const members = data.members.filter((member) => member.dept !== "all");
+  const members = (Array.isArray(data?.members) ? data.members : []).filter((member) => member.dept !== "all");
   if (!departmentId) return members;
-  const department = (data.departments ?? []).find((item) => item.id === departmentId);
+  const departments = Array.isArray(data?.departments) ? data.departments : [];
+  const department = departments.find((item) => item.id === departmentId);
   if (!department) return [];
   const memberIds = new Set(department.memberIds ?? []);
   return members.filter((member) => memberIds.has(member.id));

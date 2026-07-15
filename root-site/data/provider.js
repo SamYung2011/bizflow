@@ -98,6 +98,7 @@ const teamTaskMock = {
     { name: "Vicky", dept: "graphic", taskCount: 3, badge: 0 },
     { name: "Vicky", dept: "graphic", taskCount: 3, badge: 0 }
   ],
+  departments: [],
   // 小屿/澄川编造的任务详情与反馈演示数据,非真实任务内容或真实沟通记录。
   detail: {
     contentKey: "tasks.demo.content",
@@ -518,13 +519,14 @@ export async function getTeamTaskData() {
         }))
       ]
     : teamTaskMock.members.map((m) => ({ ...m }));
-  const departments = r9Members
-    ? membersSnap.departments.map((department) => ({
+  const taskDepartments = Array.isArray(snap?.departments) && snap.departments.every((department) =>
+    department && typeof department.id === "string" && typeof department.name === "string" && Array.isArray(department.memberIds));
+  const departmentSource = taskDepartments ? snap.departments : r9Members ? membersSnap.departments : teamTaskMock.departments;
+  const departments = departmentSource.map((department) => ({
         id: department.id,
         name: department.name,
         memberIds: department.memberIds.slice()
-      }))
-    : [];
+      }));
 
   // R9 全量 tasks[]:已完成/已放弃/逾期都在同一筛选模型内;none 归低优先级列。
   const fullTasksOk = Array.isArray(snap?.tasks) && (snap.__live === true || snap.tasks.length > 0) && snap.tasks.every(isFullTask);

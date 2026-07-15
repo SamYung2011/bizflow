@@ -522,6 +522,7 @@ function renderCreate(helpers) {
   const shippingAttributes = shippingPermissionDenied
     ? ` disabled aria-disabled="true" title="${escapeHtml(pageT(lang, "orders.shippingPermission"))}"`
     : writeAttributes;
+  const shippingDisabledClass = shippingPermissionDenied ? " orders-disabled" : "";
   return `<div class="orders-workspace" data-orders-create-page data-live-read-only="${liveReadOnly}">
     ${state.notice ? `<p class="orders-write-notice orders-write-notice--${escapeHtml(state.noticeType || "error")}" role="${state.noticeType === "success" ? "status" : "alert"}">${escapeHtml(state.notice)}</p>` : ""}
     <header class="orders-workspace__head">
@@ -567,8 +568,8 @@ function renderCreate(helpers) {
     <section class="orders-detail-card">
       <h2 class="orders-card-title">${escapeHtml(pageT(lang, "orders.logistics"))}</h2>
       <div class="orders-logistics-segment" role="tablist">
-        <button type="button" class="${state.shippingMode === "delivery" ? "is-active" : ""}" data-shipping-mode="delivery" data-shipping-write data-orders-write${shippingAttributes}>${escapeHtml(pageT(lang, "orders.delivery"))}</button>
-        <button type="button" class="${state.shippingMode === "pickup" ? "is-active" : ""}" data-shipping-mode="pickup" data-shipping-write data-orders-write${shippingAttributes}>${escapeHtml(pageT(lang, "orders.pickup"))}</button>
+        <button type="button" class="${state.shippingMode === "delivery" ? "is-active" : ""}${shippingDisabledClass}" data-shipping-mode="delivery" data-shipping-write data-orders-write${shippingAttributes}>${escapeHtml(pageT(lang, "orders.delivery"))}</button>
+        <button type="button" class="${state.shippingMode === "pickup" ? "is-active" : ""}${shippingDisabledClass}" data-shipping-mode="pickup" data-shipping-write data-orders-write${shippingAttributes}>${escapeHtml(pageT(lang, "orders.pickup"))}</button>
       </div>
       <div class="orders-field">
         <span class="orders-field__label">${escapeHtml(pageT(lang, "orders.trackingNo"))}</span>
@@ -577,8 +578,8 @@ function renderCreate(helpers) {
           : `<span class="orders-select-like">${escapeHtml(state.shippingMode === "pickup" ? pageT(lang, "orders.pickup") : pageT(lang, "orders.unshipped"))}</span>`}
       </div>
       <div class="orders-card-actions orders-card-actions--end">
-        <button type="button" class="orders-secondary" data-tracking-cancel data-shipping-write data-orders-write${shippingAttributes}>${escapeHtml(pageT(lang, "orders.cancel"))}</button>
-        <button type="button" class="orders-primary" data-tracking-confirm data-shipping-write data-orders-write${shippingAttributes}>${escapeHtml(pageT(lang, "orders.confirmTracking"))}</button>
+        <button type="button" class="orders-secondary${shippingDisabledClass}" data-tracking-cancel data-shipping-write data-orders-write${shippingAttributes}>${escapeHtml(pageT(lang, "orders.cancel"))}</button>
+        <button type="button" class="orders-primary${shippingDisabledClass}" data-tracking-confirm data-shipping-write data-orders-write${shippingAttributes}>${escapeHtml(pageT(lang, "orders.confirmTracking"))}</button>
       </div>
     </section>
 

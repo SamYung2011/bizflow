@@ -76,6 +76,7 @@ const state = {
   feedbackError: "",
   writeBusy: false,
   writeError: "",
+  writeNotice: "",
   actionTaskId: null
 };
 
@@ -168,6 +169,7 @@ export function renderTaskManagement(helpers) {
   return `<div class="team-task-page${state.detailOpen ? " team-task-page--detail" : ""}" data-task-view="${escapeHtml(filterState.view)}" data-task-mode="${escapeHtml(state.mode)}" data-only-mine="${state.onlyMine}">
     <h1 class="team-task-title" title="${escapeHtml(tt("tasks.title"))}">${escapeHtml(tt("tasks.title"))}</h1>
     ${state.writeError ? `<p class="team-task-write-error" role="alert">${escapeHtml(tt(state.writeError))}</p>` : ""}
+    ${state.writeNotice ? `<p class="team-task-write-notice" role="status" aria-live="polite">${escapeHtml(tt(state.writeNotice))}</p>` : ""}
     <section class="team-task-stats">${stats.map((stat) => renderStatCard(stat, helpers)).join("")}</section>
     ${state.detailOpen ? "" : renderTaskToolbar({ state, filterState, members: state.members, featureAiBatch: data.featureAiBatch, helpers })}
     <section class="team-board${calendarView ? " team-board--calendar" : ""}">
@@ -224,7 +226,8 @@ function taskSubmitData() {
 }
 
 function taskSubmitDepartment(departmentId) {
-  return data.departments.find((department) => department.id === departmentId) ?? null;
+  const departments = Array.isArray(data?.departments) ? data.departments : [];
+  return departments.find((department) => department.id === departmentId) ?? null;
 }
 
 function reconcileTaskSubmitAssignees(departmentId) {
@@ -265,6 +268,8 @@ function openTaskSubmit() {
   state.submitOriginalDepartmentId = "";
   state.submitCanAssignOthers = state.permissions.canAssignOthers;
   state.submitError = "";
+  state.writeError = "";
+  state.writeNotice = "";
   state.submitDraft = {
     ...data.form.defaults,
     owner: authenticated ? state.currentUser.name : data.form.defaults.owner,
@@ -291,6 +296,8 @@ function openTaskEdit(taskId) {
   state.submitCanAssignOthers = isTaskCreator(task, state.currentUser) || state.currentUser.isSuperAdmin ||
     state.currentUser.isAdminOfActive || state.permissions.canAssignOthers;
   state.submitError = "";
+  state.writeError = "";
+  state.writeNotice = "";
   state.submitDraft = {
     title: task.title,
     content: task.content,
@@ -680,6 +687,8 @@ document.addEventListener("submit", async (event) => {
     if (state.liveTaskWrites) {
       state.writeBusy = true;
       state.submitError = "";
+      state.writeError = "";
+      state.writeNotice = "";
       rerenderTaskPage();
       try {
         if (state.submitMode === "edit") {
@@ -697,25 +706,30 @@ document.addEventListener("submit", async (event) => {
             trackTitleEdit: !isTaskCreator(task, state.currentUser),
             attachments: state.submitDraft.attachments
           });
-          task.title = title;
-          task.content = content;
-          task.priority = priority;
-          task.dbPriority = task.dbPriority === "none" && priority === "low" ? "none" : priority === "medium" ? "mid" : priority;
-          task.due = due;
-          task.requiresReview = requiresReview;
-          task.departmentId = departmentId;
-          task.visibility = departmentId ? "department" : "team";
-          task.visibilityDepartment = taskSubmitDepartment(departmentId)?.name || "";
-          task.assignees = assignedRows.map((member) => ({
-            employeeId: member.id,
-            name: member.name,
-            completedAt: task.assignees.find((assignee) => assignee.employeeId === member.id)?.completedAt ?? null,
-            abandonedAt: task.assignees.find((assignee) => assignee.employeeId === member.id)?.abandonedAt ?? null
-          }));
-          task.members = task.assignees.map((assignee) => assignee.name);
-          task.owner = task.members.join("、") || "—";
-          task.attachments = result.attachments ?? task.attachments;
-          task.attachmentCount = task.attachments.length;
+          try {
+            task.title = title;
+            task.content = content;
+            task.priority = priority;
+            task.dbPriority = task.dbPriority === "none" && priority === "low" ? "none" : priority === "medium" ? "mid" : priority;
+            task.due = due;
+            task.requiresReview = requiresReview;
+            task.departmentId = departmentId;
+            task.visibility = departmentId ? "department" : "team";
+            task.visibilityDepartment = taskSubmitDepartment(departmentId)?.name || "";
+            task.assignees = assignedRows.map((member) => ({
+              employeeId: member.id,
+              name: member.name,
+              completedAt: task.assignees.find((assignee) => assignee.employeeId === member.id)?.completedAt ?? null,
+              abandonedAt: task.assignees.find((assignee) => assignee.employeeId === member.id)?.abandonedAt ?? null
+            }));
+            task.members = task.assignees.map((assignee) => assignee.name);
+            task.owner = task.members.join("、") || "—";
+            task.attachments = result.attachments ?? task.attachments;
+            task.attachmentCount = task.attachments.length;
+          } catch (echoError) {
+            console.error("Task update persisted but local echo failed", echoError);
+          }
+          state.writeNotice = "tasks.write.saved";
         } else {
           const result = await createLiveTask({
             title,
@@ -727,47 +741,55 @@ document.addEventListener("submit", async (event) => {
             departmentId,
             files: state.submitDraft.attachments.map((attachment) => attachment.file).filter(Boolean)
           });
-          const column = state.board.find((item) => item.key === priority) ?? state.board[0];
-          const newTask = {
-            id: result.task.id,
-            title,
-            content,
-            due,
-            owner: assignedRows.map((member) => member.name).join("、"),
-            priority: column.key,
-            dbPriority: column.key === "medium" ? "mid" : column.key,
-            status: "inProgress",
-            done: false,
-            countBadge: "",
-            departmentId,
-            visibility: departmentId ? "department" : "team",
-            requiresReview,
-            members: assignedRows.map((member) => member.name),
-            feedback: [],
-            startDate: "",
-            createdAt: localTimestamp(),
-            completedAt: "",
-            creator: state.currentUser.name,
-            creatorId: state.currentUser.id,
-            parentId: null,
-            visibilityDepartment: taskSubmitDepartment(departmentId)?.name || "",
-            approvedAt: "",
-            approvedBy: "",
-            attachments: result.attachments.map((attachment) => ({ ...attachment })),
-            attachmentCount: result.attachments.length,
-            assignees: assignedRows.map((member) => ({ employeeId: member.id, name: member.name, completedAt: null, abandonedAt: null })),
-            subtasks: []
-          };
-          column.tasks.unshift(newTask);
-          state.tasks.unshift(newTask);
-          state.summary.total += 1;
-          state.summary.inProgress += 1;
-          adjustOpenTaskCounts(newTask, 1);
+          try {
+            const column = state.board.find((item) => item.key === priority) ?? state.board[0];
+            const attachments = Array.isArray(result.attachments) ? result.attachments : [];
+            const newTask = {
+              id: result.task.id,
+              title,
+              content,
+              due,
+              owner: assignedRows.map((member) => member.name).join("、"),
+              priority: column.key,
+              dbPriority: column.key === "medium" ? "mid" : column.key,
+              status: "inProgress",
+              done: false,
+              countBadge: "",
+              departmentId,
+              visibility: departmentId ? "department" : "team",
+              requiresReview,
+              members: assignedRows.map((member) => member.name),
+              feedback: [],
+              startDate: "",
+              createdAt: localTimestamp(),
+              completedAt: "",
+              creator: state.currentUser.name,
+              creatorId: state.currentUser.id,
+              parentId: null,
+              visibilityDepartment: taskSubmitDepartment(departmentId)?.name || "",
+              approvedAt: "",
+              approvedBy: "",
+              attachments: attachments.map((attachment) => ({ ...attachment })),
+              attachmentCount: attachments.length,
+              assignees: assignedRows.map((member) => ({ employeeId: member.id, name: member.name, completedAt: null, abandonedAt: null })),
+              subtasks: []
+            };
+            column.tasks.unshift(newTask);
+            state.tasks.unshift(newTask);
+            state.summary.total += 1;
+            state.summary.inProgress += 1;
+            adjustOpenTaskCounts(newTask, 1);
+          } catch (echoError) {
+            // A committed create must never look failed: otherwise a retry creates a duplicate task.
+            console.error("Task create persisted but local echo failed", echoError);
+          }
+          state.writeNotice = "tasks.write.created";
         }
         state.submitOpen = false;
         state.submitTaskId = null;
         state.submitOriginalDepartmentId = "";
         state.submitError = "";
+        state.writeError = "";
       } catch (error) {
         console.warn("Task save failed", error);
         state.submitError = "tasks.write.failed";

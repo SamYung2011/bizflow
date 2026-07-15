@@ -728,6 +728,11 @@
   opacity: .5;
 }
 
+.orders-workspace [data-shipping-write].orders-disabled:disabled {
+  background: var(--orders-gray-e5);
+  color: var(--gray-20);
+}
+
 .orders-write-notice {
   margin: 0;
   padding: var(--space-10) var(--space-20);

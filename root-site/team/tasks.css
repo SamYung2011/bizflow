@@ -594,6 +594,13 @@
   line-height: var(--lh-body);
 }
 
+.team-task-write-notice {
+  margin: 0;
+  color: var(--green);
+  font-size: var(--font-description-size);
+  line-height: var(--lh-body);
+}
+
 .task-action-popover button {
   width: 100%;
   height: var(--task-action-row-height);
