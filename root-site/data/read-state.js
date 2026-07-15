@@ -22,6 +22,10 @@ export function getReadState() {
 
 export function markRead(key, watermark) {
   if (!READ_KEYS.has(key) || typeof watermark !== "string" || watermark === "") return;
+  if (document.prerendering) {
+    document.addEventListener("prerenderingchange", () => markRead(key, watermark), { once: true });
+    return;
+  }
   memoryState = { ...getReadState(), [key]: watermark };
   try {
     window.localStorage.setItem(READ_STATE_STORAGE_KEY, JSON.stringify(memoryState));

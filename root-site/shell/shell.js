@@ -3,6 +3,7 @@ import { mountIconSprite } from "../assets/icons/inline-sprite.js";
 import { renderLanguageMenu, renderUserPanel, attachMenuBehaviors } from "../components/menus.js";
 import { attachGlobalSearch, renderGlobalSearch } from "./shell-search.js";
 import { getRememberedUnreadWatermarks, markRead, READ_STATE_STORAGE_KEY } from "../data/read-state.js";
+import { installNavigationPrerender } from "../components/navigation-prerender.js";
 
 const iconsUrl = "../assets/icons/icons.svg";
 const root = document.getElementById("shell-root");
@@ -602,6 +603,7 @@ async function bootShell() {
     return;
   }
   render();
+  installNavigationPrerender(menuItems);
   attachShellBehaviors();
   if (state.forcePasswordOpen) root.querySelector('[data-force-password-form] input[name="password"]')?.focus();
 }

@@ -1,4 +1,5 @@
 import { consumeSessionValue, setSessionValue } from "../data/session-state.js";
+import { cancelNavigationPrerender } from "./navigation-prerender.js";
 
 export const navigationPresetKeys = Object.freeze({
   ordersTab: "task-platform.orders.initialTab",
@@ -13,6 +14,8 @@ const allowedPresetKeys = new Set(Object.values(navigationPresetKeys));
 
 export function setNavigationPreset(key, value) {
   if (!allowedPresetKeys.has(key) || value === null || value === undefined || value === "") return;
+  // A prerendered page has an older sessionStorage clone, so preset navigations must use a fresh document.
+  cancelNavigationPrerender();
   setSessionValue(key, String(value));
 }
 
