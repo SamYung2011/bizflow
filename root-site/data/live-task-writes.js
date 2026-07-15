@@ -229,6 +229,7 @@ export async function completeLiveTask({ taskId, targetEmployeeId, wholeTask, ne
     }
     const taskResult = await client.from("employee_tasks").update(patch).eq("id", taskId).select("*").single();
     throwIfError(taskResult.error);
+    await invalidateTaskReads("employee_tasks", "task_assignees");
     return { completedAt, wholeTask: true };
   }
 
@@ -250,6 +251,7 @@ export async function completeLiveTask({ taskId, targetEmployeeId, wholeTask, ne
       .single();
     throwIfError(taskResult.error);
   }
+  await invalidateTaskReads("employee_tasks", "task_assignees");
   return { completedAt, wholeTask: allDone && !needsApproval };
 }
 
@@ -271,5 +273,6 @@ export async function setLiveTaskParticipation({ taskId, employeeId, abandoned, 
       .single();
     throwIfError(taskResult.error);
   }
+  await invalidateTaskReads("employee_tasks", "task_assignees");
   return { changedAt };
 }

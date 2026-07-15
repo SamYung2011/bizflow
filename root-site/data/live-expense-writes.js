@@ -1,4 +1,5 @@
 import { getCurrentUser, getSession, getSupabaseClient } from "./auth.js";
+import { invalidateLiveAuthCache } from "./live-table-cache.js";
 
 async function writeContext() {
   const [client, session, currentUser] = await Promise.all([
@@ -45,6 +46,7 @@ export async function createLiveExpense({ date, amount, currency, category, desc
       receipt_urls: uploaded.map((receipt) => receipt.url)
     }).select("*").single();
     throwIfError(result.error);
+    await invalidateLiveAuthCache();
     return { row: result.data, receiptPaths: uploaded.map((receipt) => receipt.path) };
   } catch (error) {
     if (uploaded.length) {

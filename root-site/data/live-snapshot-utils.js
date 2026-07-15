@@ -1,5 +1,5 @@
 import { fetchAllTable, getSession } from "./auth.js";
-import { activateLiveTableCacheUser, clearLiveTableCache, invalidateLiveTableCache } from "./live-table-cache.js";
+import { activateLiveTableCacheUser, clearLiveTableCache, invalidateLiveAuthCache, invalidateLiveTableCache } from "./live-table-cache.js";
 
 const HK_TIME_ZONE = "Asia/Hong_Kong";
 const tablePromises = new Map();
@@ -105,5 +105,8 @@ export async function invalidateLiveTables(...tables) {
   for (const key of tablePromises.keys()) {
     if (targets.has(key.split(":", 1)[0])) tablePromises.delete(key);
   }
-  await invalidateLiveTableCache([...targets]);
+  await Promise.all([
+    invalidateLiveTableCache([...targets]),
+    invalidateLiveAuthCache()
+  ]);
 }

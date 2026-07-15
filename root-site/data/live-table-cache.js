@@ -1,6 +1,7 @@
 const CACHE_PREFIX = "tp-live-table:v1:";
 const CACHE_USER_KEY = `${CACHE_PREFIX}user`;
 const CACHE_ROWS_PREFIX = `${CACHE_PREFIX}rows:`;
+const CACHE_AUTH_PREFIX = `${CACHE_PREFIX}auth:`;
 const CACHE_DB_NAME = "tp-live-table-cache";
 const CACHE_DB_VERSION = 1;
 const CACHE_STORE_NAME = "rows";
@@ -11,6 +12,7 @@ export const LIVE_TABLE_CACHE_MAX_BYTES = 1.5 * 1024 * 1024;
 
 const memoryStorage = new Map();
 const tableVersions = new Map();
+let authVersion = 0;
 let activeUserId = "";
 let cacheEpoch = 0;
 let activationQueue = Promise.resolve();
@@ -75,6 +77,10 @@ function encoded(value) {
 
 function cacheKey(userId, table, orderCol, ascending, secondaryOrder) {
   return `${CACHE_ROWS_PREFIX}${encoded(userId)}:${encoded(table)}:${encoded(orderCol)}:${ascending ? "asc" : "desc"}:${encoded(secondaryOrder)}`;
+}
+
+function authCacheKey(userId) {
+  return `${CACHE_AUTH_PREFIX}${encoded(userId)}`;
 }
 
 function serializedBytes(value) {
@@ -202,6 +208,18 @@ function removeIndexedTables(tables) {
   });
 }
 
+function removeIndexedAuthValues() {
+  return runIndexedDbTransaction("readwrite", (store) => {
+    const request = store.openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      if (cursor.value?.kind === "auth" || String(cursor.key || "").startsWith(CACHE_AUTH_PREFIX)) cursor.delete();
+      cursor.continue();
+    };
+  });
+}
+
 function clearIndexedValues() {
   return runIndexedDbTransaction("readwrite", (store) => {
     store.clear();
@@ -216,6 +234,17 @@ function parsePayload(value) {
   return payload;
 }
 
+function parseAuthPayload(value, expectedUserId) {
+  const payload = typeof value === "string" ? JSON.parse(value) : value;
+  if (!payload?.employee || typeof payload.employee !== "object" || Array.isArray(payload.employee) ||
+    payload.userId !== expectedUserId || !Array.isArray(payload.pendingCompanyIds) ||
+    !payload.pendingCompanyIds.every((companyId) => typeof companyId === "string") ||
+    !Number.isFinite(payload.cachedAt)) {
+    throw new Error("invalid auth cache payload");
+  }
+  return payload;
+}
+
 function payloadResult(payload) {
   return {
     rows: payload.rows,
@@ -225,6 +254,10 @@ function payloadResult(payload) {
 
 function versionChangedInThisPage(table) {
   return cacheEpoch > 0 || tableVersions.has(String(table || ""));
+}
+
+function authVersionChangedInThisPage() {
+  return cacheEpoch > 0 || authVersion > 0;
 }
 
 function fallbackPayload(key) {
@@ -320,6 +353,102 @@ export async function readLiveTableCache({ userId, table, orderCol, ascending, s
 
 export function liveTableCacheVersion(table) {
   return `${cacheEpoch}:${tableVersions.get(String(table || "")) || 0}`;
+}
+
+export function liveAuthCacheVersion() {
+  return `${cacheEpoch}:${authVersion}`;
+}
+
+export async function readLiveAuthCache(userId) {
+  const normalizedUserId = String(userId || "");
+  if (!normalizedUserId) return null;
+  await activateLiveTableCacheUser(normalizedUserId);
+  if (getFallbackValue(CACHE_USER_KEY) !== normalizedUserId) return null;
+  const key = authCacheKey(normalizedUserId);
+  const currentVersion = liveAuthCacheVersion();
+  const indexed = await readIndexedValue(key);
+  if (indexed.value) {
+    try {
+      const payload = parseAuthPayload(indexed.value, normalizedUserId);
+      if (authVersionChangedInThisPage() && payload.version !== undefined && payload.version !== currentVersion) {
+        await removeIndexedValue(key);
+        return null;
+      }
+      return {
+        employee: payload.employee,
+        pendingCompanyIds: payload.pendingCompanyIds.slice(),
+        stale: Date.now() - payload.cachedAt >= LIVE_TABLE_CACHE_TTL_MS
+      };
+    } catch {
+      await removeIndexedValue(key);
+    }
+  }
+  const serialized = getFallbackValue(key);
+  if (!serialized) return null;
+  try {
+    const payload = parseAuthPayload(serialized, normalizedUserId);
+    if (authVersionChangedInThisPage() && payload.version !== undefined && payload.version !== currentVersion) {
+      removeFallbackValue(key);
+      return null;
+    }
+    if (indexed.available) {
+      const migrated = { ...payload, key, userId: normalizedUserId, kind: "auth", table: "" };
+      const migration = await writeIndexedValue(migrated);
+      if (migration.available) removeFallbackValue(key);
+    }
+    return {
+      employee: payload.employee,
+      pendingCompanyIds: payload.pendingCompanyIds.slice(),
+      stale: Date.now() - payload.cachedAt >= LIVE_TABLE_CACHE_TTL_MS
+    };
+  } catch {
+    removeFallbackValue(key);
+    return null;
+  }
+}
+
+export async function writeLiveAuthCache({ userId, employee, pendingCompanyIds = [], version }) {
+  const normalizedUserId = String(userId || "");
+  if (!normalizedUserId || !employee || typeof employee !== "object" || Array.isArray(employee) ||
+    !Array.isArray(pendingCompanyIds) || !pendingCompanyIds.every((companyId) => typeof companyId === "string")) return false;
+  if (version !== undefined && version !== liveAuthCacheVersion()) return false;
+  await activateLiveTableCacheUser(normalizedUserId);
+  if (version !== undefined && version !== liveAuthCacheVersion()) return false;
+  const key = authCacheKey(normalizedUserId);
+  const payload = {
+    key,
+    userId: normalizedUserId,
+    kind: "auth",
+    table: "",
+    cachedAt: Date.now(),
+    employee,
+    pendingCompanyIds: pendingCompanyIds.slice(),
+    version: version ?? liveAuthCacheVersion()
+  };
+  const indexed = await writeIndexedValue(payload);
+  if (indexed.available) {
+    removeFallbackValue(key);
+    if (payload.version !== liveAuthCacheVersion()) {
+      await removeIndexedValue(key);
+      return false;
+    }
+    return true;
+  }
+  const serialized = JSON.stringify(payload);
+  if (serializedBytes(serialized) > LIVE_TABLE_CACHE_MAX_BYTES || payload.version !== liveAuthCacheVersion()) {
+    removeFallbackValue(key);
+    return false;
+  }
+  setFallbackValue(key, serialized);
+  return true;
+}
+
+export async function invalidateLiveAuthCache() {
+  authVersion += 1;
+  fallbackKeys().forEach((key) => {
+    if (key.startsWith(CACHE_AUTH_PREFIX)) removeFallbackValue(key);
+  });
+  await removeIndexedAuthValues();
 }
 
 export async function writeLiveTableCache({ userId, table, orderCol, ascending, secondaryOrder, rows, version }) {

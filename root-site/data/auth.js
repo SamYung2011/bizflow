@@ -2,8 +2,12 @@ import { createClient } from "../vendor/supabase-js.esm.js";
 import {
   activateLiveTableCacheUser,
   clearLiveTableCache,
+  invalidateLiveAuthCache,
+  liveAuthCacheVersion,
   liveTableCacheVersion,
+  readLiveAuthCache,
   readLiveTableCache,
+  writeLiveAuthCache,
   writeLiveTableCache
 } from "./live-table-cache.js";
 
@@ -26,6 +30,20 @@ export const RBAC_KEYS = Object.freeze([
 let configPromise = null;
 let clientPromise = null;
 let currentUserPromise = null;
+let currentUserPromiseVersion = "";
+
+function clearCurrentUserMemory() {
+  currentUserPromise = null;
+  currentUserPromiseVersion = "";
+}
+
+function handleAuthCacheEvent(event) {
+  // INITIAL_SESSION is page bootstrap, not a state transition; clearing it would defeat cross-page caching.
+  if (event === "INITIAL_SESSION") return;
+  clearCurrentUserMemory();
+  const operation = event === "SIGNED_OUT" ? clearLiveTableCache() : invalidateLiveAuthCache();
+  void operation.catch((error) => console.warn("[auth-cache] auth event invalidation failed", error));
+}
 
 function safeLocalStorageGet(key) {
   if (typeof window === "undefined") return null;
@@ -113,8 +131,7 @@ export async function getSupabaseClient() {
         }
       });
       client.auth.onAuthStateChange((event) => {
-        currentUserPromise = null;
-        if (event === "SIGNED_OUT") void clearLiveTableCache();
+        handleAuthCacheEvent(event);
       });
       return client;
     });
@@ -139,7 +156,6 @@ export async function onAuthStateChange(callback) {
   const client = await getSupabaseClient();
   if (!client) return { unsubscribe() {} };
   const { data } = client.auth.onAuthStateChange((event, session) => {
-    currentUserPromise = null;
     callback(event, session);
   });
   return data.subscription;
@@ -173,12 +189,13 @@ export async function signUp({ email, password, name, companyName, note }) {
 export async function signOut() {
   const client = await getSupabaseClient();
   if (!client) {
+    clearCurrentUserMemory();
     await clearLiveTableCache();
     return;
   }
   const { error } = await client.auth.signOut();
   if (error) throw error;
-  currentUserPromise = null;
+  clearCurrentUserMemory();
   await clearLiveTableCache();
 }
 
@@ -230,7 +247,7 @@ async function fetchAllTableFromNetwork(client, table, orderCol, ascending, seco
   return rows;
 }
 
-export async function fetchAllTable(table, orderCol, ascending = true, secondaryOrder = "id") {
+export async function fetchAllTable(table, orderCol, ascending = true, secondaryOrder = "id", { refresh = false } = {}) {
   const client = requireClient(await getSupabaseClient());
   const { data: sessionData, error: sessionError } = await client.auth.getSession();
   if (sessionError) throw sessionError;
@@ -238,7 +255,7 @@ export async function fetchAllTable(table, orderCol, ascending = true, secondary
   if (userId) await activateLiveTableCacheUser(userId);
   const cacheArgs = { userId, table, orderCol, ascending, secondaryOrder };
   const cacheVersion = liveTableCacheVersion(table);
-  const cached = userId ? await readLiveTableCache(cacheArgs) : null;
+  const cached = userId && !refresh ? await readLiveTableCache(cacheArgs) : null;
   if (cached && !cached.stale) return cached.rows;
   if (cached) {
     void fetchAllTableFromNetwork(client, table, orderCol, ascending, secondaryOrder)
@@ -319,35 +336,55 @@ async function loadCurrentUser() {
   const session = await getSession();
   if (!session) return null;
   const client = requireClient(await getSupabaseClient());
-  const employeeResult = await client.from("employees").select("*").eq("user_id", session.user.id).maybeSingle();
-  if (employeeResult.error) throw employeeResult.error;
-  if (!employeeResult.data) return null;
-  const employee = employeeResult.data;
-  const [bindings, companies, roles, pendingResult] = await Promise.all([
-    fetchAllTable("employee_companies", "joined_at"),
-    fetchAllTable("companies", "name"),
-    fetchAllTable("roles", "name"),
-    client.from("company_join_pending").select("company_id").eq("employee_id", employee.id).is("approved", null)
+  const userId = session.user.id;
+  const cached = await readLiveAuthCache(userId);
+  const refreshAuthTables = !cached || cached.stale;
+  const authRowsPromise = cached && !cached.stale
+    ? Promise.resolve({ employee: cached.employee, pendingCompanyIds: cached.pendingCompanyIds })
+    : (async () => {
+        const version = liveAuthCacheVersion();
+        const employeeResult = await client.from("employees").select("*").eq("user_id", userId).maybeSingle();
+        if (employeeResult.error) throw employeeResult.error;
+        if (!employeeResult.data) return null;
+        const pendingResult = await client.from("company_join_pending")
+          .select("company_id")
+          .eq("employee_id", employeeResult.data.id)
+          .is("approved", null);
+        if (pendingResult.error) throw pendingResult.error;
+        const authRows = {
+          employee: employeeResult.data,
+          pendingCompanyIds: (pendingResult.data ?? []).map((row) => row.company_id)
+        };
+        await writeLiveAuthCache({ userId, ...authRows, version });
+        return authRows;
+      })();
+  const [authRows, bindings, companies, roles] = await Promise.all([
+    authRowsPromise,
+    fetchAllTable("employee_companies", "joined_at", true, "id", { refresh: refreshAuthTables }),
+    fetchAllTable("companies", "name", true, "id", { refresh: refreshAuthTables }),
+    fetchAllTable("roles", "name", true, "id", { refresh: refreshAuthTables })
   ]);
-  if (pendingResult.error) throw pendingResult.error;
+  if (!authRows) return null;
   return deriveAuthContext({
     session,
-    employee,
+    employee: authRows.employee,
     bindings,
     companies,
     roles,
-    pendingCompanyIds: (pendingResult.data ?? []).map((row) => row.company_id)
+    pendingCompanyIds: authRows.pendingCompanyIds
   });
 }
 
 export async function getCurrentUser({ refresh = false } = {}) {
-  if (refresh) currentUserPromise = null;
+  const cacheVersion = liveAuthCacheVersion();
+  if (refresh || currentUserPromiseVersion !== cacheVersion) clearCurrentUserMemory();
   if (!currentUserPromise) {
     const promise = loadCurrentUser().catch((error) => {
       if (currentUserPromise === promise) currentUserPromise = null;
       throw error;
     });
     currentUserPromise = promise;
+    currentUserPromiseVersion = cacheVersion;
   }
   return currentUserPromise;
 }
@@ -359,6 +396,7 @@ export async function setActiveCompany(companyId) {
     throw new Error("Company is not available for the current user");
   }
   safeLocalStorageSet(`team-active-company-${context.userId || context.employeeId}`, nextCompanyId);
-  currentUserPromise = null;
+  clearCurrentUserMemory();
+  await invalidateLiveAuthCache();
   return getCurrentUser();
 }
