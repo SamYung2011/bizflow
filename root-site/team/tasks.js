@@ -906,6 +906,15 @@ function syncTaskSubmitDraft(form) {
   }
 }
 
+function syncTaskSubmitSegment(control) {
+  const segment = control.closest(".form-task-submit__segment");
+  if (!segment) return;
+  segment.querySelectorAll("label").forEach((label) => {
+    const input = label.querySelector('input[type="radio"]');
+    label.classList.toggle("form-task-submit__segment--active", input?.checked === true);
+  });
+}
+
 document.addEventListener("input", (event) => {
   const feedbackInput = event.target.closest('[data-task-feedback-form] textarea[name="message"]');
   if (feedbackInput) {
@@ -946,12 +955,17 @@ document.addEventListener("change", (event) => {
   const value = event.target.value;
   const previousDepartmentId = state.submitDraft.departmentId || "";
   syncTaskSubmitDraft(form);
+  if (!state.submitOpen || !form.isConnected) return;
   if (name === "departmentId" && value !== previousDepartmentId) {
     state.submitDraft.visibility = value ? "department" : "team";
     reconcileTaskSubmitAssignees(value);
+    rerenderTaskPage();
+    document.querySelector('[data-task-submit-form] [name="departmentId"]')?.focus();
+    return;
   }
-  rerenderTaskPage();
-  document.querySelector(`[data-task-submit-form] [name="${CSS.escape(name)}"][value="${CSS.escape(value)}"], [data-task-submit-form] [name="${CSS.escape(name)}"]`)?.focus();
+  // Text controls dispatch change while losing focus. Replacing the form here would remove
+  // the submit button between pointerdown and click, so keep non-dependent updates in place.
+  if (event.target.matches('input[type="radio"]')) syncTaskSubmitSegment(event.target);
 });
 
 attachTaskDomainController({
