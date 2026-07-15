@@ -16,6 +16,7 @@ const dict = {
   zh: {
     "orders.root": "訂單",
     "orders.shipping": "運送",
+    "orders.pickup": "自取",
     "orders.payment": "付款",
     "orders.salesperson": "銷售人員",
     "orders.customer": "顧客",
@@ -56,6 +57,7 @@ const dict = {
     "orders.trackingNo": "物流單號",
     "orders.cancel": "取消",
     "orders.confirmTracking": "確認單號",
+    "orders.shippingPermission": "需要發貨權限",
     "orders.itemCount": "{count} 件商品",
     "orders.valuePlaceholder": "HKD$",
     "orders.modal.productTitle": "選取商品",
@@ -95,6 +97,7 @@ const dict = {
   en: {
     "orders.root": "Orders",
     "orders.shipping": "Shipping",
+    "orders.pickup": "Pickup",
     "orders.payment": "Payment",
     "orders.salesperson": "Salesperson",
     "orders.customer": "Customer",
@@ -135,6 +138,7 @@ const dict = {
     "orders.trackingNo": "Tracking number",
     "orders.cancel": "Cancel",
     "orders.confirmTracking": "Confirm number",
+    "orders.shippingPermission": "Shipping permission required",
     "orders.itemCount": "{count} items",
     "orders.valuePlaceholder": "HKD$",
     "orders.modal.productTitle": "Select products",
@@ -174,6 +178,7 @@ const dict = {
   fr: {
     "orders.root": "Commandes",
     "orders.shipping": "Expédition",
+    "orders.pickup": "Retrait",
     "orders.payment": "Paiement",
     "orders.salesperson": "Commercial",
     "orders.customer": "Client",
@@ -214,6 +219,7 @@ const dict = {
     "orders.trackingNo": "Numéro de suivi",
     "orders.cancel": "Annuler",
     "orders.confirmTracking": "Confirmer numéro",
+    "orders.shippingPermission": "Autorisation d’expédition requise",
     "orders.itemCount": "{count} articles",
     "orders.valuePlaceholder": "HKD$",
     "orders.modal.productTitle": "Choisir les produits",
@@ -538,20 +544,23 @@ function renderTrackingCard(helpers) {
   const { carrier, trackingNo } = detailData.detail;
   const value = trackingNo ? [carrier, trackingNo].filter(Boolean).join(" · ") : fieldValue("", lang);
   const shippingDisabled = liveMode && currentUser?.canShip !== true;
+  const shippingAttributes = shippingDisabled
+    ? ` disabled aria-disabled="true" title="${escapeHtml(pageT(lang, "orders.shippingPermission"))}"`
+    : "";
   return `<section class="orders-detail-card">
     <h2 class="orders-card-title">${escapeHtml(pageT(lang, "orders.trackingNo"))}</h2>
     ${liveWritable
       ? `<div class="orders-logistics-segment" role="tablist">
-          <button type="button" class="${state.shippingMode === "delivery" ? "is-active" : ""}" data-shipping-mode="delivery" data-orders-write${shippingDisabled ? ' disabled aria-disabled="true"' : ""}>${escapeHtml(pageT(lang, "orders.shipping"))}</button>
-          <button type="button" class="${state.shippingMode === "pickup" ? "is-active" : ""}" data-shipping-mode="pickup" data-orders-write${shippingDisabled ? ' disabled aria-disabled="true"' : ""}>${escapeHtml(pageT(lang, "orders.pickup"))}</button>
+          <button type="button" class="${state.shippingMode === "delivery" ? "is-active" : ""}" data-shipping-mode="delivery" data-shipping-write data-orders-write${shippingAttributes}>${escapeHtml(pageT(lang, "orders.shipping"))}</button>
+          <button type="button" class="${state.shippingMode === "pickup" ? "is-active" : ""}" data-shipping-mode="pickup" data-shipping-write data-orders-write${shippingAttributes}>${escapeHtml(pageT(lang, "orders.pickup"))}</button>
         </div>
         ${state.shippingMode === "delivery"
-          ? `<input class="orders-select-like orders-tracking-input" type="text" data-tracking-input data-orders-write value="${escapeHtml(state.trackingNumber)}" placeholder="${escapeHtml(pageT(lang, "orders.unshipped"))}"${shippingDisabled ? ' disabled aria-disabled="true"' : ""}>`
+          ? `<input class="orders-select-like orders-tracking-input" type="text" data-tracking-input data-shipping-write data-orders-write value="${escapeHtml(state.trackingNumber)}" placeholder="${escapeHtml(pageT(lang, "orders.unshipped"))}"${shippingAttributes}>`
           : `<span class="orders-select-like">${escapeHtml(pageT(lang, "orders.pickup"))}</span>`}`
       : `<span class="orders-select-like">${escapeHtml(value)}</span>`}
     <div class="orders-card-actions orders-card-actions--end">
-      <button type="button" class="orders-secondary" data-shipping-cancel data-orders-write${shippingDisabled ? ' disabled aria-disabled="true"' : writeAttributes}>${escapeHtml(pageT(lang, "orders.cancel"))}</button>
-      <button type="button" class="orders-primary" data-shipping-save data-orders-write${shippingDisabled || state.busy === "shipping" ? ' disabled aria-disabled="true"' : writeAttributes}>${escapeHtml(pageT(lang, state.busy === "shipping" ? "orders.write.saving" : "orders.confirmTracking"))}</button>
+      <button type="button" class="orders-secondary" data-shipping-cancel data-shipping-write data-orders-write${shippingDisabled ? shippingAttributes : writeAttributes}>${escapeHtml(pageT(lang, "orders.cancel"))}</button>
+      <button type="button" class="orders-primary" data-shipping-save data-shipping-write data-orders-write${shippingDisabled ? shippingAttributes : state.busy === "shipping" ? ' disabled aria-disabled="true"' : writeAttributes}>${escapeHtml(pageT(lang, state.busy === "shipping" ? "orders.write.saving" : "orders.confirmTracking"))}</button>
     </div>
   </section>`;
 }
@@ -640,7 +649,7 @@ function renderDetail(helpers) {
       ${renderLineRows(helpers)}
       <div class="orders-figma-total-row"><span>${escapeHtml(pageT(lang, "orders.total"))}</span><strong><span>HKD$</span><output data-detail-subtotal>${escapeHtml(moneyValue(subtotal))}</output></strong></div>
       <div class="orders-card-actions orders-card-actions--end">
-        <button type="button" class="orders-primary" data-mark-shipped data-orders-write${(liveMode && currentUser?.canShip !== true) || state.busy === "shipping" ? ' disabled aria-disabled="true"' : writeAttributes}>${escapeHtml(pageT(lang, state.busy === "shipping" ? "orders.write.saving" : "orders.markShipped"))}</button>
+        <button type="button" class="orders-primary" data-mark-shipped data-shipping-write data-orders-write${liveMode && currentUser?.canShip !== true ? ` disabled aria-disabled="true" title="${escapeHtml(pageT(lang, "orders.shippingPermission"))}"` : state.busy === "shipping" ? ' disabled aria-disabled="true"' : writeAttributes}>${escapeHtml(pageT(lang, state.busy === "shipping" ? "orders.write.saving" : "orders.markShipped"))}</button>
       </div>
     </section>
 

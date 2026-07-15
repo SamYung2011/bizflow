@@ -60,6 +60,7 @@ const dict = {
     "orders.product.option": "商品選項",
     "orders.cancel": "取消",
     "orders.confirmTracking": "確認單號",
+    "orders.shippingPermission": "需要發貨權限",
     "orders.valuePlaceholder": "HKD$",
     "orders.customerModal.title": "新增顧客",
     "orders.field.name": "姓名",
@@ -136,6 +137,7 @@ const dict = {
     "orders.product.option": "Product option",
     "orders.cancel": "Cancel",
     "orders.confirmTracking": "Confirm number",
+    "orders.shippingPermission": "Shipping permission required",
     "orders.valuePlaceholder": "HKD$",
     "orders.customerModal.title": "Add customer",
     "orders.field.name": "Name",
@@ -212,6 +214,7 @@ const dict = {
     "orders.product.option": "Option produit",
     "orders.cancel": "Annuler",
     "orders.confirmTracking": "Confirmer numéro",
+    "orders.shippingPermission": "Autorisation d’expédition requise",
     "orders.valuePlaceholder": "HKD$",
     "orders.customerModal.title": "Ajouter un client",
     "orders.field.name": "Nom",
@@ -515,6 +518,10 @@ function renderCreate(helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const subtotalAmount = subtotal();
   const sum = total();
+  const shippingPermissionDenied = liveMode && currentUser?.canShip !== true;
+  const shippingAttributes = shippingPermissionDenied
+    ? ` disabled aria-disabled="true" title="${escapeHtml(pageT(lang, "orders.shippingPermission"))}"`
+    : writeAttributes;
   return `<div class="orders-workspace" data-orders-create-page data-live-read-only="${liveReadOnly}">
     ${state.notice ? `<p class="orders-write-notice orders-write-notice--${escapeHtml(state.noticeType || "error")}" role="${state.noticeType === "success" ? "status" : "alert"}">${escapeHtml(state.notice)}</p>` : ""}
     <header class="orders-workspace__head">
@@ -560,8 +567,8 @@ function renderCreate(helpers) {
     <section class="orders-detail-card">
       <h2 class="orders-card-title">${escapeHtml(pageT(lang, "orders.logistics"))}</h2>
       <div class="orders-logistics-segment" role="tablist">
-        <button type="button" class="${state.shippingMode === "delivery" ? "is-active" : ""}" data-shipping-mode="delivery" data-orders-write${liveMode && currentUser?.canShip !== true ? " disabled aria-disabled=\"true\"" : writeAttributes}>${escapeHtml(pageT(lang, "orders.delivery"))}</button>
-        <button type="button" class="${state.shippingMode === "pickup" ? "is-active" : ""}" data-shipping-mode="pickup" data-orders-write${liveMode && currentUser?.canShip !== true ? " disabled aria-disabled=\"true\"" : writeAttributes}>${escapeHtml(pageT(lang, "orders.pickup"))}</button>
+        <button type="button" class="${state.shippingMode === "delivery" ? "is-active" : ""}" data-shipping-mode="delivery" data-shipping-write data-orders-write${shippingAttributes}>${escapeHtml(pageT(lang, "orders.delivery"))}</button>
+        <button type="button" class="${state.shippingMode === "pickup" ? "is-active" : ""}" data-shipping-mode="pickup" data-shipping-write data-orders-write${shippingAttributes}>${escapeHtml(pageT(lang, "orders.pickup"))}</button>
       </div>
       <div class="orders-field">
         <span class="orders-field__label">${escapeHtml(pageT(lang, "orders.trackingNo"))}</span>
@@ -570,8 +577,8 @@ function renderCreate(helpers) {
           : `<span class="orders-select-like">${escapeHtml(state.shippingMode === "pickup" ? pageT(lang, "orders.pickup") : pageT(lang, "orders.unshipped"))}</span>`}
       </div>
       <div class="orders-card-actions orders-card-actions--end">
-        <button type="button" class="orders-secondary" data-tracking-cancel data-orders-write${liveMode && currentUser?.canShip !== true ? " disabled aria-disabled=\"true\"" : writeAttributes}>${escapeHtml(pageT(lang, "orders.cancel"))}</button>
-        <button type="button" class="orders-primary" data-tracking-confirm data-orders-write${liveMode && currentUser?.canShip !== true ? " disabled aria-disabled=\"true\"" : writeAttributes}>${escapeHtml(pageT(lang, "orders.confirmTracking"))}</button>
+        <button type="button" class="orders-secondary" data-tracking-cancel data-shipping-write data-orders-write${shippingAttributes}>${escapeHtml(pageT(lang, "orders.cancel"))}</button>
+        <button type="button" class="orders-primary" data-tracking-confirm data-shipping-write data-orders-write${shippingAttributes}>${escapeHtml(pageT(lang, "orders.confirmTracking"))}</button>
       </div>
     </section>
 

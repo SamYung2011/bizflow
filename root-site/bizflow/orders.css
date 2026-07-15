@@ -723,6 +723,11 @@
   opacity: .5;
 }
 
+.orders-workspace [data-shipping-write]:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
 .orders-write-notice {
   margin: 0;
   padding: var(--space-10) var(--space-20);
