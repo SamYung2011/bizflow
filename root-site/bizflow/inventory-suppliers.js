@@ -1,4 +1,5 @@
 import { getSuppliersData } from "../data/provider.js";
+import { confirmInPage } from "../components/confirm-dialog.js";
 
 const copy = {
   zh: {
@@ -198,7 +199,7 @@ export function attachSupplierBehaviors({ rerender: nextRerender }) {
   rerender = nextRerender;
   if (attached) return;
   attached = true;
-  document.addEventListener("click", (event) => {
+  document.addEventListener("click", async (event) => {
     if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     if (event.target.closest("[data-supplier-new]")) {
       state.draft = blankSupplier();
@@ -213,7 +214,7 @@ export function attachSupplierBehaviors({ rerender: nextRerender }) {
       return;
     }
     const remove = event.target.closest("[data-supplier-delete]");
-    if (remove && window.confirm(t(currentLang(), "deleteConfirm"))) {
+    if (remove && await confirmInPage(t(currentLang(), "deleteConfirm"), { danger: true })) {
       state.suppliers = state.suppliers.filter((item) => item.id !== remove.getAttribute("data-supplier-delete"));
       if (state.category !== "all" && !categories().includes(state.category)) state.category = "all";
       rerender();

@@ -1,4 +1,5 @@
 import { getShopifyLinksData } from "../data/provider.js";
+import { confirmInPage } from "../components/confirm-dialog.js";
 
 // Existing BizFlow keeps this tab behind isBfAdmin; the new UI permission model is not wired yet.
 const copy = {
@@ -256,7 +257,7 @@ export function attachShopifyBehaviors({ rerender: nextRerender }) {
   rerender = nextRerender;
   if (attached) return;
   attached = true;
-  document.addEventListener("click", (event) => {
+  document.addEventListener("click", async (event) => {
     if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     const group = event.target.closest("[data-shopify-group]");
     if (group) {
@@ -267,7 +268,7 @@ export function attachShopifyBehaviors({ rerender: nextRerender }) {
       return;
     }
     const unlink = event.target.closest("[data-shopify-unlink]");
-    if (unlink && window.confirm(t(currentLang(), "unlinkConfirm"))) {
+    if (unlink && await confirmInPage(t(currentLang(), "unlinkConfirm"), { danger: true })) {
       state.links = state.links.filter((link) => link.id !== unlink.getAttribute("data-shopify-unlink"));
       rerender();
       return;

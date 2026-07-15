@@ -12,6 +12,7 @@ import {
   normalizeExpenseRows
 } from "./expense-model.js";
 import { createLiveExpense } from "../data/live-expense-writes.js";
+import { confirmInPage } from "../components/confirm-dialog.js";
 
 const copy = {
   zh: {
@@ -378,7 +379,7 @@ function findLocalRow(id) {
   return state.rows.find((row) => row.id === id && row.local);
 }
 
-document.addEventListener("click", (event) => {
+document.addEventListener("click", async (event) => {
   if (liveReadOnly && event.target.closest("[data-expense-write]")) return;
   if (state.writeBusy && event.target.closest("[data-expense-create-write]")) return;
   const filter = event.target.closest("[data-expense-filter]");
@@ -439,7 +440,7 @@ document.addEventListener("click", (event) => {
     return;
   }
   const remove = event.target.closest("[data-expense-delete]");
-  if (remove && window.confirm(t(currentHelpers?.lang ?? "zh", "deleteConfirm"))) {
+  if (remove && await confirmInPage(t(currentHelpers?.lang ?? "zh", "deleteConfirm"), { danger: true })) {
     const id = remove.getAttribute("data-expense-delete");
     const row = findLocalRow(id);
     if (row) {

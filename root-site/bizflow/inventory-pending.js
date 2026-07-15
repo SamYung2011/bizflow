@@ -1,5 +1,6 @@
 import { getOrdersPageData, getPendingDeductionData } from "../data/provider.js";
 import { renderManagementList } from "../components/management-list.js";
+import { confirmInPage } from "../components/confirm-dialog.js";
 
 const copy = {
   zh: {
@@ -129,16 +130,16 @@ export function attachPendingDeductionBehaviors({ rerender: nextRerender }) {
   rerender = nextRerender;
   if (attached) return;
   attached = true;
-  document.addEventListener("click", (event) => {
+  document.addEventListener("click", async (event) => {
     if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     const review = event.target.closest("[data-pending-review]");
-    if (review && window.confirm(t(currentLang(), "reviewConfirm"))) {
+    if (review && await confirmInPage(t(currentLang(), "reviewConfirm"))) {
       // Local-only demonstration. Production deduction and audit writes require the future API.
       removeInvoice(review.getAttribute("data-pending-review"));
       return;
     }
     const dismiss = event.target.closest("[data-pending-dismiss]");
-    if (dismiss && window.confirm(t(currentLang(), "dismissConfirm"))) {
+    if (dismiss && await confirmInPage(t(currentLang(), "dismissConfirm"), { danger: true })) {
       // Local-only demonstration. Production legacy_skip_deduct and audit writes require the future API.
       removeInvoice(dismiss.getAttribute("data-pending-dismiss"));
     }

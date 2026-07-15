@@ -1,4 +1,5 @@
 import { memberT } from "./members-i18n.js";
+import { confirmInPage } from "../components/confirm-dialog.js";
 import {
   createTeamUpdateComment,
   createTeamUpdateLog,
@@ -113,7 +114,7 @@ export function attachMemberUpdateLogController({ state, rerender }) {
       return;
     }
     const remove = event.target.closest("[data-update-delete]");
-    if (remove && state.access.canWriteUpdates && window.confirm(memberT(document.documentElement.lang === "zh-Hant" ? "zh" : document.documentElement.lang, "members.updates.confirmDelete"))) {
+    if (remove && state.access.canWriteUpdates && await confirmInPage(memberT(document.documentElement.lang === "zh-Hant" ? "zh" : document.documentElement.lang, "members.updates.confirmDelete"), { danger: true })) {
       const id = remove.getAttribute("data-update-delete");
       if (state.updateLogsLive && !await runWrite(() => deleteTeamUpdateLog(id))) return;
       state.updateLogs = state.updateLogs.filter((entry) => entry.id !== id);
@@ -123,7 +124,7 @@ export function attachMemberUpdateLogController({ state, rerender }) {
     const removeComment = event.target.closest("[data-update-comment-delete]");
     const entry = removeComment ? state.updateLogs.find((item) => item.id === removeComment.getAttribute("data-update-id")) : null;
     const comment = entry?.comments.find((item) => item.id === removeComment?.getAttribute("data-update-comment-delete"));
-    if (removeComment && comment && canDeleteComment(comment, state) && window.confirm(memberT(document.documentElement.lang === "zh-Hant" ? "zh" : document.documentElement.lang, "members.updates.confirmDeleteComment"))) {
+    if (removeComment && comment && canDeleteComment(comment, state) && await confirmInPage(memberT(document.documentElement.lang === "zh-Hant" ? "zh" : document.documentElement.lang, "members.updates.confirmDeleteComment"), { danger: true })) {
       const id = removeComment.getAttribute("data-update-comment-delete");
       if (state.updateLogsLive && !await runWrite(() => deleteTeamUpdateComment(id))) return;
       if (entry) entry.comments = entry.comments.filter((item) => item.id !== id);

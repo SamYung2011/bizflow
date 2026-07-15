@@ -1,4 +1,5 @@
 import { memberT } from "./members-i18n.js";
+import { confirmInPage } from "../components/confirm-dialog.js";
 
 function currentLang() {
   return document.documentElement.lang === "zh-Hant" ? "zh" : document.documentElement.lang;
@@ -47,7 +48,7 @@ export function renderMemberCompanies({ state, helpers }) {
 
 export function attachMemberCompanyController({ state, rerender }) {
   // 现网该页受 isSuperAdmin 门控；静态复刻按真数据展示，所有动作只改本地 state。
-  document.addEventListener("click", (event) => {
+  document.addEventListener("click", async (event) => {
     if (state.liveReadOnly) return;
     const edit = event.target.closest("[data-company-edit]");
     if (edit) {
@@ -68,7 +69,7 @@ export function attachMemberCompanyController({ state, rerender }) {
       window.alert(memberT(currentLang(), "members.companies.employeeBlocked"));
       return;
     }
-    if (window.confirm(memberT(currentLang(), "members.companies.deleteConfirm"))) {
+    if (await confirmInPage(memberT(currentLang(), "members.companies.deleteConfirm"), { danger: true })) {
       state.companies = state.companies.filter((item) => item.id !== company.id);
       rerender();
     }

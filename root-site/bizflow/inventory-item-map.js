@@ -1,4 +1,5 @@
 import { getInventoryAliasesData, getOrdersPageData } from "../data/provider.js";
+import { confirmInPage } from "../components/confirm-dialog.js";
 
 const copy = {
   zh: {
@@ -324,7 +325,7 @@ export function attachItemMapBehaviors({ rerender: nextRerender }) {
   rerender = nextRerender;
   if (attached) return;
   attached = true;
-  document.addEventListener("click", (event) => {
+  document.addEventListener("click", async (event) => {
     if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     const toggle = event.target.closest("[data-item-map-group-toggle]");
     if (toggle) {
@@ -355,7 +356,7 @@ export function attachItemMapBehaviors({ rerender: nextRerender }) {
       return;
     }
     const remove = event.target.closest("[data-item-map-delete]");
-    if (remove && window.confirm(t(currentHelpersLang(), "deleteConfirm"))) {
+    if (remove && await confirmInPage(t(currentHelpersLang(), "deleteConfirm"), { danger: true })) {
       state.aliases = state.aliases.filter((item) => item.id !== remove.getAttribute("data-item-map-delete"));
       rerender();
       return;

@@ -1,6 +1,7 @@
 import { taskT } from "./tasks-i18n.js";
 import { isWaitingApproval } from "./tasks-model.js";
 import { setSessionValue } from "../data/session-state.js";
+import { confirmInPage } from "../components/confirm-dialog.js";
 
 export function attachTaskDomainController({
   state,
@@ -155,7 +156,7 @@ export function attachTaskDomainController({
     const subtaskDelete = event.target.closest("[data-task-subtask-delete]");
     if (subtaskDelete) {
       if (state.liveReadOnly || subtaskDelete.disabled) return;
-      if (window.confirm(taskT(getHelpers().lang, "tasks.detail.deleteSubtaskConfirm"))) {
+      if (await confirmInPage(taskT(getHelpers().lang, "tasks.detail.deleteSubtaskConfirm"), { danger: true })) {
         removeSubtask(subtaskDelete.getAttribute("data-task-subtask-delete"));
         rerender();
       }

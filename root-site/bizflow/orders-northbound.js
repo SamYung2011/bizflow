@@ -1,5 +1,6 @@
 import { getNorthboundData } from "../data/provider.js";
 import { formatDateTime } from "../data/live-snapshot-utils.js";
+import { confirmInPage } from "../components/confirm-dialog.js";
 import {
   createLiveNorthboundRecord,
   createLiveNorthboundStatus,
@@ -541,7 +542,7 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
     }
     const deleteButton = event.target.closest("[data-northbound-delete]");
     if (deleteButton) {
-      if (window.confirm(t(currentHelpers?.lang, "deleteConfirm"))) {
+      if (await confirmInPage(t(currentHelpers?.lang, "deleteConfirm"), { danger: true })) {
         const id = deleteButton.getAttribute("data-northbound-delete");
         state.error = "";
         if (liveMode()) {

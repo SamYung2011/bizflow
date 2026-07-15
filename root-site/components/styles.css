@@ -887,6 +887,81 @@ textarea {
   line-height: var(--lh-body);
 }
 
+.tp-confirm-overlay {
+  --tp-confirm-dialog-width: 420px; /* 通用确认弹层紧凑桌面宽度，无对应组件 token。 */
+  --tp-confirm-z-index: 200; /* 高于全站现有 z-index 100 的业务弹层，确保二次确认可操作。 */
+
+  position: fixed;
+  inset: 0;
+  z-index: var(--tp-confirm-z-index);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-20);
+  background: rgba(0, 0, 0, .5); /* docs/00 §5.4 表单类遮罩黑 50%。 */
+}
+
+.tp-confirm-dialog {
+  display: grid;
+  width: min(100%, var(--tp-confirm-dialog-width));
+  gap: var(--space-20);
+  padding: var(--space-20);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .12); /* 沿用全站菜单/弹层既有阴影。 */
+}
+
+.tp-confirm-dialog h2,
+.tp-confirm-dialog p {
+  margin: 0;
+}
+
+.tp-confirm-dialog h2 {
+  color: var(--gray-80);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+  line-height: var(--lh-tight);
+}
+
+.tp-confirm-dialog p {
+  color: var(--gray-60);
+  font-size: var(--font-body-size);
+  font-weight: var(--font-body-weight);
+  line-height: var(--lh-body);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.tp-confirm-dialog footer {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-10);
+}
+
+.tp-confirm-dialog__button {
+  min-width: 0;
+  height: var(--space-40);
+  padding: 0 var(--space-20);
+  border: 0;
+  border-radius: var(--radius-10);
+  font-size: var(--font-body-size);
+  font-weight: var(--font-body-weight);
+}
+
+.tp-confirm-dialog__button--cancel {
+  background: var(--gray-10);
+  color: var(--gray-80);
+}
+
+.tp-confirm-dialog__button--confirm {
+  background: var(--blue);
+  color: var(--white);
+}
+
+.tp-confirm-dialog__button--danger {
+  background: var(--red);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
