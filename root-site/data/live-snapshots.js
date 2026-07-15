@@ -765,3 +765,7 @@ export async function getLiveSnapshot(snapshot) {
   }
   return LIVE_BUILDERS.get(snapshot);
 }
+
+export function invalidateLiveSnapshot(...snapshots) {
+  snapshots.flat().forEach((snapshot) => LIVE_BUILDERS.delete(String(snapshot || "")));
+}

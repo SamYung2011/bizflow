@@ -1,4 +1,5 @@
 import { fetchAllTable, getSession } from "./auth.js";
+import { activateLiveTableCacheUser, clearLiveTableCache, invalidateLiveTableCache } from "./live-table-cache.js";
 
 const HK_TIME_ZONE = "Asia/Hong_Kong";
 const tablePromises = new Map();
@@ -76,11 +77,17 @@ export function timestamp(value) {
 
 export async function ensureLiveSession() {
   const session = await getSession();
-  if (!session) return null;
+  if (!session) {
+    liveUserId = "";
+    tablePromises.clear();
+    clearLiveTableCache();
+    return null;
+  }
   if (liveUserId !== session.user.id) {
     liveUserId = session.user.id;
     tablePromises.clear();
   }
+  activateLiveTableCacheUser(session.user.id);
   return session;
 }
 
@@ -90,4 +97,13 @@ export function allRows(table, orderCol = "created_at", ascending = true, second
     tablePromises.set(key, fetchAllTable(table, orderCol, ascending, secondaryOrder));
   }
   return tablePromises.get(key);
+}
+
+export function invalidateLiveTables(...tables) {
+  const targets = new Set(tables.flat().map((table) => String(table || "")).filter(Boolean));
+  if (!targets.size) return;
+  for (const key of tablePromises.keys()) {
+    if (targets.has(key.split(":", 1)[0])) tablePromises.delete(key);
+  }
+  invalidateLiveTableCache([...targets]);
 }

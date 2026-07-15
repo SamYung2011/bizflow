@@ -301,7 +301,7 @@ function renderOrderList(helpers) {
 }
 
 function renderDomainContent(helpers) {
-  if (state.tab === "northbound") return renderNorthbound({ ...helpers, liveReadOnly });
+  if (state.tab === "northbound") return renderNorthbound({ ...helpers, liveMode: liveReadOnly, liveReadOnly: false });
   if (state.tab === "chargerLeads") return renderChargerLeads(helpers);
   if (state.tab === "revenue" && canViewRevenue) return renderRevenue(helpers);
   return renderOrderList(helpers);

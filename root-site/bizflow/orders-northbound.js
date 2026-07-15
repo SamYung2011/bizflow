@@ -1,4 +1,11 @@
 import { getNorthboundData } from "../data/provider.js";
+import { formatDateTime } from "../data/live-snapshot-utils.js";
+import {
+  createLiveNorthboundRecord,
+  createLiveNorthboundStatus,
+  deleteLiveNorthboundRecord,
+  updateLiveNorthboundRecord
+} from "../data/live-northbound-writes.js";
 
 const PAGE_CHUNK = 50;
 // 本地新增情況沿用 bizflow 现网港車北上状态色；这些值写入本地 status 数据，不是页面散落样式。
@@ -51,6 +58,9 @@ const copy = {
     newStatus: "新增情況",
     newStatusPlaceholder: "輸入新情況",
     statusRequired: "請輸入情況標籤",
+    saveFailed: "保存失敗，請重試",
+    deleteFailed: "刪除失敗，請重試",
+    statusCreateFailed: "新增情況失敗，請重試",
     cancel: "取消",
     save: "保存",
     close: "關閉"
@@ -90,6 +100,9 @@ const copy = {
     newStatus: "Add status",
     newStatusPlaceholder: "New status name",
     statusRequired: "Enter a status name",
+    saveFailed: "Save failed. Please try again.",
+    deleteFailed: "Delete failed. Please try again.",
+    statusCreateFailed: "Could not add the status. Please try again.",
     cancel: "Cancel",
     save: "Save",
     close: "Close"
@@ -129,6 +142,9 @@ const copy = {
     newStatus: "Ajouter un statut",
     newStatusPlaceholder: "Nouveau statut",
     statusRequired: "Saisissez un statut",
+    saveFailed: "Échec de l’enregistrement. Réessayez.",
+    deleteFailed: "Échec de la suppression. Réessayez.",
+    statusCreateFailed: "Impossible d’ajouter le statut. Réessayez.",
     cancel: "Annuler",
     save: "Enregistrer",
     close: "Fermer"
@@ -147,6 +163,7 @@ const state = {
   modalOpen: false,
   form: {},
   formError: "",
+  error: "",
   newStatusLabel: ""
 };
 
@@ -154,6 +171,7 @@ let currentHelpers = null;
 let rerender = () => {};
 let attached = false;
 let modalReturnFocus = null;
+let lastTouchTap = { key: "", at: 0 };
 
 function t(lang, key) {
   return copy[lang]?.[key] ?? copy.zh[key] ?? key;
@@ -171,6 +189,37 @@ function safeColor(value) {
 
 function liveReadOnly() {
   return currentHelpers?.liveReadOnly === true;
+}
+
+function liveMode() {
+  return currentHelpers?.liveMode === true;
+}
+
+function showWriteError(key, { form = false } = {}) {
+  if (form) state.formError = t(currentHelpers?.lang, key);
+  else state.error = t(currentHelpers?.lang, key);
+}
+
+function liveRecord(row, current = null) {
+  return {
+    id: row.id,
+    name: row.name || "",
+    plateNo: row.plate_no || "",
+    hkid: row.hkid || "",
+    phoneHk: row.phone_hk || "",
+    phoneMainland: row.phone_mainland || "",
+    address: row.address || "",
+    hrpNo: row.hrp_no || "",
+    remarks: row.remarks || "",
+    submittedAt: row.submitted_at || null,
+    submittedEndAt: row.submitted_end_at || null,
+    statusId: row.status_id || null,
+    createdAt: current?.createdAt || formatDateTime(row.created_at)
+  };
+}
+
+function liveStatus(row) {
+  return { id: row.id, label: row.label, color: row.color, sortOrder: Number(row.sort_order) || 0 };
 }
 
 export function normalizeNorthboundStatusLabel(label) {
@@ -390,6 +439,7 @@ export function renderNorthbound(helpers) {
       </select>
     </div>
     <div class="northbound-counts"><span>${escapeHtml(`${t(lang, "total")} ${state.records.length} ${t(lang, "records")}`)}</span><span>${escapeHtml(`${t(lang, "visible")} ${filtered.length} ${t(lang, "records")}`)}</span></div>
+    ${state.error ? `<p class="northbound-form-error" role="alert">${escapeHtml(state.error)}</p>` : ""}
     <div class="northbound-table-shell">
       <div class="northbound-table-scroll">
         <table class="northbound-table">
@@ -407,28 +457,59 @@ export function renderNorthbound(helpers) {
   </section>`;
 }
 
-function commitInlineEdit() {
+async function commitInlineEdit() {
   if (liveReadOnly()) return;
   if (!state.edit) return;
   const { rowId, field } = state.edit;
   const record = state.records.find((item) => item.id === rowId);
   if (!record) return;
+  if (!liveMode()) {
+    if (field === "submittedRange") {
+      const start = document.querySelector('[data-northbound-inline-input][data-date-part="start"]')?.value || "";
+      const end = document.querySelector('[data-northbound-inline-input][data-date-part="end"]')?.value || "";
+      record.submittedAt = start || null;
+      record.submittedEndAt = end || null;
+    } else {
+      const input = document.querySelector(`[data-northbound-inline-input][data-row-id="${CSS.escape(rowId)}"][data-field="${CSS.escape(field)}"]`);
+      record[field] = input?.value || (field === "statusId" ? null : "");
+    }
+    state.edit = null;
+    rerender();
+    return;
+  }
+
+  let patch;
   if (field === "submittedRange") {
     const start = document.querySelector('[data-northbound-inline-input][data-date-part="start"]')?.value || "";
     const end = document.querySelector('[data-northbound-inline-input][data-date-part="end"]')?.value || "";
-    record.submittedAt = start || null;
-    record.submittedEndAt = end || null;
+    patch = { submitted_at: start, submitted_end_at: end };
   } else {
     const input = document.querySelector(`[data-northbound-inline-input][data-row-id="${CSS.escape(rowId)}"][data-field="${CSS.escape(field)}"]`);
-    record[field] = input?.value || (field === "statusId" ? null : "");
+    const dbField = {
+      statusId: "status_id",
+      plateNo: "plate_no",
+      phoneHk: "phone_hk",
+      phoneMainland: "phone_mainland",
+      hrpNo: "hrp_no"
+    }[field] || field;
+    patch = { [dbField]: input?.value || (field === "statusId" ? null : "") };
   }
   state.edit = null;
+  state.error = "";
+  rerender();
+  try {
+    const saved = liveRecord(await updateLiveNorthboundRecord(rowId, patch), record);
+    state.records = state.records.map((item) => item.id === saved.id ? saved : item);
+  } catch {
+    showWriteError("saveFailed");
+  }
   rerender();
 }
 
 function openModal() {
   if (liveReadOnly()) return;
   modalReturnFocus = document.activeElement;
+  state.error = "";
   state.form = emptyForm();
   state.formError = "";
   state.newStatusLabel = "";
@@ -449,7 +530,7 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
   if (attached) return;
   attached = true;
 
-  document.addEventListener("click", (event) => {
+  document.addEventListener("click", async (event) => {
     if (liveReadOnly() && event.target.closest("[data-orders-write]")) return;
     if (event.target.closest("[data-northbound-add]")) return openModal();
     if (event.target.closest("[data-northbound-modal-close]") || event.target.matches("[data-northbound-modal-overlay]")) return closeModal();
@@ -462,7 +543,17 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
     if (deleteButton) {
       if (window.confirm(t(currentHelpers?.lang, "deleteConfirm"))) {
         const id = deleteButton.getAttribute("data-northbound-delete");
-        state.records = state.records.filter((record) => record.id !== id);
+        state.error = "";
+        if (liveMode()) {
+          try {
+            await deleteLiveNorthboundRecord(id);
+            state.records = state.records.filter((record) => record.id !== id);
+          } catch {
+            showWriteError("deleteFailed");
+          }
+        } else {
+          state.records = state.records.filter((record) => record.id !== id);
+        }
         rerender();
       }
       return;
@@ -476,14 +567,26 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
         if (existing) {
           state.form.statusId = existing.id;
         } else {
-          const status = {
-            id: `local-status-${Date.now()}`,
+          const values = {
             label,
             color: LOCAL_STATUS_COLORS[state.statuses.length % LOCAL_STATUS_COLORS.length],
             sortOrder: Math.max(0, ...state.statuses.map((item) => item.sortOrder)) + 10
           };
-          state.statuses.push(status);
-          state.form.statusId = status.id;
+          if (liveMode()) {
+            try {
+              const status = liveStatus(await createLiveNorthboundStatus(values));
+              state.statuses.push(status);
+              state.form.statusId = status.id;
+            } catch {
+              showWriteError("statusCreateFailed", { form: true });
+              rerender();
+              return;
+            }
+          } else {
+            const status = { id: `local-status-${Date.now()}`, ...values };
+            state.statuses.push(status);
+            state.form.statusId = status.id;
+          }
         }
         state.newStatusLabel = "";
         state.formError = "";
@@ -492,13 +595,32 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
     }
   });
 
-  document.addEventListener("dblclick", (event) => {
+  function startInlineEdit(cell) {
     if (liveReadOnly()) return;
-    const cell = event.target.closest("[data-northbound-edit-cell]");
     if (!cell) return;
     state.edit = { rowId: cell.getAttribute("data-row-id"), field: cell.getAttribute("data-field") };
+    state.error = "";
     rerender();
     requestAnimationFrame(() => document.querySelector("[data-northbound-inline-input]")?.focus());
+  }
+
+  document.addEventListener("dblclick", (event) => {
+    startInlineEdit(event.target.closest("[data-northbound-edit-cell]"));
+  });
+
+  document.addEventListener("pointerup", (event) => {
+    if (event.pointerType !== "touch" || liveReadOnly()) return;
+    const cell = event.target.closest("[data-northbound-edit-cell]");
+    if (!cell) return;
+    const key = `${cell.getAttribute("data-row-id")}:${cell.getAttribute("data-field")}`;
+    const now = Date.now();
+    if (lastTouchTap.key === key && now - lastTouchTap.at <= 300) {
+      event.preventDefault();
+      lastTouchTap = { key: "", at: 0 };
+      startInlineEdit(cell);
+      return;
+    }
+    lastTouchTap = { key, at: now };
   });
 
   document.addEventListener("input", (event) => {
@@ -564,7 +686,7 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
     }, 0);
   });
 
-  document.addEventListener("submit", (event) => {
+  document.addEventListener("submit", async (event) => {
     if (!event.target.matches("[data-northbound-form]")) return;
     event.preventDefault();
     if (liveReadOnly()) return;
@@ -573,19 +695,42 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
       rerender();
       return;
     }
-    const now = new Date();
-    const createdAt = new Intl.DateTimeFormat(localeForLang(currentHelpers?.lang), {
-      year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
-    }).format(now);
-    state.records.unshift({
-      id: `local-northbound-${Date.now()}`,
-      ...emptyForm(),
-      ...state.form,
-      statusId: state.form.statusId || null,
-      submittedAt: state.form.submittedAt || null,
-      submittedEndAt: state.form.submittedEndAt || null,
-      createdAt
-    });
+    if (liveMode()) {
+      try {
+        const saved = await createLiveNorthboundRecord({
+          name: state.form.name,
+          plate_no: state.form.plateNo,
+          hkid: state.form.hkid,
+          hrp_no: state.form.hrpNo,
+          phone_hk: state.form.phoneHk,
+          phone_mainland: state.form.phoneMainland,
+          submitted_at: state.form.submittedAt,
+          submitted_end_at: state.form.submittedEndAt,
+          address: state.form.address,
+          remarks: state.form.remarks,
+          status_id: state.form.statusId
+        });
+        state.records.unshift(liveRecord(saved));
+      } catch {
+        showWriteError("saveFailed", { form: true });
+        rerender();
+        return;
+      }
+    } else {
+      const now = new Date();
+      const createdAt = new Intl.DateTimeFormat(localeForLang(currentHelpers?.lang), {
+        year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
+      }).format(now);
+      state.records.unshift({
+        id: `local-northbound-${Date.now()}`,
+        ...emptyForm(),
+        ...state.form,
+        statusId: state.form.statusId || null,
+        submittedAt: state.form.submittedAt || null,
+        submittedEndAt: state.form.submittedEndAt || null,
+        createdAt
+      });
+    }
     state.modalOpen = false;
     state.visibleLimit = PAGE_CHUNK;
     rerender();

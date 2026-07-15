@@ -1,4 +1,11 @@
 import { createClient } from "../vendor/supabase-js.esm.js";
+import {
+  activateLiveTableCacheUser,
+  clearLiveTableCache,
+  liveTableCacheVersion,
+  readLiveTableCache,
+  writeLiveTableCache
+} from "./live-table-cache.js";
 
 const CONFIG_URL = new URL("../config.local.js", import.meta.url);
 const ADMIN_EMAIL = "samyung2011@gmail.com";
@@ -105,8 +112,9 @@ export async function getSupabaseClient() {
           detectSessionInUrl: true
         }
       });
-      client.auth.onAuthStateChange(() => {
+      client.auth.onAuthStateChange((event) => {
         currentUserPromise = null;
+        if (event === "SIGNED_OUT") clearLiveTableCache();
       });
       return client;
     });
@@ -164,10 +172,14 @@ export async function signUp({ email, password, name, companyName, note }) {
 
 export async function signOut() {
   const client = await getSupabaseClient();
-  if (!client) return;
+  if (!client) {
+    clearLiveTableCache();
+    return;
+  }
   const { error } = await client.auth.signOut();
   if (error) throw error;
   currentUserPromise = null;
+  clearLiveTableCache();
 }
 
 export async function resetPasswordForEmail(email, redirectTo) {
@@ -191,8 +203,7 @@ export async function completeForcedPasswordChange(password, employeeId) {
   await signOut();
 }
 
-export async function fetchAllTable(table, orderCol, ascending = true, secondaryOrder = "id") {
-  const client = requireClient(await getSupabaseClient());
+async function fetchAllTableFromNetwork(client, table, orderCol, ascending, secondaryOrder) {
   const { count, error: countError } = await client.from(table).select("*", { count: "exact", head: true });
   if (countError) throw new Error(`${table} count: ${countError.message || countError}`);
   const pageCount = Math.max(1, Math.ceil((count || 0) / PAGE_SIZE));
@@ -216,6 +227,27 @@ export async function fetchAllTable(table, orderCol, ascending = true, secondary
       rows.push(row);
     }
   }
+  return rows;
+}
+
+export async function fetchAllTable(table, orderCol, ascending = true, secondaryOrder = "id") {
+  const client = requireClient(await getSupabaseClient());
+  const { data: sessionData, error: sessionError } = await client.auth.getSession();
+  if (sessionError) throw sessionError;
+  const userId = sessionData.session?.user?.id || "";
+  if (userId) activateLiveTableCacheUser(userId);
+  const cacheArgs = { userId, table, orderCol, ascending, secondaryOrder };
+  const cacheVersion = liveTableCacheVersion(table);
+  const cached = userId ? readLiveTableCache(cacheArgs) : null;
+  if (cached && !cached.stale) return cached.rows;
+  if (cached) {
+    void fetchAllTableFromNetwork(client, table, orderCol, ascending, secondaryOrder)
+      .then((rows) => writeLiveTableCache({ ...cacheArgs, rows, version: cacheVersion }))
+      .catch((error) => console.warn(`[live-table-cache] ${table} refresh failed`, error));
+    return cached.rows;
+  }
+  const rows = await fetchAllTableFromNetwork(client, table, orderCol, ascending, secondaryOrder);
+  if (userId) writeLiveTableCache({ ...cacheArgs, rows, version: cacheVersion });
   return rows;
 }
 
