@@ -1,4 +1,6 @@
 import { getCurrentUser, getSession, getSupabaseClient } from "./auth.js";
+import { invalidateLiveTables } from "./live-snapshot-utils.js";
+import { invalidateLiveSnapshot } from "./live-snapshots.js";
 
 async function writeContext() {
   const [client, session, currentUser] = await Promise.all([
@@ -44,6 +46,25 @@ async function uploadTaskAttachment(client, file, taskId) {
   };
 }
 
+function storedAttachment(value) {
+  if (!value || typeof value !== "object" || !value.url) return null;
+  return {
+    url: String(value.url),
+    name: String(value.name || "attachment"),
+    size: Number.isFinite(Number(value.size)) ? Number(value.size) : 0,
+    type: String(value.type || "application/octet-stream")
+  };
+}
+
+async function invalidateTaskReads(...tables) {
+  try {
+    await invalidateLiveTables(tables);
+    invalidateLiveSnapshot("tasks.json", "home.json");
+  } catch (error) {
+    console.warn("Task cache invalidation failed", error);
+  }
+}
+
 export async function createLiveTask({ title, content, priority, due, requiresReview, assigneeIds, files = [] }) {
   const { client, currentUser } = await writeContext();
   const assigned = uniqueIds(assigneeIds);
@@ -86,6 +107,7 @@ export async function createLiveTask({ title, content, priority, due, requiresRe
       throwIfError(attachmentResult.error);
       task = attachmentResult.data;
     }
+    await invalidateTaskReads("employee_tasks", "task_assignees");
     return { task, assignees: assigneeResult.data ?? [], attachments: uploads };
   } catch (error) {
     if (uploadedPaths.length) await client.storage.from("task-attachments").remove(uploadedPaths);
@@ -94,7 +116,7 @@ export async function createLiveTask({ title, content, priority, due, requiresRe
   }
 }
 
-export async function updateLiveTask(taskId, { title, content, priority, due, requiresReview, assigneeIds, originalTitle, trackTitleEdit }) {
+export async function updateLiveTask(taskId, { title, content, priority, due, requiresReview, assigneeIds, originalTitle, trackTitleEdit, attachments }) {
   const { client, currentUser } = await writeContext();
   const assigned = uniqueIds(assigneeIds);
   if (!assigned.length) throw new Error("Task requires an assignee");
@@ -109,8 +131,29 @@ export async function updateLiveTask(taskId, { title, content, priority, due, re
     patch.title_edited_by = currentUser.employeeId;
     patch.title_edited_at = new Date().toISOString();
   }
-  const taskResult = await client.from("employee_tasks").update(patch).eq("id", taskId).select("*").single();
-  throwIfError(taskResult.error);
+  const uploadedPaths = [];
+  const nextAttachments = [];
+  let taskResult;
+  try {
+    if (Array.isArray(attachments)) {
+      for (const attachment of attachments) {
+        if (attachment?.file) {
+          const uploaded = await uploadTaskAttachment(client, attachment.file, taskId);
+          uploadedPaths.push(uploaded.path);
+          nextAttachments.push(uploaded.attachment);
+        } else {
+          const stored = storedAttachment(attachment);
+          if (stored) nextAttachments.push(stored);
+        }
+      }
+      patch.attachments = nextAttachments.length ? nextAttachments : null;
+    }
+    taskResult = await client.from("employee_tasks").update(patch).eq("id", taskId).select("*").single();
+    throwIfError(taskResult.error);
+  } catch (error) {
+    if (uploadedPaths.length) await client.storage.from("task-attachments").remove(uploadedPaths);
+    throw error;
+  }
 
   const currentResult = await client.from("task_assignees").select("employee_id").eq("task_id", taskId);
   throwIfError(currentResult.error);
@@ -130,9 +173,42 @@ export async function updateLiveTask(taskId, { title, content, priority, due, re
   if (taskResult.data.employee_id !== assigned[0]) {
     const ownerResult = await client.from("employee_tasks").update({ employee_id: assigned[0] }).eq("id", taskId).select("*").single();
     throwIfError(ownerResult.error);
-    return ownerResult.data;
+    await invalidateTaskReads("employee_tasks", "task_assignees");
+    return { task: ownerResult.data, attachments: Array.isArray(attachments) ? nextAttachments : null };
   }
-  return taskResult.data;
+  await invalidateTaskReads("employee_tasks", "task_assignees");
+  return { task: taskResult.data, attachments: Array.isArray(attachments) ? nextAttachments : null };
+}
+
+export async function createLiveTaskFeedback({ taskId, message, attachments = [], parentFeedbackId = null, mentionedUserIds = [] }) {
+  const { client, currentUser } = await writeContext();
+  const files = attachments.map((attachment) => attachment?.file ?? attachment).filter(Boolean);
+  const mentions = uniqueIds(mentionedUserIds);
+  if (!String(message || "").trim() && !files.length) throw new Error("Task feedback requires content or an attachment");
+  const uploadedPaths = [];
+  try {
+    const uploads = [];
+    for (const file of files) {
+      const uploaded = await uploadTaskAttachment(client, file, taskId);
+      uploadedPaths.push(uploaded.path);
+      uploads.push(uploaded.attachment);
+    }
+    const result = await client.from("employee_task_feedbacks").insert({
+      task_id: taskId,
+      author_user_id: currentUser.userId,
+      author_name: currentUser.name,
+      body: String(message || "").trim() || null,
+      parent_feedback_id: parentFeedbackId || null,
+      mentioned_user_ids: mentions.length ? mentions : null,
+      attachments: uploads.length ? uploads : null
+    }).select("*").single();
+    throwIfError(result.error);
+    await invalidateTaskReads("employee_task_feedbacks");
+    return { feedback: result.data, attachments: uploads };
+  } catch (error) {
+    if (uploadedPaths.length) await client.storage.from("task-attachments").remove(uploadedPaths);
+    throw error;
+  }
 }
 
 export async function completeLiveTask({ taskId, targetEmployeeId, wholeTask, needsApproval }) {

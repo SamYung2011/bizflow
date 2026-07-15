@@ -364,6 +364,12 @@ async function buildTasksSnapshot() {
       visibility: task.department_id
         ? { scope: "department", department: asText(departmentById.get(task.department_id)?.name) || null }
         : { scope: "team", department: null },
+      attachments: asArray(task.attachments).map((attachment) => ({
+        url: asText(attachment?.url),
+        name: asText(attachment?.name, "attachment"),
+        size: asNumber(attachment?.size),
+        type: asText(attachment?.type, "application/octet-stream")
+      })).filter((attachment) => attachment.url),
       attachmentCount: asArray(task.attachments).length,
       assignees: taskAssignees.map((assignee) => ({
         employeeId: asText(assignee.employee_id),
@@ -378,6 +384,13 @@ async function buildTasksSnapshot() {
         time: formatDateTime(feedback.created_at),
         body: asText(feedback.body),
         parentId: feedback.parent_feedback_id ?? null,
+        mentionedUserIds: asArray(feedback.mentioned_user_ids).map(String),
+        attachments: asArray(feedback.attachments).map((attachment) => ({
+          url: asText(attachment?.url),
+          name: asText(attachment?.name, "attachment"),
+          size: asNumber(attachment?.size),
+          type: asText(attachment?.type, "application/octet-stream")
+        })).filter((attachment) => attachment.url),
         attachmentCount: asArray(feedback.attachments).length
       }))
     };

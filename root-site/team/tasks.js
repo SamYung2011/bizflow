@@ -11,7 +11,7 @@ import { calendarRelatedTasks, isTaskCreator, memberIdentity, openAssignedTaskCo
 import { attachTaskDomainController } from "./tasks-domain-controller.js";
 import { renderTaskBoardGrid, renderTaskToolbar } from "./tasks-board.js";
 import { getSessionValue, setSessionValue } from "../data/session-state.js";
-import { completeLiveTask, createLiveTask, setLiveTaskParticipation, updateLiveTask } from "../data/live-task-writes.js";
+import { completeLiveTask, createLiveTask, createLiveTaskFeedback, setLiveTaskParticipation, updateLiveTask } from "../data/live-task-writes.js";
 
 const data = await getTeamTaskData();
 const currentUser = await getCurrentUser();
@@ -27,8 +27,13 @@ const unreadWatermarks = await getUnreadWatermarks();
 markRead("tasks", unreadWatermarks.tasks);
 const clonedTasks = data.tasks.map((task) => ({
   ...task,
+  attachments: (task.attachments ?? []).map((attachment) => ({ ...attachment })),
   assignees: (task.assignees ?? []).map((assignee) => ({ ...assignee })),
-  feedback: task.feedback.map((entry) => ({ ...entry })),
+  feedback: task.feedback.map((entry) => ({
+    ...entry,
+    attachments: (entry.attachments ?? []).map((attachment) => ({ ...attachment })),
+    mentionedUserIds: (entry.mentionedUserIds ?? []).slice()
+  })),
   subtasks: []
 }));
 const clonedTaskById = new Map(clonedTasks.map((task) => [task.id, task]));
@@ -66,6 +71,8 @@ const state = {
   submitCanAssignOthers: permissions.canAssignOthers,
   submitDraft: { ...data.form.defaults, attachments: [] },
   submitError: "",
+  feedbackDraft: { message: "", attachments: [] },
+  feedbackError: "",
   writeBusy: false,
   writeError: "",
   actionTaskId: null
@@ -214,6 +221,8 @@ function selectedTask() {
 function closeTaskDetail() {
   state.detailOpen = false;
   state.detailTab = "content";
+  state.feedbackDraft = { message: "", attachments: [] };
+  state.feedbackError = "";
   rerenderTaskPage({ restoreDetailFocus: true });
 }
 
@@ -259,7 +268,7 @@ function openTaskEdit(taskId) {
     requiresReview: task.requiresReview ? "yes" : "no",
     members: task.assignees.slice(1).map((assignee) => assignee.name).join(", "),
     due: String(task.due || "").replaceAll("/", "-"),
-    attachments: []
+    attachments: (task.attachments ?? []).map((attachment) => ({ ...attachment }))
   };
   rerenderTaskPage({ focusSubmit: true });
 }
@@ -480,6 +489,29 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const submitAttachmentRemove = event.target.closest("[data-task-submit-attachment-remove]");
+  if (submitAttachmentRemove) {
+    if (submitAttachmentRemove.disabled || state.writeBusy) return;
+    const index = Number(submitAttachmentRemove.getAttribute("data-task-submit-attachment-remove"));
+    if (Number.isInteger(index)) state.submitDraft.attachments.splice(index, 1);
+    rerenderTaskPage({ focusSubmit: true });
+    return;
+  }
+
+  if (event.target.closest("[data-task-feedback-attachment]")) {
+    document.querySelector("[data-task-feedback-file]")?.click();
+    return;
+  }
+
+  const feedbackAttachmentRemove = event.target.closest("[data-task-feedback-attachment-remove]");
+  if (feedbackAttachmentRemove) {
+    if (feedbackAttachmentRemove.disabled || state.writeBusy) return;
+    const index = Number(feedbackAttachmentRemove.getAttribute("data-task-feedback-attachment-remove"));
+    if (Number.isInteger(index)) state.feedbackDraft.attachments.splice(index, 1);
+    rerenderTaskPage({ focusFeedback: true });
+    return;
+  }
+
   if (event.target.closest("[data-task-submit-close]") || event.target.matches("[data-task-submit-overlay]")) {
     closeTaskSubmit();
     return;
@@ -491,6 +523,8 @@ document.addEventListener("click", async (event) => {
     state.selectedTaskId = detailTrigger.getAttribute("data-task-detail-open");
     state.detailOpen = true;
     state.detailTab = "content";
+    state.feedbackDraft = { message: "", attachments: [] };
+    state.feedbackError = "";
     state.calendarExpandedDate = null;
     closeAllFilterMenus(null);
     rerenderTaskPage({ focusDetail: true });
@@ -607,7 +641,7 @@ document.addEventListener("submit", async (event) => {
         if (state.submitMode === "edit") {
           const task = state.tasks.find((item) => item.id === state.submitTaskId);
           if (!task || !canEditTask(task)) throw new Error("Task edit permission required");
-          await updateLiveTask(task.id, {
+          const result = await updateLiveTask(task.id, {
             title,
             content,
             priority: task.dbPriority === "none" && task.priority === "low" && priority === "low" ? "none" : priority,
@@ -615,7 +649,8 @@ document.addEventListener("submit", async (event) => {
             requiresReview,
             assigneeIds: assignedRows.map((member) => member.id),
             originalTitle: task.title,
-            trackTitleEdit: !isTaskCreator(task, state.currentUser)
+            trackTitleEdit: !isTaskCreator(task, state.currentUser),
+            attachments: state.submitDraft.attachments
           });
           task.title = title;
           task.content = content;
@@ -631,6 +666,8 @@ document.addEventListener("submit", async (event) => {
           }));
           task.members = task.assignees.map((assignee) => assignee.name);
           task.owner = task.members.join("、") || "—";
+          task.attachments = result.attachments ?? task.attachments;
+          task.attachmentCount = task.attachments.length;
         } else {
           const result = await createLiveTask({
             title,
@@ -666,6 +703,7 @@ document.addEventListener("submit", async (event) => {
             visibilityDepartment: "",
             approvedAt: "",
             approvedBy: "",
+            attachments: result.attachments.map((attachment) => ({ ...attachment })),
             attachmentCount: result.attachments.length,
             assignees: assignedRows.map((member) => ({ employeeId: member.id, name: member.name, completedAt: null, abandonedAt: null })),
             subtasks: []
@@ -712,6 +750,7 @@ document.addEventListener("submit", async (event) => {
       visibilityDepartment: "",
       approvedAt: "",
       approvedBy: "",
+      attachments: [],
       attachmentCount: state.submitDraft.attachments?.length ?? 0,
       assignees: assignedMembers.map((name) => ({
         employeeId: state.members.find((member) => member.name === name)?.id || "",
@@ -732,17 +771,56 @@ document.addEventListener("submit", async (event) => {
   const form = event.target.closest("[data-task-feedback-form]");
   if (!form) return;
   event.preventDefault();
-  if (state.liveReadOnly) return;
-  const message = String(new FormData(form).get("message") || "").trim();
+  if (state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites)) return;
+  const message = String(state.feedbackDraft.message || "").trim();
+  const attachments = state.feedbackDraft.attachments ?? [];
   const task = selectedTask();
-  if (!message || !task) return;
-  task.feedback.push({
-    id: `feedback-local-${Date.now()}`,
-    author: currentUser.name,
-    timestamp: new Intl.DateTimeFormat(currentHelpers.lang === "zh" ? "zh-HK" : currentHelpers.lang, { dateStyle: "short", timeStyle: "short" }).format(new Date()),
-    message,
-    own: true
-  });
+  if ((!message && !attachments.length) || !task) return;
+  state.feedbackError = "";
+  if (state.liveTaskWrites) {
+    state.writeBusy = true;
+    rerenderTaskPage({ focusFeedback: true });
+    try {
+      const result = await createLiveTaskFeedback({
+        taskId: task.id,
+        message,
+        attachments,
+        parentFeedbackId: null,
+        mentionedUserIds: []
+      });
+      task.feedback.push({
+        id: String(result.feedback.id),
+        author: result.feedback.author_name || currentUser.name,
+        authorUserId: result.feedback.author_user_id || currentUser.userId || null,
+        timestamp: localTimestamp(),
+        message: result.feedback.body || "",
+        parentId: result.feedback.parent_feedback_id || null,
+        mentionedUserIds: result.feedback.mentioned_user_ids ?? [],
+        attachments: result.attachments.map((attachment) => ({ ...attachment })),
+        attachmentCount: result.attachments.length,
+        own: true
+      });
+      task.countBadge = String(task.feedback.length);
+      state.feedbackDraft = { message: "", attachments: [] };
+    } catch (error) {
+      console.warn("Task feedback save failed", error);
+      state.feedbackError = "tasks.write.failed";
+    } finally {
+      state.writeBusy = false;
+    }
+  } else {
+    task.feedback.push({
+      id: `feedback-local-${Date.now()}`,
+      author: currentUser.name,
+      timestamp: localTimestamp(),
+      message,
+      attachments: [],
+      attachmentCount: attachments.length,
+      own: true
+    });
+    task.countBadge = String(task.feedback.length);
+    state.feedbackDraft = { message: "", attachments: [] };
+  }
   rerenderTaskPage({ focusFeedback: true });
 });
 
@@ -755,18 +833,34 @@ function syncTaskSubmitDraft(form) {
 }
 
 document.addEventListener("input", (event) => {
+  const feedbackInput = event.target.closest('[data-task-feedback-form] textarea[name="message"]');
+  if (feedbackInput) {
+    state.feedbackDraft.message = feedbackInput.value;
+    return;
+  }
   const form = event.target.closest("[data-task-submit-form]");
   if (form) syncTaskSubmitDraft(form);
 });
 
 document.addEventListener("change", (event) => {
+  const feedbackAttachmentInput = event.target.closest("[data-task-feedback-file]");
+  if (feedbackAttachmentInput) {
+    if (state.liveReadOnly && !state.liveTaskWrites) return;
+    const currentFiles = new Set((state.feedbackDraft.attachments ?? []).map((attachment) => `${attachment.name}:${attachment.size}:${attachment.lastModified ?? ""}`));
+    const nextFiles = [...feedbackAttachmentInput.files]
+      .filter((file) => !currentFiles.has(`${file.name}:${file.size}:${file.lastModified}`))
+      .map((file) => ({ file, name: file.name, size: file.size, type: file.type, lastModified: file.lastModified }));
+    state.feedbackDraft.attachments = [...(state.feedbackDraft.attachments ?? []), ...nextFiles];
+    rerenderTaskPage({ focusFeedback: true });
+    return;
+  }
   const attachmentInput = event.target.closest("[data-task-submit-file]");
   if (attachmentInput) {
-    if ((state.liveReadOnly && !state.liveTaskWrites) || state.submitMode === "edit") return;
-    const currentNames = new Set((state.submitDraft.attachments ?? []).map((file) => file.name));
+    if (state.liveReadOnly && !state.liveTaskWrites) return;
+    const currentNames = new Set((state.submitDraft.attachments ?? []).map((file) => `${file.name}:${file.size}:${file.lastModified ?? ""}`));
     const nextFiles = [...attachmentInput.files]
-      .filter((file) => !currentNames.has(file.name))
-      .map((file) => ({ file, name: file.name, size: file.size, type: file.type }));
+      .filter((file) => !currentNames.has(`${file.name}:${file.size}:${file.lastModified}`))
+      .map((file) => ({ file, name: file.name, size: file.size, type: file.type, lastModified: file.lastModified }));
     state.submitDraft.attachments = [...(state.submitDraft.attachments ?? []), ...nextFiles];
     rerenderTaskPage();
     document.querySelector("[data-task-submit-attachment]")?.focus();

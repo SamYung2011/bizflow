@@ -431,6 +431,7 @@ function normalizeFullTask(task, currentUserName, today) {
     requiresReview: task.needsApproval === true,
     approvedAt: task.approvedAt || "",
     approvedBy: task.approvedBy || "",
+    attachments: Array.isArray(task.attachments) ? task.attachments.map((attachment) => ({ ...attachment })) : [],
     attachmentCount: isNum(task.attachmentCount) ? task.attachmentCount : 0,
     assignees,
     subtasks: [],
@@ -440,6 +441,9 @@ function normalizeFullTask(task, currentUserName, today) {
       author: entry.author,
       timestamp: entry.time,
       message: entry.body,
+      parentId: entry.parentId || null,
+      mentionedUserIds: Array.isArray(entry.mentionedUserIds) ? entry.mentionedUserIds.slice() : [],
+      attachments: Array.isArray(entry.attachments) ? entry.attachments.map((attachment) => ({ ...attachment })) : [],
       attachmentCount: isNum(entry.attachmentCount) ? entry.attachmentCount : 0,
       own: entry.author === currentUserName
     }))

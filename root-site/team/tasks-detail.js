@@ -5,11 +5,29 @@ function initials(name) {
   return String(name || "?").trim().slice(0, 1).toUpperCase();
 }
 
+function safeAttachmentUrl(value) {
+  const url = String(value || "").trim();
+  return /^https?:\/\//i.test(url) ? url : "";
+}
+
+function renderAttachmentLinks(attachments, helpers) {
+  const { escapeHtml, lang } = helpers;
+  return (attachments ?? []).map((attachment) => {
+    const url = safeAttachmentUrl(attachment?.url);
+    if (!url) return "";
+    const name = String(attachment?.name || taskT(lang, "tasks.detail.attachments"));
+    return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(name)}">${escapeHtml(name)}</a>`;
+  }).filter(Boolean).join("");
+}
+
 function renderFeedbackEntry(entry, helpers) {
   const { escapeHtml, lang } = helpers;
   const message = entry.message || taskT(lang, entry.messageKey);
-  const attachment = entry.attachmentCount > 0
-    ? `<span class="task-detail__attachment-count">${escapeHtml(`${taskT(lang, "tasks.detail.attachments")} ${entry.attachmentCount}`)}</span>`
+  const attachmentLinks = renderAttachmentLinks(entry.attachments, helpers);
+  const attachment = attachmentLinks
+    ? `<div class="task-detail__attachment-links">${attachmentLinks}</div>`
+    : entry.attachmentCount > 0
+      ? `<span class="task-detail__attachment-count">${escapeHtml(`${taskT(lang, "tasks.detail.attachments")} ${entry.attachmentCount}`)}</span>`
     : "";
   const body = `<div class="chat-bubble__content">
     <header class="chat-bubble__meta">
@@ -17,7 +35,7 @@ function renderFeedbackEntry(entry, helpers) {
       <time>${escapeHtml(entry.timestamp)}</time>
       <button type="button" class="chat-bubble__menu" aria-label="${escapeHtml(taskT(lang, "tasks.detail.feedbackMenu"))}" tabindex="-1"><span></span><span></span><span></span></button>
     </header>
-    <p class="chat-bubble__body">${escapeHtml(message)}</p>
+    ${message ? `<p class="chat-bubble__body">${escapeHtml(message)}</p>` : ""}
     ${attachment}
   </div>`;
   const avatar = `<span class="avatar--initial chat-bubble__avatar" aria-hidden="true">${escapeHtml(initials(entry.author))}</span>`;
@@ -111,26 +129,34 @@ function renderDetailContent(task, state, helpers) {
     </label>
     ${task.attachmentCount > 0 ? `<div class="task-detail__field">
       <span>${escapeHtml(tt("tasks.detail.attachments"))}</span>
-      <span class="task-detail__control">${escapeHtml(String(task.attachmentCount))}</span>
+      ${task.attachments?.length
+        ? `<span class="task-detail__control task-detail__attachment-links">${renderAttachmentLinks(task.attachments, helpers)}</span>`
+        : `<span class="task-detail__control">${escapeHtml(String(task.attachmentCount))}</span>`}
     </div>` : ""}
     ${renderSubtasks(task, state, helpers)}
     ${renderApproval(task, state, helpers)}
   </section>`;
 }
 
-function renderTaskFeedback(task, helpers) {
+function renderTaskFeedback(task, state, helpers) {
   const { escapeHtml, lang } = helpers;
   const tt = (key) => taskT(lang, key);
+  const attachments = state.feedbackDraft.attachments ?? [];
+  const writable = !state.liveReadOnly || state.liveTaskWrites;
+  const disabled = !writable || state.writeBusy;
   return `<section class="task-detail__feedback" data-task-detail-panel="feedback">
     <h3>${escapeHtml(tt("tasks.detail.feedbackTitle"))}</h3>
     <div class="task-detail__thread">${task.feedback.length
       ? task.feedback.map((entry) => renderFeedbackEntry(entry, helpers)).join("")
       : `<p class="team-kanban-empty">${escapeHtml(tt("tasks.detail.feedbackEmpty"))}</p>`}</div>
     <form class="task-detail__composer" data-task-feedback-form>
-      <textarea name="message" required aria-label="${escapeHtml(tt("tasks.detail.feedbackPlaceholder"))}" placeholder="${escapeHtml(tt("tasks.detail.feedbackPlaceholder"))}"${helpers.liveReadOnly ? " disabled" : ""}></textarea>
+      <textarea name="message" aria-label="${escapeHtml(tt("tasks.detail.feedbackPlaceholder"))}" placeholder="${escapeHtml(tt("tasks.detail.feedbackPlaceholder"))}"${disabled ? " disabled" : ""}>${escapeHtml(state.feedbackDraft.message)}</textarea>
+      <input type="file" data-task-feedback-file multiple hidden${disabled ? " disabled" : ""}>
+      ${attachments.length ? `<div class="task-detail__attachment-drafts">${attachments.map((attachment, index) => `<span class="task-detail__attachment-chip"><span title="${escapeHtml(attachment.name)}">${escapeHtml(attachment.name)}</span><button type="button" data-task-feedback-attachment-remove="${index}" aria-label="${escapeHtml(`${tt("tasks.detail.removeAttachment")}: ${attachment.name}`)}"${disabled ? " disabled" : ""}>×</button></span>`).join("")}</div>` : ""}
+      ${state.feedbackError ? `<p class="task-detail__feedback-error" role="alert">${escapeHtml(tt(state.feedbackError))}</p>` : ""}
       <footer>
-        <span class="task-detail__attachment" aria-hidden="true">@</span>
-        <button type="submit"${helpers.liveReadOnly ? " disabled" : ""}>${escapeHtml(tt("tasks.detail.send"))}</button>
+        <button type="button" class="task-detail__attachment" data-task-feedback-attachment aria-label="${escapeHtml(tt("tasks.detail.addAttachment"))}"${disabled ? " disabled" : ""}>+ <span>${escapeHtml(tt("tasks.detail.attachments"))}</span></button>
+        <button type="submit"${disabled ? " disabled" : ""}>${escapeHtml(tt("tasks.detail.send"))}</button>
       </footer>
     </form>
   </section>`;
@@ -154,7 +180,7 @@ export function renderTaskDetail({ state, helpers }) {
       </div>
       <div class="task-detail__body task-detail__body--${escapeHtml(state.detailTab)}">
         ${renderDetailContent(task, state, helpers)}
-        ${renderTaskFeedback(task, { ...helpers, liveReadOnly: state.liveReadOnly })}
+        ${renderTaskFeedback(task, state, helpers)}
       </div>
     </article>
   </div>`;

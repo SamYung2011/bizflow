@@ -67,8 +67,8 @@ export function renderTaskSubmitDialog({ state, data, helpers }) {
         <div class="form-task-submit__field">
           <span>${escapeHtml(tt("tasks.submit.attachments"))}</span>
           <input type="file" data-task-submit-file multiple hidden${busy}>
-          ${attachments.length ? `<div class="form-task-submit__attachment-list" data-task-submit-attachment-list>${attachments.map((file) => `<span class="form-task-submit__attachment-chip" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>`).join("")}</div>` : ""}
-          <button type="button" class="form-task-submit__attachment" data-task-submit-attachment aria-label="${escapeHtml(tt("tasks.submit.addAttachment"))}"${!writable || state.writeBusy || state.submitMode === "edit" ? " disabled" : ""}>+</button>
+          ${attachments.length ? `<div class="form-task-submit__attachment-list" data-task-submit-attachment-list>${attachments.map((file, index) => `<span class="form-task-submit__attachment-chip"><span title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span><button type="button" data-task-submit-attachment-remove="${index}" aria-label="${escapeHtml(`${tt("tasks.submit.removeAttachment")}: ${file.name}`)}"${!writable || state.writeBusy ? " disabled" : ""}>×</button></span>`).join("")}</div>` : ""}
+          <button type="button" class="form-task-submit__attachment" data-task-submit-attachment aria-label="${escapeHtml(tt("tasks.submit.addAttachment"))}"${!writable || state.writeBusy ? " disabled" : ""}>+ <span>${escapeHtml(tt("tasks.submit.attachments"))}</span></button>
         </div>
         ${state.submitError ? `<p class="form-task-submit__error" role="alert">${escapeHtml(tt(state.submitError))}</p>` : ""}
       </div>

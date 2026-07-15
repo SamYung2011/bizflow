@@ -1073,6 +1073,24 @@
   line-height: var(--lh-body);
 }
 
+.task-detail__attachment-links {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.task-detail__attachment-links a {
+  max-width: 100%;
+  color: var(--blue);
+  font-size: var(--font-description-size);
+  line-height: var(--lh-body);
+  overflow: hidden;
+  text-decoration: underline;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .task-detail .chat-bubble--own .chat-bubble__body {
   background: var(--blue);
   color: var(--white);
@@ -1106,20 +1124,57 @@
 .task-detail__composer footer {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: var(--space-20);
 }
 
 .task-detail__attachment {
-  display: flex;
-  width: var(--space-20);
-  height: var(--space-20);
+  display: inline-flex;
+  width: auto;
+  height: var(--task-detail-action-height);
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-40);
+  gap: var(--space-4);
+  padding: 0 var(--space-10);
+  border-radius: var(--radius-10);
   background: var(--gray-15);
   color: var(--gray-80);
-  font-size: var(--font-body-size);
+  font-size: var(--font-description-size);
+}
+
+.task-detail__attachment-drafts {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.task-detail__attachment-chip {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-10);
+  border-radius: var(--radius-20);
+  background: var(--gray-10);
+  color: var(--gray-60);
+  font-size: var(--font-description-size);
+  line-height: var(--lh-body);
+}
+
+.task-detail__attachment-chip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-detail__feedback-error {
+  margin: 0;
+  color: var(--red);
+  font-size: var(--font-description-size);
+  line-height: var(--lh-body);
 }
 
 .task-detail__composer button {
@@ -1136,6 +1191,36 @@
 .task-detail__composer button:hover {
   opacity: .92;
   transform: translateY(calc(var(--task-detail-hover-offset) * -1));
+}
+
+.task-detail__composer .task-detail__attachment,
+.task-detail__composer .task-detail__attachment-chip button {
+  background: var(--gray-10);
+  color: var(--gray-80);
+}
+
+.task-detail__composer .task-detail__attachment {
+  padding: 0 var(--space-10);
+}
+
+.task-detail__composer .task-detail__attachment-chip button {
+  width: var(--space-20);
+  height: var(--space-20);
+  flex: none;
+  padding: 0;
+  border-radius: var(--radius-40);
+}
+
+.task-detail__composer .task-detail__attachment:hover,
+.task-detail__composer .task-detail__attachment-chip button:hover {
+  opacity: 1;
+  transform: none;
+}
+
+.task-detail__composer button:disabled,
+.task-detail__composer textarea:disabled {
+  opacity: .5;
+  cursor: not-allowed;
 }
 
 .task-submit-overlay {
@@ -1339,7 +1424,9 @@
   border-radius: var(--radius-10);
   background: var(--white);
   color: var(--blue);
-  font-size: var(--font-title-2-size);
+  gap: var(--space-4);
+  font-size: var(--font-body-size);
+  font-weight: var(--font-body-weight);
   cursor: pointer;
 }
 
@@ -1351,16 +1438,42 @@
 }
 
 .form-task-submit__attachment-chip {
+  display: inline-flex;
+  min-width: 0;
   max-width: 100%;
+  align-items: center;
+  gap: var(--space-4);
   padding: var(--space-4) var(--space-10);
   border-radius: var(--radius-20);
   background: var(--gray-10);
   color: var(--gray-60);
   font-size: var(--font-description-size);
   line-height: var(--lh-body);
+}
+
+.form-task-submit__attachment-chip > span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.form-task-submit__attachment-chip button {
+  width: var(--space-20);
+  height: var(--space-20);
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-40);
+  background: transparent;
+  color: var(--gray-60);
+  cursor: pointer;
+}
+
+.form-task-submit__attachment:disabled,
+.form-task-submit__attachment-chip button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
 }
 
 .form-task-submit__footer {
