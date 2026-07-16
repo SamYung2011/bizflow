@@ -212,6 +212,12 @@ async function verifyRouter() {
   assert.equal(await router.navigate("/b.html"), true);
   assert.deepEqual(pages, ["a", "b"]);
   assert.equal(styleCommits, 2);
+  allowLeave = false;
+  assert.equal(await router.navigate("/legacy.html"), false, "canLeave must guard fallback MPA routes");
+  assert.equal(browser.assigned.length, 0);
+  allowLeave = true;
+  assert.equal(await router.navigate("/legacy.html"), false);
+  assert.equal(browser.assigned.at(-1), "https://example.test/legacy.html");
   const warnings = [];
   const originalWarn = console.warn;
   console.warn = (...values) => warnings.push(values);

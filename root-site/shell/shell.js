@@ -322,6 +322,20 @@ function render() {
   </div>${renderForcedPasswordModal()}`;
 }
 
+function renderPageContext() {
+  const app = root.querySelector(".shell-app");
+  const main = app?.querySelector(".shell-main");
+  if (!app || !main) {
+    render();
+    return;
+  }
+  main.outerHTML = renderContent();
+  app.querySelectorAll(".shell-nav").forEach((nav) => {
+    nav.outerHTML = renderNav();
+  });
+  syncUnreadIndicators();
+}
+
 function renderProfileView() {
   render();
   const trigger = root.querySelector(".shell-avatar-trigger");
@@ -656,7 +670,7 @@ export function setPage(nextPage = {}) {
   state.profileJoinRequest = null;
   closeTransientShellUi();
   if (pageContext.title) document.title = pageContext.title;
-  render();
+  renderPageContext();
 }
 
 export const shellReady = bootShell();

@@ -70,4 +70,3 @@ export const routeManifest = Object.freeze(Object.fromEntries(routes.map((item) 
 export function routeForPath(pathname) {
   return routeManifest[String(pathname || "")] ?? null;
 }
-

@@ -154,7 +154,10 @@ export function createAppRouter({
     const url = new URL(rawUrl, windowRef.location.href);
     const route = routeForUrl(url);
     if (!active || !route) {
-      if (!fromPopstate) hardNavigate(url);
+      if (!fromPopstate) {
+        if (currentController && !await canLeave(url, "hard-navigation")) return false;
+        hardNavigate(url);
+      }
       return false;
     }
     if (!fromPopstate && currentRoute && url.href === currentUrl.href) return true;
@@ -241,7 +244,7 @@ export function createAppRouter({
 
   async function onDocumentClick(event) {
     const target = eligibleAnchor(event, windowRef);
-    if (!target || !routeForUrl(target.url)) return;
+    if (!target || (!routeForUrl(target.url) && !currentController)) return;
     event.preventDefault();
     await navigate(target.url);
   }
