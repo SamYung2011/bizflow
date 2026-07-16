@@ -1,6 +1,7 @@
 import { getNorthboundData } from "../data/provider.js";
 import { formatDateTime } from "../data/live-snapshot-utils.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
+import { createDateRangePanel } from "../components/date-range-panel.js";
 import {
   createLiveNorthboundRecord,
   createLiveNorthboundStatus,
@@ -64,7 +65,13 @@ const copy = {
     statusCreateFailed: "新增情況失敗，請重試",
     cancel: "取消",
     save: "保存",
-    close: "關閉"
+    close: "關閉",
+    dateRange: "日期區間",
+    today: "今天",
+    previousMonth: "上個月",
+    nextMonth: "下個月",
+    clear: "清除",
+    complete: "完成"
   },
   en: {
     title: "Northbound vehicles",
@@ -106,7 +113,13 @@ const copy = {
     statusCreateFailed: "Could not add the status. Please try again.",
     cancel: "Cancel",
     save: "Save",
-    close: "Close"
+    close: "Close",
+    dateRange: "Date range",
+    today: "Today",
+    previousMonth: "Previous month",
+    nextMonth: "Next month",
+    clear: "Clear",
+    complete: "Done"
   },
   fr: {
     title: "Véhicules vers le nord",
@@ -148,7 +161,13 @@ const copy = {
     statusCreateFailed: "Impossible d’ajouter le statut. Réessayez.",
     cancel: "Annuler",
     save: "Enregistrer",
-    close: "Fermer"
+    close: "Fermer",
+    dateRange: "Période",
+    today: "Aujourd’hui",
+    previousMonth: "Mois précédent",
+    nextMonth: "Mois suivant",
+    clear: "Effacer",
+    complete: "Terminer"
   }
 };
 
@@ -174,6 +193,7 @@ let attached = false;
 let modalReturnFocus = null;
 let lastTouchTap = { key: "", at: 0 };
 let searchRenderTimer = null;
+const submittedRangePanel = createDateRangePanel();
 
 function t(lang, key) {
   return copy[lang]?.[key] ?? copy.zh[key] ?? key;
@@ -314,15 +334,6 @@ function renderEditableCell(record, field, content, helpers, className = "") {
         <option value="">${escapeHtml(t(lang, "noStatus"))}</option>
         ${normalizedStatuses().map((status) => `<option value="${escapeHtml(status.id)}"${normalizedStatusById(record.statusId)?.key === status.key ? " selected" : ""}>${escapeHtml(status.label)}</option>`).join("")}
       </select>
-    </td>`;
-  }
-  if (field === "submittedRange") {
-    return `<td class="northbound-cell northbound-cell--dates ${className}" data-northbound-edit-active>
-      <span class="northbound-inline-dates">
-        <input type="date" class="northbound-inline-input" data-northbound-inline-input data-date-part="start" data-row-id="${escapeHtml(record.id)}" data-field="submittedRange" value="${escapeHtml(record.submittedAt || "")}" autofocus>
-        <span>–</span>
-        <input type="date" class="northbound-inline-input" data-northbound-inline-input data-date-part="end" data-row-id="${escapeHtml(record.id)}" data-field="submittedRange" value="${escapeHtml(record.submittedEndAt || "")}">
-      </span>
     </td>`;
   }
   return `<td class="northbound-cell ${className}" data-northbound-edit-active>
@@ -467,8 +478,7 @@ async function commitInlineEdit() {
   if (!record) return;
   if (!liveMode()) {
     if (field === "submittedRange") {
-      const start = document.querySelector('[data-northbound-inline-input][data-date-part="start"]')?.value || "";
-      const end = document.querySelector('[data-northbound-inline-input][data-date-part="end"]')?.value || "";
+      const { start = "", end = "" } = state.edit.draft ?? {};
       record.submittedAt = start || null;
       record.submittedEndAt = end || null;
     } else {
@@ -482,8 +492,7 @@ async function commitInlineEdit() {
 
   let patch;
   if (field === "submittedRange") {
-    const start = document.querySelector('[data-northbound-inline-input][data-date-part="start"]')?.value || "";
-    const end = document.querySelector('[data-northbound-inline-input][data-date-part="end"]')?.value || "";
+    const { start = "", end = "" } = state.edit.draft ?? {};
     patch = { submitted_at: start, submitted_end_at: end };
   } else {
     const input = document.querySelector(`[data-northbound-inline-input][data-row-id="${CSS.escape(rowId)}"][data-field="${CSS.escape(field)}"]`);
@@ -600,8 +609,26 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
   function startInlineEdit(cell) {
     if (liveReadOnly()) return;
     if (!cell) return;
-    state.edit = { rowId: cell.getAttribute("data-row-id"), field: cell.getAttribute("data-field") };
+    const rowId = cell.getAttribute("data-row-id");
+    const field = cell.getAttribute("data-field");
     state.error = "";
+    if (field === "submittedRange") {
+      const record = state.records.find((item) => item.id === rowId);
+      if (!record) return;
+      submittedRangePanel.open({
+        anchor: cell,
+        start: record.submittedAt,
+        end: record.submittedEndAt,
+        language: currentHelpers?.lang,
+        t: (key) => t(currentHelpers?.lang, key),
+        onCommit: async (draft) => {
+          state.edit = { rowId, field, draft };
+          await commitInlineEdit();
+        }
+      });
+      return;
+    }
+    state.edit = { rowId, field };
     rerender();
     requestAnimationFrame(() => document.querySelector("[data-northbound-inline-input]")?.focus());
   }

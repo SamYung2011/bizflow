@@ -1,0 +1,221 @@
+.date-range-panel {
+  --date-range-panel-width: 254px; /* bizflow DateRangePicker 现网面板宽度。 */
+  --date-range-panel-z: 230; /* 沿用现网 portal 置顶语义，无全局 z-index token。 */
+  --date-range-control-height: 30px; /* 现网日期起止控制高度，无全局组件档。 */
+  --date-range-nav-size: 24px; /* 现网月导航点击面尺寸。 */
+  --date-range-day-size: 32px; /* 现网日期格尺寸，无全局组件档。 */
+  --date-range-day-inner-size: 28px; /* 现网日期数字选中面尺寸。 */
+  position: fixed;
+  z-index: var(--date-range-panel-z);
+  width: min(var(--date-range-panel-width), calc(100vw - var(--space-20)));
+  max-height: calc(100vh - var(--space-20));
+  padding: var(--space-10);
+  border: 1px solid var(--gray-10);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  box-shadow: 0 var(--space-10) var(--space-40) color-mix(in srgb, var(--gray-80) 18%, transparent);
+  overflow-y: auto;
+}
+
+.date-range-panel__inputs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-10);
+  margin-bottom: var(--space-10);
+}
+
+.date-range-panel__date {
+  height: var(--date-range-control-height);
+  min-width: 0;
+  padding: 0 var(--space-10);
+  border: 1px solid var(--gray-12);
+  border-radius: var(--radius-10);
+  background: var(--gray-5);
+  color: var(--gray-60);
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.date-range-panel__date.is-active,
+.date-range-panel__date:focus-visible {
+  border-color: var(--blue);
+  outline: 0;
+  background: color-mix(in srgb, var(--blue) 8%, var(--white));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--blue) 18%, transparent);
+}
+
+.date-range-panel__head,
+.date-range-panel__head-actions,
+.date-range-panel__footer,
+.date-range-panel__footer-actions {
+  display: flex;
+  align-items: center;
+}
+
+.date-range-panel__head {
+  justify-content: space-between;
+  min-height: 28px;
+  margin-bottom: var(--space-4);
+  color: var(--gray-60);
+}
+
+.date-range-panel__head strong {
+  font-size: var(--font-description-size);
+  font-weight: var(--font-title-3-weight);
+}
+
+.date-range-panel__head-actions {
+  gap: var(--space-4);
+}
+
+.date-range-panel__today,
+.date-range-panel__nav,
+.date-range-panel__clear {
+  border: 0;
+  background: transparent;
+  color: var(--gray-40);
+}
+
+.date-range-panel__today,
+.date-range-panel__clear {
+  padding: var(--space-4);
+  font-size: var(--font-description-size);
+}
+
+.date-range-panel__nav {
+  display: grid;
+  width: var(--date-range-nav-size);
+  height: var(--date-range-nav-size);
+  place-items: center;
+  padding: 0;
+  font-size: var(--font-title-2-size);
+  line-height: 1;
+}
+
+.date-range-panel__today:hover,
+.date-range-panel__nav:hover,
+.date-range-panel__clear:hover {
+  color: var(--blue);
+}
+
+.date-range-panel__calendar {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.date-range-panel__weekday,
+.date-range-panel__day {
+  display: grid;
+  place-items: center;
+}
+
+.date-range-panel__weekday {
+  height: var(--date-range-nav-size);
+  color: var(--gray-20);
+  font-size: var(--font-description-size);
+}
+
+.date-range-panel__day {
+  position: relative;
+  height: var(--date-range-day-size);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--gray-60);
+  font-size: var(--font-description-size);
+}
+
+.date-range-panel__day::before {
+  position: absolute;
+  z-index: 0;
+  inset: 2px 0;
+  background: transparent;
+  content: "";
+}
+
+.date-range-panel__day--range::before {
+  background: color-mix(in srgb, var(--blue) 15%, var(--white));
+}
+
+.date-range-panel__day--range:nth-child(7n + 1)::before,
+.date-range-panel__weekday + .date-range-panel__day--range::before,
+.date-range-panel__day--range-start::before {
+  border-radius: var(--radius-10) 0 0 var(--radius-10);
+}
+
+.date-range-panel__day--range:nth-child(7n)::before,
+.date-range-panel__day--range-end::before {
+  border-radius: 0 var(--radius-10) var(--radius-10) 0;
+}
+
+.date-range-panel__day span {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: var(--date-range-day-inner-size);
+  height: var(--date-range-day-inner-size);
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-10);
+}
+
+.date-range-panel__day--outside {
+  color: var(--gray-20);
+}
+
+.date-range-panel__day--selected span {
+  border-color: var(--blue);
+  background: var(--blue);
+  color: var(--white);
+  font-weight: var(--font-title-3-weight);
+}
+
+.date-range-panel__day--today:not(.date-range-panel__day--selected) span {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+.date-range-panel__day:focus-visible span {
+  outline: 2px solid color-mix(in srgb, var(--blue) 35%, transparent);
+  outline-offset: 1px;
+}
+
+.date-range-panel__footer {
+  justify-content: space-between;
+  gap: var(--space-10);
+  margin: var(--space-10) calc(0px - var(--space-10)) calc(0px - var(--space-10));
+  padding: var(--space-10);
+  border-top: 1px solid var(--gray-10);
+}
+
+.date-range-panel__footer-actions {
+  gap: var(--space-4);
+}
+
+.date-range-panel__button {
+  min-height: 32px;
+  padding: var(--space-4) var(--space-10);
+  border: 0;
+  border-radius: var(--radius-10);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-title-3-weight);
+}
+
+.date-range-panel__button--cancel {
+  background: var(--gray-5);
+  color: var(--gray-60);
+}
+
+.date-range-panel__button--complete {
+  background: var(--blue);
+  color: var(--white);
+}
+
+@media (max-width: 768px) {
+  .date-range-panel {
+    width: min(var(--date-range-panel-width), calc(100vw - var(--space-20)));
+  }
+}
