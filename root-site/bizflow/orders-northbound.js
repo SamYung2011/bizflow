@@ -173,6 +173,7 @@ let rerender = () => {};
 let attached = false;
 let modalReturnFocus = null;
 let lastTouchTap = { key: "", at: 0 };
+let searchRenderTimer = null;
 
 function t(lang, key) {
   return copy[lang]?.[key] ?? copy.zh[key] ?? key;
@@ -629,12 +630,19 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
     if (search) {
       state.search = search.value;
       state.visibleLimit = PAGE_CHUNK;
-      rerender();
-      requestAnimationFrame(() => {
-        const input = document.querySelector("[data-northbound-search]");
-        input?.focus();
-        input?.setSelectionRange(input.value.length, input.value.length);
-      });
+      if (event.isComposing) return;
+      clearTimeout(searchRenderTimer);
+      // Keep the active input alive while typing. Immediate full rerenders replace
+      // the node, so subsequent keystrokes otherwise land on a detached element.
+      searchRenderTimer = setTimeout(() => {
+        searchRenderTimer = null;
+        rerender();
+        requestAnimationFrame(() => {
+          const input = document.querySelector("[data-northbound-search]");
+          input?.focus();
+          input?.setSelectionRange(input.value.length, input.value.length);
+        });
+      }, 180);
       return;
     }
     const formField = event.target.closest("[data-northbound-form-field]");
