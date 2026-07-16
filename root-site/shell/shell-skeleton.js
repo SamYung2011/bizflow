@@ -1,6 +1,18 @@
-(function mountShellSkeleton() {
+(async function mountShellSkeleton() {
   const root = document.getElementById("shell-root");
   if (!root || root.childElementCount) return;
+
+  try {
+    const [{ hasLiveSnapshotCache }, { snapshotsForPathname }] = await Promise.all([
+      import("../data/live-table-cache.js"),
+      import("../data/live-snapshot-dependencies.js")
+    ]);
+    const snapshots = snapshotsForPathname(window.location.pathname);
+    if (snapshots.length && await hasLiveSnapshotCache(snapshots)) return;
+  } catch (error) {
+    console.warn("[shell-boot] snapshot cache probe failed", error);
+  }
+  if (root.childElementCount) return;
 
   const mobileViewport = window.matchMedia?.("(max-width: 768px)") ?? null;
   const navRows = window.location.pathname.includes("/team/") ? 2 : 6;

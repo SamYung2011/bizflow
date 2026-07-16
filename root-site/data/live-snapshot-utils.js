@@ -3,8 +3,10 @@ import { activateLiveTableCacheUser, invalidateLiveAuthCache, invalidateLiveTabl
 
 const HK_TIME_ZONE = "Asia/Hong_Kong";
 const tablePromises = new Map();
+const freshTablePromises = new Map();
 const tableQueries = new Map();
 let liveUserId = "";
+let freshReadDepth = 0;
 
 if (typeof window !== "undefined") {
   window.addEventListener(TRANSIENT_AUTH_RESET_EVENT, () => {
@@ -101,10 +103,29 @@ export async function ensureLiveSession() {
 export function allRows(table, orderCol = "created_at", ascending = true, secondaryOrder = "id") {
   const key = `${table}:${orderCol || ""}:${ascending}:${secondaryOrder || ""}`;
   tableQueries.set(key, { table, orderCol, ascending, secondaryOrder });
+  if (freshReadDepth > 0) {
+    if (!freshTablePromises.has(key)) {
+      const promise = fetchAllTable(table, orderCol, ascending, secondaryOrder, { refresh: true })
+        .finally(() => freshTablePromises.delete(key));
+      freshTablePromises.set(key, promise);
+    }
+    const promise = freshTablePromises.get(key);
+    tablePromises.set(key, promise);
+    return promise;
+  }
   if (!tablePromises.has(key)) {
     tablePromises.set(key, fetchAllTable(table, orderCol, ascending, secondaryOrder));
   }
   return tablePromises.get(key);
+}
+
+export async function withFreshLiveTableReads(operation) {
+  freshReadDepth += 1;
+  try {
+    return await operation();
+  } finally {
+    freshReadDepth -= 1;
+  }
 }
 
 export async function refreshStaleLiveTables() {

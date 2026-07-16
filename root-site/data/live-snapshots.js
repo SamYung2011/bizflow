@@ -7,6 +7,13 @@ import {
   buildWhatsappSnapshot
 } from "./live-admin-snapshots.js";
 import { buildInventorySnapshot } from "./live-inventory-snapshot.js";
+import {
+  invalidateLiveSnapshotCache,
+  liveSnapshotCacheVersion,
+  readLiveSnapshotCache,
+  writeLiveSnapshotCache
+} from "./live-table-cache.js";
+import { LIVE_SNAPSHOT_INVALIDATED_EVENT } from "./live-snapshot-dependencies.js";
 import { buildCustomerGroups } from "./customer-groups.js";
 import { customerSourceFromInvoices } from "./customer-source.js";
 import {
@@ -20,13 +27,24 @@ import {
   formatDateTime,
   formatMonthDay,
   formatTime,
-  timestamp
+  timestamp,
+  withFreshLiveTableReads
 } from "./live-snapshot-utils.js";
 
 export const LIVE_SNAPSHOT_MISS = Symbol("live-snapshot-miss");
 
 const LIVE_BUILDERS = new Map();
+const LIVE_REFRESHES = new Map();
 let snapshotUserId = "";
+
+if (typeof window !== "undefined") {
+  window.addEventListener(LIVE_SNAPSHOT_INVALIDATED_EVENT, (event) => {
+    (event.detail?.snapshots ?? []).forEach((snapshot) => {
+      LIVE_BUILDERS.delete(String(snapshot || ""));
+      LIVE_REFRESHES.delete(String(snapshot || ""));
+    });
+  });
+}
 
 function dedupeInvoices(rows) {
   const selected = new Map();
@@ -789,18 +807,62 @@ const builders = {
   "pending-deduction.json": buildPendingDeductionSnapshot
 };
 
+function liveValue(value) {
+  return { ...value, __live: true };
+}
+
+function comparableSnapshot(value) {
+  return JSON.stringify(value, (key, item) => key === "generated_at" ? undefined : item);
+}
+
+async function buildAndCacheSnapshot(snapshot, builder, userId, { fresh = false } = {}) {
+  const version = liveSnapshotCacheVersion(snapshot);
+  const value = liveValue(await (fresh ? withFreshLiveTableReads(builder) : builder()));
+  const stored = await writeLiveSnapshotCache({ userId, snapshot, value, version });
+  return { value, stored };
+}
+
+function refreshLiveSnapshot(snapshot, builder, userId, cachedValue) {
+  if (LIVE_REFRESHES.has(snapshot)) return LIVE_REFRESHES.get(snapshot);
+  const promise = buildAndCacheSnapshot(snapshot, builder, userId, { fresh: true })
+    .then(({ value, stored }) => {
+      if (!stored || userId !== snapshotUserId) return value;
+      LIVE_BUILDERS.set(snapshot, Promise.resolve(value));
+      if (comparableSnapshot(value) !== comparableSnapshot(cachedValue) && typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("tp:live-snapshot-updated", { detail: { snapshot, value } }));
+      }
+      return value;
+    })
+    .catch((error) => console.warn(`[live-snapshot-cache] ${snapshot} refresh failed`, error))
+    .finally(() => LIVE_REFRESHES.delete(snapshot));
+  LIVE_REFRESHES.set(snapshot, promise);
+  return promise;
+}
+
+async function loadLiveSnapshot(snapshot, builder, userId) {
+  const cached = await readLiveSnapshotCache({ userId, snapshot });
+  if (cached) {
+    const value = liveValue(cached.value);
+    if (cached.stale) void refreshLiveSnapshot(snapshot, builder, userId, value);
+    return value;
+  }
+  const { value } = await buildAndCacheSnapshot(snapshot, builder, userId);
+  return value;
+}
+
 export async function getLiveSnapshot(snapshot) {
   const session = await ensureLiveSession();
   if (!session) return LIVE_SNAPSHOT_MISS;
   if (snapshotUserId !== session.user.id) {
     snapshotUserId = session.user.id;
     LIVE_BUILDERS.clear();
+    LIVE_REFRESHES.clear();
   }
   // OCPP stays on its separately approved read-only snapshot line (docs/41); P0 never invents a Supabase source for it.
   const builder = builders[snapshot];
   if (!builder) return LIVE_SNAPSHOT_MISS;
   if (!LIVE_BUILDERS.has(snapshot)) {
-    const promise = builder().then((value) => ({ ...value, __live: true })).catch((error) => {
+    const promise = loadLiveSnapshot(snapshot, builder, session.user.id).catch((error) => {
       if (LIVE_BUILDERS.get(snapshot) === promise) LIVE_BUILDERS.delete(snapshot);
       throw error;
     });
@@ -810,5 +872,11 @@ export async function getLiveSnapshot(snapshot) {
 }
 
 export function invalidateLiveSnapshot(...snapshots) {
-  snapshots.flat().forEach((snapshot) => LIVE_BUILDERS.delete(String(snapshot || "")));
+  const targets = snapshots.flat().map((snapshot) => String(snapshot || "")).filter(Boolean);
+  targets.forEach((snapshot) => {
+    LIVE_BUILDERS.delete(snapshot);
+    LIVE_REFRESHES.delete(snapshot);
+  });
+  void invalidateLiveSnapshotCache(targets)
+    .catch((error) => console.warn("[live-snapshot-cache] invalidation failed", error));
 }

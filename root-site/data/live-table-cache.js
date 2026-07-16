@@ -1,18 +1,24 @@
+import { LIVE_SNAPSHOT_INVALIDATED_EVENT, snapshotsForTables } from "./live-snapshot-dependencies.js";
+
 const CACHE_PREFIX = "tp-live-table:v1:";
 const CACHE_USER_KEY = `${CACHE_PREFIX}user`;
 const CACHE_ROWS_PREFIX = `${CACHE_PREFIX}rows:`;
 const CACHE_AUTH_PREFIX = `${CACHE_PREFIX}auth:`;
+const CACHE_SNAPSHOT_PREFIX = `${CACHE_PREFIX}snapshot:`;
 const CACHE_DB_NAME = "tp-live-table-cache";
 const CACHE_DB_VERSION = 1;
 const CACHE_STORE_NAME = "rows";
 
 export const LIVE_TABLE_CACHE_TTL_MS = 60_000;
 export const LIVE_AUTH_CACHE_TTL_MS = 5 * 60_000;
+export const LIVE_SNAPSHOT_CACHE_TTL_MS = LIVE_TABLE_CACHE_TTL_MS;
+export const LIVE_SNAPSHOT_CACHE_MAX_AGE_MS = 5 * 60_000;
 // IndexedDB is the primary store. This limit only applies to the sessionStorage fallback.
 export const LIVE_TABLE_CACHE_MAX_BYTES = 1.5 * 1024 * 1024;
 
 const memoryStorage = new Map();
 const tableVersions = new Map();
+const snapshotVersions = new Map();
 let authVersion = 0;
 let activeUserId = "";
 let cacheEpoch = 0;
@@ -82,6 +88,10 @@ function cacheKey(userId, table, orderCol, ascending, secondaryOrder) {
 
 function authCacheKey(userId) {
   return `${CACHE_AUTH_PREFIX}${encoded(userId)}`;
+}
+
+function snapshotCacheKey(userId, snapshot) {
+  return `${CACHE_SNAPSHOT_PREFIX}${encoded(userId)}:${encoded(snapshot)}`;
 }
 
 function serializedBytes(value) {
@@ -221,6 +231,18 @@ function removeIndexedAuthValues() {
   });
 }
 
+function removeIndexedSnapshots(snapshots) {
+  return runIndexedDbTransaction("readwrite", (store) => {
+    const request = store.openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      if (cursor.value?.kind === "snapshot" && snapshots.has(String(cursor.value?.snapshot || ""))) cursor.delete();
+      cursor.continue();
+    };
+  });
+}
+
 function clearIndexedValues() {
   return runIndexedDbTransaction("readwrite", (store) => {
     store.clear();
@@ -246,6 +268,16 @@ function parseAuthPayload(value, expectedUserId) {
   return payload;
 }
 
+function parseSnapshotPayload(value, expectedUserId, expectedSnapshot) {
+  const payload = typeof value === "string" ? JSON.parse(value) : value;
+  if (!payload?.value || typeof payload.value !== "object" || Array.isArray(payload.value) ||
+    payload.userId !== expectedUserId || payload.snapshot !== expectedSnapshot ||
+    !Number.isFinite(payload.cachedAt)) {
+    throw new Error("invalid snapshot cache payload");
+  }
+  return payload;
+}
+
 function payloadResult(payload) {
   return {
     rows: payload.rows,
@@ -259,6 +291,10 @@ function versionChangedInThisPage(table) {
 
 function authVersionChangedInThisPage() {
   return cacheEpoch > 0 || authVersion > 0;
+}
+
+function snapshotVersionChangedInThisPage(snapshot) {
+  return cacheEpoch > 0 || snapshotVersions.has(String(snapshot || ""));
 }
 
 function fallbackPayload(key) {
@@ -282,6 +318,7 @@ async function clearCacheStores() {
   cacheEpoch += 1;
   activeUserId = "";
   tableVersions.clear();
+  snapshotVersions.clear();
   clearFallbackValues();
   await clearIndexedValues();
 }
@@ -358,6 +395,116 @@ export function liveTableCacheVersion(table) {
 
 export function liveAuthCacheVersion() {
   return `${cacheEpoch}:${authVersion}`;
+}
+
+export function liveSnapshotCacheVersion(snapshot) {
+  return `${cacheEpoch}:${snapshotVersions.get(String(snapshot || "")) || 0}`;
+}
+
+export async function readLiveSnapshotCache({ userId, snapshot }) {
+  const normalizedUserId = String(userId || "");
+  const normalizedSnapshot = String(snapshot || "");
+  if (!normalizedUserId || !normalizedSnapshot) return null;
+  await activateLiveTableCacheUser(normalizedUserId);
+  if (getFallbackValue(CACHE_USER_KEY) !== normalizedUserId) return null;
+  const key = snapshotCacheKey(normalizedUserId, normalizedSnapshot);
+  const currentVersion = liveSnapshotCacheVersion(normalizedSnapshot);
+  const usePayload = async (payload, remove) => {
+    if (Date.now() - payload.cachedAt >= LIVE_SNAPSHOT_CACHE_MAX_AGE_MS ||
+      (snapshotVersionChangedInThisPage(normalizedSnapshot) && payload.version !== undefined && payload.version !== currentVersion)) {
+      await remove();
+      return null;
+    }
+    return {
+      value: payload.value,
+      stale: Date.now() - payload.cachedAt >= LIVE_SNAPSHOT_CACHE_TTL_MS,
+      cachedAt: payload.cachedAt
+    };
+  };
+  const indexed = await readIndexedValue(key);
+  if (indexed.value) {
+    try {
+      return await usePayload(parseSnapshotPayload(indexed.value, normalizedUserId, normalizedSnapshot), () => removeIndexedValue(key));
+    } catch {
+      await removeIndexedValue(key);
+    }
+  }
+  const serialized = getFallbackValue(key);
+  if (!serialized) return null;
+  try {
+    const payload = parseSnapshotPayload(serialized, normalizedUserId, normalizedSnapshot);
+    const result = await usePayload(payload, async () => removeFallbackValue(key));
+    if (!result) return null;
+    if (indexed.available) {
+      const migration = await writeIndexedValue(payload);
+      if (migration.available) removeFallbackValue(key);
+    }
+    return result;
+  } catch {
+    removeFallbackValue(key);
+    return null;
+  }
+}
+
+export async function writeLiveSnapshotCache({ userId, snapshot, value, version }) {
+  const normalizedUserId = String(userId || "");
+  const normalizedSnapshot = String(snapshot || "");
+  if (!normalizedUserId || !normalizedSnapshot || !value || typeof value !== "object" || Array.isArray(value)) return false;
+  if (version !== undefined && version !== liveSnapshotCacheVersion(normalizedSnapshot)) return false;
+  await activateLiveTableCacheUser(normalizedUserId);
+  if (version !== undefined && version !== liveSnapshotCacheVersion(normalizedSnapshot)) return false;
+  const key = snapshotCacheKey(normalizedUserId, normalizedSnapshot);
+  const payload = {
+    key,
+    userId: normalizedUserId,
+    kind: "snapshot",
+    table: "",
+    snapshot: normalizedSnapshot,
+    cachedAt: Date.now(),
+    value,
+    version: version ?? liveSnapshotCacheVersion(normalizedSnapshot)
+  };
+  const indexed = await writeIndexedValue(payload);
+  if (indexed.available) {
+    removeFallbackValue(key);
+    if (payload.version !== liveSnapshotCacheVersion(normalizedSnapshot)) {
+      await removeIndexedValue(key);
+      return false;
+    }
+    return true;
+  }
+  const serialized = JSON.stringify(payload);
+  if (serializedBytes(serialized) > LIVE_TABLE_CACHE_MAX_BYTES || payload.version !== liveSnapshotCacheVersion(normalizedSnapshot)) {
+    removeFallbackValue(key);
+    return false;
+  }
+  setFallbackValue(key, serialized);
+  return true;
+}
+
+export async function invalidateLiveSnapshotCache(...snapshots) {
+  const targets = new Set(snapshots.flat().map((snapshot) => String(snapshot || "")).filter(Boolean));
+  if (!targets.size) return;
+  targets.forEach((snapshot) => snapshotVersions.set(snapshot, (snapshotVersions.get(snapshot) || 0) + 1));
+  fallbackKeys().forEach((key) => {
+    if (!key.startsWith(CACHE_SNAPSHOT_PREFIX)) return;
+    const [, snapshot = ""] = key.slice(CACHE_SNAPSHOT_PREFIX.length).split(":");
+    if (targets.has(decodeURIComponent(snapshot))) removeFallbackValue(key);
+  });
+  await removeIndexedSnapshots(targets);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(LIVE_SNAPSHOT_INVALIDATED_EVENT, { detail: { snapshots: [...targets] } }));
+  }
+}
+
+export async function hasLiveSnapshotCache(...snapshots) {
+  const targets = snapshots.flat().map((snapshot) => String(snapshot || "")).filter(Boolean);
+  if (!targets.length) return false;
+  let userId = getFallbackValue(CACHE_USER_KEY) || "";
+  if (!userId) userId = String((await readIndexedValue(CACHE_USER_KEY)).value?.userId || "");
+  if (!userId) return false;
+  const results = await Promise.all(targets.map((snapshot) => readLiveSnapshotCache({ userId, snapshot })));
+  return results.every(Boolean);
 }
 
 export async function readLiveAuthCache(userId) {
@@ -495,7 +642,11 @@ export async function invalidateLiveTableCache(...tables) {
     const [, table = ""] = key.slice(CACHE_ROWS_PREFIX.length).split(":");
     if (targets.has(decodeURIComponent(table))) removeFallbackValue(key);
   });
-  await removeIndexedTables(targets);
+  const snapshots = snapshotsForTables(targets);
+  await Promise.all([
+    removeIndexedTables(targets),
+    snapshots.size ? invalidateLiveSnapshotCache([...snapshots]) : Promise.resolve()
+  ]);
 }
 
 export function clearLiveTableCache() {
