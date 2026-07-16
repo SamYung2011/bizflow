@@ -189,11 +189,12 @@ const state = {
 
 let currentHelpers = null;
 let rerender = () => {};
-let attached = false;
 let modalReturnFocus = null;
 let lastTouchTap = { key: "", at: 0 };
 let searchRenderTimer = null;
 const submittedRangePanel = createDateRangePanel();
+let activeScope = null;
+let dataLoadVersion = 0;
 
 function t(lang, key) {
   return copy[lang]?.[key] ?? copy.zh[key] ?? key;
@@ -423,9 +424,11 @@ function renderModal(helpers) {
 
 export async function ensureNorthboundData() {
   if (state.loaded || state.loading) return;
+  const version = dataLoadVersion;
   state.loading = true;
   rerender();
   const data = await getNorthboundData();
+  if (version !== dataLoadVersion) return;
   state.statuses = data.statuses;
   state.records = data.records;
   state.loading = false;
@@ -508,10 +511,13 @@ async function commitInlineEdit() {
   state.edit = null;
   state.error = "";
   rerender();
+  const version = dataLoadVersion;
   try {
     const saved = liveRecord(await updateLiveNorthboundRecord(rowId, patch), record);
+    if (version !== dataLoadVersion) return;
     state.records = state.records.map((item) => item.id === saved.id ? saved : item);
   } catch {
+    if (version !== dataLoadVersion) return;
     showWriteError("saveFailed");
   }
   rerender();
@@ -526,22 +532,21 @@ function openModal() {
   state.newStatusLabel = "";
   state.modalOpen = true;
   rerender();
-  requestAnimationFrame(() => document.querySelector('[data-northbound-form-field="name"]')?.focus());
+  activeScope?.animationFrame(() => document.querySelector('[data-northbound-form-field="name"]')?.focus());
 }
 
 function closeModal() {
   state.modalOpen = false;
   state.formError = "";
   rerender();
-  requestAnimationFrame(() => modalReturnFocus?.focus());
+  activeScope?.animationFrame(() => modalReturnFocus?.focus());
 }
 
-export function attachNorthboundBehaviors({ rerender: nextRerender }) {
+export function attachNorthboundBehaviors({ rerender: nextRerender, scope }) {
   rerender = nextRerender;
-  if (attached) return;
-  attached = true;
+  activeScope = scope;
 
-  document.addEventListener("click", async (event) => {
+  scope.listen(document, "click", async (event) => {
     if (liveReadOnly() && event.target.closest("[data-orders-write]")) return;
     if (event.target.closest("[data-northbound-add]")) return openModal();
     if (event.target.closest("[data-northbound-modal-close]") || event.target.matches("[data-northbound-modal-overlay]")) return closeModal();
@@ -554,12 +559,15 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
     if (deleteButton) {
       if (await confirmInPage(t(currentHelpers?.lang, "deleteConfirm"), { danger: true })) {
         const id = deleteButton.getAttribute("data-northbound-delete");
+        const version = dataLoadVersion;
         state.error = "";
         if (liveMode()) {
           try {
             await deleteLiveNorthboundRecord(id);
+            if (version !== dataLoadVersion) return;
             state.records = state.records.filter((record) => record.id !== id);
           } catch {
+            if (version !== dataLoadVersion) return;
             showWriteError("deleteFailed");
           }
         } else {
@@ -584,11 +592,14 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
             sortOrder: Math.max(0, ...state.statuses.map((item) => item.sortOrder)) + 10
           };
           if (liveMode()) {
+            const version = dataLoadVersion;
             try {
               const status = liveStatus(await createLiveNorthboundStatus(values));
+              if (version !== dataLoadVersion) return;
               state.statuses.push(status);
               state.form.statusId = status.id;
             } catch {
+              if (version !== dataLoadVersion) return;
               showWriteError("statusCreateFailed", { form: true });
               rerender();
               return;
@@ -630,14 +641,14 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
     }
     state.edit = { rowId, field };
     rerender();
-    requestAnimationFrame(() => document.querySelector("[data-northbound-inline-input]")?.focus());
+    scope.animationFrame(() => document.querySelector("[data-northbound-inline-input]")?.focus());
   }
 
-  document.addEventListener("dblclick", (event) => {
+  scope.listen(document, "dblclick", (event) => {
     startInlineEdit(event.target.closest("[data-northbound-edit-cell]"));
   });
 
-  document.addEventListener("pointerup", (event) => {
+  scope.listen(document, "pointerup", (event) => {
     if (event.pointerType !== "touch" || liveReadOnly()) return;
     const cell = event.target.closest("[data-northbound-edit-cell]");
     if (!cell) return;
@@ -652,7 +663,7 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
     lastTouchTap = { key, at: now };
   });
 
-  document.addEventListener("input", (event) => {
+  scope.listen(document, "input", (event) => {
     const search = event.target.closest("[data-northbound-search]");
     if (search) {
       state.search = search.value;
@@ -661,10 +672,10 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
       clearTimeout(searchRenderTimer);
       // Keep the active input alive while typing. Immediate full rerenders replace
       // the node, so subsequent keystrokes otherwise land on a detached element.
-      searchRenderTimer = setTimeout(() => {
+      searchRenderTimer = scope.timeout(() => {
         searchRenderTimer = null;
         rerender();
-        requestAnimationFrame(() => {
+        scope.animationFrame(() => {
           const input = document.querySelector("[data-northbound-search]");
           input?.focus();
           input?.setSelectionRange(input.value.length, input.value.length);
@@ -678,7 +689,7 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
     if (newStatus && !liveReadOnly()) state.newStatusLabel = newStatus.value;
   });
 
-  document.addEventListener("change", (event) => {
+  scope.listen(document, "change", (event) => {
     const filter = event.target.closest("[data-northbound-status-filter]");
     if (filter) {
       state.statusFilter = filter.value;
@@ -692,7 +703,7 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
     if (formField && !liveReadOnly()) state.form[formField.getAttribute("data-northbound-form-field")] = formField.value;
   });
 
-  document.addEventListener("keydown", (event) => {
+  scope.listen(document, "keydown", (event) => {
     if (event.key === "Escape" && state.modalOpen) {
       event.preventDefault();
       closeModal();
@@ -710,11 +721,11 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
     }
   });
 
-  document.addEventListener("focusout", (event) => {
+  scope.listen(document, "focusout", (event) => {
     const input = event.target.closest("[data-northbound-inline-input]");
     if (!input || !state.edit || liveReadOnly()) return;
     const activeEdit = state.edit;
-    setTimeout(() => {
+    scope.timeout(() => {
       if (state.edit !== activeEdit) return;
       const active = document.activeElement;
       if (active?.closest("[data-northbound-edit-active]")) return;
@@ -722,7 +733,7 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
     }, 0);
   });
 
-  document.addEventListener("submit", async (event) => {
+  scope.listen(document, "submit", async (event) => {
     if (!event.target.matches("[data-northbound-form]")) return;
     event.preventDefault();
     if (liveReadOnly()) return;
@@ -732,6 +743,7 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
       return;
     }
     if (liveMode()) {
+      const version = dataLoadVersion;
       try {
         const saved = await createLiveNorthboundRecord({
           name: state.form.name,
@@ -746,8 +758,10 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
           remarks: state.form.remarks,
           status_id: state.form.statusId
         });
+        if (version !== dataLoadVersion) return;
         state.records.unshift(liveRecord(saved));
       } catch {
+        if (version !== dataLoadVersion) return;
         showWriteError("saveFailed", { form: true });
         rerender();
         return;
@@ -771,4 +785,53 @@ export function attachNorthboundBehaviors({ rerender: nextRerender }) {
     state.visibleLimit = PAGE_CHUNK;
     rerender();
   });
+}
+
+export function captureNorthboundState() {
+  return {
+    search: state.search,
+    statusFilter: state.statusFilter,
+    visibleLimit: state.visibleLimit
+  };
+}
+
+export function restoreNorthboundState(value = null) {
+  const next = value && typeof value === "object" ? value : {};
+  state.search = typeof next.search === "string" ? next.search : "";
+  state.statusFilter = typeof next.statusFilter === "string" ? next.statusFilter : "all";
+  state.visibleLimit = Number.isInteger(next.visibleLimit) && next.visibleLimit >= PAGE_CHUNK ? next.visibleLimit : PAGE_CHUNK;
+  state.edit = null;
+  state.modalOpen = false;
+  state.form = {};
+  state.formError = "";
+  state.error = "";
+  state.newStatusLabel = "";
+}
+
+export function hasNorthboundUnsavedChanges() {
+  if (state.edit) return true;
+  if (!state.modalOpen) return false;
+  return Object.values(state.form).some((value) => String(value || "").trim()) || Boolean(state.newStatusLabel.trim());
+}
+
+export function disposeNorthboundState() {
+  dataLoadVersion += 1;
+  clearTimeout(searchRenderTimer);
+  searchRenderTimer = null;
+  submittedRangePanel.close({ restoreFocus: false });
+  state.loaded = false;
+  state.loading = false;
+  state.records = [];
+  state.statuses = [];
+  state.edit = null;
+  state.modalOpen = false;
+  state.form = {};
+  state.formError = "";
+  state.error = "";
+  state.newStatusLabel = "";
+  currentHelpers = null;
+  modalReturnFocus = null;
+  lastTouchTap = { key: "", at: 0 };
+  rerender = () => {};
+  activeScope = null;
 }

@@ -9,9 +9,20 @@ import { renderSegment as renderSharedSegment } from "../components/segment.js";
 import { aggregateShippingCounts, matchesShippingFilter } from "../components/order-metrics.js";
 import { consumeNavigationPreset, navigationPresetKeys } from "../components/navigation-presets.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
-import { ensureNorthboundData, renderNorthbound, attachNorthboundBehaviors } from "./orders-northbound.js";
-import { ensureChargerLeadsData, renderChargerLeads, attachChargerLeadBehaviors } from "./orders-charger-leads.js";
-import { ensureRevenueData, renderRevenue, attachRevenueBehaviors } from "./orders-revenue.js";
+import { confirmInPage } from "../components/confirm-dialog.js";
+import { throwIfPageAborted } from "../spa/page-lifecycle.js";
+import {
+  attachNorthboundBehaviors, captureNorthboundState, disposeNorthboundState, ensureNorthboundData,
+  hasNorthboundUnsavedChanges, renderNorthbound, restoreNorthboundState
+} from "./orders-northbound.js";
+import {
+  attachChargerLeadBehaviors, captureChargerLeadState, disposeChargerLeadState, ensureChargerLeadsData,
+  renderChargerLeads, restoreChargerLeadState
+} from "./orders-charger-leads.js";
+import {
+  attachRevenueBehaviors, captureRevenueState, disposeRevenueState, ensureRevenueData, renderRevenue,
+  restoreRevenueState
+} from "./orders-revenue.js";
 import { createPrintDialog } from "./print/print-dialog.js";
 import { toPrintableOrder } from "./print/print-invoice.js";
 
@@ -39,7 +50,8 @@ const dict = {
     "orders.tab.list": "訂單列表",
     "orders.tab.northbound": "港車北上",
     "orders.tab.chargerLeads": "充電樁意向",
-    "orders.tab.revenue": "營收分析"
+    "orders.tab.revenue": "營收分析",
+    "orders.leaveUnsaved": "尚有未保存的港車北上資料，確定離開？"
   },
   en: {
     "orders.title": "Order management",
@@ -64,7 +76,8 @@ const dict = {
     "orders.tab.list": "Order list",
     "orders.tab.northbound": "Northbound vehicles",
     "orders.tab.chargerLeads": "Charger interest",
-    "orders.tab.revenue": "Revenue analysis"
+    "orders.tab.revenue": "Revenue analysis",
+    "orders.leaveUnsaved": "There are unsaved northbound changes. Leave this page?"
   },
   fr: {
     "orders.title": "Gestion des commandes",
@@ -89,45 +102,35 @@ const dict = {
     "orders.tab.list": "Liste des commandes",
     "orders.tab.northbound": "Véhicules vers le nord",
     "orders.tab.chargerLeads": "Intérêt bornes",
-    "orders.tab.revenue": "Analyse des revenus"
+    "orders.tab.revenue": "Analyse des revenus",
+    "orders.leaveUnsaved": "Des modifications de véhicules vers le nord ne sont pas enregistrées. Quitter cette page ?"
   }
 };
 
-const [data, unreadWatermarks, currentUser] = await Promise.all([
-  getOrdersPageData(),
-  getUnreadWatermarks(),
-  getCurrentUser()
-]);
-const presetTab = consumeNavigationPreset(navigationPresetKeys.ordersTab);
-const presetShipping = consumeNavigationPreset(navigationPresetKeys.ordersShipping);
-const presetSearch = consumeNavigationPreset(navigationPresetKeys.ordersSearch) ?? "";
+let data = null;
+let unreadWatermarks = null;
+let unread = null;
+let currentUser = null;
 const shippingFilters = ["all", "pending", "in_transit", "exception", "delivered"];
-const canViewRevenue = currentUser?.canViewRevenue !== false;
-const liveMode = typeof currentUser?.hasPermission === "function";
-const liveReadOnly = liveMode && currentUser?.bizflowMainAccess !== true;
-const domainTabs = ["list", "northbound", "chargerLeads", ...(canViewRevenue ? ["revenue"] : [])];
+let canViewRevenue = true;
+let liveMode = false;
+let liveReadOnly = false;
+let domainTabs = ["list", "northbound", "chargerLeads", "revenue"];
 
-const state = {
-  tab: domainTabs.includes(presetTab) ? presetTab : "list",
+let state = {
+  tab: "list",
   source: "all",
-  shipping: shippingFilters.includes(presetShipping) ? presetShipping : "all",
-  search: presetSearch,
+  shipping: "all",
+  search: "",
   page: 1
 };
 
-if (state.tab === "list") markRead("orders", unreadWatermarks.orders);
-
 let currentHelpers = null;
-const printDialog = createPrintDialog({ getLang: () => currentHelpers?.lang ?? "zh" });
-
-const dateFilter = createDateFilter({
-  id: "orders",
-  initialDate: latestDateInput(data.orders.map((order) => order.date)),
-  onChange({ filterChanged }) {
-    if (filterChanged) state.page = 1;
-    rerenderOrdersPage();
-  }
-});
+let printDialog = null;
+let dateFilter = null;
+let resizeTimer = 0;
+let activeScope = null;
+let activeNavigation = null;
 
 function pageT(lang, key) {
   return dict[lang]?.[key] ?? dict.zh[key] ?? key;
@@ -339,11 +342,16 @@ function rerenderOrdersPage() {
   if (page && currentHelpers) page.outerHTML = renderOrders(currentHelpers);
 }
 
-document.addEventListener("click", async (event) => {
+async function onOrdersClick(event) {
   const domainTab = event.target.closest("[data-orders-domain-tab]");
   if (domainTab) {
     const tab = domainTab.getAttribute("data-orders-domain-tab");
     if (!domainTabs.includes(tab) || state.tab === tab) return;
+    if (hasNorthboundUnsavedChanges()) {
+      const leave = await confirmInPage(pageT(currentHelpers?.lang ?? "zh", "orders.leaveUnsaved"));
+      if (!leave) return;
+      restoreNorthboundState(captureNorthboundState());
+    }
     state.tab = tab;
     if (tab === "list") markRead("orders", unreadWatermarks.orders);
     closeSourceMenu();
@@ -352,12 +360,13 @@ document.addEventListener("click", async (event) => {
     if (tab === "northbound") await ensureNorthboundData();
     if (tab === "chargerLeads") await ensureChargerLeadsData();
     if (tab === "revenue" && canViewRevenue) await ensureRevenueData(data.orders);
+    if (activeScope?.disposed) return;
     rerenderOrdersPage();
     return;
   }
   if (event.target.closest("[data-orders-create]")) {
     if (liveReadOnly) return;
-    window.location.href = "./orders-create.html";
+    navigateTo("./orders-create.html");
     return;
   }
 
@@ -422,23 +431,23 @@ document.addEventListener("click", async (event) => {
 
   const card = event.target.closest("[data-order-card]");
   if (card) {
-    window.location.href = `./orders-detail.html?id=${encodeURIComponent(card.getAttribute("data-order-id"))}`;
+    navigateTo(`./orders-detail.html?id=${encodeURIComponent(card.getAttribute("data-order-id"))}`);
     return;
   }
 
   if (!event.target.closest("[data-source-popover]")) closeSourceMenu();
   if (!event.target.closest("[data-date-filter]")) dateFilter.close();
-});
+}
 
-document.addEventListener("focusin", (event) => {
+function onOrdersFocus(event) {
   dateFilter.handleFocus(event);
-});
+}
 
-document.addEventListener("change", (event) => {
+function onOrdersChange(event) {
   dateFilter.handleChange(event);
-});
+}
 
-document.addEventListener("input", (event) => {
+function onOrdersInput(event) {
   const search = event.target.closest("[data-orders-search]");
   if (!search) return;
   state.search = search.value;
@@ -449,9 +458,9 @@ document.addEventListener("input", (event) => {
     next.focus();
     next.setSelectionRange(next.value.length, next.value.length);
   }
-});
+}
 
-document.addEventListener("keydown", (event) => {
+function onOrdersKeydown(event) {
   if (event.key === "Escape") {
     closeSourceMenu();
     dateFilter.close();
@@ -459,27 +468,130 @@ document.addEventListener("keydown", (event) => {
   if ((event.key === "Enter" || event.key === " ") && event.target.closest("[data-order-card]")) {
     event.preventDefault();
     const card = event.target.closest("[data-order-card]");
-    window.location.href = `./orders-detail.html?id=${encodeURIComponent(card.getAttribute("data-order-id"))}`;
+    navigateTo(`./orders-detail.html?id=${encodeURIComponent(card.getAttribute("data-order-id"))}`);
   }
-});
+}
 
-let resizeTimer = 0;
-window.addEventListener("resize", () => {
+function onOrdersResize() {
   window.clearTimeout(resizeTimer);
   resizeTimer = window.setTimeout(() => {
+    resizeTimer = 0;
+    if (activeScope?.disposed) return;
     const pages = totalPages();
     if (state.page > pages) state.page = pages;
     rerenderOrdersPage();
   }, 120);
-});
+}
 
-attachNorthboundBehaviors({ rerender: rerenderOrdersPage });
-attachChargerLeadBehaviors({ rerender: rerenderOrdersPage });
-attachRevenueBehaviors({ rerender: rerenderOrdersPage });
+function navigateTo(relative) {
+  const url = new URL(relative, window.location.href);
+  if (typeof activeNavigation?.navigate === "function") void activeNavigation.navigate(url);
+  else if (typeof activeNavigation?.hardNavigate === "function") activeNavigation.hardNavigate(url);
+  else window.location.assign(url.href);
+}
 
-if (state.tab === "revenue" && canViewRevenue) await ensureRevenueData(data.orders);
+function restoredState(value, presets) {
+  const next = value && typeof value === "object" ? value : {};
+  const tab = domainTabs.includes(next.tab) ? next.tab : domainTabs.includes(presets.tab) ? presets.tab : "list";
+  return {
+    tab,
+    source: typeof next.source === "string" ? next.source : "all",
+    shipping: shippingFilters.includes(next.shipping) ? next.shipping : shippingFilters.includes(presets.shipping) ? presets.shipping : "all",
+    search: typeof next.search === "string" ? next.search : presets.search,
+    page: Number.isInteger(next.page) && next.page > 0 ? next.page : 1
+  };
+}
 
-window.__shellMenu = createBizflowMenu("orders");
-window.__shellData = { unread: await getUnread(), user: currentUser };
-window.__shellContent = renderOrders;
-await import("../shell/shell.js");
+async function ensureActiveDomainData(signal) {
+  if (state.tab === "northbound") await ensureNorthboundData();
+  if (state.tab === "chargerLeads") await ensureChargerLeadsData();
+  if (state.tab === "revenue" && canViewRevenue) await ensureRevenueData(data.orders);
+  throwIfPageAborted(signal);
+}
+
+export async function mountPage({ scope, signal, historyState = null, navigation = null } = {}) {
+  activeScope = scope;
+  activeNavigation = navigation;
+  const presets = {
+    tab: consumeNavigationPreset(navigationPresetKeys.ordersTab),
+    shipping: consumeNavigationPreset(navigationPresetKeys.ordersShipping),
+    search: consumeNavigationPreset(navigationPresetKeys.ordersSearch) ?? ""
+  };
+  [data, unreadWatermarks, currentUser, unread] = await Promise.all([
+    getOrdersPageData(), getUnreadWatermarks(), getCurrentUser(), getUnread()
+  ]);
+  throwIfPageAborted(signal);
+  canViewRevenue = currentUser?.canViewRevenue !== false;
+  liveMode = typeof currentUser?.hasPermission === "function";
+  liveReadOnly = liveMode && currentUser?.bizflowMainAccess !== true;
+  domainTabs = ["list", "northbound", "chargerLeads", ...(canViewRevenue ? ["revenue"] : [])];
+  state = restoredState(historyState, presets);
+  restoreNorthboundState(historyState?.northbound);
+  restoreChargerLeadState(historyState?.chargerLeads);
+  restoreRevenueState(historyState?.revenue);
+  dateFilter = createDateFilter({
+    id: "orders",
+    initialDate: latestDateInput(data.orders.map((order) => order.date)),
+    onChange({ filterChanged }) {
+      if (filterChanged) state.page = 1;
+      rerenderOrdersPage();
+    }
+  });
+  dateFilter.restoreState?.(historyState?.dateFilter);
+  printDialog = createPrintDialog({ getLang: () => currentHelpers?.lang ?? "zh", scope });
+  await ensureActiveDomainData(signal);
+
+  return {
+    page: {
+      menu: createBizflowMenu("orders"),
+      data: { unread, user: currentUser },
+      render: renderOrders,
+      title: "Honnmono · Orders"
+    },
+    activate() {
+      if (state.tab === "list") markRead("orders", unreadWatermarks.orders);
+      scope.listen(document, "click", onOrdersClick);
+      scope.listen(document, "focusin", onOrdersFocus);
+      scope.listen(document, "change", onOrdersChange);
+      scope.listen(document, "input", onOrdersInput);
+      scope.listen(document, "keydown", onOrdersKeydown);
+      scope.listen(window, "resize", onOrdersResize);
+      attachNorthboundBehaviors({ rerender: rerenderOrdersPage, scope });
+      attachChargerLeadBehaviors({ rerender: rerenderOrdersPage, scope });
+      attachRevenueBehaviors({ rerender: rerenderOrdersPage, scope });
+    },
+    hasUnsavedChanges: hasNorthboundUnsavedChanges,
+    async canLeave() {
+      if (!hasNorthboundUnsavedChanges()) return true;
+      return confirmInPage(pageT(currentHelpers?.lang ?? "zh", "orders.leaveUnsaved"));
+    },
+    captureState() {
+      return {
+        ...state,
+        dateFilter: dateFilter.captureState?.() ?? null,
+        northbound: captureNorthboundState(),
+        chargerLeads: captureChargerLeadState(),
+        revenue: captureRevenueState()
+      };
+    },
+    dispose() {
+      window.clearTimeout(resizeTimer);
+      resizeTimer = 0;
+      closeSourceMenu();
+      dateFilter?.close();
+      printDialog?.dispose();
+      disposeNorthboundState();
+      disposeChargerLeadState();
+      disposeRevenueState();
+      data = null;
+      unreadWatermarks = null;
+      unread = null;
+      currentUser = null;
+      currentHelpers = null;
+      printDialog = null;
+      dateFilter = null;
+      activeScope = null;
+      activeNavigation = null;
+    }
+  };
+}

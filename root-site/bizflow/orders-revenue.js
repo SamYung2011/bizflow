@@ -75,7 +75,7 @@ const copy = {
 
 const state = { loaded: false, loading: false, orders: [], support: { aliases: [], customers: [], products: [] }, range: "12m" };
 let rerender = () => {};
-let attached = false;
+let dataLoadVersion = 0;
 
 function t(lang, key) {
   return copy[lang]?.[key] ?? copy.zh[key] ?? key;
@@ -126,9 +126,11 @@ function renderRanking(items, helpers, valueKey, tone) {
 export async function ensureRevenueData(orders) {
   state.orders = orders;
   if (state.loaded || state.loading) return;
+  const version = dataLoadVersion;
   state.loading = true;
   rerender();
   state.support = await getOrderRevenueSupportData();
+  if (version !== dataLoadVersion) return;
   state.loading = false;
   state.loaded = true;
 }
@@ -168,11 +170,9 @@ export function renderRevenue(helpers) {
   </section>`;
 }
 
-export function attachRevenueBehaviors({ rerender: nextRerender }) {
+export function attachRevenueBehaviors({ rerender: nextRerender, scope }) {
   rerender = nextRerender;
-  if (attached) return;
-  attached = true;
-  document.addEventListener("click", (event) => {
+  scope.listen(document, "click", (event) => {
     const button = event.target.closest("[data-revenue-range]");
     if (!button) return;
     const range = button.getAttribute("data-revenue-range");
@@ -180,4 +180,22 @@ export function attachRevenueBehaviors({ rerender: nextRerender }) {
     state.range = range;
     rerender();
   });
+}
+
+export function captureRevenueState() {
+  return { range: state.range };
+}
+
+export function restoreRevenueState(value = null) {
+  const next = value && typeof value === "object" ? value : {};
+  state.range = ranges.includes(next.range) ? next.range : "12m";
+}
+
+export function disposeRevenueState() {
+  dataLoadVersion += 1;
+  state.loaded = false;
+  state.loading = false;
+  state.orders = [];
+  state.support = { aliases: [], customers: [], products: [] };
+  rerender = () => {};
 }

@@ -8,7 +8,10 @@ export const spaRouteAllowlist = Object.freeze([
   "/bizflow/ocpp-users.html",
   "/bizflow/ocpp-finance.html",
   "/bizflow/customers.html",
-  "/bizflow/customer-detail.html"
+  "/bizflow/customer-detail.html",
+  "/bizflow/orders.html",
+  "/bizflow/orders-create.html",
+  "/bizflow/orders-detail.html"
 ]);
 
 const fromHere = (path) => new URL(path, import.meta.url).href;
@@ -28,13 +31,13 @@ const routes = [
   route("/bizflow/orders.html", "bizflow", "../bizflow/orders.js", [
     "../components/segment.css", "../components/date-filter.css", "../components/date-range-panel.css", "../components/management-list.css",
     "../bizflow/orders.css", "../bizflow/orders-domain.css"
-  ]),
+  ], () => import("../bizflow/orders.js")),
   route("/bizflow/orders-create.html", "bizflow", "../bizflow/orders-create.js", [
     "../bizflow/customers.css", "../bizflow/orders.css"
-  ]),
+  ], () => import("../bizflow/orders-create.js")),
   route("/bizflow/orders-detail.html", "bizflow", "../bizflow/orders-detail.js", [
     "../bizflow/customers.css", "../bizflow/orders.css"
-  ]),
+  ], () => import("../bizflow/orders-detail.js")),
   route("/bizflow/customers.html", "bizflow", "../bizflow/customers.js", [
     "../components/segment.css", "../components/date-filter.css", "../components/date-range-panel.css", "../components/management-list.css",
     "../bizflow/customers.css", "../bizflow/customers-warranty.css"

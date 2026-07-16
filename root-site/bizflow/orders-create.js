@@ -2,7 +2,9 @@
 
 import { getOrderCreateData, getUnread, getCurrentUser } from "../data/provider.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
+import { confirmInPage } from "../components/confirm-dialog.js";
 import { renderNewCustomerFields } from "../components/new-customer-fields.js";
+import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import {
   createAndPayLiveOrder,
   createLiveOrderCustomer,
@@ -85,7 +87,8 @@ const dict = {
     "orders.customer.failed": "新增顧客失敗，請重試",
     "orders.customer.imeiConflict": "顧客已新增，但 IMEI 已屬於其他顧客",
     "orders.customer.deviceFailed": "顧客已新增，但 IMEI 未能保存",
-    "orders.tracking.ready": "物流資料會在付款時一併保存"
+    "orders.tracking.ready": "物流資料會在付款時一併保存",
+    "orders.leaveUnsaved": "訂單草稿尚未保存，確定離開？"
   },
   en: {
     "orders.root": "Orders",
@@ -162,7 +165,8 @@ const dict = {
     "orders.customer.failed": "Could not add the customer. Try again.",
     "orders.customer.imeiConflict": "Customer added, but the IMEI belongs to another customer",
     "orders.customer.deviceFailed": "Customer added, but the IMEI could not be saved",
-    "orders.tracking.ready": "Shipping details will be saved with the payment"
+    "orders.tracking.ready": "Shipping details will be saved with the payment",
+    "orders.leaveUnsaved": "This order draft has not been saved. Leave this page?"
   },
   fr: {
     "orders.root": "Commandes",
@@ -239,42 +243,50 @@ const dict = {
     "orders.customer.failed": "Impossible d’ajouter le client. Réessayez.",
     "orders.customer.imeiConflict": "Client ajouté, mais l’IMEI appartient à un autre client",
     "orders.customer.deviceFailed": "Client ajouté, mais l’IMEI n’a pas pu être enregistré",
-    "orders.tracking.ready": "Les données d’expédition seront enregistrées avec le paiement"
+    "orders.tracking.ready": "Les données d’expédition seront enregistrées avec le paiement",
+    "orders.leaveUnsaved": "Ce brouillon de commande n’est pas enregistré. Quitter cette page ?"
   }
 };
 
-const [data, currentUser] = await Promise.all([getOrderCreateData(), getCurrentUser()]);
-const liveMode = typeof currentUser?.hasPermission === "function";
-const liveWritable = liveMode && currentUser?.bizflowMainAccess === true;
-const liveReadOnly = liveMode && !liveWritable;
-const writeOptions = liveWritable
-  ? await getLiveOrderWriteOptions()
-  : { defaultWarehouseId: null, salespeople: [] };
-const writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
-const draftCreatedAt = new Date();
+let data = null;
+let currentUser = null;
+let unread = null;
+let liveMode = false;
+let liveWritable = false;
+let liveReadOnly = false;
+let writeOptions = { defaultWarehouseId: null, salespeople: [] };
+let writeAttributes = "";
+let draftCreatedAt = new Date();
 const CUSTOMER_RESULTS_LIMIT = 20; // 联想下拉只渲染前 20 条匹配,避免 4198 行 DOM。
 
-const state = {
-  productModalOpen: false,
-  productSearch: "",
-  selectedOptions: new Set(),
-  lineItems: [],
-  customerMenuOpen: false,
-  customerSearch: "",
-  selectedCustomerId: "",
-  customerModalOpen: false,
-  customerDraft: {},
-  shippingMode: "delivery",
-  trackingNumber: "",
-  salespersonId: "",
-  feesEnabled: { deposit: true, discount: false, service: false },
-  fees: { shipping: 0, deposit: 0, discount: 0, service: 0 },
-  busy: false,
-  notice: "",
-  noticeType: ""
-};
+let state = initialState();
 
 let currentHelpers = null;
+let activeNavigation = null;
+let activeMountId = 0;
+let submissionComplete = false;
+
+function initialState() {
+  return {
+    productModalOpen: false,
+    productSearch: "",
+    selectedOptions: new Set(),
+    lineItems: [],
+    customerMenuOpen: false,
+    customerSearch: "",
+    selectedCustomerId: "",
+    customerModalOpen: false,
+    customerDraft: {},
+    shippingMode: "delivery",
+    trackingNumber: "",
+    salespersonId: "",
+    feesEnabled: { deposit: true, discount: false, service: false },
+    fees: { shipping: 0, deposit: 0, discount: 0, service: 0 },
+    busy: false,
+    notice: "",
+    noticeType: ""
+  };
+}
 
 function pageT(lang, key) {
   return dict[lang]?.[key] ?? dict.zh[key] ?? key;
@@ -699,6 +711,7 @@ function refreshLiveTotals() {
 }
 
 async function submitLiveCustomer() {
+  const mountId = activeMountId;
   const values = readNewCustomerFields();
   state.customerDraft = values;
   state.busy = true;
@@ -706,6 +719,7 @@ async function submitLiveCustomer() {
   rerender();
   try {
     const result = await createLiveOrderCustomer(values);
+    if (mountId !== activeMountId) return;
     data.customers.unshift({
       id: result.customer.id,
       name: result.customer.name || "",
@@ -727,15 +741,18 @@ async function submitLiveCustomer() {
         : "orders.customer.created";
     setNotice(pageT(currentHelpers?.lang ?? "zh", noticeKey), noticeKey === "orders.customer.created" ? "success" : "error");
   } catch (error) {
+    if (mountId !== activeMountId) return;
     console.error("[orders-create] customer write failed", error);
     setNotice(friendlyWriteError(error, "orders.customer.failed"));
   } finally {
+    if (mountId !== activeMountId) return;
     state.busy = false;
     rerender();
   }
 }
 
 async function submitLiveOrder() {
+  const mountId = activeMountId;
   syncLiveFormInputs();
   const lang = currentHelpers?.lang ?? "zh";
   if (!state.selectedCustomerId) {
@@ -771,9 +788,12 @@ async function submitLiveOrder() {
         ? { mode: state.shippingMode, trackingNumber: state.trackingNumber }
         : null
     });
+    if (mountId !== activeMountId) return;
     if (result.deviceConflicts.length) console.warn("[orders-create] item IMEI conflicts", result.deviceConflicts);
-    window.location.href = `./orders-detail.html?id=${encodeURIComponent(result.invoice.id)}`;
+    submissionComplete = true;
+    navigateTo(`./orders-detail.html?id=${encodeURIComponent(result.invoice.id)}`);
   } catch (error) {
+    if (mountId !== activeMountId) return;
     console.error("[orders-create] order write failed", error);
     state.busy = false;
     setNotice(friendlyWriteError(error, "orders.write.failed"));
@@ -781,7 +801,7 @@ async function submitLiveOrder() {
   }
 }
 
-document.addEventListener("click", async (event) => {
+async function onOrderCreateClick(event) {
   if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
   if (state.busy && event.target.closest("[data-orders-write]")) return;
   if (event.target.closest("[data-order-submit]")) {
@@ -877,9 +897,9 @@ document.addEventListener("click", async (event) => {
     state.customerSearch = "";
     rerender();
   }
-});
+}
 
-document.addEventListener("change", (event) => {
+function onOrderCreateChange(event) {
   if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
   if (state.busy && event.target.closest("[data-orders-write]")) return;
   const option = event.target.closest("[data-product-option]");
@@ -923,9 +943,9 @@ document.addEventListener("change", (event) => {
     syncLiveNumberInput(shippingFee);
     refreshLiveTotals();
   }
-});
+}
 
-document.addEventListener("input", (event) => {
+function onOrderCreateInput(event) {
   if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
   if (state.busy && event.target.closest("[data-orders-write]")) return;
   if (syncLiveNumberInput(event.target)) {
@@ -952,9 +972,9 @@ document.addEventListener("input", (event) => {
   if (!customerSearch) return;
   state.customerSearch = customerSearch.value;
   rerender({ focusCustomerSearch: true });
-});
+}
 
-document.addEventListener("keydown", (event) => {
+function onOrderCreateKeydown(event) {
   if (event.key !== "Escape") return;
   if (state.productModalOpen) closeProductModal();
   else if (state.customerModalOpen) closeCustomerModal();
@@ -963,9 +983,72 @@ document.addEventListener("keydown", (event) => {
     state.customerSearch = "";
     rerender();
   }
-});
+}
 
-window.__shellMenu = createBizflowMenu("orders");
-window.__shellData = { unread: await getUnread(), user: currentUser };
-window.__shellContent = renderCreate;
-await import("../shell/shell.js");
+function navigateTo(relative) {
+  const url = new URL(relative, window.location.href);
+  if (typeof activeNavigation?.navigate === "function") void activeNavigation.navigate(url);
+  else if (typeof activeNavigation?.hardNavigate === "function") activeNavigation.hardNavigate(url);
+  else window.location.assign(url.href);
+}
+
+function hasOrderCreateUnsavedChanges() {
+  if (submissionComplete) return false;
+  return state.lineItems.length > 0
+    || Boolean(state.selectedCustomerId || state.trackingNumber || state.salespersonId)
+    || state.shippingMode !== "delivery"
+    || Object.values(state.fees).some((value) => Number(value) !== 0)
+    || state.feesEnabled.deposit !== true
+    || state.feesEnabled.discount !== false
+    || state.feesEnabled.service !== false
+    || Object.values(state.customerDraft).some((value) => String(value || "").trim());
+}
+
+export async function mountPage({ scope, signal, navigation = null } = {}) {
+  const mountId = ++activeMountId;
+  activeNavigation = navigation;
+  submissionComplete = false;
+  state = initialState();
+  draftCreatedAt = new Date();
+  [data, currentUser, unread] = await Promise.all([getOrderCreateData(), getCurrentUser(), getUnread()]);
+  throwIfPageAborted(signal);
+  liveMode = typeof currentUser?.hasPermission === "function";
+  liveWritable = liveMode && currentUser?.bizflowMainAccess === true;
+  liveReadOnly = liveMode && !liveWritable;
+  writeOptions = liveWritable
+    ? await getLiveOrderWriteOptions()
+    : { defaultWarehouseId: null, salespeople: [] };
+  throwIfPageAborted(signal);
+  writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
+
+  return {
+    page: {
+      menu: createBizflowMenu("orders"),
+      data: { unread, user: currentUser },
+      render: renderCreate,
+      title: "Honnmono · Create order"
+    },
+    activate() {
+      scope.listen(document, "click", onOrderCreateClick);
+      scope.listen(document, "change", onOrderCreateChange);
+      scope.listen(document, "input", onOrderCreateInput);
+      scope.listen(document, "keydown", onOrderCreateKeydown);
+    },
+    hasUnsavedChanges: hasOrderCreateUnsavedChanges,
+    async canLeave() {
+      if (!hasOrderCreateUnsavedChanges()) return true;
+      return confirmInPage(pageT(currentHelpers?.lang ?? "zh", "orders.leaveUnsaved"));
+    },
+    captureState: () => null,
+    dispose() {
+      if (activeMountId === mountId) activeMountId += 1;
+      data = null;
+      currentUser = null;
+      unread = null;
+      currentHelpers = null;
+      activeNavigation = null;
+      writeOptions = { defaultWarehouseId: null, salespeople: [] };
+      state = initialState();
+    }
+  };
+}

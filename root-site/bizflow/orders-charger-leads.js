@@ -44,7 +44,7 @@ const copy = {
 
 const state = { loaded: false, loading: false, leads: [], tab: "registration", status: "all", search: "" };
 let rerender = () => {};
-let attached = false;
+let dataLoadVersion = 0;
 
 function t(lang, key) {
   return copy[lang]?.[key] ?? copy.zh[key] ?? key;
@@ -85,9 +85,11 @@ function statusCounts() {
 
 export async function ensureChargerLeadsData() {
   if (state.loaded || state.loading) return;
+  const version = dataLoadVersion;
   state.loading = true;
   rerender();
   const data = await getChargerLeadsData();
+  if (version !== dataLoadVersion) return;
   state.leads = data.leads;
   state.loading = false;
   state.loaded = true;
@@ -132,11 +134,9 @@ export function renderChargerLeads(helpers) {
   </section>`;
 }
 
-export function attachChargerLeadBehaviors({ rerender: nextRerender }) {
+export function attachChargerLeadBehaviors({ rerender: nextRerender, scope }) {
   rerender = nextRerender;
-  if (attached) return;
-  attached = true;
-  document.addEventListener("click", (event) => {
+  scope.listen(document, "click", (event) => {
     const tab = event.target.closest("[data-charger-lead-tab]");
     if (tab) {
       state.tab = tab.getAttribute("data-charger-lead-tab");
@@ -150,15 +150,34 @@ export function attachChargerLeadBehaviors({ rerender: nextRerender }) {
       rerender();
     }
   });
-  document.addEventListener("input", (event) => {
+  scope.listen(document, "input", (event) => {
     const input = event.target.closest("[data-charger-lead-search]");
     if (!input) return;
     state.search = input.value;
     rerender();
-    requestAnimationFrame(() => {
+    scope.animationFrame(() => {
       const next = document.querySelector("[data-charger-lead-search]");
       next?.focus();
       next?.setSelectionRange(next.value.length, next.value.length);
     });
   });
+}
+
+export function captureChargerLeadState() {
+  return { tab: state.tab, status: state.status, search: state.search };
+}
+
+export function restoreChargerLeadState(value = null) {
+  const next = value && typeof value === "object" ? value : {};
+  state.tab = ["registration", "visit"].includes(next.tab) ? next.tab : "registration";
+  state.status = ["all", "pending", "arranged", "measuring", "completed"].includes(next.status) ? next.status : "all";
+  state.search = typeof next.search === "string" ? next.search : "";
+}
+
+export function disposeChargerLeadState() {
+  dataLoadVersion += 1;
+  state.loaded = false;
+  state.loading = false;
+  state.leads = [];
+  rerender = () => {};
 }

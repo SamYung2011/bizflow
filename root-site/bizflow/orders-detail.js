@@ -2,7 +2,9 @@
 
 import { getOrderCreateData, getOrderDetailData, getUnread, getCurrentUser } from "../data/provider.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
+import { confirmInPage } from "../components/confirm-dialog.js";
 import { renderNewCustomerFields } from "../components/new-customer-fields.js";
+import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import {
   getLiveOrderWriteOptions,
   updateLiveOrder,
@@ -92,7 +94,8 @@ const dict = {
     "orders.field.imei": "產品IMEI碼",
     "orders.field.address": "運送地址",
     "orders.action.submit": "提交",
-    "orders.action.close": "關閉"
+    "orders.action.close": "關閉",
+    "orders.leaveUnsaved": "訂單修改尚未保存，確定離開？"
   },
   en: {
     "orders.root": "Orders",
@@ -173,7 +176,8 @@ const dict = {
     "orders.field.imei": "Product IMEI",
     "orders.field.address": "Shipping address",
     "orders.action.submit": "Submit",
-    "orders.action.close": "Close"
+    "orders.action.close": "Close",
+    "orders.leaveUnsaved": "Order changes have not been saved. Leave this page?"
   },
   fr: {
     "orders.root": "Commandes",
@@ -254,67 +258,71 @@ const dict = {
     "orders.field.imei": "IMEI produit",
     "orders.field.address": "Adresse livraison",
     "orders.action.submit": "Soumettre",
-    "orders.action.close": "Fermer"
+    "orders.action.close": "Fermer",
+    "orders.leaveUnsaved": "Les modifications de la commande ne sont pas enregistrées. Quitter cette page ?"
   }
 };
 
-const params = new URLSearchParams(window.location.search);
-const [detailData, currentUser] = await Promise.all([
-  getOrderDetailData(params.get("id")),
-  getCurrentUser()
-]);
-const liveMode = typeof currentUser?.hasPermission === "function";
-const liveWritable = liveMode && currentUser?.bizflowMainAccess === true;
-const liveReadOnly = liveMode && !liveWritable;
-const pickerData = detailData ? await getOrderCreateData() : { productGroups: [] };
-const writeOptions = liveWritable && detailData
-  ? await getLiveOrderWriteOptions(detailData.order.id)
-  : { invoice: null, defaultWarehouseId: null, salespeople: [] };
-const writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
+let detailData = null;
+let currentUser = null;
+let unread = null;
+let liveMode = false;
+let liveWritable = false;
+let liveReadOnly = false;
+let pickerData = { productGroups: [] };
+let writeOptions = { invoice: null, defaultWarehouseId: null, salespeople: [] };
+let writeAttributes = "";
 
 function cloneItems(items) {
   return items.map((item) => ({ ...item }));
 }
 
-const initialItems = cloneItems(detailData?.detail.items ?? []);
-const initialFees = {
-  shipping: Number(detailData?.detail.fees.shipping || 0),
-  deposit: Number(detailData?.detail.fees.deposit || 0),
-  discount: Math.abs(Number(detailData?.detail.fees.discount || 0)),
-  service: Number(detailData?.detail.fees.service || 0)
-};
+let state = initialDetailState();
 
-const state = {
-  productModalOpen: false,
-  productSearch: "",
-  selectedOptions: new Set(),
-  items: cloneItems(initialItems),
-  savedItems: cloneItems(initialItems),
-  feesEnabled: {
+let currentHelpers = null;
+let printDialog = null;
+let activeMountId = 0;
+
+function initialDetailState() {
+  const initialItems = cloneItems(detailData?.detail.items ?? []);
+  const initialFees = {
+    shipping: Number(detailData?.detail.fees.shipping || 0),
+    deposit: Number(detailData?.detail.fees.deposit || 0),
+    discount: Math.abs(Number(detailData?.detail.fees.discount || 0)),
+    service: Number(detailData?.detail.fees.service || 0)
+  };
+  const feesEnabled = {
     deposit: true,
     discount: Number(detailData?.detail.fees.discount || 0) !== 0,
     service: Number(detailData?.detail.fees.service || 0) !== 0
-  },
-  savedFeesEnabled: null,
-  fees: { ...initialFees },
-  savedFees: { ...initialFees },
-  feesTouched: false,
-  salespersonId: writeOptions.invoice?.salesperson_id ?? detailData?.detail.salespersonId ?? "",
-  savedSalespersonId: writeOptions.invoice?.salesperson_id ?? detailData?.detail.salespersonId ?? "",
-  shippingMode: detailData?.detail.carrier === "self_pickup" ? "pickup" : "delivery",
-  trackingNumber: detailData?.detail.trackingNo ?? "",
-  savedShippingMode: detailData?.detail.carrier === "self_pickup" ? "pickup" : "delivery",
-  savedTrackingNumber: detailData?.detail.trackingNo ?? "",
-  customerModalOpen: false,
-  customerDraft: {},
-  busy: "",
-  notice: "",
-  noticeType: ""
-};
-state.savedFeesEnabled = { ...state.feesEnabled };
-
-let currentHelpers = null;
-const printDialog = createPrintDialog({ getLang: () => currentHelpers?.lang ?? "zh" });
+  };
+  const salespersonId = writeOptions.invoice?.salesperson_id ?? detailData?.detail.salespersonId ?? "";
+  const shippingMode = detailData?.detail.carrier === "self_pickup" ? "pickup" : "delivery";
+  const trackingNumber = detailData?.detail.trackingNo ?? "";
+  return {
+    productModalOpen: false,
+    productSearch: "",
+    selectedOptions: new Set(),
+    items: cloneItems(initialItems),
+    savedItems: cloneItems(initialItems),
+    feesEnabled,
+    savedFeesEnabled: { ...feesEnabled },
+    fees: { ...initialFees },
+    savedFees: { ...initialFees },
+    feesTouched: false,
+    salespersonId,
+    savedSalespersonId: salespersonId,
+    shippingMode,
+    trackingNumber,
+    savedShippingMode: shippingMode,
+    savedTrackingNumber: trackingNumber,
+    customerModalOpen: false,
+    customerDraft: {},
+    busy: "",
+    notice: "",
+    noticeType: ""
+  };
+}
 
 function pageT(lang, key) {
   return dict[lang]?.[key] ?? dict.zh[key] ?? key;
@@ -809,6 +817,7 @@ function resetOrderChanges() {
 }
 
 async function saveOrderChanges() {
+  const mountId = activeMountId;
   syncLiveFormInputs();
   const lang = currentHelpers?.lang ?? "zh";
   if (!state.items.length) {
@@ -837,6 +846,7 @@ async function saveOrderChanges() {
       salespersonId: state.salespersonId,
       totalOverride: state.feesTouched ? undefined : detailData.detail.paymentTotal
     });
+    if (mountId !== activeMountId) return;
     detailData.detail.paymentTotal = Number(result.invoice.total) || 0;
     detailData.detail.salespersonId = result.invoice.salesperson_id ?? null;
     detailData.detail.salesperson = writeOptions.salespeople.find((person) => person.id === state.salespersonId)?.name ?? "";
@@ -854,9 +864,11 @@ async function saveOrderChanges() {
         : "orders.write.saved";
     setNotice(pageT(lang, noticeKey), noticeKey === "orders.write.saved" ? "success" : "error");
   } catch (error) {
+    if (mountId !== activeMountId) return;
     console.error("[orders-detail] order write failed", error);
     setNotice(friendlyWriteError(error, "orders.write.failed"));
   } finally {
+    if (mountId !== activeMountId) return;
     state.busy = "";
     rerender();
   }
@@ -882,12 +894,14 @@ function closeCustomerEdit() {
 }
 
 async function saveCustomerEdit() {
+  const mountId = activeMountId;
   const lang = currentHelpers?.lang ?? "zh";
   state.busy = "customer";
   setNotice("");
   rerender();
   try {
     const result = await updateLiveOrderCustomer(detailData.detail.customerId ?? detailData.order.customerId, state.customerDraft);
+    if (mountId !== activeMountId) return;
     detailData.order.customer = result.customer.name || "";
     detailData.order.phone = result.customer.phone || "";
     detailData.detail.email = result.customer.email || "";
@@ -904,15 +918,18 @@ async function saveCustomerEdit() {
         : "orders.customer.saved";
     setNotice(pageT(lang, noticeKey), noticeKey === "orders.customer.saved" ? "success" : "error");
   } catch (error) {
+    if (mountId !== activeMountId) return;
     console.error("[orders-detail] customer write failed", error);
     setNotice(friendlyWriteError(error, "orders.customer.failed"));
   } finally {
+    if (mountId !== activeMountId) return;
     state.busy = "";
     rerender();
   }
 }
 
 async function saveShipping() {
+  const mountId = activeMountId;
   syncLiveFormInputs();
   const lang = currentHelpers?.lang ?? "zh";
   if (state.shippingMode === "delivery" && !/^[A-Za-z0-9]{6,}$/.test(state.trackingNumber.trim())) {
@@ -929,6 +946,7 @@ async function saveShipping() {
       mode: state.shippingMode,
       trackingNumber: state.trackingNumber
     });
+    if (mountId !== activeMountId) return;
     detailData.detail.carrier = invoice.carrier || "";
     detailData.detail.trackingNo = invoice.tracking_number || "";
     detailData.detail.shippingStatus = invoice.shipping_status || "unshipped";
@@ -937,15 +955,17 @@ async function saveShipping() {
     state.savedShippingMode = state.shippingMode;
     setNotice(pageT(lang, "orders.shipping.saved"), "success");
   } catch (error) {
+    if (mountId !== activeMountId) return;
     console.error("[orders-detail] shipping write failed", error);
     setNotice(friendlyWriteError(error, "orders.shipping.failed"));
   } finally {
+    if (mountId !== activeMountId) return;
     state.busy = "";
     rerender();
   }
 }
 
-document.addEventListener("click", async (event) => {
+async function onOrderDetailClick(event) {
   const printOpen = event.target.closest("[data-print-open]");
   if (printOpen) {
     printDialog.open(printableOrder(), printOpen.getAttribute("data-print-open"), printOpen);
@@ -1018,9 +1038,9 @@ document.addEventListener("click", async (event) => {
     closeProductModal();
     return;
   }
-});
+}
 
-document.addEventListener("change", (event) => {
+function onOrderDetailChange(event) {
   if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
   if (state.busy && event.target.closest("[data-orders-write]")) return;
   const option = event.target.closest("[data-product-option]");
@@ -1064,9 +1084,9 @@ document.addEventListener("change", (event) => {
     syncLiveNumberInput(shippingFee);
     refreshLiveTotals();
   }
-});
+}
 
-document.addEventListener("input", (event) => {
+function onOrderDetailInput(event) {
   if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
   if (state.busy && event.target.closest("[data-orders-write]")) return;
   if (syncLiveNumberInput(event.target)) {
@@ -1088,15 +1108,98 @@ document.addEventListener("input", (event) => {
     state.productSearch = search.value;
     rerender({ focusProductSearch: true });
   }
-});
+}
 
-document.addEventListener("keydown", (event) => {
+function onOrderDetailKeydown(event) {
   if (event.key !== "Escape") return;
   if (state.productModalOpen) closeProductModal();
   else if (state.customerModalOpen) closeCustomerEdit();
-});
+}
 
-window.__shellMenu = createBizflowMenu("orders");
-window.__shellData = { unread: await getUnread(), user: currentUser };
-window.__shellContent = renderDetail;
-await import("../shell/shell.js");
+function comparableItems(items) {
+  return items.map(({ productId, name, quantity, price, warehouseId }) => ({ productId, name, quantity, price, warehouseId }));
+}
+
+function sameRecord(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function customerDraftChanged() {
+  if (!state.customerModalOpen) return false;
+  const baseline = {
+    name: detailData?.order.customer || "",
+    phone: detailData?.order.phone || "",
+    email: detailData?.detail.email || "",
+    carModel: detailData?.detail.carModelValue ?? detailData?.detail.carModel ?? "",
+    imei: "",
+    address: detailData?.detail.shippingAddress || ""
+  };
+  return Object.keys(baseline).some((key) => String(state.customerDraft[key] ?? "") !== String(baseline[key]));
+}
+
+function hasOrderDetailUnsavedChanges() {
+  return !sameRecord(comparableItems(state.items), comparableItems(state.savedItems))
+    || !sameRecord(state.feesEnabled, state.savedFeesEnabled)
+    || !sameRecord(state.fees, state.savedFees)
+    || state.salespersonId !== state.savedSalespersonId
+    || state.shippingMode !== state.savedShippingMode
+    || state.trackingNumber !== state.savedTrackingNumber
+    || customerDraftChanged();
+}
+
+export async function mountPage({ scope, signal, url = new URL(window.location.href) } = {}) {
+  const mountId = ++activeMountId;
+  const orderId = url.searchParams.get("id");
+  [detailData, currentUser, unread] = await Promise.all([
+    getOrderDetailData(orderId),
+    getCurrentUser(),
+    getUnread()
+  ]);
+  throwIfPageAborted(signal);
+  liveMode = typeof currentUser?.hasPermission === "function";
+  liveWritable = liveMode && currentUser?.bizflowMainAccess === true;
+  liveReadOnly = liveMode && !liveWritable;
+  [pickerData, writeOptions] = await Promise.all([
+    detailData ? getOrderCreateData() : Promise.resolve({ productGroups: [] }),
+    liveWritable && detailData
+      ? getLiveOrderWriteOptions(detailData.order.id)
+      : Promise.resolve({ invoice: null, defaultWarehouseId: null, salespeople: [] })
+  ]);
+  throwIfPageAborted(signal);
+  writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
+  state = initialDetailState();
+  printDialog = createPrintDialog({ getLang: () => currentHelpers?.lang ?? "zh", scope });
+
+  return {
+    page: {
+      menu: createBizflowMenu("orders"),
+      data: { unread, user: currentUser },
+      render: renderDetail,
+      title: detailData?.detail?.orderNo ? `Honnmono · ${detailData.detail.orderNo}` : "Honnmono · Order"
+    },
+    activate() {
+      scope.listen(document, "click", onOrderDetailClick);
+      scope.listen(document, "change", onOrderDetailChange);
+      scope.listen(document, "input", onOrderDetailInput);
+      scope.listen(document, "keydown", onOrderDetailKeydown);
+    },
+    hasUnsavedChanges: hasOrderDetailUnsavedChanges,
+    async canLeave() {
+      if (!hasOrderDetailUnsavedChanges()) return true;
+      return confirmInPage(pageT(currentHelpers?.lang ?? "zh", "orders.leaveUnsaved"));
+    },
+    captureState: () => null,
+    dispose() {
+      if (activeMountId === mountId) activeMountId += 1;
+      printDialog?.dispose();
+      printDialog = null;
+      detailData = null;
+      currentUser = null;
+      unread = null;
+      pickerData = { productGroups: [] };
+      writeOptions = { invoice: null, defaultWarehouseId: null, salespeople: [] };
+      currentHelpers = null;
+      state = initialDetailState();
+    }
+  };
+}
