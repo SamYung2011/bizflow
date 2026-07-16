@@ -3,5 +3,25 @@
     { "source": "/task-platform/login", "destination": "/login/", "permanent": false },
     { "source": "/task-platform/login/(.*)", "destination": "/login/$1", "permanent": false },
     { "source": "/task-platform/bizflow/(.*)", "destination": "/bizflow/$1", "permanent": false }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)\\.(js|css|svg|png|jpg|woff2?)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, stale-while-revalidate=604800"
+        }
+      ]
+    },
+    {
+      "source": "/task-platform/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    }
   ]
 }
