@@ -15,15 +15,19 @@ import { renderSegment } from "../components/segment.js";
 import { consumeNavigationPreset, navigationPresetKeys } from "../components/navigation-presets.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { renderNewCustomerFields } from "../components/new-customer-fields.js";
+import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { createCustomerSorter, customerSortKeys } from "./customers-sort.js";
 import {
+  captureWarrantyState,
   clearWarrantyDateRange,
   closeWarrantyDateRange,
   copyWarrantyPhone,
+  disposeWarrantyState,
   ensureWarrantyData,
   moveWarrantyPage,
   openWarrantyDateRange,
   renderWarranty,
+  restoreWarrantyState,
   selectWarrantyBucket,
   setWarrantySearch
 } from "./customers-warranty.js";
@@ -140,15 +144,15 @@ function pageT(lang, key) {
   return dict[lang]?.[key] ?? dict.zh[key] ?? key;
 }
 
-const [data, currentUser, unread] = await Promise.all([getCustomersPageData(), getCurrentUser(), getUnread()]);
-const liveReadOnly = typeof currentUser?.hasPermission === "function";
-const writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
-const presetTab = consumeNavigationPreset(navigationPresetKeys.customersTab);
-const presetWarrantySearch = consumeNavigationPreset(navigationPresetKeys.warrantySearch) ?? "";
+let data = null;
+let currentUser = null;
+let unread = null;
+let liveReadOnly = false;
+let writeAttributes = "";
 
 // 筛选 + 分页 + 弹窗状态(模块级,重渲后延续)
-const state = {
-  tab: presetTab === "warranty" ? "warranty" : "list",
+let state = {
+  tab: "list",
   sort: "createdDesc",
   source: "all",
   imei: "all",
@@ -159,19 +163,10 @@ const state = {
 
 let currentHelpers = null;
 const customerTabs = ["list", "warranty"];
-const customerSorter = createCustomerSorter();
-
-if (presetWarrantySearch) setWarrantySearch(presetWarrantySearch);
-if (state.tab === "warranty") await ensureWarrantyData();
-
-const dateFilter = createDateFilter({
-  id: "customers",
-  initialDate: latestDateInput(data.customers.map((customer) => customer.joinedAt)),
-  onChange({ filterChanged }) {
-    if (filterChanged) state.page = 1;
-    rerenderCustomersPage();
-  }
-});
+let customerSorter = null;
+let dateFilter = null;
+let resizeTimer = 0;
+let activeScope = null;
 
 function filteredCustomers() {
   const query = state.search.trim().toLocaleLowerCase();
@@ -355,7 +350,7 @@ function rerenderCustomersPage() {
   if (page && currentHelpers) page.outerHTML = renderCustomers(currentHelpers);
 }
 
-document.addEventListener("click", async (event) => {
+async function onCustomersClick(event) {
   if (liveReadOnly && event.target.closest("[data-customers-write]")) return;
   const customerTab = event.target.closest("[data-customers-tab]");
   if (customerTab) {
@@ -369,6 +364,7 @@ document.addEventListener("click", async (event) => {
     rerenderCustomersPage();
     if (tab === "warranty") {
       await ensureWarrantyData();
+      if (activeScope?.disposed) return;
       rerenderCustomersPage();
     }
     return;
@@ -464,9 +460,9 @@ document.addEventListener("click", async (event) => {
     closeAllFilterMenus(null);
   }
   if (!event.target.closest("[data-date-filter]")) dateFilter.close();
-});
+}
 
-document.addEventListener("input", (event) => {
+function onCustomersInput(event) {
   const customerSearch = event.target.closest("[data-customers-search]");
   if (customerSearch && state.tab === "list") {
     state.search = customerSearch.value;
@@ -487,17 +483,17 @@ document.addEventListener("input", (event) => {
     nextSearch.focus();
     nextSearch.setSelectionRange(nextSearch.value.length, nextSearch.value.length);
   }
-});
+}
 
-document.addEventListener("focusin", (event) => {
+function onCustomersFocus(event) {
   dateFilter.handleFocus(event);
-});
+}
 
-document.addEventListener("change", (event) => {
+function onCustomersChange(event) {
   dateFilter.handleChange(event);
-});
+}
 
-document.addEventListener("keydown", (event) => {
+function onCustomersKeydown(event) {
   if (event.key !== "Escape") return;
   closeAllFilterMenus(null);
   dateFilter.close();
@@ -505,18 +501,98 @@ document.addEventListener("keydown", (event) => {
     state.modalOpen = false;
     rerenderCustomersPage();
   }
-});
+}
 
-let resizeTimer = 0;
-window.addEventListener("resize", () => {
+function onCustomersResize() {
   window.clearTimeout(resizeTimer);
   resizeTimer = window.setTimeout(() => {
+    resizeTimer = 0;
+    if (activeScope?.disposed) return;
     closeWarrantyDateRange();
     rerenderCustomersPage();
   }, 120);
-});
+}
 
-window.__shellMenu = createBizflowMenu("customers");
-window.__shellData = { unread, user: currentUser };
-window.__shellContent = renderCustomers;
-await import("../shell/shell.js");
+function restoredState(value = null, presetTab = null) {
+  const next = value && typeof value === "object" ? value : {};
+  return {
+    tab: customerTabs.includes(next.tab) ? next.tab : presetTab === "warranty" ? "warranty" : "list",
+    sort: customerSortKeys.includes(next.sort) ? next.sort : "createdDesc",
+    source: ["all", "shopify", "framer", "other"].includes(next.source) ? next.source : "all",
+    imei: ["all", "has", "none"].includes(next.imei) ? next.imei : "all",
+    search: typeof next.search === "string" ? next.search : "",
+    page: Number.isInteger(next.page) && next.page > 0 ? next.page : 1,
+    modalOpen: false
+  };
+}
+
+export async function mountPage({ scope, signal, historyState = null } = {}) {
+  activeScope = scope;
+  scope.onCleanup(disposeWarrantyState);
+  const presetTab = consumeNavigationPreset(navigationPresetKeys.customersTab);
+  const presetWarrantySearch = consumeNavigationPreset(navigationPresetKeys.warrantySearch) ?? "";
+  [data, currentUser, unread] = await Promise.all([getCustomersPageData(), getCurrentUser(), getUnread()]);
+  throwIfPageAborted(signal);
+  liveReadOnly = typeof currentUser?.hasPermission === "function";
+  writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
+  state = restoredState(historyState, presetTab);
+  customerSorter = createCustomerSorter();
+  restoreWarrantyState(historyState?.warranty);
+  if (!historyState && presetWarrantySearch) setWarrantySearch(presetWarrantySearch);
+  dateFilter = createDateFilter({
+    id: "customers",
+    initialDate: latestDateInput(data.customers.map((customer) => customer.joinedAt)),
+    onChange({ filterChanged }) {
+      if (filterChanged) state.page = 1;
+      rerenderCustomersPage();
+    }
+  });
+  dateFilter.restoreState?.(historyState?.dateFilter);
+  if (state.tab === "warranty") {
+    await ensureWarrantyData();
+    throwIfPageAborted(signal);
+  }
+
+  return {
+    page: {
+      menu: createBizflowMenu("customers"),
+      data: { unread, user: currentUser },
+      render: renderCustomers,
+      title: "Honnmono · Customers"
+    },
+    activate() {
+      scope.listen(document, "click", onCustomersClick);
+      scope.listen(document, "input", onCustomersInput);
+      scope.listen(document, "focusin", onCustomersFocus);
+      scope.listen(document, "change", onCustomersChange);
+      scope.listen(document, "keydown", onCustomersKeydown);
+      scope.listen(window, "resize", onCustomersResize);
+    },
+    captureState() {
+      return {
+        tab: state.tab,
+        sort: state.sort,
+        source: state.source,
+        imei: state.imei,
+        search: state.search,
+        page: state.page,
+        dateFilter: dateFilter.captureState?.() ?? null,
+        warranty: captureWarrantyState()
+      };
+    },
+    dispose() {
+      window.clearTimeout(resizeTimer);
+      resizeTimer = 0;
+      closeAllFilterMenus(null);
+      dateFilter?.close();
+      disposeWarrantyState();
+      data = null;
+      currentUser = null;
+      unread = null;
+      currentHelpers = null;
+      customerSorter = null;
+      dateFilter = null;
+      activeScope = null;
+    }
+  };
+}

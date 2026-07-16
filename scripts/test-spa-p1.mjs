@@ -17,12 +17,14 @@ const commonStyles = new Set([
   "components/styles.css",
   "shell/shell.css"
 ]);
-const expectedP1Routes = [
+const expectedSpaRoutes = [
   "/bizflow/home.html",
   "/bizflow/ocpp-monitor.html",
   "/bizflow/ocpp-charging.html",
   "/bizflow/ocpp-users.html",
-  "/bizflow/ocpp-finance.html"
+  "/bizflow/ocpp-finance.html",
+  "/bizflow/customers.html",
+  "/bizflow/customer-detail.html"
 ];
 
 function attributes(tag) {
@@ -40,11 +42,11 @@ async function verifyManifest() {
   const routes = Object.values(routeManifest);
   assert.equal(routes.length, 16, "manifest must enumerate the 16 approved pages");
   assert.equal(spaNavigation, true, "SPA master switch must stay enabled");
-  assert.deepEqual([...spaRouteAllowlist], expectedP1Routes, "P1 allowlist must contain Home + four OCPP pages only");
+  assert.deepEqual([...spaRouteAllowlist], expectedSpaRoutes, "SPA allowlist must contain the P1 sample and P2 customer routes");
   for (const route of routes) {
-    const migrated = expectedP1Routes.includes(route.path);
+    const migrated = expectedSpaRoutes.includes(route.path);
     assert.ok(route.path.endsWith(".html"), `${route.path} must retain its .html URL`);
-    assert.equal(typeof route.load, migrated ? "function" : "object", `${route.path} loader must match its P1 migration status`);
+    assert.equal(typeof route.load, migrated ? "function" : "object", `${route.path} loader must match its rollout status`);
     const htmlFile = path.join(rootDir, "root-site", route.path);
     const html = await readFile(htmlFile, "utf8");
     const tags = [...html.matchAll(/<(?:link|script)\b[^>]*>/g)].map((match) => attributes(match[0]));
@@ -308,4 +310,4 @@ await verifyLifecycle();
 verifyOcppGuard();
 await verifyRouter();
 await verifyShellAdapter();
-console.log("SPA P1 contracts: PASS (5 migrated routes, 11 MPA routes, 30-cycle lifecycle, fallback, shell adapter)");
+console.log("SPA rollout contracts: PASS (7 migrated routes, 9 MPA routes, 30-cycle lifecycle, fallback, shell adapter)");

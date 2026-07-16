@@ -4,6 +4,7 @@
 import { getCurrentUser, getCustomerDetailData, getOrdersPageData, getUnread } from "../data/provider.js";
 import { renderManagementPager } from "../components/management-list.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
+import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { createPrintDialog } from "./print/print-dialog.js";
 import { toPrintableOrder } from "./print/print-invoice.js";
 
@@ -133,16 +134,13 @@ const dict = {
   }
 };
 
-const params = new URLSearchParams(window.location.search);
-const [detailData, currentUser, unread] = await Promise.all([
-  getCustomerDetailData(params.get("id")),
-  getCurrentUser(),
-  getUnread()
-]);
-const liveReadOnly = typeof currentUser?.hasPermission === "function";
-const writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
+let detailData = null;
+let currentUser = null;
+let unread = null;
+let liveReadOnly = false;
+let writeAttributes = "";
 
-const state = {
+let state = {
   actionMenuOpen: false,
   editModalOpen: false,
   purchasePage: 1
@@ -151,8 +149,9 @@ const state = {
 const PURCHASE_PAGE_SIZE = 6;
 
 let currentHelpers = null;
-const printDialog = createPrintDialog({ getLang: () => currentHelpers?.lang ?? "zh" });
+let printDialog = null;
 let printOrdersPromise = null;
+let activeMountId = 0;
 
 async function getFullOrderForPrint(orderNo) {
   if (!printOrdersPromise) printOrdersPromise = getOrdersPageData();
@@ -395,7 +394,7 @@ function closeEditModal() {
   rerender();
 }
 
-document.addEventListener("click", async (event) => {
+async function onCustomerDetailClick(event) {
   if (liveReadOnly && event.target.closest("[data-customer-write]")) return;
   if (event.target.closest("[data-customer-actions-trigger]")) {
     state.actionMenuOpen = !state.actionMenuOpen;
@@ -430,6 +429,7 @@ document.addEventListener("click", async (event) => {
 
   const printButton = event.target.closest("[data-customer-order-print]");
   if (printButton) {
+    const mountId = activeMountId;
     event.stopPropagation();
     const orderNo = printButton.closest("[data-customer-purchase-row]")?.getAttribute("data-order-no");
     printButton.disabled = true;
@@ -440,9 +440,12 @@ document.addEventListener("click", async (event) => {
     } catch {
       order = null;
     } finally {
-      printButton.disabled = false;
-      printButton.removeAttribute("aria-busy");
+      if (printButton.isConnected) {
+        printButton.disabled = false;
+        printButton.removeAttribute("aria-busy");
+      }
     }
+    if (mountId !== activeMountId) return;
     printDialog.open(order ? toPrintableOrder(order) : null, "both", printButton);
     return;
   }
@@ -450,15 +453,59 @@ document.addEventListener("click", async (event) => {
   if (state.actionMenuOpen && !event.target.closest("[data-customer-actions-menu]")) {
     closeActionMenu();
   }
-});
+}
 
-document.addEventListener("keydown", (event) => {
+function onCustomerDetailKeydown(event) {
   if (event.key !== "Escape") return;
   if (state.editModalOpen) closeEditModal();
   else closeActionMenu();
-});
+}
 
-window.__shellMenu = createBizflowMenu("customers");
-window.__shellData = { unread, user: currentUser };
-window.__shellContent = renderCustomerDetail;
-await import("../shell/shell.js");
+function restoredState(value = null) {
+  const next = value && typeof value === "object" ? value : {};
+  return {
+    actionMenuOpen: false,
+    editModalOpen: false,
+    purchasePage: Number.isInteger(next.purchasePage) && next.purchasePage > 0 ? next.purchasePage : 1
+  };
+}
+
+export async function mountPage({ scope, signal, url = new URL(window.location.href), historyState = null } = {}) {
+  const mountId = ++activeMountId;
+  const customerId = url.searchParams.get("id");
+  [detailData, currentUser, unread] = await Promise.all([
+    getCustomerDetailData(customerId),
+    getCurrentUser(),
+    getUnread()
+  ]);
+  throwIfPageAborted(signal);
+  liveReadOnly = typeof currentUser?.hasPermission === "function";
+  writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
+  state = restoredState(historyState);
+  printOrdersPromise = null;
+  printDialog = createPrintDialog({ getLang: () => currentHelpers?.lang ?? "zh", scope });
+
+  return {
+    page: {
+      menu: createBizflowMenu("customers"),
+      data: { unread, user: currentUser },
+      render: renderCustomerDetail,
+      title: detailData?.customer?.name ? `Honnmono · ${detailData.customer.name}` : "Honnmono · Customer"
+    },
+    activate() {
+      scope.listen(document, "click", onCustomerDetailClick);
+      scope.listen(document, "keydown", onCustomerDetailKeydown);
+    },
+    captureState: () => ({ purchasePage: state.purchasePage }),
+    dispose() {
+      if (activeMountId === mountId) activeMountId += 1;
+      printDialog?.dispose();
+      printDialog = null;
+      printOrdersPromise = null;
+      detailData = null;
+      currentUser = null;
+      unread = null;
+      currentHelpers = null;
+    }
+  };
+}

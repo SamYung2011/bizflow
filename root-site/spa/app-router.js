@@ -188,6 +188,12 @@ export function createAppRouter({
         route.load()
       ]), navigationTimeoutMs, abortController.signal);
       styles = preparedStyles;
+      // ES modules are singletons. Dispose a same-path controller before mounting
+      // another query-string instance so module-scoped page state cannot overlap.
+      if (currentController && route === currentRoute) {
+        await currentController.dispose();
+        currentController = null;
+      }
       controller = await withTimeout(mountPageModule(module, {
         url,
         route,

@@ -1,4 +1,4 @@
-// P1 enables the Home + OCPP sample. Remaining routes stay on their MPA entries.
+// P2 adds the customer list/detail domain to the Home + OCPP sample.
 export const spaNavigation = true;
 export const spaCrossSectionNavigation = false;
 export const spaRouteAllowlist = Object.freeze([
@@ -6,7 +6,9 @@ export const spaRouteAllowlist = Object.freeze([
   "/bizflow/ocpp-monitor.html",
   "/bizflow/ocpp-charging.html",
   "/bizflow/ocpp-users.html",
-  "/bizflow/ocpp-finance.html"
+  "/bizflow/ocpp-finance.html",
+  "/bizflow/customers.html",
+  "/bizflow/customer-detail.html"
 ]);
 
 const fromHere = (path) => new URL(path, import.meta.url).href;
@@ -36,10 +38,10 @@ const routes = [
   route("/bizflow/customers.html", "bizflow", "../bizflow/customers.js", [
     "../components/segment.css", "../components/date-filter.css", "../components/date-range-panel.css", "../components/management-list.css",
     "../bizflow/customers.css", "../bizflow/customers-warranty.css"
-  ]),
+  ], () => import("../bizflow/customers.js")),
   route("/bizflow/customer-detail.html", "bizflow", "../bizflow/customer-detail.js", [
     "../components/management-list.css", "../bizflow/customers.css", "../bizflow/orders.css"
-  ]),
+  ], () => import("../bizflow/customer-detail.js")),
   route("/bizflow/inventory.html", "bizflow", "../bizflow/inventory.js", [
     "../components/segment.css", "../components/management-list.css",
     "../bizflow/inventory.css", "../bizflow/inventory-domain.css"

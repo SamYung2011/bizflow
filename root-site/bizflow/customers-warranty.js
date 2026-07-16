@@ -351,3 +351,32 @@ export async function copyWarrantyPhone(phone, lang) {
 export function moveWarrantyPage(direction) {
   state.page += direction === "next" ? 1 : -1;
 }
+
+export function captureWarrantyState() {
+  return {
+    bucket: state.bucket,
+    search: state.search,
+    dateFrom: state.dateFrom,
+    dateTo: state.dateTo,
+    page: state.page
+  };
+}
+
+export function restoreWarrantyState(value = null) {
+  const next = value && typeof value === "object" ? value : {};
+  state.bucket = ["all", ...bucketKeys].includes(next.bucket) ? next.bucket : "all";
+  state.search = typeof next.search === "string" ? next.search : "";
+  state.dateFrom = typeof next.dateFrom === "string" ? next.dateFrom : "";
+  state.dateTo = typeof next.dateTo === "string" ? next.dateTo : "";
+  state.page = Number.isInteger(next.page) && next.page > 0 ? next.page : 1;
+  dateRangePanel.close({ restoreFocus: false });
+}
+
+export function disposeWarrantyState() {
+  dateRangePanel.close({ restoreFocus: false });
+  window.clearTimeout(copyNoticeTimer);
+  copyNoticeTimer = 0;
+  document.querySelector("[data-warranty-copy-notice]")?.remove();
+  state.items = null;
+  validCustomerIds = new Set();
+}

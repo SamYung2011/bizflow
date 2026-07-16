@@ -34,7 +34,7 @@ const copy = {
   }
 };
 
-export function createPrintDialog({ getLang = () => "zh" } = {}) {
+export function createPrintDialog({ getLang = () => "zh", scope = null } = {}) {
   const state = {
     open: false,
     order: null,
@@ -116,7 +116,7 @@ export function createPrintDialog({ getLang = () => "zh" } = {}) {
     if (opener?.isConnected) opener.focus();
   }
 
-  document.addEventListener("click", (event) => {
+  function onClick(event) {
     const root = event.target.closest("[data-print-dialog-root]");
     if (!root) return;
     if (event.target.matches("[data-print-dialog-root]") || event.target.closest("[data-print-dialog-close]")) {
@@ -131,9 +131,9 @@ export function createPrintDialog({ getLang = () => "zh" } = {}) {
       return;
     }
     close();
-  });
+  }
 
-  document.addEventListener("change", (event) => {
+  function onChange(event) {
     const option = event.target.closest("[data-print-dialog-option]");
     if (!option || !state.open) return;
     const key = option.getAttribute("data-print-dialog-option");
@@ -141,20 +141,42 @@ export function createPrintDialog({ getLang = () => "zh" } = {}) {
     state.errorKey = state.errorKey === "blocked" ? "" : state.errorKey;
     render();
     focusOption(key);
-  });
+  }
 
-  document.addEventListener("keydown", (event) => {
+  function onKeydown(event) {
     if (event.key !== "Escape" || !state.open) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     close();
-  });
+  }
 
-  new MutationObserver(() => {
+  const languageObserver = new MutationObserver(() => {
     if (!state.open) return;
     render();
     focusOption(state.trigger === "receipt" ? "receipt" : "invoice");
-  }).observe(document.documentElement, { attributes: true, attributeFilter: ["lang"] });
+  });
 
-  return { open, close, isOpen: () => state.open };
+  const cleanups = [];
+  function listen(target, type, handler) {
+    if (scope?.listen) {
+      scope.listen(target, type, handler);
+      return;
+    }
+    target.addEventListener(type, handler);
+    cleanups.push(() => target.removeEventListener(type, handler));
+  }
+
+  listen(document, "click", onClick);
+  listen(document, "change", onChange);
+  listen(document, "keydown", onKeydown);
+  languageObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["lang"] });
+  if (scope?.track) scope.track(languageObserver);
+  else cleanups.push(() => languageObserver.disconnect());
+
+  function dispose() {
+    close();
+    for (const cleanup of cleanups.splice(0).reverse()) cleanup();
+  }
+
+  return { open, close, dispose, isOpen: () => state.open };
 }

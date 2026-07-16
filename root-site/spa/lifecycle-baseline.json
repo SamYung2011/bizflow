@@ -20,7 +20,7 @@
     "/bizflow/orders.html": {
       "moduleCount": 40,
       "totals": {
-        "documentListeners": 34,
+        "documentListeners": 31,
         "windowListeners": 9,
         "mediaQueryListeners": 2,
         "timeouts": 28,
@@ -48,7 +48,7 @@
     "/bizflow/orders-detail.html": {
       "moduleCount": 31,
       "totals": {
-        "documentListeners": 19,
+        "documentListeners": 16,
         "windowListeners": 6,
         "mediaQueryListeners": 2,
         "timeouts": 25,
@@ -60,30 +60,30 @@
       }
     },
     "/bizflow/customers.html": {
-      "moduleCount": 31,
+      "moduleCount": 26,
       "totals": {
-        "documentListeners": 19,
-        "windowListeners": 9,
-        "mediaQueryListeners": 2,
-        "timeouts": 26,
+        "documentListeners": 3,
+        "windowListeners": 4,
+        "mediaQueryListeners": 0,
+        "timeouts": 27,
         "intervals": 2,
-        "animationFrames": 2,
+        "animationFrames": 3,
         "observers": 0,
-        "authSubscriptions": 5,
+        "authSubscriptions": 4,
         "realtimeSubscriptions": 2
       }
     },
     "/bizflow/customer-detail.html": {
-      "moduleCount": 30,
+      "moduleCount": 23,
       "totals": {
-        "documentListeners": 17,
-        "windowListeners": 6,
-        "mediaQueryListeners": 2,
-        "timeouts": 25,
+        "documentListeners": 1,
+        "windowListeners": 2,
+        "mediaQueryListeners": 0,
+        "timeouts": 26,
         "intervals": 2,
-        "animationFrames": 0,
+        "animationFrames": 1,
         "observers": 1,
-        "authSubscriptions": 5,
+        "authSubscriptions": 4,
         "realtimeSubscriptions": 2
       }
     },
