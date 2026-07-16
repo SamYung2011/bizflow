@@ -59,7 +59,7 @@ export function renderTaskSubmitDialog({ state, data, helpers }) {
         </label>
         <label class="form-task-submit__field">
           <span>${escapeHtml(tt("tasks.submit.content"))}</span>
-          <textarea name="content" required${busy}>${escapeHtml(draft.content)}</textarea>
+          <textarea name="content" placeholder="${escapeHtml(tt("tasks.submit.contentPlaceholder"))}"${busy}>${escapeHtml(draft.content)}</textarea>
         </label>
         <div class="form-task-submit__field">
           <span>${escapeHtml(tt("tasks.submit.priority"))}</span>

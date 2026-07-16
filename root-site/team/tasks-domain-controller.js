@@ -9,6 +9,7 @@ export function attachTaskDomainController({
   getHelpers,
   rerender,
   closeTaskDetail,
+  leaveTaskDetailForNavigation,
   adjustOpenTaskCounts,
   localTimestamp,
   toggleTaskParticipation
@@ -31,6 +32,7 @@ export function attachTaskDomainController({
 
   document.addEventListener("click", async (event) => {
     if (event.target.closest("[data-task-overview-open]")) {
+      leaveTaskDetailForNavigation();
       state.mode = "overview";
       filterState.view = "board";
       setSessionValue("team-tasks-view-mode", "board");
@@ -40,6 +42,7 @@ export function attachTaskDomainController({
 
     const memberTrigger = event.target.closest("[data-task-member]");
     if (memberTrigger) {
+      leaveTaskDetailForNavigation();
       state.mode = "board";
       filterState.member = memberTrigger.getAttribute("data-task-member") || "all";
       filterState.view = "board";
@@ -53,6 +56,15 @@ export function attachTaskDomainController({
       const memberId = overviewToggle.getAttribute("data-overview-toggle");
       if (state.overviewExpanded.has(memberId)) state.overviewExpanded.delete(memberId);
       else state.overviewExpanded.add(memberId);
+      rerender();
+      return;
+    }
+
+    const completedToggle = event.target.closest("[data-overview-completed-toggle]");
+    if (completedToggle) {
+      const memberId = completedToggle.getAttribute("data-overview-completed-toggle");
+      if (state.overviewCompletedExpanded.has(memberId)) state.overviewCompletedExpanded.delete(memberId);
+      else state.overviewCompletedExpanded.add(memberId);
       rerender();
       return;
     }

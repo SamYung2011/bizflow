@@ -57,6 +57,7 @@ const state = {
   liveTaskWrites: authenticated,
   mode: "overview",
   overviewExpanded: new Set(),
+  overviewCompletedExpanded: new Set(),
   onlyMine: getSessionValue("team-tasks-only-mine") === "1",
   calendarYear: now.getFullYear(),
   calendarMonth: now.getMonth(),
@@ -164,7 +165,13 @@ export function renderTaskManagement(helpers) {
     : calendarView
       ? renderTaskCalendar({ tasks: calendarTasks, state, helpers })
       : state.mode === "overview"
-        ? renderTaskOverview({ members: state.members, tasks: scopedTasks, expanded: state.overviewExpanded, helpers })
+        ? renderTaskOverview({
+          members: state.members,
+          tasks: scopedTasks,
+          expanded: state.overviewExpanded,
+          completedExpanded: state.overviewCompletedExpanded,
+          helpers
+        })
         : `<div class="team-kanban-grid">${renderTaskBoardGrid({ state, filterState, helpers })}</div>`;
   return `<div class="team-task-page${state.detailOpen ? " team-task-page--detail" : ""}" data-task-view="${escapeHtml(filterState.view)}" data-task-mode="${escapeHtml(state.mode)}" data-only-mine="${state.onlyMine}">
     <h1 class="team-task-title" title="${escapeHtml(tt("tasks.title"))}">${escapeHtml(tt("tasks.title"))}</h1>
@@ -257,6 +264,14 @@ function closeTaskDetail() {
   state.feedbackDraft = { message: "", attachments: [] };
   state.feedbackError = "";
   rerenderTaskPage({ restoreDetailFocus: true });
+}
+
+function leaveTaskDetailForNavigation() {
+  state.detailOpen = false;
+  state.selectedTaskId = null;
+  state.detailTab = "content";
+  state.feedbackDraft = { message: "", attachments: [] };
+  state.feedbackError = "";
 }
 
 function openTaskSubmit() {
@@ -974,6 +989,7 @@ attachTaskDomainController({
   getHelpers: () => currentHelpers,
   rerender: rerenderTaskPage,
   closeTaskDetail,
+  leaveTaskDetailForNavigation,
   adjustOpenTaskCounts,
   localTimestamp,
   toggleTaskParticipation

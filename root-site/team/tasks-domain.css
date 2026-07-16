@@ -275,6 +275,18 @@
   text-decoration: line-through;
 }
 
+.task-overview__completed-toggle {
+  align-self: flex-start;
+  margin-top: var(--space-4);
+  padding: var(--space-4) var(--space-10);
+  border: 0;
+  border-radius: var(--radius-10);
+  color: var(--blue);
+  background: var(--gray-5);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+}
+
 /* Calendar */
 .team-board--calendar {
   display: block;
