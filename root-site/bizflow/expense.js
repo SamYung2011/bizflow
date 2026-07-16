@@ -202,7 +202,12 @@ let state = {
 };
 
 let currentHelpers = null;
+let activeScope = null;
 let activeMountId = 0;
+
+function isCurrentExpenseMount(mountId, scope = activeScope) {
+  return mountId === activeMountId && Boolean(scope?.isCurrent());
+}
 
 function t(lang, key, values = {}) {
   const template = copy[lang]?.[key] ?? copy.zh[key] ?? key;
@@ -448,6 +453,7 @@ async function onExpenseClick(event) {
   }
   const remove = event.target.closest("[data-expense-delete]");
   if (remove && await confirmInPage(t(currentHelpers?.lang ?? "zh", "deleteConfirm"), { danger: true })) {
+    if (!activeScope?.isCurrent()) return;
     const id = remove.getAttribute("data-expense-delete");
     const row = findLocalRow(id);
     if (row) {
@@ -493,6 +499,7 @@ async function onExpenseSubmit(event) {
   else if (!categories.includes(state.draft.category)) state.error = "categoryRequired";
   else if (authenticated) {
     const mountId = activeMountId;
+    const scope = activeScope;
     state.writeBusy = true;
     state.error = "";
     rerender();
@@ -505,7 +512,7 @@ async function onExpenseSubmit(event) {
         description: state.draft.description.trim(),
         files: state.draft.receipts.map((receipt) => receipt.file).filter(Boolean)
       });
-      if (mountId !== activeMountId) return;
+      if (!isCurrentExpenseMount(mountId, scope)) return;
       const row = normalizeExpenseRows([{ ...result.row, employee: currentUser.name }])[0];
       revokeReceipts(state.draft.receipts);
       state.rows.unshift(row);
@@ -513,11 +520,11 @@ async function onExpenseSubmit(event) {
       state.draft = null;
       state.error = "";
     } catch (error) {
-      if (mountId !== activeMountId) return;
+      if (!isCurrentExpenseMount(mountId, scope)) return;
       console.warn("Expense submission failed", error);
       state.error = "saveFailed";
     } finally {
-      if (mountId !== activeMountId) return;
+      if (!isCurrentExpenseMount(mountId, scope)) return;
       state.writeBusy = false;
     }
     rerender();
@@ -560,8 +567,12 @@ function hasExpenseUnsavedChanges() {
 
 export async function mountPage({ scope, signal, historyState = null } = {}) {
   const mountId = ++activeMountId;
-  [snapshot, currentUser, unread] = await Promise.all([getExpenseData(), getCurrentUser(), getUnread()]);
-  throwIfPageAborted(signal);
+  activeScope = scope;
+  const [nextSnapshot, nextCurrentUser, nextUnread] = await Promise.all([getExpenseData(), getCurrentUser(), getUnread()]);
+  throwIfPageAborted(signal, scope);
+  snapshot = nextSnapshot;
+  currentUser = nextCurrentUser;
+  unread = nextUnread;
   authenticated = typeof currentUser?.hasPermission === "function";
   isAdmin = !authenticated || currentUser?.isBfAdmin === true;
   liveReadOnly = authenticated;
@@ -604,6 +615,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       currentUser = null;
       unread = null;
       currentHelpers = null;
+      if (activeScope === scope) activeScope = null;
       state.draft = null;
     }
   };

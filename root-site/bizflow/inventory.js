@@ -173,6 +173,10 @@ let currentHelpers = null;
 let activeScope = null;
 let activeNavigation = null;
 
+function isCurrentInventoryScope(scope = activeScope) {
+  return Boolean(scope && scope === activeScope && scope.isCurrent());
+}
+
 function pageT(lang, key) {
   return dict[lang]?.[key] ?? dict.zh[key] ?? key;
 }
@@ -393,13 +397,13 @@ export function renderInventory(helpers) {
   </div>`;
 }
 
-async function ensureTabData(tab) {
-  if (tab === "itemMap") await ensureItemMapData();
-  else if (tab === "shopify") await ensureShopifyData();
-  else if (tab === "suppliers") await ensureSuppliersData();
+async function ensureTabData(tab, { scope = activeScope, signal = scope?.signal } = {}) {
+  if (tab === "itemMap") await ensureItemMapData({ scope, signal });
+  else if (tab === "shopify") await ensureShopifyData({ scope, signal });
+  else if (tab === "suppliers") await ensureSuppliersData({ scope, signal });
   else if (tab === "pending") await Promise.all([
-    ensurePendingDeductionData(),
-    ensurePendingOrderLinks()
+    ensurePendingDeductionData({ scope, signal }),
+    ensurePendingOrderLinks({ scope, signal })
   ]);
 }
 
@@ -448,17 +452,19 @@ async function onInventoryClick(event) {
   if (tab) {
     const nextTab = tab.getAttribute("data-inventory-tab");
     if (tabs.includes(nextTab) && state.tab !== nextTab) {
+      const scope = activeScope;
       if (hasInventoryUnsavedChanges()) {
         const leave = await confirmInPage(pageT(currentHelpers?.lang ?? "zh", "inventory.leaveUnsaved"));
         if (!leave) return;
+        if (!isCurrentInventoryScope(scope)) return;
         discardTransientDrafts();
       }
       state.tab = nextTab;
       state.page = 1;
       closeCategoryMenu();
       rerenderInventoryPage();
-      await ensureTabData(nextTab);
-      if (!activeScope?.disposed && state.tab === nextTab) rerenderInventoryPage();
+      await ensureTabData(nextTab, { scope });
+      if (isCurrentInventoryScope(scope) && state.tab === nextTab) rerenderInventoryPage();
     }
     return;
   }
@@ -593,17 +599,21 @@ export async function mountPage({ scope, signal, historyState = null, navigation
   activeScope = scope;
   activeNavigation = navigation;
   const presetSearch = consumeNavigationPreset(navigationPresetKeys.inventorySearch) ?? "";
-  [data, unreadWatermarks, currentUser, unread] = await Promise.all([
+  const [nextData, nextUnreadWatermarks, nextCurrentUser, nextUnread] = await Promise.all([
     getInventoryPageData(), getUnreadWatermarks(), getCurrentUser(), getUnread()
   ]);
-  throwIfPageAborted(signal);
+  throwIfPageAborted(signal, scope);
+  data = nextData;
+  unreadWatermarks = nextUnreadWatermarks;
+  currentUser = nextCurrentUser;
+  unread = nextUnread;
   liveReadOnly = typeof currentUser?.hasPermission === "function";
   writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
   state = restoredState(historyState, presetSearch);
   restoreItemMapState(historyState?.itemMap);
   restoreSupplierState(historyState?.suppliers);
-  await ensureTabData(state.tab);
-  throwIfPageAborted(signal);
+  await ensureTabData(state.tab, { scope, signal });
+  throwIfPageAborted(signal, scope);
   restoreShopifyState(historyState?.shopify);
 
   return {
@@ -626,8 +636,8 @@ export async function mountPage({ scope, signal, historyState = null, navigation
       attachPendingDeductionBehaviors({ rerender: rerenderInventoryPage, scope });
       // Warm the expensive pending snapshot only after the visible product list has painted.
       scope.animationFrame(() => scope.timeout(() => {
-        ensurePendingDeductionData()
-          .then(() => { if (!scope.disposed) rerenderInventoryPage(); })
+        ensurePendingDeductionData({ scope })
+          .then(() => { if (isCurrentInventoryScope(scope)) rerenderInventoryPage(); })
           .catch((error) => console.warn("[inventory] pending deduction preload failed", error));
       }, 0));
     },
@@ -658,8 +668,8 @@ export async function mountPage({ scope, signal, historyState = null, navigation
       unread = null;
       currentUser = null;
       currentHelpers = null;
-      activeScope = null;
-      activeNavigation = null;
+      if (activeScope === scope) activeScope = null;
+      if (activeNavigation === navigation) activeNavigation = null;
     }
   };
 }

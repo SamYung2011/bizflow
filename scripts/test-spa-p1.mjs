@@ -82,6 +82,12 @@ async function verifyManifest() {
     if (migrated) {
       const source = await readFile(fileURLToPath(route.entry), "utf8");
       assert.match(source, /export\s+async\s+function\s+mountPage\s*\(/, `${route.path} must export mountPage()`);
+      assert.match(source, /throwIfPageAborted\(signal, scope\)/, `${route.path} mount must validate its route generation`);
+      assert.doesNotMatch(
+        source,
+        /^\s*\[[A-Za-z_$][\w$]*(?:\s*,\s*[A-Za-z_$][\w$]*)+\]\s*=\s*await\s+Promise\.all/m,
+        `${route.path} must not assign async mount results to module globals before its generation guard`
+      );
       const module = await route.load();
       assert.equal(typeof module.mountPage, "function", `${route.path} loader must resolve its lifecycle controller without boot side effects`);
     }
@@ -124,6 +130,22 @@ async function verifyLifecycle() {
   assert.equal(target.listeners.get("change")?.size, 0, "scope must remove listeners exactly once");
   assert.equal(disposed, 1, "scope must release tracked resources exactly once");
 
+  let currentGeneration = 1;
+  const guardedScope = createPageScope(null, () => currentGeneration === 1);
+  let guardedCommits = 0;
+  const guardedTarget = eventTarget();
+  let guardedEvents = 0;
+  guardedScope.listen(guardedTarget, "change", () => guardedEvents += 1);
+  assert.equal(guardedScope.commit(() => guardedCommits += 1), true);
+  [...guardedTarget.listeners.get("change")][0]({ type: "change" });
+  currentGeneration = 2;
+  assert.equal(guardedScope.commit(() => guardedCommits += 1), false, "superseded page scopes must reject late commits");
+  assert.equal(guardedCommits, 1);
+  [...guardedTarget.listeners.get("change")][0]({ type: "change" });
+  assert.equal(guardedEvents, 1, "superseded page scopes must ignore late events before disposal completes");
+  assert.throws(() => throwIfPageAborted(null, guardedScope), { name: "AbortError" });
+  guardedScope.dispose();
+
   let activated = 0;
   let customDisposed = 0;
   const mounted = await mountPageModule({
@@ -159,6 +181,70 @@ async function verifyLifecycle() {
   const restoredFilter = createDateFilter({ initialDate: "2026-07-16" });
   assert.equal(restoredFilter.restoreState(sourceFilter.captureState()), true);
   assert.deepEqual(restoredFilter.captureState(), sourceFilter.captureState(), "date filter history state must round-trip");
+}
+
+async function verifyRouteGenerationRace() {
+  for (let iteration = 0; iteration < 10; iteration += 1) {
+    const browser = fakeBrowser();
+    let firstScope = null;
+    let releaseSecond = null;
+    let secondStarted = null;
+    const secondStart = new Promise((resolve) => { secondStarted = resolve; });
+    const secondGate = new Promise((resolve) => { releaseSecond = resolve; });
+    const manifest = {
+      "/a.html": {
+        path: "/a.html", section: "bizflow", styles: [],
+        load: async () => ({
+          async mountPage({ scope }) {
+            firstScope = scope;
+            return { page: { data: {}, render: () => "a" } };
+          }
+        })
+      },
+      "/b.html": {
+        path: "/b.html", section: "bizflow", styles: [],
+        load: async () => ({
+          async mountPage() {
+            secondStarted();
+            await secondGate;
+            return { page: { data: {}, render: () => "b" } };
+          }
+        })
+      }
+    };
+    const router = createAppRouter({
+      shell: { setPage() {} },
+      manifest,
+      allowlist: Object.keys(manifest),
+      windowRef: browser.windowRef,
+      documentRef: browser.documentRef,
+      styleManager: {
+        adopt() {},
+        async prepare() { return { commit() {}, rollback() {} }; },
+        dispose() {}
+      }
+    });
+    assert.equal(await router.start(), true);
+    const navigation = router.navigate("/b.html");
+    await secondStart;
+    await new Promise((resolve) => setTimeout(resolve, 200 + (iteration % 4) * 100));
+    let staleCommit = false;
+    assert.equal(firstScope.commit(() => { staleCommit = true; }), false, `old route must reject delayed commit in cycle ${iteration + 1}`);
+    assert.equal(staleCommit, false);
+    releaseSecond();
+    assert.equal(await navigation, true);
+    await router.dispose();
+  }
+}
+
+async function verifyDataRaceGuards() {
+  const auth = await readFile(path.join(rootDir, "root-site/data/auth.js"), "utf8");
+  const snapshotUtils = await readFile(path.join(rootDir, "root-site/data/live-snapshot-utils.js"), "utf8");
+  const snapshots = await readFile(path.join(rootDir, "root-site/data/live-snapshots.js"), "utf8");
+  assert.match(auth, /secondaryOrder \|\| ""\}:\$\{cacheVersion\}/, "table in-flight keys must include the invalidation generation");
+  assert.match(snapshotUtils, /freshTablePromises\.get\(key\) === promise/, "fresh table requests must clear only their own generation");
+  assert.match(snapshotUtils, /freshTablePromises\.keys\(\)/, "table invalidation must evict fresh in-flight reuse keys");
+  assert.match(snapshots, /LIVE_REFRESHES\.get\(snapshot\) === promise/, "snapshot refreshes must clear only their own generation");
 }
 
 function verifyOcppGuard() {
@@ -365,6 +451,8 @@ await verifyLifecycle();
 verifyOcppGuard();
 verifyWhatsappI18n();
 await verifyRouter();
+await verifyRouteGenerationRace();
+await verifyDataRaceGuards();
 await verifyShellAdapter();
 await verifyTransitions();
 console.log("SPA rollout contracts: PASS (16 migrated routes, cross-section navigation, 30-cycle lifecycle, fallback, shell adapter)");

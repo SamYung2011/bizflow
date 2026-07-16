@@ -27,6 +27,10 @@ let taskMobileViewport = null;
 let activeScope = null;
 let activeMountId = 0;
 
+function isCurrentTaskMount(mountId, scope = activeScope) {
+  return mountId === activeMountId && Boolean(scope?.isCurrent());
+}
+
 function initializeTaskState(historyState = null) {
   const clonedTasks = data.tasks.map((task) => ({
     ...task,
@@ -493,6 +497,7 @@ function completeWholeTask(task, completedAt) {
 async function performTaskAction(taskId, action) {
   if (state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites)) return;
   const mountId = activeMountId;
+  const scope = activeScope;
   const location = taskLocation(taskId);
   if (!location) return;
   const { column, index, task } = location;
@@ -518,18 +523,18 @@ async function performTaskAction(taskId, action) {
           wholeTask,
           needsApproval: task.requiresReview
         });
-        if (mountId !== activeMountId) return;
+        if (!isCurrentTaskMount(mountId, scope)) return;
         if (result.wholeTask) completeWholeTask(task, result.completedAt);
         else {
           targetAssignee.completedAt = result.completedAt;
           targetAssignee.abandonedAt = null;
         }
       } catch (error) {
-        if (mountId !== activeMountId) return;
+        if (!isCurrentTaskMount(mountId, scope)) return;
         console.warn("Task completion failed", error);
         state.writeError = "tasks.write.failed";
       } finally {
-        if (mountId === activeMountId) state.writeBusy = false;
+        if (isCurrentTaskMount(mountId, scope)) state.writeBusy = false;
       }
       state.actionTaskId = null;
       rerenderTaskPage({ focusBoard: true });
@@ -559,14 +564,14 @@ async function performTaskAction(taskId, action) {
       try {
         await deleteLiveTask(task.id);
       } catch (error) {
-        if (mountId !== activeMountId) return;
+        if (!isCurrentTaskMount(mountId, scope)) return;
         console.warn("Task deletion failed", error);
         state.writeError = "tasks.write.failed";
         state.writeBusy = false;
         rerenderTaskPage({ focusBoard: true });
         return;
       }
-      if (mountId !== activeMountId) return;
+      if (!isCurrentTaskMount(mountId, scope)) return;
       state.writeBusy = false;
     }
     const removedIds = descendantTaskIds(task.id);
@@ -598,6 +603,7 @@ function localTimestamp() {
 async function toggleTaskParticipation(task) {
   if (!state.liveTaskWrites || state.writeBusy) return;
   const mountId = activeMountId;
+  const scope = activeScope;
   const assignee = taskAssignee(task, state.currentUser);
   if (!assignee) return;
   const abandoned = assignee.abandonedAt != null || ((task.assignees?.length ?? 0) === 1 && task.status === "abandoned");
@@ -615,7 +621,7 @@ async function toggleTaskParticipation(task) {
       abandoned: nextAbandoned,
       singleAssignee
     });
-    if (mountId !== activeMountId) return;
+    if (!isCurrentTaskMount(mountId, scope)) return;
     assignee.abandonedAt = result.changedAt;
     assignee.completedAt = null;
     if (singleAssignee) {
@@ -627,13 +633,13 @@ async function toggleTaskParticipation(task) {
     }
     if (nextAbandoned) state.detailOpen = false;
   } catch (error) {
-    if (mountId !== activeMountId) return;
+    if (!isCurrentTaskMount(mountId, scope)) return;
     console.warn("Task participation update failed", error);
     state.writeError = "tasks.write.failed";
   } finally {
-    if (mountId === activeMountId) state.writeBusy = false;
+    if (isCurrentTaskMount(mountId, scope)) state.writeBusy = false;
   }
-  if (mountId !== activeMountId) return;
+  if (!isCurrentTaskMount(mountId, scope)) return;
   rerenderTaskPage({ focusDetail: state.detailOpen, focusBoard: !state.detailOpen });
 }
 
@@ -666,6 +672,7 @@ async function onTaskClick(event) {
     const task = state.tasks.find((item) => item.id === taskId);
     if (!canDeleteTask(task)) return;
     if (await confirmInPage(pageT(currentHelpers.lang, "tasks.action.deleteConfirm"), { danger: true })) {
+      if (!activeScope?.isCurrent()) return;
       await performTaskAction(taskId, "delete");
     }
     return;
@@ -877,6 +884,7 @@ function onTaskKeydown(event) {
 
 async function onTaskSubmit(event) {
   const mountId = activeMountId;
+  const scope = activeScope;
   const taskForm = event.target.closest("[data-task-submit-form]");
   if (taskForm) {
     event.preventDefault();
@@ -945,7 +953,7 @@ async function onTaskSubmit(event) {
             trackTitleEdit: !isTaskCreator(task, state.currentUser),
             attachments: state.submitDraft.attachments
           });
-          if (mountId !== activeMountId) return;
+          if (!isCurrentTaskMount(mountId, scope)) return;
           try {
             task.title = title;
             task.content = content;
@@ -981,7 +989,7 @@ async function onTaskSubmit(event) {
             departmentId,
             files: state.submitDraft.attachments.map((attachment) => attachment.file).filter(Boolean)
           });
-          if (mountId !== activeMountId) return;
+          if (!isCurrentTaskMount(mountId, scope)) return;
           try {
             const column = state.board.find((item) => item.key === priority) ?? state.board[0];
             const attachments = Array.isArray(result.attachments) ? result.attachments : [];
@@ -1032,13 +1040,13 @@ async function onTaskSubmit(event) {
         state.submitError = "";
         state.writeError = "";
       } catch (error) {
-        if (mountId !== activeMountId) return;
+        if (!isCurrentTaskMount(mountId, scope)) return;
         console.warn("Task save failed", error);
         state.submitError = "tasks.write.failed";
       } finally {
-        if (mountId === activeMountId) state.writeBusy = false;
+        if (isCurrentTaskMount(mountId, scope)) state.writeBusy = false;
       }
-      if (mountId !== activeMountId) return;
+      if (!isCurrentTaskMount(mountId, scope)) return;
       rerenderTaskPage({ focusBoard: !state.submitOpen, focusSubmit: state.submitOpen });
       return;
     }
@@ -1105,7 +1113,7 @@ async function onTaskSubmit(event) {
         parentFeedbackId: null,
         mentionedUserIds: []
       });
-      if (mountId !== activeMountId) return;
+      if (!isCurrentTaskMount(mountId, scope)) return;
       task.feedback.push({
         id: String(result.feedback.id),
         author: result.feedback.author_name || currentUser.name,
@@ -1121,11 +1129,11 @@ async function onTaskSubmit(event) {
       task.countBadge = String(task.feedback.length);
       state.feedbackDraft = { message: "", attachments: [] };
     } catch (error) {
-      if (mountId !== activeMountId) return;
+      if (!isCurrentTaskMount(mountId, scope)) return;
       console.warn("Task feedback save failed", error);
       state.feedbackError = "tasks.write.failed";
     } finally {
-      if (mountId === activeMountId) state.writeBusy = false;
+      if (isCurrentTaskMount(mountId, scope)) state.writeBusy = false;
     }
   } else {
     task.feedback.push({
@@ -1140,7 +1148,7 @@ async function onTaskSubmit(event) {
     task.countBadge = String(task.feedback.length);
     state.feedbackDraft = { message: "", attachments: [] };
   }
-  if (mountId === activeMountId) rerenderTaskPage({ focusFeedback: true });
+  if (isCurrentTaskMount(mountId, scope)) rerenderTaskPage({ focusFeedback: true });
 }
 
 function syncTaskSubmitDraft(form) {
@@ -1270,10 +1278,14 @@ function hasTaskUnsavedChanges() {
 export async function mountPage({ scope, signal, historyState = null } = {}) {
   const mountId = ++activeMountId;
   activeScope = scope;
-  [data, currentUser, unreadWatermarks, unread] = await Promise.all([
+  const [nextData, nextCurrentUser, nextUnreadWatermarks, nextUnread] = await Promise.all([
     getTeamTaskData(), getCurrentUser(), getUnreadWatermarks(), getUnread()
   ]);
-  throwIfPageAborted(signal);
+  throwIfPageAborted(signal, scope);
+  data = nextData;
+  currentUser = nextCurrentUser;
+  unreadWatermarks = nextUnreadWatermarks;
+  unread = nextUnread;
   authenticated = typeof currentUser?.hasPermission === "function";
   permissions = {
     canCreate: !authenticated || currentUser.hasPermission("can_create_task"),
@@ -1305,8 +1317,12 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       scope.listen(document, "focusin", onTaskFocus);
       if (typeof taskMobileViewport.addEventListener === "function") scope.listen(taskMobileViewport, "change", onTaskViewportChange);
       else {
-        taskMobileViewport.addListener(onTaskViewportChange);
-        scope.onCleanup(() => taskMobileViewport?.removeListener(onTaskViewportChange));
+        const viewport = taskMobileViewport;
+        const guardedViewportChange = (event) => {
+          if (scope.isCurrent()) onTaskViewportChange(event);
+        };
+        viewport.addListener(guardedViewportChange);
+        scope.onCleanup(() => viewport.removeListener(guardedViewportChange));
       }
       attachTaskDomainController({
         state,
@@ -1349,7 +1365,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       unreadWatermarks = null;
       currentHelpers = null;
       taskMobileViewport = null;
-      activeScope = null;
+      if (activeScope === scope) activeScope = null;
       state = null;
       filterState = null;
     }

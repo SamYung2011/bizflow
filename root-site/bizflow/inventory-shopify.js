@@ -126,11 +126,11 @@ function t(lang, key) {
   return copy[lang]?.[key] ?? copy.zh[key] ?? key;
 }
 
-export async function ensureShopifyData() {
+export async function ensureShopifyData({ scope = null, signal = scope?.signal } = {}) {
   if (state.loaded) return;
   const version = dataLoadVersion;
   const data = await getShopifyLinksData();
-  if (version !== dataLoadVersion) return;
+  if (version !== dataLoadVersion || signal?.aborted || (scope && !scope.isCurrent())) return;
   state.links = data.links;
   const variants = new Map();
   for (const link of data.links) {
@@ -269,6 +269,7 @@ export function attachShopifyBehaviors({ rerender: nextRerender, scope }) {
     }
     const unlink = event.target.closest("[data-shopify-unlink]");
     if (unlink && await confirmInPage(t(currentLang(), "unlinkConfirm"), { danger: true })) {
+      if (!scope.isCurrent()) return;
       state.links = state.links.filter((link) => link.id !== unlink.getAttribute("data-shopify-unlink"));
       rerender();
       return;

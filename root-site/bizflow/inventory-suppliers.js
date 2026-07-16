@@ -106,11 +106,11 @@ function t(lang, key) {
   return copy[lang]?.[key] ?? copy.zh[key] ?? key;
 }
 
-export async function ensureSuppliersData() {
+export async function ensureSuppliersData({ scope = null, signal = scope?.signal } = {}) {
   if (state.loaded) return;
   const version = dataLoadVersion;
   const data = await getSuppliersData();
-  if (version !== dataLoadVersion) return;
+  if (version !== dataLoadVersion || signal?.aborted || (scope && !scope.isCurrent())) return;
   state.suppliers = data.suppliers;
   state.loaded = true;
 }
@@ -215,6 +215,7 @@ export function attachSupplierBehaviors({ rerender: nextRerender, scope }) {
     }
     const remove = event.target.closest("[data-supplier-delete]");
     if (remove && await confirmInPage(t(currentLang(), "deleteConfirm"), { danger: true })) {
+      if (!scope.isCurrent()) return;
       state.suppliers = state.suppliers.filter((item) => item.id !== remove.getAttribute("data-supplier-delete"));
       if (state.category !== "all" && !categories().includes(state.category)) state.category = "all";
       rerender();

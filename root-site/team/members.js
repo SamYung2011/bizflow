@@ -32,6 +32,10 @@ let state = null;
 let activeScope = null;
 let activeMountId = 0;
 
+function isCurrentMemberMount(mountId, scope = activeScope) {
+  return mountId === activeMountId && Boolean(scope?.isCurrent());
+}
+
 function createMemberState(initialTab) {
   return {
   members: data.members.map((member) => ({
@@ -128,8 +132,9 @@ async function ensureMemberTabData(tabKey) {
   const includeExtras = MEMBER_EXTRAS_TABS.has(tabKey) && memberExtrasScope !== "all" && memberExtrasScope !== requestedExtrasScope;
   if (!includeMembers && !includeExtras) return;
   const mountId = activeMountId;
+  const scope = activeScope;
   const nextData = await getTeamMembersData({ includeMembers, includeExtras, extrasScope: requestedExtrasScope });
-  if (mountId !== activeMountId) return;
+  if (!isCurrentMemberMount(mountId, scope)) return;
   mergeMemberData(nextData, { members: includeMembers, extras: includeExtras });
   memberDataLoaded ||= includeMembers;
   if (includeExtras) memberExtrasScope = requestedExtrasScope;
@@ -338,10 +343,11 @@ function closeDepartmentModal() {
 async function onMembersClick(event) {
   const pageTab = event.target.closest("[data-members-tab]");
   if (pageTab) {
+    const scope = activeScope;
     const nextTab = pageTab.getAttribute("data-members-tab") || "members";
     if (!visibleTabKeys.has(nextTab)) return;
     await ensureMemberTabData(nextTab);
-    if (activeScope?.disposed) return;
+    if (!isCurrentMemberMount(activeMountId, scope)) return;
     state.activeTab = nextTab;
     if (nextTab === "members") state.departmentFilter = null;
     rerenderMembers();
@@ -711,8 +717,11 @@ function buildMemberAccess() {
 export async function mountPage({ scope, signal, historyState = null } = {}) {
   const mountId = ++activeMountId;
   activeScope = scope;
-  [currentUser, session, unread] = await Promise.all([getCurrentUser(), getSession(), getUnread()]);
-  throwIfPageAborted(signal);
+  const [nextCurrentUser, nextSession, nextUnread] = await Promise.all([getCurrentUser(), getSession(), getUnread()]);
+  throwIfPageAborted(signal, scope);
+  currentUser = nextCurrentUser;
+  session = nextSession;
+  unread = nextUnread;
   authenticated = typeof currentUser?.hasPermission === "function";
   buildMemberAccess();
   const restoredTab = visibleTabKeys.has(historyState?.activeTab) ? historyState.activeTab : null;
@@ -720,12 +729,13 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
   const initialIncludesMembers = MEMBER_DATA_TABS.has(initialTab);
   const initialIncludesExtras = MEMBER_EXTRAS_TABS.has(initialTab);
   const initialExtrasScope = initialTab === "updates" ? "updates" : "all";
-  data = await getTeamMembersData({
+  const nextData = await getTeamMembersData({
     includeMembers: initialIncludesMembers,
     includeExtras: initialIncludesExtras,
     extrasScope: initialExtrasScope
   });
-  throwIfPageAborted(signal);
+  throwIfPageAborted(signal, scope);
+  data = nextData;
   visibleTabs = data.tabs.filter((tab) => visibleTabKeys.has(tab.key));
   memberDataLoaded = initialIncludesMembers;
   memberExtrasScope = initialIncludesExtras ? initialExtrasScope : "none";
@@ -778,7 +788,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       data = null;
       visibleTabs = [];
       currentHelpers = null;
-      activeScope = null;
+      if (activeScope === scope) activeScope = null;
       state = null;
     }
   };

@@ -360,10 +360,10 @@ function createState(historyState) {
 
 export async function mountPage({ scope, signal, url, navigation, historyState }) {
   const currentUser = await getCurrentUser();
-  throwIfPageAborted(signal);
+  throwIfPageAborted(signal, scope);
   requireOcppRouteAccess(currentUser, { url, navigation });
   const [nextData, unread] = await Promise.all([getOcppFinanceData(), getUnread()]);
-  throwIfPageAborted(signal);
+  throwIfPageAborted(signal, scope);
   data = nextData;
   context = makeOcppContext();
   state = createState(historyState);

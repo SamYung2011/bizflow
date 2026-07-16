@@ -1,13 +1,26 @@
 function noop() {}
 
-export function throwIfPageAborted(signal) {
-  if (signal?.aborted) throw new DOMException("SPA page mount aborted", "AbortError");
+export function throwIfPageAborted(signal, scope = null) {
+  if (signal?.aborted || (scope && !scope.isCurrent())) {
+    throw new DOMException("SPA page mount aborted", "AbortError");
+  }
 }
 
-export function createPageScope(parentSignal = null) {
+export function createPageScope(parentSignal = null, parentIsCurrent = null) {
   const abortController = new AbortController();
   const cleanups = [];
   let disposed = false;
+
+  function isCurrent() {
+    return !disposed && !abortController.signal.aborted &&
+      (typeof parentIsCurrent !== "function" || parentIsCurrent() === true);
+  }
+
+  function commit(callback) {
+    if (!isCurrent() || typeof callback !== "function") return false;
+    callback();
+    return true;
+  }
 
   function onCleanup(cleanup) {
     if (typeof cleanup !== "function") return noop;
@@ -25,19 +38,27 @@ export function createPageScope(parentSignal = null) {
 
   function listen(target, type, handler, options) {
     if (!target?.addEventListener || !target?.removeEventListener) return noop;
-    target.addEventListener(type, handler, options);
-    return onCleanup(() => target.removeEventListener(type, handler, options));
+    const guardedHandler = function (...args) {
+      if (!isCurrent()) return;
+      return handler.apply(this, args);
+    };
+    target.addEventListener(type, guardedHandler, options);
+    return onCleanup(() => target.removeEventListener(type, guardedHandler, options));
   }
 
   function timeout(callback, delay = 0) {
-    const id = setTimeout(callback, delay);
+    const id = setTimeout(() => {
+      if (isCurrent()) callback();
+    }, delay);
     onCleanup(() => clearTimeout(id));
     return id;
   }
 
   function animationFrame(callback) {
     if (typeof requestAnimationFrame !== "function") return timeout(callback, 0);
-    const id = requestAnimationFrame(callback);
+    const id = requestAnimationFrame((timestamp) => {
+      if (isCurrent()) callback(timestamp);
+    });
     onCleanup(() => cancelAnimationFrame(id));
     return id;
   }
@@ -85,6 +106,8 @@ export function createPageScope(parentSignal = null) {
       return disposed;
     },
     onCleanup,
+    isCurrent,
+    commit,
     listen,
     timeout,
     animationFrame,
@@ -110,9 +133,10 @@ export async function mountPageModule(module, context = {}) {
   if (typeof module?.mountPage !== "function") {
     throw new TypeError("SPA route module must export mountPage(context).");
   }
-  const scope = createPageScope(context.signal);
+  const scope = createPageScope(context.signal, context.isCurrent);
   try {
     const mounted = await module.mountPage({ ...context, scope, signal: scope.signal });
+    if (!scope.isCurrent()) throw new DOMException("SPA page mount superseded", "AbortError");
     const page = pageDescriptor(mounted);
     let active = false;
     let disposed = false;

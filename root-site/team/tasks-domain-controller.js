@@ -170,7 +170,7 @@ export function attachTaskDomainController({
     if (subtaskDelete) {
       if (state.liveReadOnly || subtaskDelete.disabled) return;
       if (await confirmInPage(taskT(getHelpers().lang, "tasks.detail.deleteSubtaskConfirm"), { danger: true })) {
-        if (scope.disposed) return;
+        if (!scope.isCurrent()) return;
         removeSubtask(subtaskDelete.getAttribute("data-task-subtask-delete"));
         rerender();
       }

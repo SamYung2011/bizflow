@@ -106,7 +106,9 @@ export function allRows(table, orderCol = "created_at", ascending = true, second
   if (freshReadDepth > 0) {
     if (!freshTablePromises.has(key)) {
       const promise = fetchAllTable(table, orderCol, ascending, secondaryOrder, { refresh: true })
-        .finally(() => freshTablePromises.delete(key));
+        .finally(() => {
+          if (freshTablePromises.get(key) === promise) freshTablePromises.delete(key);
+        });
       freshTablePromises.set(key, promise);
     }
     const promise = freshTablePromises.get(key);
@@ -150,6 +152,9 @@ export async function invalidateLiveTables(...tables) {
   if (!targets.size) return;
   for (const key of tablePromises.keys()) {
     if (targets.has(key.split(":", 1)[0])) tablePromises.delete(key);
+  }
+  for (const key of freshTablePromises.keys()) {
+    if (targets.has(key.split(":", 1)[0])) freshTablePromises.delete(key);
   }
   await Promise.all([
     invalidateLiveTableCache([...targets]),

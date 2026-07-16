@@ -65,20 +65,20 @@ function t(lang, key) {
   return copy[lang]?.[key] ?? copy.zh[key] ?? key;
 }
 
-export async function ensurePendingDeductionData() {
+export async function ensurePendingDeductionData({ scope = null, signal = scope?.signal } = {}) {
   if (state.loaded) return;
   const version = dataLoadVersion;
   const pending = await getPendingDeductionData();
-  if (version !== dataLoadVersion) return;
+  if (version !== dataLoadVersion || signal?.aborted || (scope && !scope.isCurrent())) return;
   state.invoices = pending.invoices;
   state.loaded = true;
 }
 
-export async function ensurePendingOrderLinks() {
+export async function ensurePendingOrderLinks({ scope = null, signal = scope?.signal } = {}) {
   if (state.orderLinksLoaded) return;
   const version = dataLoadVersion;
   const orders = await getOrdersPageData();
-  if (version !== dataLoadVersion) return;
+  if (version !== dataLoadVersion || signal?.aborted || (scope && !scope.isCurrent())) return;
   state.orderIds = new Map(orders.orders.map((order) => [order.detail?.orderNo, order.id]).filter(([orderNo]) => orderNo));
   state.orderLinksLoaded = true;
 }
@@ -136,12 +136,14 @@ export function attachPendingDeductionBehaviors({ rerender: nextRerender, scope 
     if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     const review = event.target.closest("[data-pending-review]");
     if (review && await confirmInPage(t(currentLang(), "reviewConfirm"))) {
+      if (!scope.isCurrent()) return;
       // Local-only demonstration. Production deduction and audit writes require the future API.
       removeInvoice(review.getAttribute("data-pending-review"));
       return;
     }
     const dismiss = event.target.closest("[data-pending-dismiss]");
     if (dismiss && await confirmInPage(t(currentLang(), "dismissConfirm"), { danger: true })) {
+      if (!scope.isCurrent()) return;
       // Local-only demonstration. Production legacy_skip_deduct and audit writes require the future API.
       removeInvoice(dismiss.getAttribute("data-pending-dismiss"));
     }

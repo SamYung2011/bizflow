@@ -123,14 +123,14 @@ function renderRanking(items, helpers, valueKey, tone) {
   }).join("")}</div>`;
 }
 
-export async function ensureRevenueData(orders) {
+export async function ensureRevenueData(orders, { scope = null, signal = scope?.signal } = {}) {
   state.orders = orders;
   if (state.loaded || state.loading) return;
   const version = dataLoadVersion;
   state.loading = true;
   rerender();
   state.support = await getOrderRevenueSupportData();
-  if (version !== dataLoadVersion) return;
+  if (version !== dataLoadVersion || signal?.aborted || (scope && !scope.isCurrent())) return;
   state.loading = false;
   state.loaded = true;
 }

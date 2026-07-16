@@ -337,7 +337,7 @@ export async function mountPage({ scope, signal }) {
     getCurrentUser(),
     getUnread()
   ]);
-  throwIfPageAborted(signal);
+  throwIfPageAborted(signal, scope);
   data = {
     ...homeData,
     stats: homeData.stats.map((stat) => {

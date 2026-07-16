@@ -132,6 +132,10 @@ let resizeTimer = 0;
 let activeScope = null;
 let activeNavigation = null;
 
+function isCurrentOrdersScope(scope = activeScope) {
+  return Boolean(scope && scope === activeScope && scope.isCurrent());
+}
+
 function pageT(lang, key) {
   return dict[lang]?.[key] ?? dict.zh[key] ?? key;
 }
@@ -345,11 +349,13 @@ function rerenderOrdersPage() {
 async function onOrdersClick(event) {
   const domainTab = event.target.closest("[data-orders-domain-tab]");
   if (domainTab) {
+    const scope = activeScope;
     const tab = domainTab.getAttribute("data-orders-domain-tab");
     if (!domainTabs.includes(tab) || state.tab === tab) return;
     if (hasNorthboundUnsavedChanges()) {
       const leave = await confirmInPage(pageT(currentHelpers?.lang ?? "zh", "orders.leaveUnsaved"));
       if (!leave) return;
+      if (!isCurrentOrdersScope(scope)) return;
       restoreNorthboundState(captureNorthboundState());
     }
     state.tab = tab;
@@ -357,10 +363,10 @@ async function onOrdersClick(event) {
     closeSourceMenu();
     dateFilter.close();
     rerenderOrdersPage();
-    if (tab === "northbound") await ensureNorthboundData();
-    if (tab === "chargerLeads") await ensureChargerLeadsData();
-    if (tab === "revenue" && canViewRevenue) await ensureRevenueData(data.orders);
-    if (activeScope?.disposed) return;
+    if (tab === "northbound") await ensureNorthboundData({ scope });
+    if (tab === "chargerLeads") await ensureChargerLeadsData({ scope });
+    if (tab === "revenue" && canViewRevenue) await ensureRevenueData(data.orders, { scope });
+    if (!isCurrentOrdersScope(scope)) return;
     rerenderOrdersPage();
     return;
   }
@@ -474,9 +480,10 @@ function onOrdersKeydown(event) {
 
 function onOrdersResize() {
   window.clearTimeout(resizeTimer);
+  const scope = activeScope;
   resizeTimer = window.setTimeout(() => {
     resizeTimer = 0;
-    if (activeScope?.disposed) return;
+    if (!isCurrentOrdersScope(scope)) return;
     const pages = totalPages();
     if (state.page > pages) state.page = pages;
     rerenderOrdersPage();
@@ -503,9 +510,11 @@ function restoredState(value, presets) {
 }
 
 async function ensureActiveDomainData(signal) {
-  if (state.tab === "northbound") await ensureNorthboundData();
-  if (state.tab === "chargerLeads") await ensureChargerLeadsData();
-  if (state.tab === "revenue" && canViewRevenue) await ensureRevenueData(data.orders);
+  const scope = activeScope;
+  if (state.tab === "northbound") await ensureNorthboundData({ scope, signal });
+  if (state.tab === "chargerLeads") await ensureChargerLeadsData({ scope, signal });
+  if (state.tab === "revenue" && canViewRevenue) await ensureRevenueData(data.orders, { scope, signal });
+  if (!isCurrentOrdersScope(scope)) throw new DOMException("Orders page superseded", "AbortError");
   throwIfPageAborted(signal);
 }
 
@@ -517,10 +526,14 @@ export async function mountPage({ scope, signal, historyState = null, navigation
     shipping: consumeNavigationPreset(navigationPresetKeys.ordersShipping),
     search: consumeNavigationPreset(navigationPresetKeys.ordersSearch) ?? ""
   };
-  [data, unreadWatermarks, currentUser, unread] = await Promise.all([
+  const [nextData, nextUnreadWatermarks, nextCurrentUser, nextUnread] = await Promise.all([
     getOrdersPageData(), getUnreadWatermarks(), getCurrentUser(), getUnread()
   ]);
-  throwIfPageAborted(signal);
+  throwIfPageAborted(signal, scope);
+  data = nextData;
+  unreadWatermarks = nextUnreadWatermarks;
+  currentUser = nextCurrentUser;
+  unread = nextUnread;
   canViewRevenue = currentUser?.canViewRevenue !== false;
   liveMode = typeof currentUser?.hasPermission === "function";
   liveReadOnly = liveMode && currentUser?.bizflowMainAccess !== true;
@@ -590,8 +603,8 @@ export async function mountPage({ scope, signal, historyState = null, navigation
       currentHelpers = null;
       printDialog = null;
       dateFilter = null;
-      activeScope = null;
-      activeNavigation = null;
+      if (activeScope === scope) activeScope = null;
+      if (activeNavigation === navigation) activeNavigation = null;
     }
   };
 }

@@ -92,9 +92,9 @@ export function attachMemberUpdateLogController({ state, rerender, scope }) {
     writePending = true;
     try {
       const result = await operation();
-      return scope.disposed ? null : result;
+      return scope.isCurrent() ? result : null;
     } catch (error) {
-      if (scope.disposed) return null;
+      if (!scope.isCurrent()) return null;
       window.alert(error?.message || String(error));
       return null;
     } finally {
@@ -117,7 +117,7 @@ export function attachMemberUpdateLogController({ state, rerender, scope }) {
     }
     const remove = event.target.closest("[data-update-delete]");
     if (remove && state.access.canWriteUpdates && await confirmInPage(memberT(document.documentElement.lang === "zh-Hant" ? "zh" : document.documentElement.lang, "members.updates.confirmDelete"), { danger: true })) {
-      if (scope.disposed) return;
+      if (!scope.isCurrent()) return;
       const id = remove.getAttribute("data-update-delete");
       if (state.updateLogsLive && !await runWrite(() => deleteTeamUpdateLog(id))) return;
       state.updateLogs = state.updateLogs.filter((entry) => entry.id !== id);
@@ -128,7 +128,7 @@ export function attachMemberUpdateLogController({ state, rerender, scope }) {
     const entry = removeComment ? state.updateLogs.find((item) => item.id === removeComment.getAttribute("data-update-id")) : null;
     const comment = entry?.comments.find((item) => item.id === removeComment?.getAttribute("data-update-comment-delete"));
     if (removeComment && comment && canDeleteComment(comment, state) && await confirmInPage(memberT(document.documentElement.lang === "zh-Hant" ? "zh" : document.documentElement.lang, "members.updates.confirmDeleteComment"), { danger: true })) {
-      if (scope.disposed) return;
+      if (!scope.isCurrent()) return;
       const id = removeComment.getAttribute("data-update-comment-delete");
       if (state.updateLogsLive && !await runWrite(() => deleteTeamUpdateComment(id))) return;
       if (entry) entry.comments = entry.comments.filter((item) => item.id !== id);
@@ -150,7 +150,7 @@ export function attachMemberUpdateLogController({ state, rerender, scope }) {
       const row = state.updateLogsLive
         ? await runWrite(() => createTeamUpdateLog({ summary, detail }))
         : { id: `local-update-${Date.now()}`, created_at: null };
-      if (scope.disposed) return;
+      if (!scope.isCurrent()) return;
       if (!row) return;
       state.updateLogs.unshift({
         id: row.id,
@@ -165,7 +165,7 @@ export function attachMemberUpdateLogController({ state, rerender, scope }) {
       const entry = state.updateLogs.find((item) => item.id === editForm.getAttribute("data-update-id"));
       if (entry) {
         if (state.updateLogsLive && !await runWrite(() => updateTeamUpdateLog(entry.id, { summary, detail }))) return;
-        if (scope.disposed) return;
+        if (!scope.isCurrent()) return;
         entry.summary = summary;
         entry.detail = detail;
         entry.edited = true;
@@ -178,7 +178,7 @@ export function attachMemberUpdateLogController({ state, rerender, scope }) {
         const row = state.updateLogsLive
           ? await runWrite(() => createTeamUpdateComment({ updateLogId: entry.id, authorName: state.updateLogUser.name || "—", body }))
           : { id: `local-comment-${Date.now()}` };
-        if (scope.disposed) return;
+        if (!scope.isCurrent()) return;
         if (!row) return;
         entry.comments.unshift({
           id: row.id,

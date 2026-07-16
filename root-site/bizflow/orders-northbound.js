@@ -422,13 +422,13 @@ function renderModal(helpers) {
   </div>`;
 }
 
-export async function ensureNorthboundData() {
+export async function ensureNorthboundData({ scope = activeScope, signal = scope?.signal } = {}) {
   if (state.loaded || state.loading) return;
   const version = dataLoadVersion;
   state.loading = true;
   rerender();
   const data = await getNorthboundData();
-  if (version !== dataLoadVersion) return;
+  if (version !== dataLoadVersion || signal?.aborted || (scope && !scope.isCurrent())) return;
   state.statuses = data.statuses;
   state.records = data.records;
   state.loading = false;
@@ -512,12 +512,13 @@ async function commitInlineEdit() {
   state.error = "";
   rerender();
   const version = dataLoadVersion;
+  const scope = activeScope;
   try {
     const saved = liveRecord(await updateLiveNorthboundRecord(rowId, patch), record);
-    if (version !== dataLoadVersion) return;
+    if (version !== dataLoadVersion || !scope?.isCurrent()) return;
     state.records = state.records.map((item) => item.id === saved.id ? saved : item);
   } catch {
-    if (version !== dataLoadVersion) return;
+    if (version !== dataLoadVersion || !scope?.isCurrent()) return;
     showWriteError("saveFailed");
   }
   rerender();
@@ -558,16 +559,17 @@ export function attachNorthboundBehaviors({ rerender: nextRerender, scope }) {
     const deleteButton = event.target.closest("[data-northbound-delete]");
     if (deleteButton) {
       if (await confirmInPage(t(currentHelpers?.lang, "deleteConfirm"), { danger: true })) {
+        if (!scope.isCurrent()) return;
         const id = deleteButton.getAttribute("data-northbound-delete");
         const version = dataLoadVersion;
         state.error = "";
         if (liveMode()) {
           try {
             await deleteLiveNorthboundRecord(id);
-            if (version !== dataLoadVersion) return;
+            if (version !== dataLoadVersion || !scope.isCurrent()) return;
             state.records = state.records.filter((record) => record.id !== id);
           } catch {
-            if (version !== dataLoadVersion) return;
+            if (version !== dataLoadVersion || !scope.isCurrent()) return;
             showWriteError("deleteFailed");
           }
         } else {
@@ -595,11 +597,11 @@ export function attachNorthboundBehaviors({ rerender: nextRerender, scope }) {
             const version = dataLoadVersion;
             try {
               const status = liveStatus(await createLiveNorthboundStatus(values));
-              if (version !== dataLoadVersion) return;
+              if (version !== dataLoadVersion || !scope.isCurrent()) return;
               state.statuses.push(status);
               state.form.statusId = status.id;
             } catch {
-              if (version !== dataLoadVersion) return;
+              if (version !== dataLoadVersion || !scope.isCurrent()) return;
               showWriteError("statusCreateFailed", { form: true });
               rerender();
               return;
@@ -758,10 +760,10 @@ export function attachNorthboundBehaviors({ rerender: nextRerender, scope }) {
           remarks: state.form.remarks,
           status_id: state.form.statusId
         });
-        if (version !== dataLoadVersion) return;
+        if (version !== dataLoadVersion || !scope.isCurrent()) return;
         state.records.unshift(liveRecord(saved));
       } catch {
-        if (version !== dataLoadVersion) return;
+        if (version !== dataLoadVersion || !scope.isCurrent()) return;
         showWriteError("saveFailed", { form: true });
         rerender();
         return;

@@ -281,7 +281,12 @@ let state = initialDetailState();
 
 let currentHelpers = null;
 let printDialog = null;
+let activeScope = null;
 let activeMountId = 0;
+
+function isCurrentOrderDetailMount(mountId, scope = activeScope) {
+  return mountId === activeMountId && Boolean(scope?.isCurrent());
+}
 
 function initialDetailState() {
   const initialItems = cloneItems(detailData?.detail.items ?? []);
@@ -818,6 +823,7 @@ function resetOrderChanges() {
 
 async function saveOrderChanges() {
   const mountId = activeMountId;
+  const scope = activeScope;
   syncLiveFormInputs();
   const lang = currentHelpers?.lang ?? "zh";
   if (!state.items.length) {
@@ -846,7 +852,7 @@ async function saveOrderChanges() {
       salespersonId: state.salespersonId,
       totalOverride: state.feesTouched ? undefined : detailData.detail.paymentTotal
     });
-    if (mountId !== activeMountId) return;
+    if (!isCurrentOrderDetailMount(mountId, scope)) return;
     detailData.detail.paymentTotal = Number(result.invoice.total) || 0;
     detailData.detail.salespersonId = result.invoice.salesperson_id ?? null;
     detailData.detail.salesperson = writeOptions.salespeople.find((person) => person.id === state.salespersonId)?.name ?? "";
@@ -864,11 +870,11 @@ async function saveOrderChanges() {
         : "orders.write.saved";
     setNotice(pageT(lang, noticeKey), noticeKey === "orders.write.saved" ? "success" : "error");
   } catch (error) {
-    if (mountId !== activeMountId) return;
+    if (!isCurrentOrderDetailMount(mountId, scope)) return;
     console.error("[orders-detail] order write failed", error);
     setNotice(friendlyWriteError(error, "orders.write.failed"));
   } finally {
-    if (mountId !== activeMountId) return;
+    if (!isCurrentOrderDetailMount(mountId, scope)) return;
     state.busy = "";
     rerender();
   }
@@ -895,13 +901,14 @@ function closeCustomerEdit() {
 
 async function saveCustomerEdit() {
   const mountId = activeMountId;
+  const scope = activeScope;
   const lang = currentHelpers?.lang ?? "zh";
   state.busy = "customer";
   setNotice("");
   rerender();
   try {
     const result = await updateLiveOrderCustomer(detailData.detail.customerId ?? detailData.order.customerId, state.customerDraft);
-    if (mountId !== activeMountId) return;
+    if (!isCurrentOrderDetailMount(mountId, scope)) return;
     detailData.order.customer = result.customer.name || "";
     detailData.order.phone = result.customer.phone || "";
     detailData.detail.email = result.customer.email || "";
@@ -918,11 +925,11 @@ async function saveCustomerEdit() {
         : "orders.customer.saved";
     setNotice(pageT(lang, noticeKey), noticeKey === "orders.customer.saved" ? "success" : "error");
   } catch (error) {
-    if (mountId !== activeMountId) return;
+    if (!isCurrentOrderDetailMount(mountId, scope)) return;
     console.error("[orders-detail] customer write failed", error);
     setNotice(friendlyWriteError(error, "orders.customer.failed"));
   } finally {
-    if (mountId !== activeMountId) return;
+    if (!isCurrentOrderDetailMount(mountId, scope)) return;
     state.busy = "";
     rerender();
   }
@@ -930,6 +937,7 @@ async function saveCustomerEdit() {
 
 async function saveShipping() {
   const mountId = activeMountId;
+  const scope = activeScope;
   syncLiveFormInputs();
   const lang = currentHelpers?.lang ?? "zh";
   if (state.shippingMode === "delivery" && !/^[A-Za-z0-9]{6,}$/.test(state.trackingNumber.trim())) {
@@ -946,7 +954,7 @@ async function saveShipping() {
       mode: state.shippingMode,
       trackingNumber: state.trackingNumber
     });
-    if (mountId !== activeMountId) return;
+    if (!isCurrentOrderDetailMount(mountId, scope)) return;
     detailData.detail.carrier = invoice.carrier || "";
     detailData.detail.trackingNo = invoice.tracking_number || "";
     detailData.detail.shippingStatus = invoice.shipping_status || "unshipped";
@@ -955,11 +963,11 @@ async function saveShipping() {
     state.savedShippingMode = state.shippingMode;
     setNotice(pageT(lang, "orders.shipping.saved"), "success");
   } catch (error) {
-    if (mountId !== activeMountId) return;
+    if (!isCurrentOrderDetailMount(mountId, scope)) return;
     console.error("[orders-detail] shipping write failed", error);
     setNotice(friendlyWriteError(error, "orders.shipping.failed"));
   } finally {
-    if (mountId !== activeMountId) return;
+    if (!isCurrentOrderDetailMount(mountId, scope)) return;
     state.busy = "";
     rerender();
   }
@@ -1149,23 +1157,29 @@ function hasOrderDetailUnsavedChanges() {
 
 export async function mountPage({ scope, signal, url = new URL(window.location.href) } = {}) {
   const mountId = ++activeMountId;
+  activeScope = scope;
   const orderId = url.searchParams.get("id");
-  [detailData, currentUser, unread] = await Promise.all([
+  const [nextDetailData, nextCurrentUser, nextUnread] = await Promise.all([
     getOrderDetailData(orderId),
     getCurrentUser(),
     getUnread()
   ]);
-  throwIfPageAborted(signal);
+  throwIfPageAborted(signal, scope);
+  detailData = nextDetailData;
+  currentUser = nextCurrentUser;
+  unread = nextUnread;
   liveMode = typeof currentUser?.hasPermission === "function";
   liveWritable = liveMode && currentUser?.bizflowMainAccess === true;
   liveReadOnly = liveMode && !liveWritable;
-  [pickerData, writeOptions] = await Promise.all([
+  const [nextPickerData, nextWriteOptions] = await Promise.all([
     detailData ? getOrderCreateData() : Promise.resolve({ productGroups: [] }),
     liveWritable && detailData
       ? getLiveOrderWriteOptions(detailData.order.id)
       : Promise.resolve({ invoice: null, defaultWarehouseId: null, salespeople: [] })
   ]);
-  throwIfPageAborted(signal);
+  throwIfPageAborted(signal, scope);
+  pickerData = nextPickerData;
+  writeOptions = nextWriteOptions;
   writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
   state = initialDetailState();
   printDialog = createPrintDialog({ getLang: () => currentHelpers?.lang ?? "zh", scope });
@@ -1199,6 +1213,7 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
       pickerData = { productGroups: [] };
       writeOptions = { invoice: null, defaultWarehouseId: null, salespeople: [] };
       currentHelpers = null;
+      if (activeScope === scope) activeScope = null;
       state = initialDetailState();
     }
   };

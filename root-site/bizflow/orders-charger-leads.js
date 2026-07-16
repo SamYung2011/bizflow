@@ -83,13 +83,13 @@ function statusCounts() {
   return counts;
 }
 
-export async function ensureChargerLeadsData() {
+export async function ensureChargerLeadsData({ scope = null, signal = scope?.signal } = {}) {
   if (state.loaded || state.loading) return;
   const version = dataLoadVersion;
   state.loading = true;
   rerender();
   const data = await getChargerLeadsData();
-  if (version !== dataLoadVersion) return;
+  if (version !== dataLoadVersion || signal?.aborted || (scope && !scope.isCurrent())) return;
   state.leads = data.leads;
   state.loading = false;
   state.loaded = true;

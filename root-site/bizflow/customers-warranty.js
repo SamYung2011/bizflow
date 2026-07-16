@@ -110,6 +110,7 @@ const state = {
 let validCustomerIds = new Set();
 const dateRangePanel = createDateRangePanel();
 let copyNoticeTimer = 0;
+let dataLoadVersion = 0;
 
 function t(lang, key, values = {}) {
   const template = copy[lang]?.[key] ?? copy.zh[key] ?? key;
@@ -142,9 +143,11 @@ export function warrantyBucket(expiry, today = new Date()) {
   return null;
 }
 
-export async function ensureWarrantyData() {
+export async function ensureWarrantyData({ scope = null, signal = scope?.signal } = {}) {
   if (state.items !== null) return;
+  const version = dataLoadVersion;
   const data = await getWarrantyData();
+  if (version !== dataLoadVersion || signal?.aborted || (scope && !scope.isCurrent())) return;
   validCustomerIds = new Set(data.items.map((item) => String(item.customerId)));
   state.items = data.items
     .map((item) => ({
@@ -334,14 +337,16 @@ function showCopyNotice(message, tone = "success") {
   copyNoticeTimer = window.setTimeout(() => notice.remove(), 1800);
 }
 
-export async function copyWarrantyPhone(phone, lang) {
+export async function copyWarrantyPhone(phone, lang, { scope = null } = {}) {
   const value = String(phone || "").trim();
   if (!value) return false;
   try {
     await navigator.clipboard.writeText(value);
+    if (scope && !scope.isCurrent()) return false;
     showCopyNotice(t(lang, "copied"));
     return true;
   } catch (error) {
+    if (scope && !scope.isCurrent()) return false;
     console.warn("Warranty phone copy failed", error);
     showCopyNotice(t(lang, "copyFailed"), "error");
     return false;
@@ -373,6 +378,7 @@ export function restoreWarrantyState(value = null) {
 }
 
 export function disposeWarrantyState() {
+  dataLoadVersion += 1;
   dateRangePanel.close({ restoreFocus: false });
   window.clearTimeout(copyNoticeTimer);
   copyNoticeTimer = 0;

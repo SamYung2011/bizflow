@@ -263,8 +263,13 @@ let state = initialState();
 
 let currentHelpers = null;
 let activeNavigation = null;
+let activeScope = null;
 let activeMountId = 0;
 let submissionComplete = false;
+
+function isCurrentOrderCreateMount(mountId, scope = activeScope) {
+  return mountId === activeMountId && Boolean(scope?.isCurrent());
+}
 
 function initialState() {
   return {
@@ -712,6 +717,7 @@ function refreshLiveTotals() {
 
 async function submitLiveCustomer() {
   const mountId = activeMountId;
+  const scope = activeScope;
   const values = readNewCustomerFields();
   state.customerDraft = values;
   state.busy = true;
@@ -719,7 +725,7 @@ async function submitLiveCustomer() {
   rerender();
   try {
     const result = await createLiveOrderCustomer(values);
-    if (mountId !== activeMountId) return;
+    if (!isCurrentOrderCreateMount(mountId, scope)) return;
     data.customers.unshift({
       id: result.customer.id,
       name: result.customer.name || "",
@@ -741,11 +747,11 @@ async function submitLiveCustomer() {
         : "orders.customer.created";
     setNotice(pageT(currentHelpers?.lang ?? "zh", noticeKey), noticeKey === "orders.customer.created" ? "success" : "error");
   } catch (error) {
-    if (mountId !== activeMountId) return;
+    if (!isCurrentOrderCreateMount(mountId, scope)) return;
     console.error("[orders-create] customer write failed", error);
     setNotice(friendlyWriteError(error, "orders.customer.failed"));
   } finally {
-    if (mountId !== activeMountId) return;
+    if (!isCurrentOrderCreateMount(mountId, scope)) return;
     state.busy = false;
     rerender();
   }
@@ -753,6 +759,7 @@ async function submitLiveCustomer() {
 
 async function submitLiveOrder() {
   const mountId = activeMountId;
+  const scope = activeScope;
   syncLiveFormInputs();
   const lang = currentHelpers?.lang ?? "zh";
   if (!state.selectedCustomerId) {
@@ -788,12 +795,12 @@ async function submitLiveOrder() {
         ? { mode: state.shippingMode, trackingNumber: state.trackingNumber }
         : null
     });
-    if (mountId !== activeMountId) return;
+    if (!isCurrentOrderCreateMount(mountId, scope)) return;
     if (result.deviceConflicts.length) console.warn("[orders-create] item IMEI conflicts", result.deviceConflicts);
     submissionComplete = true;
     navigateTo(`./orders-detail.html?id=${encodeURIComponent(result.invoice.id)}`);
   } catch (error) {
-    if (mountId !== activeMountId) return;
+    if (!isCurrentOrderCreateMount(mountId, scope)) return;
     console.error("[orders-create] order write failed", error);
     state.busy = false;
     setNotice(friendlyWriteError(error, "orders.write.failed"));
@@ -1006,19 +1013,24 @@ function hasOrderCreateUnsavedChanges() {
 
 export async function mountPage({ scope, signal, navigation = null } = {}) {
   const mountId = ++activeMountId;
+  activeScope = scope;
   activeNavigation = navigation;
   submissionComplete = false;
   state = initialState();
   draftCreatedAt = new Date();
-  [data, currentUser, unread] = await Promise.all([getOrderCreateData(), getCurrentUser(), getUnread()]);
-  throwIfPageAborted(signal);
+  const [nextData, nextCurrentUser, nextUnread] = await Promise.all([getOrderCreateData(), getCurrentUser(), getUnread()]);
+  throwIfPageAborted(signal, scope);
+  data = nextData;
+  currentUser = nextCurrentUser;
+  unread = nextUnread;
   liveMode = typeof currentUser?.hasPermission === "function";
   liveWritable = liveMode && currentUser?.bizflowMainAccess === true;
   liveReadOnly = liveMode && !liveWritable;
-  writeOptions = liveWritable
+  const nextWriteOptions = liveWritable
     ? await getLiveOrderWriteOptions()
     : { defaultWarehouseId: null, salespeople: [] };
-  throwIfPageAborted(signal);
+  throwIfPageAborted(signal, scope);
+  writeOptions = nextWriteOptions;
   writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
 
   return {
@@ -1046,7 +1058,8 @@ export async function mountPage({ scope, signal, navigation = null } = {}) {
       currentUser = null;
       unread = null;
       currentHelpers = null;
-      activeNavigation = null;
+      if (activeScope === scope) activeScope = null;
+      if (activeNavigation === navigation) activeNavigation = null;
       writeOptions = { defaultWarehouseId: null, salespeople: [] };
       state = initialState();
     }

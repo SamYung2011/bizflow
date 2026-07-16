@@ -151,7 +151,12 @@ const PURCHASE_PAGE_SIZE = 6;
 let currentHelpers = null;
 let printDialog = null;
 let printOrdersPromise = null;
+let activeScope = null;
 let activeMountId = 0;
+
+function isCurrentCustomerDetailMount(mountId, scope = activeScope) {
+  return mountId === activeMountId && Boolean(scope?.isCurrent());
+}
 
 async function getFullOrderForPrint(orderNo) {
   if (!printOrdersPromise) printOrdersPromise = getOrdersPageData();
@@ -430,6 +435,7 @@ async function onCustomerDetailClick(event) {
   const printButton = event.target.closest("[data-customer-order-print]");
   if (printButton) {
     const mountId = activeMountId;
+    const scope = activeScope;
     event.stopPropagation();
     const orderNo = printButton.closest("[data-customer-purchase-row]")?.getAttribute("data-order-no");
     printButton.disabled = true;
@@ -445,7 +451,7 @@ async function onCustomerDetailClick(event) {
         printButton.removeAttribute("aria-busy");
       }
     }
-    if (mountId !== activeMountId) return;
+    if (!isCurrentCustomerDetailMount(mountId, scope)) return;
     printDialog.open(order ? toPrintableOrder(order) : null, "both", printButton);
     return;
   }
@@ -472,13 +478,17 @@ function restoredState(value = null) {
 
 export async function mountPage({ scope, signal, url = new URL(window.location.href), historyState = null } = {}) {
   const mountId = ++activeMountId;
+  activeScope = scope;
   const customerId = url.searchParams.get("id");
-  [detailData, currentUser, unread] = await Promise.all([
+  const [nextDetailData, nextCurrentUser, nextUnread] = await Promise.all([
     getCustomerDetailData(customerId),
     getCurrentUser(),
     getUnread()
   ]);
-  throwIfPageAborted(signal);
+  throwIfPageAborted(signal, scope);
+  detailData = nextDetailData;
+  currentUser = nextCurrentUser;
+  unread = nextUnread;
   liveReadOnly = typeof currentUser?.hasPermission === "function";
   writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
   state = restoredState(historyState);
@@ -506,6 +516,7 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
       currentUser = null;
       unread = null;
       currentHelpers = null;
+      if (activeScope === scope) activeScope = null;
     }
   };
 }

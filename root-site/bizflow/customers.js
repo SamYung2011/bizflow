@@ -168,6 +168,10 @@ let dateFilter = null;
 let resizeTimer = 0;
 let activeScope = null;
 
+function isCurrentCustomersScope(scope = activeScope) {
+  return Boolean(scope && scope === activeScope && scope.isCurrent());
+}
+
 function filteredCustomers() {
   const query = state.search.trim().toLocaleLowerCase();
   return data.customers.filter((c) => {
@@ -354,6 +358,7 @@ async function onCustomersClick(event) {
   if (liveReadOnly && event.target.closest("[data-customers-write]")) return;
   const customerTab = event.target.closest("[data-customers-tab]");
   if (customerTab) {
+    const scope = activeScope;
     const tab = customerTab.getAttribute("data-customers-tab");
     if (!customerTabs.includes(tab) || state.tab === tab) return;
     state.tab = tab;
@@ -363,8 +368,8 @@ async function onCustomersClick(event) {
     closeWarrantyDateRange();
     rerenderCustomersPage();
     if (tab === "warranty") {
-      await ensureWarrantyData();
-      if (activeScope?.disposed) return;
+      await ensureWarrantyData({ scope });
+      if (!isCurrentCustomersScope(scope)) return;
       rerenderCustomersPage();
     }
     return;
@@ -380,7 +385,8 @@ async function onCustomersClick(event) {
   if (warrantyPhone && state.tab === "warranty") {
     event.preventDefault();
     event.stopPropagation();
-    await copyWarrantyPhone(warrantyPhone.getAttribute("data-warranty-phone"), currentHelpers.lang);
+    const scope = activeScope;
+    await copyWarrantyPhone(warrantyPhone.getAttribute("data-warranty-phone"), currentHelpers.lang, { scope });
     return;
   }
 
@@ -507,7 +513,7 @@ function onCustomersResize() {
   window.clearTimeout(resizeTimer);
   resizeTimer = window.setTimeout(() => {
     resizeTimer = 0;
-    if (activeScope?.disposed) return;
+    if (!isCurrentCustomersScope()) return;
     closeWarrantyDateRange();
     rerenderCustomersPage();
   }, 120);
@@ -528,11 +534,16 @@ function restoredState(value = null, presetTab = null) {
 
 export async function mountPage({ scope, signal, historyState = null } = {}) {
   activeScope = scope;
-  scope.onCleanup(disposeWarrantyState);
+  scope.onCleanup(() => {
+    if (activeScope === scope) disposeWarrantyState();
+  });
   const presetTab = consumeNavigationPreset(navigationPresetKeys.customersTab);
   const presetWarrantySearch = consumeNavigationPreset(navigationPresetKeys.warrantySearch) ?? "";
-  [data, currentUser, unread] = await Promise.all([getCustomersPageData(), getCurrentUser(), getUnread()]);
-  throwIfPageAborted(signal);
+  const [nextData, nextCurrentUser, nextUnread] = await Promise.all([getCustomersPageData(), getCurrentUser(), getUnread()]);
+  throwIfPageAborted(signal, scope);
+  data = nextData;
+  currentUser = nextCurrentUser;
+  unread = nextUnread;
   liveReadOnly = typeof currentUser?.hasPermission === "function";
   writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
   state = restoredState(historyState, presetTab);
@@ -549,8 +560,8 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
   });
   dateFilter.restoreState?.(historyState?.dateFilter);
   if (state.tab === "warranty") {
-    await ensureWarrantyData();
-    throwIfPageAborted(signal);
+    await ensureWarrantyData({ scope, signal });
+    throwIfPageAborted(signal, scope);
   }
 
   return {
@@ -592,7 +603,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       currentHelpers = null;
       customerSorter = null;
       dateFilter = null;
-      activeScope = null;
+      if (activeScope === scope) activeScope = null;
     }
   };
 }

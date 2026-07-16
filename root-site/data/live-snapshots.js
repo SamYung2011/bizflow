@@ -854,7 +854,9 @@ function refreshLiveSnapshot(snapshot, builder, userId, cachedValue) {
       return value;
     })
     .catch((error) => console.warn(`[live-snapshot-cache] ${snapshot} refresh failed`, error))
-    .finally(() => LIVE_REFRESHES.delete(snapshot));
+    .finally(() => {
+      if (LIVE_REFRESHES.get(snapshot) === promise) LIVE_REFRESHES.delete(snapshot);
+    });
   LIVE_REFRESHES.set(snapshot, promise);
   return promise;
 }

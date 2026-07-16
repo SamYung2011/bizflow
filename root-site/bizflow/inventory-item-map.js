@@ -145,11 +145,11 @@ function withoutDefaultTitle(value) {
   return String(value || "").replace(/\s+-\s+default title$/i, "").trim();
 }
 
-export async function ensureItemMapData() {
+export async function ensureItemMapData({ scope = null, signal = scope?.signal } = {}) {
   if (state.loaded) return;
   const version = dataLoadVersion;
   const [aliasData, orderData] = await Promise.all([getInventoryAliasesData(), getOrdersPageData()]);
-  if (version !== dataLoadVersion) return;
+  if (version !== dataLoadVersion || signal?.aborted || (scope && !scope.isCurrent())) return;
   state.aliases = aliasData.aliases;
   state.orders = orderData.orders;
   state.loaded = true;
@@ -357,6 +357,7 @@ export function attachItemMapBehaviors({ rerender: nextRerender, scope }) {
     }
     const remove = event.target.closest("[data-item-map-delete]");
     if (remove && await confirmInPage(t(currentHelpersLang(), "deleteConfirm"), { danger: true })) {
+      if (!scope.isCurrent()) return;
       state.aliases = state.aliases.filter((item) => item.id !== remove.getAttribute("data-item-map-delete"));
       rerender();
       return;

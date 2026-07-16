@@ -352,8 +352,11 @@ function hasWhatsappUnsavedChanges() {
 }
 
 export async function mountPage({ scope, signal, historyState = null } = {}) {
-  [snapshot, currentUser, unread] = await Promise.all([getWhatsappData(), getCurrentUser(), getUnread()]);
-  throwIfPageAborted(signal);
+  const [nextSnapshot, nextCurrentUser, nextUnread] = await Promise.all([getWhatsappData(), getCurrentUser(), getUnread()]);
+  throwIfPageAborted(signal, scope);
+  snapshot = nextSnapshot;
+  currentUser = nextCurrentUser;
+  unread = nextUnread;
   liveReadOnly = typeof currentUser?.hasPermission === "function";
   initializeWhatsappState(historyState);
 

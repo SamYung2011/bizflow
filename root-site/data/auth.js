@@ -260,8 +260,10 @@ async function fetchAllTableFromNetwork(client, table, orderCol, ascending, seco
   return rows;
 }
 
-function fetchAllTableOnce(client, userId, table, orderCol, ascending, secondaryOrder) {
-  const key = `${userId}:${table}:${orderCol || ""}:${ascending}:${secondaryOrder || ""}`;
+function fetchAllTableOnce(client, userId, table, orderCol, ascending, secondaryOrder, cacheVersion) {
+  // Include the table generation so a post-write rebuild can never reuse a
+  // request that started before invalidateLiveTables() advanced the version.
+  const key = `${userId}:${table}:${orderCol || ""}:${ascending}:${secondaryOrder || ""}:${cacheVersion}`;
   if (!tableFetchPromises.has(key)) {
     const promise = fetchAllTableFromNetwork(client, table, orderCol, ascending, secondaryOrder)
       .finally(() => {
@@ -283,12 +285,12 @@ export async function fetchAllTable(table, orderCol, ascending = true, secondary
   const cached = userId && !refresh ? await readLiveTableCache(cacheArgs) : null;
   if (cached && !cached.stale) return cached.rows;
   if (cached) {
-    void fetchAllTableOnce(client, userId, table, orderCol, ascending, secondaryOrder)
+    void fetchAllTableOnce(client, userId, table, orderCol, ascending, secondaryOrder, cacheVersion)
       .then((rows) => writeLiveTableCache({ ...cacheArgs, rows, version: cacheVersion }))
       .catch((error) => console.warn(`[live-table-cache] ${table} refresh failed`, error));
     return cached.rows;
   }
-  const rows = await fetchAllTableOnce(client, userId, table, orderCol, ascending, secondaryOrder);
+  const rows = await fetchAllTableOnce(client, userId, table, orderCol, ascending, secondaryOrder, cacheVersion);
   if (userId) await writeLiveTableCache({ ...cacheArgs, rows, version: cacheVersion });
   return rows;
 }

@@ -503,10 +503,13 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
   activeNavigation = navigation;
   detailCommitted = false;
   const productId = url.searchParams.get("id");
-  [detail, currentUser, unread] = await Promise.all([
+  const [nextDetail, nextCurrentUser, nextUnread] = await Promise.all([
     getInventoryDetailData(productId), getCurrentUser(), getUnread()
   ]);
-  throwIfPageAborted(signal);
+  throwIfPageAborted(signal, scope);
+  detail = nextDetail;
+  currentUser = nextCurrentUser;
+  unread = nextUnread;
   liveReadOnly = typeof currentUser?.hasPermission === "function";
   writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
   statusOptions = ["active", "discontinued"].includes(detail.product.status)
@@ -545,7 +548,7 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
       currentUser = null;
       unread = null;
       currentHelpers = null;
-      activeNavigation = null;
+      if (activeNavigation === navigation) activeNavigation = null;
       state.modalItem = null;
     }
   };

@@ -95,6 +95,7 @@ export function createAppRouter({
   let currentUrl = new URL(windowRef.location.href);
   let currentIndex = historyDetails(windowRef.history.state)?.index ?? 0;
   let pendingAbortController = null;
+  let routeGeneration = 0;
   let disposed = false;
   let suppressPopstate = false;
   let scrollFrame = 0;
@@ -190,6 +191,7 @@ export function createAppRouter({
     }
 
     pendingAbortController?.abort();
+    const generation = ++routeGeneration;
     const abortController = new AbortController();
     pendingAbortController = abortController;
     let styles = null;
@@ -210,6 +212,7 @@ export function createAppRouter({
         url,
         route,
         historyState: historyDetails(historyState)?.pageState ?? null,
+        isCurrent: () => !disposed && generation === routeGeneration && !abortController.signal.aborted,
         navigation: Object.freeze({ navigate, savePageState, hardNavigate })
       }), navigationTimeoutMs, abortController.signal);
       if (abortController.signal.aborted) throw abortError();
@@ -305,6 +308,7 @@ export function createAppRouter({
   async function dispose() {
     if (disposed) return;
     disposed = true;
+    routeGeneration += 1;
     pendingAbortController?.abort();
     if (scrollFrame) windowRef.cancelAnimationFrame(scrollFrame);
     if (active) {

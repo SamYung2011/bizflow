@@ -29,6 +29,7 @@ let logDate = null;
 let alarmDate = null;
 let instanceSequence = 0;
 let activeInstance = 0;
+let activeScope = null;
 
 function e(value) {
   return context.helpers().escapeHtml(value ?? "—");
@@ -85,18 +86,19 @@ function renderLogs() {
 async function loadLiveLogs() {
   if (state.logsLoaded || state.logsLoading) return;
   const instance = activeInstance;
+  const scope = activeScope;
   state.logsLoading = true;
   rerender();
   try {
     const result = await getOcppMonitorLogsData();
-    if (instance !== activeInstance) return;
+    if (instance !== activeInstance || !scope?.isCurrent()) return;
     data.logs = result.logs;
     data.isLive = result.isLive;
     data.logsScope = result.logsScope;
     data.generatedAt = result.generatedAt;
     state.logsLoaded = true;
   } finally {
-    if (instance !== activeInstance) return;
+    if (instance !== activeInstance || !scope?.isCurrent()) return;
     state.logsLoading = false;
     rerender();
   }
@@ -228,12 +230,13 @@ function createState(historyState, logsDeferred) {
 
 export async function mountPage({ scope, signal, url, navigation, historyState }) {
   const currentUser = await getCurrentUser();
-  throwIfPageAborted(signal);
+  throwIfPageAborted(signal, scope);
   requireOcppRouteAccess(currentUser, { url, navigation });
   const [initialData, unread] = await Promise.all([getOcppMonitorData(), getUnread()]);
-  throwIfPageAborted(signal);
+  throwIfPageAborted(signal, scope);
   const instance = ++instanceSequence;
   activeInstance = instance;
+  activeScope = scope;
   data = { ...initialData };
   context = makeOcppContext();
   state = createState(historyState, data.logsDeferred);
@@ -281,6 +284,7 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
     }),
     dispose() {
       if (activeInstance === instance) activeInstance = 0;
+      if (activeScope === scope) activeScope = null;
       logDate?.close();
       alarmDate?.close();
       data = null;

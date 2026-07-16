@@ -70,7 +70,7 @@ export function attachMemberCompanyController({ state, rerender, scope }) {
       return;
     }
     if (await confirmInPage(memberT(currentLang(), "members.companies.deleteConfirm"), { danger: true })) {
-      if (scope.disposed) return;
+      if (!scope.isCurrent()) return;
       state.companies = state.companies.filter((item) => item.id !== company.id);
       rerender();
     }
