@@ -25,6 +25,50 @@ function assignableTaskMembers(state, data, departmentId) {
     state.submitCanAssignOthers || member.id === state.currentUser.id);
 }
 
+function renderMemberEditor({ state, data, departmentId, helpers }) {
+  const { escapeHtml, lang } = helpers;
+  const tt = (key) => taskT(lang, key);
+  const allMembers = (Array.isArray(data?.members) ? data.members : []).filter((member) => member.dept !== "all");
+  const eligibleMembers = taskMembersForDepartment(data, departmentId);
+  const selectedIds = [...new Set(Array.isArray(state.submitDraft.memberIds) ? state.submitDraft.memberIds : [])];
+  const selectedIdSet = new Set(selectedIds);
+  const owner = eligibleMembers.find((member) => member.name === state.submitDraft.owner);
+  const selectedMembers = selectedIds
+    .map((id) => allMembers.find((member) => member.id === id))
+    .filter(Boolean);
+  const candidates = state.submitCanAssignOthers
+    ? eligibleMembers.filter((member) => member.id !== owner?.id && !selectedIdSet.has(member.id))
+    : [];
+  const query = String(state.submitDraft.memberQuery || "");
+  const normalizedQuery = query.replace(/^@/, "").trim().toLocaleLowerCase();
+  const menuOpen = Boolean(state.submitDraft.memberMenuOpen) && !state.writeBusy;
+  const disabled = !state.submitCanAssignOthers || state.writeBusy;
+  const chips = selectedMembers.map((member) => `<span class="form-task-submit__member-chip">
+    <span>@${escapeHtml(member.name)}</span>
+    <button type="button" data-task-member-remove="${escapeHtml(member.id)}" aria-label="${escapeHtml(taskT(lang, "tasks.submit.removeMember", { name: member.name }))}"${disabled ? " disabled" : ""}>×</button>
+  </span>`).join("");
+  let visibleCandidateCount = 0;
+  const options = candidates.map((member) => {
+    const visible = !normalizedQuery || member.name.toLocaleLowerCase().includes(normalizedQuery);
+    if (visible) visibleCandidateCount += 1;
+    return `<button type="button" role="option" data-task-member-option="${escapeHtml(member.id)}" data-task-member-name="${escapeHtml(member.name)}"${visible ? "" : " hidden"}>
+    <span>${escapeHtml(member.name)}</span>
+    ${member.role ? `<small>${escapeHtml(member.role)}</small>` : ""}
+  </button>`;
+  }).join("");
+
+  return `<div class="form-task-submit__member-editor" data-task-member-editor>
+    <div class="form-task-submit__member-control">
+      ${chips}
+      <input type="text" data-task-member-query value="${escapeHtml(query)}" placeholder="${escapeHtml(tt("tasks.submit.membersPlaceholder"))}" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="task-submit-member-menu" aria-expanded="${menuOpen}"${disabled ? " disabled" : ""}>
+    </div>
+    <div id="task-submit-member-menu" class="form-task-submit__member-menu" data-task-member-menu role="listbox" aria-label="${escapeHtml(tt("tasks.submit.memberCandidates"))}"${menuOpen ? "" : " hidden"}>
+      ${options}
+      <p data-task-member-empty${visibleCandidateCount ? " hidden" : ""}>${escapeHtml(tt("tasks.submit.noMemberMatches"))}</p>
+    </div>
+  </div>`;
+}
+
 function renderSegment({ name, values, selected, disabled, helpers }) {
   const { escapeHtml, lang } = helpers;
   return `<div class="form-task-submit__segment">${values.map(({ value, key }) => `<label class="${value === selected ? "form-task-submit__segment--active" : ""}">
@@ -86,10 +130,10 @@ export function renderTaskSubmitDialog({ state, data, helpers }) {
             { value: "yes", key: "tasks.submit.requiresReview" }
           ], helpers })}
         </div>
-        <label class="form-task-submit__field">
+        <div class="form-task-submit__field">
           <span>${escapeHtml(tt("tasks.submit.members"))}</span>
-          <input name="members" value="${escapeHtml(draft.members)}" placeholder="${escapeHtml(tt("tasks.submit.membersPlaceholder"))}"${state.submitCanAssignOthers ? busy : " disabled"}>
-        </label>
+          ${renderMemberEditor({ state, data, departmentId, helpers })}
+        </div>
         <label class="form-task-submit__field">
           <span>${escapeHtml(tt("tasks.submit.expectedAt"))}</span>
           <input type="date" name="due" value="${escapeHtml(draft.due)}" required${busy}>

@@ -41,12 +41,16 @@ const clonedTaskById = new Map(clonedTasks.map((task) => [task.id, task]));
 clonedTasks.forEach((task) => {
   if (task.parentId && clonedTaskById.has(task.parentId)) clonedTaskById.get(task.parentId).subtasks.push(task);
 });
-const currentMember = data.members.find((member) => member.name.toLocaleLowerCase() === currentUser.name.toLocaleLowerCase());
+const clonedMembers = data.members.map((member, index) => ({
+  ...member,
+  id: member.id || `mock-member-${index}`
+}));
+const currentMember = clonedMembers.find((member) => member.name.toLocaleLowerCase() === currentUser.name.toLocaleLowerCase());
 const now = new Date();
 const storedViewMode = getSessionValue("team-tasks-view-mode");
 const state = {
   summary: { ...data.summary },
-  members: data.members.map((member) => ({ ...member })),
+  members: clonedMembers,
   tasks: clonedTasks,
   board: data.board.map((column) => ({
     ...column,
@@ -72,7 +76,7 @@ const state = {
   submitTaskId: null,
   submitOriginalDepartmentId: "",
   submitCanAssignOthers: permissions.canAssignOthers,
-  submitDraft: { ...data.form.defaults, attachments: [] },
+  submitDraft: { ...data.form.defaults, memberIds: [], memberQuery: "", memberMenuOpen: false, attachments: [] },
   submitError: "",
   feedbackDraft: { message: "", attachments: [] },
   feedbackError: "",
@@ -242,22 +246,56 @@ function taskSubmitDepartment(departmentId) {
 function reconcileTaskSubmitAssignees(departmentId) {
   const eligibleMembers = taskMembersForDepartment(taskSubmitData(), departmentId);
   const eligibleNames = new Set(eligibleMembers.map((member) => member.name));
+  const eligibleIds = new Set(eligibleMembers.map((member) => member.id));
   if (!state.submitCanAssignOthers && state.submitMode === "edit") {
     const task = state.tasks.find((item) => item.id === state.submitTaskId);
     const retained = (task?.assignees ?? []).filter((assignee) => eligibleMembers.some((member) => member.id === assignee.employeeId));
     state.submitDraft.owner = retained[0]?.name || "";
-    state.submitDraft.members = retained.slice(1).map((assignee) => assignee.name).join(", ");
+    state.submitDraft.memberIds = retained.slice(1).map((assignee) => assignee.employeeId);
     return;
   }
-  const currentNames = [
-    state.submitDraft.owner,
-    ...String(state.submitDraft.members || "").split(",").map((name) => name.trim()).filter(Boolean)
-  ];
-  const retained = [...new Set(currentNames.filter((name) => eligibleNames.has(name)))];
   const preferredOwner = eligibleMembers.find((member) => member.id === state.currentUser.id) ?? eligibleMembers[0];
   const owner = eligibleNames.has(state.submitDraft.owner) ? state.submitDraft.owner : preferredOwner?.name || "";
+  const ownerId = eligibleMembers.find((member) => member.name === owner)?.id || "";
   state.submitDraft.owner = owner;
-  state.submitDraft.members = retained.filter((name) => name !== owner).join(", ");
+  state.submitDraft.memberIds = [...new Set(state.submitDraft.memberIds ?? [])]
+    .filter((id) => eligibleIds.has(id) && id !== ownerId);
+  state.submitDraft.memberQuery = "";
+  state.submitDraft.memberMenuOpen = false;
+}
+
+function focusTaskMemberQuery() {
+  requestAnimationFrame(() => {
+    const input = document.querySelector("[data-task-member-query]");
+    if (!input || input.disabled) return;
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  });
+}
+
+function filterTaskMemberCandidatesInPlace(input) {
+  const editor = input?.closest("[data-task-member-editor]");
+  const menu = editor?.querySelector("[data-task-member-menu]");
+  if (!menu) return;
+  const query = String(input.value || "").replace(/^@/, "").trim().toLocaleLowerCase();
+  let visibleCount = 0;
+  menu.querySelectorAll("[data-task-member-option]").forEach((option) => {
+    const visible = !query || String(option.getAttribute("data-task-member-name") || "").toLocaleLowerCase().includes(query);
+    option.hidden = !visible;
+    if (visible) visibleCount += 1;
+  });
+  const empty = menu.querySelector("[data-task-member-empty]");
+  if (empty) empty.hidden = visibleCount > 0;
+  menu.hidden = false;
+  input.setAttribute("aria-expanded", "true");
+}
+
+function closeTaskMemberMenuInPlace() {
+  state.submitDraft.memberMenuOpen = false;
+  const input = document.querySelector("[data-task-member-query]");
+  const menu = document.querySelector("[data-task-member-menu]");
+  if (menu) menu.hidden = true;
+  input?.setAttribute("aria-expanded", "false");
 }
 
 function closeTaskDetail() {
@@ -292,6 +330,9 @@ function openTaskSubmit() {
   state.submitDraft = {
     ...data.form.defaults,
     owner: authenticated ? state.currentUser.name : data.form.defaults.owner,
+    memberIds: [],
+    memberQuery: "",
+    memberMenuOpen: false,
     attachments: [],
     content: data.form.defaults.content ?? (data.form.defaults.contentKey ? pageT(currentHelpers.lang, data.form.defaults.contentKey) : "")
   };
@@ -335,7 +376,9 @@ function openTaskCopy(taskId) {
     visibility: departmentId ? "department" : "team",
     departmentId,
     owner: state.currentUser.name,
-    members: "",
+    memberIds: [],
+    memberQuery: "",
+    memberMenuOpen: false,
     attachments: []
   };
   rerenderTaskPage({ focusSubmit: true });
@@ -363,7 +406,9 @@ function openTaskEdit(taskId) {
     departmentId: task.departmentId || "",
     owner: task.assignees[0]?.name || "",
     requiresReview: task.requiresReview ? "yes" : "no",
-    members: task.assignees.slice(1).map((assignee) => assignee.name).join(", "),
+    memberIds: task.assignees.slice(1).map((assignee) => assignee.employeeId).filter(Boolean),
+    memberQuery: "",
+    memberMenuOpen: false,
     due: String(task.due || "").replaceAll("/", "-"),
     attachments: (task.attachments ?? []).map((attachment) => ({ ...attachment }))
   };
@@ -682,6 +727,33 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const memberOption = event.target.closest("[data-task-member-option]");
+  if (memberOption) {
+    if (!state.submitCanAssignOthers || state.writeBusy) return;
+    const memberId = memberOption.getAttribute("data-task-member-option");
+    const eligibleMembers = taskMembersForDepartment(taskSubmitData(), state.submitDraft.departmentId || "");
+    const member = eligibleMembers.find((item) => item.id === memberId);
+    const ownerId = eligibleMembers.find((item) => item.name === state.submitDraft.owner)?.id || "";
+    if (!member || member.id === ownerId) return;
+    state.submitDraft.memberIds = [...new Set([...(state.submitDraft.memberIds ?? []), member.id])];
+    state.submitDraft.memberQuery = "";
+    state.submitDraft.memberMenuOpen = true;
+    rerenderTaskPage();
+    focusTaskMemberQuery();
+    return;
+  }
+
+  const memberRemove = event.target.closest("[data-task-member-remove]");
+  if (memberRemove) {
+    if (memberRemove.disabled || !state.submitCanAssignOthers || state.writeBusy) return;
+    const memberId = memberRemove.getAttribute("data-task-member-remove");
+    state.submitDraft.memberIds = (state.submitDraft.memberIds ?? []).filter((id) => id !== memberId);
+    state.submitDraft.memberMenuOpen = true;
+    rerenderTaskPage();
+    focusTaskMemberQuery();
+    return;
+  }
+
   if (event.target.closest("[data-task-feedback-attachment]")) {
     document.querySelector("[data-task-feedback-file]")?.click();
     return;
@@ -765,11 +837,18 @@ document.addEventListener("click", async (event) => {
   if (!event.target.closest("[data-filter-popover]")) {
     closeAllFilterMenus(null);
   }
+  if (state.submitDraft.memberMenuOpen && !event.target.closest("[data-task-member-editor]")) closeTaskMemberMenuInPlace();
   if (state.actionTaskId && !event.target.closest("[data-task-action-popover]")) closeTaskAction();
 });
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
+  if (event.target.closest("[data-task-member-query]") && state.submitDraft.memberMenuOpen) {
+    event.preventDefault();
+    event.stopPropagation();
+    closeTaskMemberMenuInPlace();
+    return;
+  }
   if (state.attachmentPreview) {
     const previewUrl = state.attachmentPreview.url;
     state.attachmentPreview = null;
@@ -817,16 +896,22 @@ document.addEventListener("submit", async (event) => {
     const eligibleMembers = taskMembersForDepartment(taskSubmitData(), departmentId);
     const eligibleMemberIds = new Set(eligibleMembers.map((member) => member.id));
     const owner = String(values.get("owner") ?? state.submitDraft.owner ?? "");
-    const members = String(values.get("members") ?? state.submitDraft.members ?? "").split(",").map((name) => name.trim()).filter(Boolean);
-    const assignedMembers = [...new Set([owner, ...members].filter(Boolean))];
+    // Old team AssigneeChipEditor persists selected employee ids to task_assignees;
+    // the free-text @ query is intentionally excluded from the write payload.
+    const ownerRow = eligibleMembers.find((member) => member.name === owner);
+    const selectedMemberIds = [...new Set(state.submitDraft.memberIds ?? [])].filter(Boolean);
+    const selectedRows = selectedMemberIds
+      .map((memberId) => eligibleMembers.find((member) => member.id === memberId))
+      .filter(Boolean);
     const assignedRows = state.submitCanAssignOthers
-      ? assignedMembers.map((name) => eligibleMembers.find((member) => member.name === name)).filter(Boolean)
+      ? [ownerRow, ...selectedRows].filter((member, index, rows) => member && rows.findIndex((row) => row?.id === member.id) === index)
       : state.submitMode === "edit"
         ? (state.tasks.find((task) => task.id === state.submitTaskId)?.assignees ?? [])
           .map((assignee) => state.members.find((member) => member.id === assignee.employeeId))
           .filter((member) => member && eligibleMemberIds.has(member.id))
         : eligibleMembers.filter((member) => member.id === state.currentUser.id);
-    if (!assignedRows.length || (state.submitCanAssignOthers && assignedRows.length !== assignedMembers.length)) {
+    const invalidSelection = state.submitCanAssignOthers && (!ownerRow || selectedRows.length !== selectedMemberIds.length);
+    if (!assignedRows.length || invalidSelection) {
       state.submitError = assignedRows.length ? "tasks.submit.invalidAssignee" : "tasks.submit.assigneeRequired";
       rerenderTaskPage({ focusSubmit: true });
       return;
@@ -835,6 +920,7 @@ document.addEventListener("submit", async (event) => {
     const content = String(values.get("content") || "").trim();
     const due = String(values.get("due") || "");
     const requiresReview = values.get("requiresReview") === "yes";
+    const assignedMembers = assignedRows.map((member) => member.name);
     if (state.liveTaskWrites) {
       state.writeBusy = true;
       state.submitError = "";
@@ -1051,7 +1137,7 @@ document.addEventListener("submit", async (event) => {
 
 function syncTaskSubmitDraft(form) {
   const values = new FormData(form);
-  for (const key of ["title", "content", "priority", "visibility", "departmentId", "owner", "requiresReview", "members", "due"]) {
+  for (const key of ["title", "content", "priority", "visibility", "departmentId", "owner", "requiresReview", "due"]) {
     const value = values.get(key);
     if (value != null) state.submitDraft[key] = String(value);
   }
@@ -1070,6 +1156,13 @@ document.addEventListener("input", (event) => {
   const feedbackInput = event.target.closest('[data-task-feedback-form] textarea[name="message"]');
   if (feedbackInput) {
     state.feedbackDraft.message = feedbackInput.value;
+    return;
+  }
+  const memberQuery = event.target.closest("[data-task-member-query]");
+  if (memberQuery) {
+    state.submitDraft.memberQuery = memberQuery.value;
+    state.submitDraft.memberMenuOpen = true;
+    filterTaskMemberCandidatesInPlace(memberQuery);
     return;
   }
   const form = event.target.closest("[data-task-submit-form]");
@@ -1114,9 +1207,26 @@ document.addEventListener("change", (event) => {
     document.querySelector('[data-task-submit-form] [name="departmentId"]')?.focus();
     return;
   }
+  if (name === "owner") {
+    const ownerId = taskMembersForDepartment(taskSubmitData(), state.submitDraft.departmentId || "")
+      .find((member) => member.name === value)?.id || "";
+    state.submitDraft.memberIds = (state.submitDraft.memberIds ?? []).filter((id) => id !== ownerId);
+    state.submitDraft.memberQuery = "";
+    state.submitDraft.memberMenuOpen = false;
+    rerenderTaskPage();
+    document.querySelector('[data-task-submit-form] [name="owner"]')?.focus();
+    return;
+  }
   // Text controls dispatch change while losing focus. Replacing the form here would remove
   // the submit button between pointerdown and click, so keep non-dependent updates in place.
   if (event.target.matches('input[type="radio"]')) syncTaskSubmitSegment(event.target);
+});
+
+document.addEventListener("focusin", (event) => {
+  const memberQuery = event.target.closest("[data-task-member-query]");
+  if (!memberQuery || memberQuery.disabled) return;
+  state.submitDraft.memberMenuOpen = true;
+  filterTaskMemberCandidatesInPlace(memberQuery);
 });
 
 attachTaskDomainController({
