@@ -462,8 +462,12 @@ async function performTaskAction(taskId, action) {
     const scopedMember = selectedActionMember();
     const scopedAssignee = scopedMember ? taskAssignee(task, scopedMember) : null;
     const currentAssignee = taskAssignee(task, state.currentUser);
-    const targetAssignee = scopedAssignee ?? (!scopedMember ? currentAssignee : null);
-    const wholeTask = !scopedMember && isTaskCreator(task, state.currentUser);
+    // The creator's completion action is whole-task completion even while viewing an assignee scope.
+    const wholeTask = isTaskCreator(task, state.currentUser);
+    // In live mode an assignee can only complete their own row, never the member currently being viewed.
+    const targetAssignee = state.liveTaskWrites
+      ? currentAssignee
+      : scopedAssignee ?? (!scopedMember ? currentAssignee : null);
     if (state.liveTaskWrites) {
       if (!wholeTask && !targetAssignee) return;
       state.writeBusy = true;
@@ -492,14 +496,17 @@ async function performTaskAction(taskId, action) {
       return;
     }
     const completedAt = localTimestamp();
-    // Mirrors bizflow_samyung/team/src/views/Tasks.jsx:368-385: member scope completes one assignee row.
-    if (scopedAssignee) {
+    if (wholeTask) {
+      // Mirrors Tasks.jsx:344-366: creator completion marks every pending assignee and the task done.
+      completeWholeTask(task, completedAt);
+    } else if (scopedAssignee) {
+      // Mirrors Tasks.jsx:368-385: mock member scope completes one assignee row.
       scopedAssignee.completedAt = completedAt;
       scopedAssignee.abandonedAt = null;
       const allDone = task.assignees.length > 0 && task.assignees.every((assignee) => assignee.completedAt != null);
       if (allDone && !task.requiresReview) completeWholeTask(task, completedAt);
-    } else if (!scopedMember || isTaskCreator(task, state.currentUser)) {
-      // Mirrors Tasks.jsx:344-366: creator/all-scope action completes pending assignees and the whole task.
+    } else if (!scopedMember) {
+      // Preserve the mock/demo all-scope action for users with edit-others permission.
       completeWholeTask(task, completedAt);
     }
   }

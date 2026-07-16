@@ -1,5 +1,6 @@
 import { getWarrantyData } from "../data/provider.js";
 import { managementPageSize, renderManagementList, renderManagementPager } from "../components/management-list.js";
+import { createDateRangePanel } from "../components/date-range-panel.js";
 
 const copy = {
   zh: {
@@ -11,6 +12,19 @@ const copy = {
     quarter: "90 天內",
     year: "一年內",
     search: "搜尋客戶、電話、產品或單號",
+    expiryRange: "保修到期日",
+    dateRange: "保修到期日期範圍",
+    startDate: "開始日期",
+    endDate: "結束日期",
+    today: "今天",
+    previousMonth: "上個月",
+    nextMonth: "下個月",
+    clear: "清除",
+    cancel: "取消",
+    complete: "完成",
+    copyPhone: "複製電話 {phone}",
+    copied: "已複製",
+    copyFailed: "未能複製",
     purchase: "購買日期",
     expiry: "到期日",
     remaining: "剩餘 {days} 天",
@@ -29,6 +43,19 @@ const copy = {
     quarter: "Within 90 days",
     year: "Within 1 year",
     search: "Search customer, phone, product or order",
+    expiryRange: "Warranty expiry",
+    dateRange: "Warranty expiry date range",
+    startDate: "Start date",
+    endDate: "End date",
+    today: "Today",
+    previousMonth: "Previous month",
+    nextMonth: "Next month",
+    clear: "Clear",
+    cancel: "Cancel",
+    complete: "Done",
+    copyPhone: "Copy phone {phone}",
+    copied: "Copied",
+    copyFailed: "Could not copy",
     purchase: "Purchased",
     expiry: "Expires",
     remaining: "{days} days remaining",
@@ -47,6 +74,19 @@ const copy = {
     quarter: "Sous 90 jours",
     year: "Sous 1 an",
     search: "Rechercher client, téléphone, produit ou commande",
+    expiryRange: "Expiration de garantie",
+    dateRange: "Période d'expiration de garantie",
+    startDate: "Date de début",
+    endDate: "Date de fin",
+    today: "Aujourd'hui",
+    previousMonth: "Mois précédent",
+    nextMonth: "Mois suivant",
+    clear: "Effacer",
+    cancel: "Annuler",
+    complete: "Terminer",
+    copyPhone: "Copier le téléphone {phone}",
+    copied: "Copié",
+    copyFailed: "Copie impossible",
     purchase: "Achat",
     expiry: "Expiration",
     remaining: "{days} jours restants",
@@ -63,9 +103,13 @@ const state = {
   items: null,
   bucket: "all",
   search: "",
+  dateFrom: "",
+  dateTo: "",
   page: 1
 };
 let validCustomerIds = new Set();
+const dateRangePanel = createDateRangePanel();
+let copyNoticeTimer = 0;
 
 function t(lang, key, values = {}) {
   const template = copy[lang]?.[key] ?? copy.zh[key] ?? key;
@@ -119,12 +163,34 @@ function bucketCounts() {
 
 function filteredItems() {
   const term = state.search.trim().toLocaleLowerCase();
+  const rangeFrom = dateValue(state.dateFrom);
+  const rangeTo = dateValue(state.dateTo);
   return (state.items ?? []).filter((item) => {
     if (state.bucket !== "all" && item.bucket !== state.bucket) return false;
+    const expiry = dateValue(item.expiry);
+    if (Number.isFinite(rangeFrom) && (!Number.isFinite(expiry) || expiry < rangeFrom)) return false;
+    if (Number.isFinite(rangeTo) && (!Number.isFinite(expiry) || expiry > rangeTo)) return false;
     if (!term) return true;
     return [item.customer, item.phone, item.product, item.no]
       .some((value) => String(value).toLocaleLowerCase().includes(term));
   });
+}
+
+function dateRangeLabel(lang) {
+  if (!state.dateFrom && !state.dateTo) return t(lang, "expiryRange");
+  return `${state.dateFrom || state.dateTo} - ${state.dateTo || state.dateFrom}`;
+}
+
+function renderDateRangeFilter(helpers) {
+  const { escapeHtml, icon, lang } = helpers;
+  const hasRange = Boolean(state.dateFrom || state.dateTo);
+  return `<span class="warranty-date-filter${hasRange ? " warranty-date-filter--active" : ""}">
+    <button type="button" class="warranty-date-filter__trigger" data-warranty-date-trigger aria-haspopup="dialog" aria-expanded="${dateRangePanel.isOpen()}" title="${escapeHtml(t(lang, "dateRange"))}">
+      ${icon("icon-task-calendar", "icon")}
+      <span>${escapeHtml(dateRangeLabel(lang))}</span>
+    </button>
+    ${hasRange ? `<button type="button" class="warranty-date-filter__clear" data-warranty-date-clear aria-label="${escapeHtml(t(lang, "clear"))}">${escapeHtml(t(lang, "clear"))}</button>` : ""}
+  </span>`;
 }
 
 function renderBucketChips(helpers) {
@@ -141,16 +207,18 @@ function renderWarrantyRow(item, helpers) {
   const { escapeHtml, lang } = helpers;
   const e = escapeHtml;
   const hasCustomer = Boolean(item.customerId && validCustomerIds.has(String(item.customerId)));
-  const tag = hasCustomer ? "a" : "article";
-  const link = hasCustomer ? ` href="./customer-detail.html?id=${encodeURIComponent(item.customerId)}"` : ' aria-disabled="true"';
+  const detailLink = hasCustomer
+    ? `<a class="warranty-row__link" href="./customer-detail.html?id=${encodeURIComponent(item.customerId)}" aria-label="${e(item.customer)}"></a>`
+    : "";
   const timing = item.daysLeft < 0
     ? t(lang, "overdue", { days: Math.abs(item.daysLeft) })
     : t(lang, "remaining", { days: item.daysLeft });
-  return `<${tag} class="management-list__row warranty-row warranty-row--${item.bucket}${hasCustomer ? "" : " warranty-row--disabled"}"${link} data-warranty-row data-warranty-bucket-value="${item.bucket}"${item.customerId ? ` data-customer-id="${e(item.customerId)}"` : ""}>
+  return `<article class="management-list__row warranty-row warranty-row--${item.bucket}${hasCustomer ? "" : " warranty-row--disabled"}"${hasCustomer ? "" : ' aria-disabled="true"'} data-warranty-row data-warranty-bucket-value="${item.bucket}"${item.customerId ? ` data-customer-id="${e(item.customerId)}"` : ""}>
+    ${detailLink}
     <span class="warranty-row__bar" aria-hidden="true"></span>
     <span class="warranty-row__customer">
       <strong title="${e(item.customer)}">${e(item.customer)}</strong>
-      <span title="${e(item.phone)}">${e(item.phone)}</span>
+      <button type="button" class="warranty-row__phone" data-warranty-phone="${e(item.phone)}" title="${e(t(lang, "copyPhone", { phone: item.phone }))}" aria-label="${e(t(lang, "copyPhone", { phone: item.phone }))}">${e(item.phone)}</button>
       <span class="warranty-row__badge">${e(t(lang, item.bucket))}</span>
     </span>
     <span class="warranty-row__product">
@@ -162,7 +230,7 @@ function renderWarrantyRow(item, helpers) {
       <span>${e(t(lang, "expiry"))} ${e(item.expiry)}</span>
       <strong>${e(timing)}</strong>
     </span>
-  </${tag}>`;
+  </article>`;
 }
 
 export function renderWarranty(helpers) {
@@ -193,10 +261,13 @@ export function renderWarranty(helpers) {
   return `<section class="warranty-panel" data-warranty-panel data-warranty-total="${counts.all}" data-warranty-filtered="${filtered.length}" ${bucketKeys.map((key) => `data-warranty-count-${key}="${counts[key]}"`).join(" ")}>
     <div class="warranty-toolbar">
       ${renderBucketChips(helpers)}
-      <label class="warranty-search">
-        ${icon("icon-nav-search", "icon")}
-        <input type="search" data-warranty-search value="${escapeHtml(state.search)}" placeholder="${escapeHtml(t(lang, "search"))}" aria-label="${escapeHtml(t(lang, "search"))}">
-      </label>
+      <div class="warranty-toolbar__filters">
+        ${renderDateRangeFilter(helpers)}
+        <label class="warranty-search">
+          ${icon("icon-nav-search", "icon")}
+          <input type="search" data-warranty-search value="${escapeHtml(state.search)}" placeholder="${escapeHtml(t(lang, "search"))}" aria-label="${escapeHtml(t(lang, "search"))}">
+        </label>
+      </div>
     </div>
     ${renderManagementList({ content, pager, paged: filtered.length > pageSize })}
   </section>`;
@@ -214,6 +285,67 @@ export function setWarrantySearch(value) {
   state.search = value;
   state.page = 1;
   return true;
+}
+
+export function openWarrantyDateRange(anchor, helpers, onChange) {
+  if (dateRangePanel.isOpen()) return dateRangePanel.close();
+  const { lang } = helpers;
+  return dateRangePanel.open({
+    anchor,
+    start: state.dateFrom,
+    end: state.dateTo,
+    language: lang,
+    t: (key) => t(lang, key),
+    onCommit(range) {
+      const nextFrom = range.start || "";
+      const nextTo = range.end || "";
+      if (nextFrom === state.dateFrom && nextTo === state.dateTo) return;
+      state.dateFrom = nextFrom;
+      state.dateTo = nextTo;
+      state.page = 1;
+      onChange?.();
+    }
+  });
+}
+
+export function clearWarrantyDateRange() {
+  dateRangePanel.close({ restoreFocus: false });
+  if (!state.dateFrom && !state.dateTo) return false;
+  state.dateFrom = "";
+  state.dateTo = "";
+  state.page = 1;
+  return true;
+}
+
+export function closeWarrantyDateRange() {
+  return dateRangePanel.close({ restoreFocus: false });
+}
+
+function showCopyNotice(message, tone = "success") {
+  window.clearTimeout(copyNoticeTimer);
+  document.querySelector("[data-warranty-copy-notice]")?.remove();
+  const notice = document.createElement("p");
+  notice.className = `warranty-copy-notice warranty-copy-notice--${tone}`;
+  notice.dataset.warrantyCopyNotice = "";
+  notice.setAttribute("role", tone === "success" ? "status" : "alert");
+  notice.setAttribute("aria-live", "polite");
+  notice.textContent = message;
+  document.body.append(notice);
+  copyNoticeTimer = window.setTimeout(() => notice.remove(), 1800);
+}
+
+export async function copyWarrantyPhone(phone, lang) {
+  const value = String(phone || "").trim();
+  if (!value) return false;
+  try {
+    await navigator.clipboard.writeText(value);
+    showCopyNotice(t(lang, "copied"));
+    return true;
+  } catch (error) {
+    console.warn("Warranty phone copy failed", error);
+    showCopyNotice(t(lang, "copyFailed"), "error");
+    return false;
+  }
 }
 
 export function moveWarrantyPage(direction) {

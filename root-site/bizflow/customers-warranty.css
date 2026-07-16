@@ -13,6 +13,67 @@
   gap: var(--space-20);
 }
 
+.warranty-toolbar__filters {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-10);
+}
+
+.warranty-date-filter {
+  display: inline-flex;
+  min-width: 0;
+  height: 36px;
+  align-items: stretch;
+  border: 1px solid var(--gray-15);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  overflow: hidden;
+}
+
+.warranty-date-filter--active {
+  border-color: var(--blue);
+}
+
+.warranty-date-filter__trigger,
+.warranty-date-filter__clear {
+  border: 0;
+  background: transparent;
+  color: var(--gray-40);
+  font: inherit;
+}
+
+.warranty-date-filter__trigger {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-4);
+  padding: 0 var(--space-10);
+}
+
+.warranty-date-filter__trigger .icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.warranty-date-filter__trigger span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.warranty-date-filter__clear {
+  padding: 0 var(--space-10);
+  border-left: 1px solid var(--gray-15);
+}
+
+.warranty-date-filter__trigger:hover,
+.warranty-date-filter__clear:hover {
+  color: var(--blue);
+}
+
 .warranty-buckets {
   display: flex;
   min-width: 0;
@@ -98,6 +159,18 @@
   text-decoration: none;
 }
 
+.warranty-row__link {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.warranty-row__link:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
 .warranty-row--expired {
   --warranty-tone: var(--red);
 }
@@ -120,6 +193,7 @@
   bottom: var(--space-10);
   left: var(--space-10);
   width: var(--space-4);
+  z-index: 2;
   border-radius: var(--radius-10);
   background: var(--warranty-tone);
 }
@@ -128,9 +202,12 @@
 .warranty-row__product,
 .warranty-row__expiry {
   display: flex;
+  position: relative;
+  z-index: 2;
   min-width: 0;
   flex-direction: column;
   gap: var(--space-4);
+  pointer-events: none;
 }
 
 .warranty-row__customer {
@@ -160,6 +237,48 @@
 .warranty-row__expiry > span {
   color: var(--gray-40);
   font-size: var(--font-body-size);
+}
+
+.warranty-row__phone {
+  position: relative;
+  z-index: 3;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--gray-40);
+  font: inherit;
+  font-size: var(--font-body-size);
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+
+.warranty-row__phone:hover,
+.warranty-row__phone:focus-visible {
+  color: var(--blue);
+}
+
+.warranty-copy-notice {
+  --warranty-copy-notice-z: 240; /* Above the shared date panel (230); no global overlay z-index token. */
+
+  position: fixed;
+  z-index: var(--warranty-copy-notice-z);
+  right: var(--space-20);
+  bottom: var(--space-20);
+  margin: 0;
+  padding: var(--space-10) var(--space-20);
+  border-radius: var(--radius-10);
+  background: var(--gray-80);
+  color: var(--white);
+  box-shadow: 0 var(--space-4) var(--space-20) color-mix(in srgb, var(--gray-80) 20%, transparent);
+}
+
+.warranty-copy-notice--error {
+  background: var(--red);
 }
 
 .warranty-row__customer > .warranty-row__badge {
@@ -197,6 +316,11 @@
   .warranty-search {
     width: 100%;
   }
+
+  .warranty-toolbar__filters {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 768px) {
@@ -212,6 +336,19 @@
 
   .warranty-bucket {
     flex: none;
+  }
+
+  .warranty-toolbar__filters {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .warranty-date-filter {
+    width: 100%;
+  }
+
+  .warranty-date-filter__trigger {
+    flex: 1 1 auto;
   }
 
   .warranty-row {

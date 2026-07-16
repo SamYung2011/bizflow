@@ -17,8 +17,12 @@ import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { renderNewCustomerFields } from "../components/new-customer-fields.js";
 import { createCustomerSorter, customerSortKeys } from "./customers-sort.js";
 import {
+  clearWarrantyDateRange,
+  closeWarrantyDateRange,
+  copyWarrantyPhone,
   ensureWarrantyData,
   moveWarrantyPage,
+  openWarrantyDateRange,
   renderWarranty,
   selectWarrantyBucket,
   setWarrantySearch
@@ -361,6 +365,7 @@ document.addEventListener("click", async (event) => {
     state.modalOpen = false;
     closeAllFilterMenus(null);
     dateFilter.close();
+    closeWarrantyDateRange();
     rerenderCustomersPage();
     if (tab === "warranty") {
       await ensureWarrantyData();
@@ -372,6 +377,27 @@ document.addEventListener("click", async (event) => {
   const warrantyBucket = event.target.closest("[data-warranty-bucket]");
   if (warrantyBucket && state.tab === "warranty") {
     if (selectWarrantyBucket(warrantyBucket.getAttribute("data-warranty-bucket"))) rerenderCustomersPage();
+    return;
+  }
+
+  const warrantyPhone = event.target.closest("[data-warranty-phone]");
+  if (warrantyPhone && state.tab === "warranty") {
+    event.preventDefault();
+    event.stopPropagation();
+    await copyWarrantyPhone(warrantyPhone.getAttribute("data-warranty-phone"), currentHelpers.lang);
+    return;
+  }
+
+  const warrantyDateTrigger = event.target.closest("[data-warranty-date-trigger]");
+  if (warrantyDateTrigger && state.tab === "warranty") {
+    closeAllFilterMenus(null);
+    dateFilter.close();
+    openWarrantyDateRange(warrantyDateTrigger, currentHelpers, rerenderCustomersPage);
+    return;
+  }
+
+  if (event.target.closest("[data-warranty-date-clear]") && state.tab === "warranty") {
+    if (clearWarrantyDateRange()) rerenderCustomersPage();
     return;
   }
 
@@ -484,7 +510,10 @@ document.addEventListener("keydown", (event) => {
 let resizeTimer = 0;
 window.addEventListener("resize", () => {
   window.clearTimeout(resizeTimer);
-  resizeTimer = window.setTimeout(rerenderCustomersPage, 120);
+  resizeTimer = window.setTimeout(() => {
+    closeWarrantyDateRange();
+    rerenderCustomersPage();
+  }, 120);
 });
 
 window.__shellMenu = createBizflowMenu("customers");
