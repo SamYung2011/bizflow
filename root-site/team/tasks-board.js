@@ -15,7 +15,7 @@ function renderTaskCard(task, columnKey, state, helpers) {
   const currentName = String(state.currentUser.name || "").toLocaleLowerCase();
   const ownTask = String(task.creator || "").toLocaleLowerCase() === currentName;
   const assigned = (task.assignees ?? []).some((assignee) => String(assignee.name || "").toLocaleLowerCase() === currentName);
-  const canOpenActions = ownTask || assigned || state.permissions.canEditOthers || state.permissions.canDeleteOthers;
+  const canOpenActions = ownTask || assigned || state.permissions.canCreate || state.permissions.canEditOthers || state.permissions.canDeleteOthers;
   return `<article class="team-task-card team-task-card--${columnKey}${actionOpen ? " team-task-card--action-open" : ""}" data-task-card="${escapeHtml(task.id)}">
     <button type="button" class="team-task-card__body" data-task-detail-open="${escapeHtml(task.id)}" aria-label="${escapeHtml(`${taskT(lang, "tasks.detail.open")}: ${task.title}`)}">
       <h3 class="team-task-card__title" title="${escapeHtml(task.title)}">${escapeHtml(task.title)}</h3>

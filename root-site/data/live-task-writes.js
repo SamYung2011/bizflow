@@ -212,6 +212,16 @@ export async function createLiveTaskFeedback({ taskId, message, attachments = []
   }
 }
 
+export async function deleteLiveTask(taskId) {
+  const { client } = await writeContext();
+  // Mirrors team/src/components/EditTaskModal.jsx:115-120. Database cascades own
+  // assignees, feedback and child tasks; a missing/RLS-hidden row must fail visibly.
+  const result = await client.from("employee_tasks").delete().eq("id", taskId).select("id").single();
+  throwIfError(result.error);
+  await invalidateTaskReads("employee_tasks", "task_assignees", "employee_task_feedbacks");
+  return result.data;
+}
+
 export async function completeLiveTask({ taskId, targetEmployeeId, wholeTask, needsApproval }) {
   const { client, currentUser } = await writeContext();
   const completedAt = new Date().toISOString();

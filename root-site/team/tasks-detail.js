@@ -10,14 +10,36 @@ function safeAttachmentUrl(value) {
   return /^https?:\/\//i.test(url) ? url : "";
 }
 
+function isImageAttachment(attachment, url) {
+  const type = String(attachment?.type || "").toLocaleLowerCase();
+  if (type.startsWith("image/")) return true;
+  return /\.(?:avif|gif|jpe?g|png|webp)(?:[?#].*)?$/i.test(url);
+}
+
 function renderAttachmentLinks(attachments, helpers) {
   const { escapeHtml, lang } = helpers;
   return (attachments ?? []).map((attachment) => {
     const url = safeAttachmentUrl(attachment?.url);
     if (!url) return "";
     const name = String(attachment?.name || taskT(lang, "tasks.detail.attachments"));
+    if (isImageAttachment(attachment, url)) {
+      return `<button type="button" class="task-detail__attachment-preview" data-task-attachment-preview="${escapeHtml(url)}" data-task-attachment-name="${escapeHtml(name)}" aria-label="${escapeHtml(taskT(lang, "tasks.detail.previewAttachment", { name }))}"><img src="${escapeHtml(url)}" alt="${escapeHtml(name)}" loading="lazy"><span>${escapeHtml(name)}</span></button>`;
+    }
     return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(name)}">${escapeHtml(name)}</a>`;
   }).filter(Boolean).join("");
+}
+
+function renderAttachmentViewer(state, helpers) {
+  if (!state.attachmentPreview?.url) return "";
+  const { escapeHtml, lang } = helpers;
+  const name = state.attachmentPreview.name || taskT(lang, "tasks.detail.attachments");
+  return `<div class="task-attachment-viewer" data-task-attachment-viewer role="dialog" aria-modal="true" aria-label="${escapeHtml(name)}">
+    <div class="task-attachment-viewer__dialog">
+      <button type="button" data-task-attachment-viewer-close aria-label="${escapeHtml(taskT(lang, "tasks.detail.closeAttachmentPreview"))}">×</button>
+      <img src="${escapeHtml(state.attachmentPreview.url)}" alt="${escapeHtml(name)}">
+      <p>${escapeHtml(name)}</p>
+    </div>
+  </div>`;
 }
 
 function renderFeedbackEntry(entry, helpers) {
@@ -172,7 +194,10 @@ export function renderTaskDetail({ state, helpers }) {
     <article class="tp-component task-detail task-detail--${escapeHtml(state.detailTab)}" aria-label="${escapeHtml(task.title)}">
       <header class="task-detail__head">
         <h2 title="${escapeHtml(task.title)}">${escapeHtml(task.title)}</h2>
-        <button type="button" class="task-detail__close" data-task-detail-close aria-label="${escapeHtml(tt("tasks.detail.close"))}"></button>
+        <div class="task-detail__head-actions">
+          ${state.permissions.canCreate ? `<button type="button" class="task-detail__copy" data-task-copy="${escapeHtml(task.id)}"${state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites) ? " disabled aria-disabled=\"true\"" : ""}>${escapeHtml(tt("tasks.detail.copy"))}</button>` : ""}
+          <button type="button" class="task-detail__close" data-task-detail-close aria-label="${escapeHtml(tt("tasks.detail.close"))}"></button>
+        </div>
       </header>
       <div class="task-detail__tabs" role="tablist">
         <button type="button" class="${state.detailTab === "content" ? "task-detail__tab--active" : ""}" data-task-detail-tab="content" role="tab" aria-selected="${state.detailTab === "content"}">${escapeHtml(tt("tasks.detail.contentTab"))}</button>
@@ -183,5 +208,6 @@ export function renderTaskDetail({ state, helpers }) {
         ${renderTaskFeedback(task, state, helpers)}
       </div>
     </article>
+    ${renderAttachmentViewer(state, helpers)}
   </div>`;
 }

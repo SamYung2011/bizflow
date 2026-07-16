@@ -11,7 +11,8 @@ import { calendarRelatedTasks, isTaskCreator, memberIdentity, openAssignedTaskCo
 import { attachTaskDomainController } from "./tasks-domain-controller.js";
 import { renderTaskBoardGrid, renderTaskToolbar } from "./tasks-board.js";
 import { getSessionValue, setSessionValue } from "../data/session-state.js";
-import { completeLiveTask, createLiveTask, createLiveTaskFeedback, setLiveTaskParticipation, updateLiveTask } from "../data/live-task-writes.js";
+import { confirmInPage } from "../components/confirm-dialog.js";
+import { completeLiveTask, createLiveTask, createLiveTaskFeedback, deleteLiveTask, setLiveTaskParticipation, updateLiveTask } from "../data/live-task-writes.js";
 
 const data = await getTeamTaskData();
 const currentUser = await getCurrentUser();
@@ -23,6 +24,8 @@ const permissions = {
   canDeleteOthers: !authenticated || currentUser.hasPermission("can_delete_others_tasks"),
   canValidate: !authenticated || currentUser.hasPermission("can_validate_task")
 };
+const canManageEmployees = !authenticated || currentUser.isSuperAdmin === true || currentUser.isAdminOfAny === true ||
+  currentUser.hasPermission("can_manage_employees");
 const unreadWatermarks = await getUnreadWatermarks();
 markRead("tasks", unreadWatermarks.tasks);
 const clonedTasks = data.tasks.map((task) => ({
@@ -75,6 +78,7 @@ const state = {
   submitError: "",
   feedbackDraft: { message: "", attachments: [] },
   feedbackError: "",
+  attachmentPreview: null,
   writeBusy: false,
   writeError: "",
   writeNotice: "",
@@ -261,6 +265,7 @@ function reconcileTaskSubmitAssignees(departmentId) {
 function closeTaskDetail() {
   state.detailOpen = false;
   state.detailTab = "content";
+  state.attachmentPreview = null;
   state.feedbackDraft = { message: "", attachments: [] };
   state.feedbackError = "";
   rerenderTaskPage({ restoreDetailFocus: true });
@@ -270,6 +275,7 @@ function leaveTaskDetailForNavigation() {
   state.detailOpen = false;
   state.selectedTaskId = null;
   state.detailTab = "content";
+  state.attachmentPreview = null;
   state.feedbackDraft = { message: "", attachments: [] };
   state.feedbackError = "";
 }
@@ -297,6 +303,44 @@ function openTaskSubmit() {
 function canEditTask(task) {
   return Boolean(task) && (isTaskCreator(task, state.currentUser) || state.currentUser.isSuperAdmin ||
     state.currentUser.isAdminOfActive || state.permissions.canEditOthers);
+}
+
+function canDeleteTask(task) {
+  return Boolean(task) && (isTaskCreator(task, state.currentUser) || state.currentUser.isSuperAdmin ||
+    state.currentUser.isAdminOfActive || state.permissions.canDeleteOthers);
+}
+
+function openTaskCopy(taskId) {
+  if (!state.permissions.canCreate || state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites)) return;
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (!task) return;
+  const originalDepartmentId = String(task.departmentId || "");
+  const departmentAvailable = availableTaskDepartments(state, taskSubmitData())
+    .some((department) => department.id === originalDepartmentId);
+  const currentUserEligible = taskMembersForDepartment(taskSubmitData(), originalDepartmentId)
+    .some((member) => member.id === state.currentUser.id);
+  const departmentId = originalDepartmentId && departmentAvailable && currentUserEligible ? originalDepartmentId : "";
+  state.actionTaskId = null;
+  state.submitOpen = true;
+  state.submitMode = "create";
+  state.submitTaskId = null;
+  state.submitOriginalDepartmentId = "";
+  state.submitCanAssignOthers = state.permissions.canAssignOthers;
+  state.submitError = "";
+  state.writeError = "";
+  state.writeNotice = "";
+  state.submitDraft = {
+    ...data.form.defaults,
+    title: task.title,
+    content: task.content || "",
+    priority: task.priority,
+    visibility: departmentId ? "department" : "team",
+    departmentId,
+    owner: state.currentUser.name,
+    members: "",
+    attachments: []
+  };
+  rerenderTaskPage({ focusSubmit: true });
 }
 
 function openTaskEdit(taskId) {
@@ -349,6 +393,27 @@ function taskLocation(taskId) {
     if (index >= 0) return { column, index, task: column.tasks[index] };
   }
   return null;
+}
+
+function descendantTaskIds(taskId) {
+  const ids = new Set([taskId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    state.tasks.forEach((task) => {
+      if (task.parentId && ids.has(task.parentId) && !ids.has(task.id)) {
+        ids.add(task.id);
+        changed = true;
+      }
+    });
+  }
+  return ids;
+}
+
+function restoreAttachmentPreviewFocus(url) {
+  [...document.querySelectorAll("[data-task-attachment-preview]")]
+    .find((element) => element.getAttribute("data-task-attachment-preview") === url)
+    ?.focus();
 }
 
 function adjustOpenTaskCounts(task, delta) {
@@ -441,9 +506,27 @@ async function performTaskAction(taskId, action) {
     }
   }
   if (action === "delete") {
-    const removedIds = new Set([task.id, ...(task.subtasks ?? []).map((subtask) => subtask.id)]);
+    if (!canDeleteTask(task)) return;
+    if (state.liveTaskWrites) {
+      state.writeBusy = true;
+      state.writeError = "";
+      rerenderTaskPage();
+      try {
+        await deleteLiveTask(task.id);
+      } catch (error) {
+        console.warn("Task deletion failed", error);
+        state.writeError = "tasks.write.failed";
+        state.writeBusy = false;
+        rerenderTaskPage({ focusBoard: true });
+        return;
+      }
+      state.writeBusy = false;
+    }
+    const removedIds = descendantTaskIds(task.id);
     const removedTasks = state.tasks.filter((item) => removedIds.has(item.id));
-    column.tasks.splice(index, 1);
+    state.board.forEach((boardColumn) => {
+      boardColumn.tasks = boardColumn.tasks.filter((item) => !removedIds.has(item.id));
+    });
     state.tasks = state.tasks.filter((item) => !removedIds.has(item.id));
     state.summary.total = Math.max(0, state.summary.total - removedIds.size);
     removedTasks.forEach((removedTask) => {
@@ -516,10 +599,22 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const copyAction = event.target.closest("[data-task-action-copy]");
+  if (copyAction) {
+    if (copyAction.disabled) return;
+    openTaskCopy(copyAction.getAttribute("data-task-action-copy"));
+    return;
+  }
+
   const deleteAction = event.target.closest("[data-task-action-delete]");
   if (deleteAction) {
-    if (deleteAction.disabled || state.liveReadOnly) return;
-    performTaskAction(deleteAction.getAttribute("data-task-action-delete"), "delete");
+    if (deleteAction.disabled || (state.liveReadOnly && !state.liveTaskWrites)) return;
+    const taskId = deleteAction.getAttribute("data-task-action-delete");
+    const task = state.tasks.find((item) => item.id === taskId);
+    if (!canDeleteTask(task)) return;
+    if (await confirmInPage(pageT(currentHelpers.lang, "tasks.action.deleteConfirm"), { danger: true })) {
+      await performTaskAction(taskId, "delete");
+    }
     return;
   }
 
@@ -537,6 +632,32 @@ document.addEventListener("click", async (event) => {
 
   if (event.target.closest("[data-task-submit-open]")) {
     openTaskSubmit();
+    return;
+  }
+
+  const detailCopy = event.target.closest("[data-task-copy]");
+  if (detailCopy) {
+    if (detailCopy.disabled) return;
+    openTaskCopy(detailCopy.getAttribute("data-task-copy"));
+    return;
+  }
+
+  const attachmentPreview = event.target.closest("[data-task-attachment-preview]");
+  if (attachmentPreview) {
+    state.attachmentPreview = {
+      url: attachmentPreview.getAttribute("data-task-attachment-preview"),
+      name: attachmentPreview.getAttribute("data-task-attachment-name") || ""
+    };
+    rerenderTaskPage();
+    document.querySelector("[data-task-attachment-viewer-close]")?.focus();
+    return;
+  }
+
+  if (event.target.closest("[data-task-attachment-viewer-close]") || event.target.matches("[data-task-attachment-viewer]")) {
+    const previewUrl = state.attachmentPreview?.url || "";
+    state.attachmentPreview = null;
+    rerenderTaskPage();
+    if (previewUrl) restoreAttachmentPreviewFocus(previewUrl);
     return;
   }
 
@@ -579,6 +700,7 @@ document.addEventListener("click", async (event) => {
     state.selectedTaskId = detailTrigger.getAttribute("data-task-detail-open");
     state.detailOpen = true;
     state.detailTab = "content";
+    state.attachmentPreview = null;
     state.feedbackDraft = { message: "", attachments: [] };
     state.feedbackError = "";
     state.calendarExpandedDate = null;
@@ -641,6 +763,13 @@ document.addEventListener("click", async (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
+  if (state.attachmentPreview) {
+    const previewUrl = state.attachmentPreview.url;
+    state.attachmentPreview = null;
+    rerenderTaskPage();
+    restoreAttachmentPreviewFocus(previewUrl);
+    return;
+  }
   if (state.submitOpen) {
     closeTaskSubmit();
     return;
@@ -997,7 +1126,7 @@ attachTaskDomainController({
 
 window.__shellMenu = [
   { key: "nav.tasks", icon: "icon-nav-task", href: "./index.html", active: true, unreadKey: "tasks" },
-  { key: "nav.team", icon: "icon-nav-user", href: "./members.html" }
+  { key: authenticated && !canManageEmployees ? "nav.updates" : "nav.team", icon: "icon-nav-user", href: "./members.html" }
 ];
 window.__shellData = { unread: await getUnread(), user: currentUser };
 window.__shellContent = renderTaskManagement;

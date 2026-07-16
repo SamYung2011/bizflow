@@ -798,6 +798,29 @@
   white-space: nowrap;
 }
 
+.task-detail__head-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-10);
+}
+
+.task-detail__copy {
+  min-height: var(--space-40);
+  padding: 0 var(--space-20);
+  border: 0;
+  border-radius: var(--radius-10);
+  background: var(--blue);
+  color: var(--white);
+  font: inherit;
+  cursor: pointer;
+}
+
+.task-detail__copy:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
 .task-detail__close {
   position: relative;
   display: none;
@@ -1094,6 +1117,91 @@
   line-height: var(--lh-body);
   overflow: hidden;
   text-decoration: underline;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-detail__attachment-preview {
+  --task-attachment-thumb-width: 96px; /* 反馈附件预览需保持紧凑，无对应尺寸 token。 */
+  --task-attachment-thumb-height: 72px; /* 4:3 缩略图容器，无对应尺寸 token。 */
+
+  display: inline-flex;
+  width: var(--task-attachment-thumb-width);
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: var(--task-detail-border-width) solid var(--gray-15);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  color: var(--blue);
+  cursor: pointer;
+}
+
+.task-detail__attachment-preview img {
+  width: 100%;
+  height: var(--task-attachment-thumb-height);
+  border-radius: var(--radius-10);
+  object-fit: cover;
+}
+
+.task-detail__attachment-preview span {
+  overflow: hidden;
+  font-size: var(--font-description-size);
+  line-height: var(--lh-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-attachment-viewer {
+  --task-attachment-viewer-overlay: rgb(0 0 0 / 60%); /* 页内预览遮罩，无对应全局 token。 */
+  --task-attachment-viewer-max-width: 960px; /* 大图可视上限，无对应尺寸 token。 */
+  --task-attachment-viewer-max-height: 80vh; /* 保留关闭按钮与文件名区域。 */
+
+  position: fixed;
+  z-index: 200;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--space-20);
+  background: var(--task-attachment-viewer-overlay);
+}
+
+.task-attachment-viewer__dialog {
+  position: relative;
+  display: flex;
+  width: min(100%, var(--task-attachment-viewer-max-width));
+  max-height: calc(100vh - var(--space-40));
+  flex-direction: column;
+  gap: var(--space-10);
+  padding: var(--space-20);
+  border-radius: var(--radius-20);
+  background: var(--white);
+}
+
+.task-attachment-viewer__dialog > button {
+  width: var(--space-40);
+  height: var(--space-40);
+  align-self: flex-end;
+  border: 0;
+  border-radius: var(--radius-40);
+  background: var(--gray-10);
+  color: var(--black);
+  font-size: var(--font-title-2-size);
+  cursor: pointer;
+}
+
+.task-attachment-viewer__dialog img {
+  width: 100%;
+  max-height: var(--task-attachment-viewer-max-height);
+  object-fit: contain;
+}
+
+.task-attachment-viewer__dialog p {
+  margin: 0;
+  overflow: hidden;
+  color: var(--gray-60);
+  text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

@@ -244,6 +244,19 @@
   margin-top: var(--space-10);
 }
 
+.task-overview__recent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-10);
+}
+
+.task-overview__recent-head h4 {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+}
+
 .task-overview__task {
   display: flex;
   min-width: 0;
@@ -276,8 +289,8 @@
 }
 
 .task-overview__completed-toggle {
-  align-self: flex-start;
-  margin-top: var(--space-4);
+  flex: none;
+  margin: 0;
   padding: var(--space-4) var(--space-10);
   border: 0;
   border-radius: var(--radius-10);

@@ -34,7 +34,7 @@ export function renderTaskOverview({ members, tasks, expanded, completedExpanded
         <span class="task-overview__count task-overview__count--open">${summary.open.length} ${escapeHtml(taskT(lang, "tasks.overview.open"))}</span>
         <span class="task-overview__count task-overview__count--done">${summary.completedCount} ${escapeHtml(taskT(lang, "tasks.overview.completed"))}</span>
       </button>
-      ${isExpanded ? `<div class="task-overview__member-body">${groups || `<p>${escapeHtml(taskT(lang, "tasks.overview.noOpen"))}</p>`}${visibleCompleted.length ? `<section class="task-overview__recent"><h4>${escapeHtml(taskT(lang, "tasks.overview.recent"))}<span>${summary.completedCount}</span></h4>${visibleCompleted.map((row) => renderTaskRow(row, helpers, true)).join("")}${completedToggle}</section>` : ""}</div>` : ""}
+      ${isExpanded ? `<div class="task-overview__member-body">${groups || `<p>${escapeHtml(taskT(lang, "tasks.overview.noOpen"))}</p>`}${visibleCompleted.length ? `<section class="task-overview__recent" data-completed-visible="${visibleCompleted.length}"><div class="task-overview__recent-head"><h4>${escapeHtml(taskT(lang, "tasks.overview.recent"))}<span>${summary.completedCount}</span></h4>${completedToggle}</div>${visibleCompleted.map((row) => renderTaskRow(row, helpers, true)).join("")}</section>` : ""}</div>` : ""}
     </article>`;
   }).join("");
   return `<section class="task-overview" data-task-overview data-member-count="${members.filter((member) => member.dept !== "all").length}"><h2>${escapeHtml(taskT(lang, "tasks.overview.title"))}</h2><div>${rows}</div></section>`;
