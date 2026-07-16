@@ -2,6 +2,8 @@
 
 import { getTeamMembersData, getCurrentUser, getUnread } from "../data/provider.js";
 import { getSession } from "../data/auth.js";
+import { throwIfPageAborted } from "../spa/page-lifecycle.js";
+import { confirmInPage } from "../components/confirm-dialog.js";
 import { memberT as pageT } from "./members-i18n.js";
 import { renderMemberDetailDialog } from "./members-detail.js";
 import { attachMemberReviewController, renderMemberReviews } from "./members-review.js";
@@ -16,50 +18,22 @@ const HELEN_EMAIL = "a1017339632@gmail.com";
 const MEMBER_TAB_ORDER = ["members", "permissions", "departments", "reviews", "commission", "updates", "companies"];
 const MEMBER_DATA_TABS = new Set(["members", "permissions", "departments", "reviews", "commission"]);
 const MEMBER_EXTRAS_TABS = new Set(["reviews", "commission", "updates", "companies"]);
-const [currentUser, session] = await Promise.all([getCurrentUser(), getSession()]);
-const authenticated = typeof currentUser?.hasPermission === "function";
-const sessionEmail = String(session?.user?.email || "").toLowerCase();
-// Mirrors bizflow_samyung/team/src/admin.jsx:28,32: sales can always view their own commission.
-const canViewCommission = !authenticated || currentUser.isSuperAdmin === true ||
-  currentUser.hasPermission("can_view_commission") || currentUser.role === "銷售";
-const memberAccess = {
-  // Mirrors bizflow_samyung/team/src/admin.jsx:29-37.
-  canManageEmployees: !authenticated || currentUser.isSuperAdmin === true || currentUser.isAdminOfAny === true ||
-    currentUser.hasPermission("can_manage_employees"),
-  canApproveRegistration: !authenticated || currentUser.hasPermission("can_approve_registration"),
-  canViewCommission,
-  canManageRoles: !authenticated || currentUser.hasPermission("can_manage_roles"),
-  canManageCompanies: !authenticated || currentUser.isSuperAdmin === true,
-  // Mirrors bizflow_samyung/team/src/views/UpdateLog.jsx:8,16.
-  canWriteUpdates: !authenticated || currentUser.isBfAdmin === true || sessionEmail === HELEN_EMAIL,
-  canAdministerUpdateComments: !authenticated || currentUser.isBfAdmin === true,
-  // Mirrors bizflow_samyung/team/src/admin.jsx:50-52: every authenticated non-super user is self-only.
-  commissionLockedEmployeeId: authenticated && currentUser.isSuperAdmin !== true ? currentUser.id : null
-};
-const visibleTabKeys = authenticated
-  ? new Set([
-      "updates",
-      ...(memberAccess.canManageEmployees ? ["members"] : []),
-      ...(memberAccess.canApproveRegistration ? ["reviews"] : []),
-      ...(memberAccess.canViewCommission ? ["commission"] : []),
-      // Mirrors bizflow_samyung/team/src/admin.jsx:33,37 and RolesAndDepartments.jsx:22-53.
-      ...(memberAccess.canManageRoles ? ["permissions", "departments"] : []),
-      ...(memberAccess.canManageCompanies ? ["companies"] : [])
-    ])
-  : new Set(MEMBER_TAB_ORDER);
-const initialTab = MEMBER_TAB_ORDER.find((key) => visibleTabKeys.has(key)) ?? "updates";
-const initialIncludesMembers = MEMBER_DATA_TABS.has(initialTab);
-const initialIncludesExtras = MEMBER_EXTRAS_TABS.has(initialTab);
-const initialExtrasScope = initialTab === "updates" ? "updates" : "all";
-const data = await getTeamMembersData({
-  includeMembers: initialIncludesMembers,
-  includeExtras: initialIncludesExtras,
-  extrasScope: initialExtrasScope
-});
-const visibleTabs = data.tabs.filter((tab) => visibleTabKeys.has(tab.key));
-let memberDataLoaded = initialIncludesMembers;
-let memberExtrasScope = initialIncludesExtras ? initialExtrasScope : "none";
-const state = {
+let currentUser = null;
+let session = null;
+let unread = null;
+let authenticated = false;
+let memberAccess = null;
+let visibleTabKeys = new Set(MEMBER_TAB_ORDER);
+let data = null;
+let visibleTabs = [];
+let memberDataLoaded = false;
+let memberExtrasScope = "none";
+let state = null;
+let activeScope = null;
+let activeMountId = 0;
+
+function createMemberState(initialTab) {
+  return {
   members: data.members.map((member) => ({
     ...member,
     tasks: {
@@ -104,8 +78,9 @@ const state = {
   departmentModalOpen: false,
   departmentDraft: null,
   departmentReturnFocus: null,
-  editingPermissionRoleId: null
-};
+    editingPermissionRoleId: null
+  };
+}
 let currentHelpers = null;
 
 function cloneMembers(rows) {
@@ -152,7 +127,9 @@ async function ensureMemberTabData(tabKey) {
   const requestedExtrasScope = tabKey === "updates" ? "updates" : "all";
   const includeExtras = MEMBER_EXTRAS_TABS.has(tabKey) && memberExtrasScope !== "all" && memberExtrasScope !== requestedExtrasScope;
   if (!includeMembers && !includeExtras) return;
+  const mountId = activeMountId;
   const nextData = await getTeamMembersData({ includeMembers, includeExtras, extrasScope: requestedExtrasScope });
+  if (mountId !== activeMountId) return;
   mergeMemberData(nextData, { members: includeMembers, extras: includeExtras });
   memberDataLoaded ||= includeMembers;
   if (includeExtras) memberExtrasScope = requestedExtrasScope;
@@ -358,12 +335,13 @@ function closeDepartmentModal() {
   state.departmentDraft = null;
 }
 
-document.addEventListener("click", async (event) => {
+async function onMembersClick(event) {
   const pageTab = event.target.closest("[data-members-tab]");
   if (pageTab) {
     const nextTab = pageTab.getAttribute("data-members-tab") || "members";
     if (!visibleTabKeys.has(nextTab)) return;
     await ensureMemberTabData(nextTab);
+    if (activeScope?.disposed) return;
     state.activeTab = nextTab;
     if (nextTab === "members") state.departmentFilter = null;
     rerenderMembers();
@@ -516,9 +494,9 @@ document.addEventListener("click", async (event) => {
   if (event.target.closest("[data-member-add-close]") || event.target.matches("[data-member-add-overlay]")) {
     closeAddMemberDialog();
   }
-});
+}
 
-document.addEventListener("submit", (event) => {
+function onMembersSubmit(event) {
   const departmentForm = event.target.closest("[data-department-modal-form]");
   if (departmentForm && state.departmentDraft) {
     event.preventDefault();
@@ -633,9 +611,9 @@ document.addEventListener("submit", (event) => {
   state.summary.total += 1;
   state.summary.active += 1;
   closeAddMemberDialog();
-});
+}
 
-document.addEventListener("input", (event) => {
+function onMembersInput(event) {
   const roleNameInput = event.target.closest("[data-permission-role-name]");
   if (roleNameInput) {
     if (state.liveReadOnly || !state.access.canManageRoles) return;
@@ -653,14 +631,14 @@ document.addEventListener("input", (event) => {
   if (!nameInput) return;
   const avatar = document.querySelector("[data-member-form-avatar]");
   if (avatar) avatar.textContent = nameInput.value.trim().charAt(0).toUpperCase() || "?";
-});
+}
 
-document.addEventListener("change", (event) => {
+function onMembersChange(event) {
   if (!event.target.closest("[data-department-modal-form]") || !state.departmentDraft) return;
   state.departmentDraft.managerId = String(event.target.form?.elements.managerId?.value || "");
-});
+}
 
-document.addEventListener("keydown", (event) => {
+function onMembersKeydown(event) {
   const roleNameInput = event.target.closest?.("[data-permission-role-name]");
   if (roleNameInput && (event.key === "Enter" || event.key === "Escape")) {
     event.preventDefault();
@@ -684,16 +662,124 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (state.addMemberOpen) closeAddMemberDialog();
-});
+}
 
-window.__shellMenu = [
-  { key: "nav.tasks", icon: "icon-nav-task", href: "./index.html", unreadKey: "tasks" },
-  { key: "nav.team", icon: "icon-nav-user", href: "./members.html", active: true }
-];
-attachMemberCommissionController({ state, rerender: rerenderMembers });
-attachMemberUpdateLogController({ state, rerender: rerenderMembers });
-attachMemberReviewController({ state, rerender: rerenderMembers });
-attachMemberCompanyController({ state, rerender: rerenderMembers });
-window.__shellData = { unread: await getUnread(), user: currentUser };
-window.__shellContent = renderTeamMembers;
-await import("../shell/shell.js");
+function formHasValue(selector) {
+  return [...document.querySelectorAll(selector)].some((form) => [...form.elements].some((field) => {
+    if (!field.name || field.disabled || ["submit", "button"].includes(field.type)) return false;
+    return String(field.value || "").trim() !== "";
+  }));
+}
+
+function hasMemberUnsavedChanges() {
+  return Boolean(state.departmentDraft)
+    || Boolean(state.editingPermissionRoleId)
+    || formHasValue("[data-member-add-form]")
+    || formHasValue("[data-update-create-form]")
+    || formHasValue("[data-update-edit-form]")
+    || formHasValue("[data-update-comment-form]")
+    || formHasValue("[data-company-create-form]")
+    || formHasValue("[data-company-name-form]");
+}
+
+function buildMemberAccess() {
+  const sessionEmail = String(session?.user?.email || "").toLowerCase();
+  const canViewCommission = !authenticated || currentUser.isSuperAdmin === true ||
+    currentUser.hasPermission("can_view_commission") || currentUser.role === "銷售";
+  memberAccess = {
+    canManageEmployees: !authenticated || currentUser.isSuperAdmin === true || currentUser.isAdminOfAny === true || currentUser.hasPermission("can_manage_employees"),
+    canApproveRegistration: !authenticated || currentUser.hasPermission("can_approve_registration"),
+    canViewCommission,
+    canManageRoles: !authenticated || currentUser.hasPermission("can_manage_roles"),
+    canManageCompanies: !authenticated || currentUser.isSuperAdmin === true,
+    canWriteUpdates: !authenticated || currentUser.isBfAdmin === true || sessionEmail === HELEN_EMAIL,
+    canAdministerUpdateComments: !authenticated || currentUser.isBfAdmin === true,
+    commissionLockedEmployeeId: authenticated && currentUser.isSuperAdmin !== true ? currentUser.id : null
+  };
+  visibleTabKeys = authenticated
+    ? new Set([
+        "updates",
+        ...(memberAccess.canManageEmployees ? ["members"] : []),
+        ...(memberAccess.canApproveRegistration ? ["reviews"] : []),
+        ...(memberAccess.canViewCommission ? ["commission"] : []),
+        ...(memberAccess.canManageRoles ? ["permissions", "departments"] : []),
+        ...(memberAccess.canManageCompanies ? ["companies"] : [])
+      ])
+    : new Set(MEMBER_TAB_ORDER);
+}
+
+export async function mountPage({ scope, signal, historyState = null } = {}) {
+  const mountId = ++activeMountId;
+  activeScope = scope;
+  [currentUser, session, unread] = await Promise.all([getCurrentUser(), getSession(), getUnread()]);
+  throwIfPageAborted(signal);
+  authenticated = typeof currentUser?.hasPermission === "function";
+  buildMemberAccess();
+  const restoredTab = visibleTabKeys.has(historyState?.activeTab) ? historyState.activeTab : null;
+  const initialTab = restoredTab ?? MEMBER_TAB_ORDER.find((key) => visibleTabKeys.has(key)) ?? "updates";
+  const initialIncludesMembers = MEMBER_DATA_TABS.has(initialTab);
+  const initialIncludesExtras = MEMBER_EXTRAS_TABS.has(initialTab);
+  const initialExtrasScope = initialTab === "updates" ? "updates" : "all";
+  data = await getTeamMembersData({
+    includeMembers: initialIncludesMembers,
+    includeExtras: initialIncludesExtras,
+    extrasScope: initialExtrasScope
+  });
+  throwIfPageAborted(signal);
+  visibleTabs = data.tabs.filter((tab) => visibleTabKeys.has(tab.key));
+  memberDataLoaded = initialIncludesMembers;
+  memberExtrasScope = initialIncludesExtras ? initialExtrasScope : "none";
+  state = createMemberState(initialTab);
+  state.reviewMode = ["registration", "join"].includes(historyState?.reviewMode) ? historyState.reviewMode : "registration";
+  state.commissionSale = typeof historyState?.commissionSale === "string" ? historyState.commissionSale : state.commissionSale;
+  state.commissionMonth = typeof historyState?.commissionMonth === "string" ? historyState.commissionMonth : "all";
+  state.departmentFilter = typeof historyState?.departmentFilter === "string" ? historyState.departmentFilter : null;
+
+  return {
+    page: {
+      menu: [
+        { key: "nav.tasks", icon: "icon-nav-task", href: "./index.html", unreadKey: "tasks" },
+        { key: memberAccess.canManageEmployees ? "nav.team" : "nav.updates", icon: "icon-nav-user", href: "./members.html", active: true }
+      ],
+      data: { unread, user: currentUser },
+      render: renderTeamMembers,
+      title: "Honnmono · Team"
+    },
+    activate() {
+      scope.listen(document, "click", onMembersClick);
+      scope.listen(document, "submit", onMembersSubmit);
+      scope.listen(document, "input", onMembersInput);
+      scope.listen(document, "change", onMembersChange);
+      scope.listen(document, "keydown", onMembersKeydown);
+      attachMemberCommissionController({ state, rerender: rerenderMembers, scope });
+      attachMemberUpdateLogController({ state, rerender: rerenderMembers, scope });
+      attachMemberReviewController({ state, rerender: rerenderMembers, scope });
+      attachMemberCompanyController({ state, rerender: rerenderMembers, scope });
+    },
+    hasUnsavedChanges: hasMemberUnsavedChanges,
+    async canLeave() {
+      if (!hasMemberUnsavedChanges()) return true;
+      return confirmInPage(pageT(currentHelpers?.lang ?? "zh", "members.leaveUnsaved"));
+    },
+    captureState() {
+      return {
+        activeTab: state.activeTab,
+        reviewMode: state.reviewMode,
+        commissionSale: state.commissionSale,
+        commissionMonth: state.commissionMonth,
+        departmentFilter: state.departmentFilter
+      };
+    },
+    dispose() {
+      if (activeMountId === mountId) activeMountId += 1;
+      currentUser = null;
+      session = null;
+      unread = null;
+      data = null;
+      visibleTabs = [];
+      currentHelpers = null;
+      activeScope = null;
+      state = null;
+    }
+  };
+}

@@ -30,7 +30,9 @@ const expectedSpaRoutes = [
   "/bizflow/orders-detail.html",
   "/bizflow/inventory.html",
   "/bizflow/inventory-detail.html",
-  "/bizflow/expense.html"
+  "/bizflow/expense.html",
+  "/team/index.html",
+  "/team/members.html"
 ];
 
 function attributes(tag) {
@@ -48,7 +50,7 @@ async function verifyManifest() {
   const routes = Object.values(routeManifest);
   assert.equal(routes.length, 16, "manifest must enumerate the 16 approved pages");
   assert.equal(spaNavigation, true, "SPA master switch must stay enabled");
-  assert.deepEqual([...spaRouteAllowlist], expectedSpaRoutes, "SPA allowlist must contain the P1 sample and P2 customer routes");
+  assert.deepEqual([...spaRouteAllowlist], expectedSpaRoutes, "SPA allowlist must contain the P1-P5 migrated routes");
   for (const route of routes) {
     const migrated = expectedSpaRoutes.includes(route.path);
     assert.ok(route.path.endsWith(".html"), `${route.path} must retain its .html URL`);
@@ -316,4 +318,4 @@ await verifyLifecycle();
 verifyOcppGuard();
 await verifyRouter();
 await verifyShellAdapter();
-console.log("SPA rollout contracts: PASS (13 migrated routes, 3 MPA routes, 30-cycle lifecycle, fallback, shell adapter)");
+console.log("SPA rollout contracts: PASS (15 migrated routes, 1 MPA route, 30-cycle lifecycle, fallback, shell adapter)");

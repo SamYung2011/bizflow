@@ -61,9 +61,9 @@ export function renderMemberCommission({ state, data, helpers }) {
   </section>`;
 }
 
-export function attachMemberCommissionController({ state, rerender }) {
+export function attachMemberCommissionController({ state, rerender, scope }) {
   // 现网由 canCommission 门控；super admin 可看全部，其余获准使用者只能查看自己。
-  document.addEventListener("change", (event) => {
+  scope.listen(document, "change", (event) => {
     const filter = event.target.closest("[data-commission-filter]");
     if (!filter) return;
     if (filter.getAttribute("data-commission-filter") === "sale") {

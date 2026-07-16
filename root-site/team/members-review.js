@@ -100,9 +100,9 @@ function renderJoinPendingCard(review, state, helpers) {
   </article>`;
 }
 
-export function attachMemberReviewController({ state, rerender }) {
+export function attachMemberReviewController({ state, rerender, scope }) {
   // 现网批准/拒绝会写审核表；静态复刻只在真实 pending 出现时提供本地演示动作。
-  document.addEventListener("click", (event) => {
+  scope.listen(document, "click", (event) => {
     const mode = event.target.closest("button[data-review-mode]");
     if (mode) {
       state.reviewMode = mode.getAttribute("data-review-mode") === "join" ? "join" : "registration";

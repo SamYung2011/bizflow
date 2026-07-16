@@ -12,7 +12,8 @@ export function attachTaskDomainController({
   leaveTaskDetailForNavigation,
   adjustOpenTaskCounts,
   localTimestamp,
-  toggleTaskParticipation
+  toggleTaskParticipation,
+  scope
 }) {
   const taskById = (taskId) => state.tasks.find((task) => task.id === taskId) ?? null;
 
@@ -30,7 +31,7 @@ export function attachTaskDomainController({
     }
   }
 
-  document.addEventListener("click", async (event) => {
+  scope.listen(document, "click", async (event) => {
     if (event.target.closest("[data-task-overview-open]")) {
       leaveTaskDetailForNavigation();
       state.mode = "overview";
@@ -169,13 +170,14 @@ export function attachTaskDomainController({
     if (subtaskDelete) {
       if (state.liveReadOnly || subtaskDelete.disabled) return;
       if (await confirmInPage(taskT(getHelpers().lang, "tasks.detail.deleteSubtaskConfirm"), { danger: true })) {
+        if (scope.disposed) return;
         removeSubtask(subtaskDelete.getAttribute("data-task-subtask-delete"));
         rerender();
       }
     }
   });
 
-  document.addEventListener("submit", (event) => {
+  scope.listen(document, "submit", (event) => {
     const form = event.target.closest("[data-task-subtask-form]");
     if (!form) return;
     event.preventDefault();
@@ -221,14 +223,14 @@ export function attachTaskDomainController({
     rerender();
   });
 
-  document.addEventListener("change", (event) => {
+  scope.listen(document, "change", (event) => {
     if (!event.target.matches("[data-task-only-mine]")) return;
     state.onlyMine = event.target.checked;
     setSessionValue("team-tasks-only-mine", state.onlyMine ? "1" : "0");
     rerender();
   });
 
-  document.addEventListener("keydown", (event) => {
+  scope.listen(document, "keydown", (event) => {
     if (event.key !== "Escape") return;
     if (state.aiOpen) {
       state.aiOpen = false;

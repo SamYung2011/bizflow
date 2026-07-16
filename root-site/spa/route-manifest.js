@@ -1,4 +1,4 @@
-// P2 adds the customer list/detail domain to the Home + OCPP sample.
+// P5 adds the Team task/member domain while cross-section navigation stays disabled until P6.
 export const spaNavigation = true;
 export const spaCrossSectionNavigation = false;
 export const spaRouteAllowlist = Object.freeze([
@@ -14,7 +14,9 @@ export const spaRouteAllowlist = Object.freeze([
   "/bizflow/orders-detail.html",
   "/bizflow/inventory.html",
   "/bizflow/inventory-detail.html",
-  "/bizflow/expense.html"
+  "/bizflow/expense.html",
+  "/team/index.html",
+  "/team/members.html"
 ]);
 
 const fromHere = (path) => new URL(path, import.meta.url).href;
@@ -73,8 +75,8 @@ const routes = [
   route("/bizflow/ocpp-finance.html", "bizflow", "../bizflow/ocpp-finance.js", [
     "../components/segment.css", "../bizflow/ocpp.css"
   ], () => import("../bizflow/ocpp-finance.js")),
-  route("/team/index.html", "team", "../team/tasks.js", ["../team/tasks.css", "../team/tasks-domain.css"]),
-  route("/team/members.html", "team", "../team/members.js", ["../team/members.css", "../team/members-domain.css"])
+  route("/team/index.html", "team", "../team/tasks.js", ["../team/tasks.css", "../team/tasks-domain.css"], () => import("../team/tasks.js")),
+  route("/team/members.html", "team", "../team/members.js", ["../team/members.css", "../team/members-domain.css"], () => import("../team/members.js"))
 ];
 
 export const routeManifest = Object.freeze(Object.fromEntries(routes.map((item) => [item.path, item])));

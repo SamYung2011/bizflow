@@ -1,6 +1,7 @@
 export const memberDictionaries = {
   zh: {
     "members.title": "團隊成員",
+    "members.leaveUnsaved": "成員資料或更新日誌草稿尚未保存，確定離開？",
     "members.stat.total": "所有成員",
     "members.stat.active": "在職",
     "members.stat.review": "需要審核",
@@ -170,6 +171,7 @@ export const memberDictionaries = {
   },
   en: {
     "members.title": "Team members",
+    "members.leaveUnsaved": "Team data or an update-log draft has not been saved. Leave this page?",
     "members.stat.total": "All members",
     "members.stat.active": "Active",
     "members.stat.review": "Pending review",
@@ -339,6 +341,7 @@ export const memberDictionaries = {
   },
   fr: {
     "members.title": "Membres de l'équipe",
+    "members.leaveUnsaved": "Des données d’équipe ou un brouillon du journal ne sont pas enregistrés. Quitter cette page ?",
     "members.stat.total": "Tous les membres",
     "members.stat.active": "Actifs",
     "members.stat.review": "À valider",

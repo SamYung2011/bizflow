@@ -46,9 +46,9 @@ export function renderMemberCompanies({ state, helpers }) {
   </section>`;
 }
 
-export function attachMemberCompanyController({ state, rerender }) {
+export function attachMemberCompanyController({ state, rerender, scope }) {
   // 现网该页受 isSuperAdmin 门控；静态复刻按真数据展示，所有动作只改本地 state。
-  document.addEventListener("click", async (event) => {
+  scope.listen(document, "click", async (event) => {
     if (state.liveReadOnly) return;
     const edit = event.target.closest("[data-company-edit]");
     if (edit) {
@@ -70,12 +70,13 @@ export function attachMemberCompanyController({ state, rerender }) {
       return;
     }
     if (await confirmInPage(memberT(currentLang(), "members.companies.deleteConfirm"), { danger: true })) {
+      if (scope.disposed) return;
       state.companies = state.companies.filter((item) => item.id !== company.id);
       rerender();
     }
   });
 
-  document.addEventListener("change", (event) => {
+  scope.listen(document, "change", (event) => {
     if (state.liveReadOnly) return;
     const toggle = event.target.closest("[data-company-ai]");
     if (!toggle) return;
@@ -84,7 +85,7 @@ export function attachMemberCompanyController({ state, rerender }) {
     rerender();
   });
 
-  document.addEventListener("submit", (event) => {
+  scope.listen(document, "submit", (event) => {
     const createForm = event.target.closest("[data-company-create-form]");
     const nameForm = event.target.closest("[data-company-name-form]");
     if (!createForm && !nameForm) return;

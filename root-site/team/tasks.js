@@ -12,89 +12,84 @@ import { attachTaskDomainController } from "./tasks-domain-controller.js";
 import { renderTaskBoardGrid, renderTaskToolbar } from "./tasks-board.js";
 import { getSessionValue, setSessionValue } from "../data/session-state.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
+import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { completeLiveTask, createLiveTask, createLiveTaskFeedback, deleteLiveTask, setLiveTaskParticipation, updateLiveTask } from "../data/live-task-writes.js";
 
-const data = await getTeamTaskData();
-const currentUser = await getCurrentUser();
-const authenticated = typeof currentUser?.hasPermission === "function";
-const permissions = {
-  canCreate: !authenticated || currentUser.hasPermission("can_create_task"),
-  canAssignOthers: !authenticated || currentUser.hasPermission("can_assign_others"),
-  canEditOthers: !authenticated || currentUser.hasPermission("can_edit_others_tasks"),
-  canDeleteOthers: !authenticated || currentUser.hasPermission("can_delete_others_tasks"),
-  canValidate: !authenticated || currentUser.hasPermission("can_validate_task")
-};
-const unreadWatermarks = await getUnreadWatermarks();
-markRead("tasks", unreadWatermarks.tasks);
-const clonedTasks = data.tasks.map((task) => ({
-  ...task,
-  attachments: (task.attachments ?? []).map((attachment) => ({ ...attachment })),
-  assignees: (task.assignees ?? []).map((assignee) => ({ ...assignee })),
-  feedback: task.feedback.map((entry) => ({
-    ...entry,
-    attachments: (entry.attachments ?? []).map((attachment) => ({ ...attachment })),
-    mentionedUserIds: (entry.mentionedUserIds ?? []).slice()
-  })),
-  subtasks: []
-}));
-const clonedTaskById = new Map(clonedTasks.map((task) => [task.id, task]));
-clonedTasks.forEach((task) => {
-  if (task.parentId && clonedTaskById.has(task.parentId)) clonedTaskById.get(task.parentId).subtasks.push(task);
-});
-const clonedMembers = data.members.map((member, index) => ({
-  ...member,
-  id: member.id || `mock-member-${index}`
-}));
-const currentMember = clonedMembers.find((member) => member.name.toLocaleLowerCase() === currentUser.name.toLocaleLowerCase());
-const now = new Date();
-const storedViewMode = getSessionValue("team-tasks-view-mode");
-const state = {
-  summary: { ...data.summary },
-  members: clonedMembers,
-  tasks: clonedTasks,
-  board: data.board.map((column) => ({
-    ...column,
-    tasks: column.tasks.map((task) => clonedTaskById.get(task.id)).filter(Boolean)
-  })),
-  currentUser: { ...currentUser, id: currentUser.employeeId || currentMember?.id || "" },
-  permissions,
-  liveReadOnly: authenticated,
-  liveTaskWrites: authenticated,
-  mode: "overview",
-  overviewExpanded: new Set(),
-  overviewCompletedExpanded: new Set(),
-  onlyMine: getSessionValue("team-tasks-only-mine") === "1",
-  calendarYear: now.getFullYear(),
-  calendarMonth: now.getMonth(),
-  calendarExpandedDate: null,
-  aiOpen: false,
-  detailOpen: false,
-  selectedTaskId: null,
-  detailTab: "content",
-  submitOpen: false,
-  submitMode: "create",
-  submitTaskId: null,
-  submitOriginalDepartmentId: "",
-  submitCanAssignOthers: permissions.canAssignOthers,
-  submitDraft: { ...data.form.defaults, memberIds: [], memberQuery: "", memberMenuOpen: false, attachments: [] },
-  submitError: "",
-  feedbackDraft: { message: "", attachments: [] },
-  feedbackError: "",
-  attachmentPreview: null,
-  writeBusy: false,
-  writeError: "",
-  writeNotice: "",
-  actionTaskId: null
-};
+let data = null;
+let currentUser = null;
+let unread = null;
+let unreadWatermarks = null;
+let authenticated = false;
+let permissions = null;
+let state = null;
+let filterState = null;
+let taskMobileViewport = null;
+let activeScope = null;
+let activeMountId = 0;
 
-const filterState = {
-  status: data.filters?.status ?? "inProgress", // inProgress / completed / overdue
-  priority: data.filters?.priority ?? "all", // all / high / medium / low
-  view: ["board", "calendar"].includes(storedViewMode)
-    ? storedViewMode
-    : data.filters?.view ?? "board",
-  member: "all"
-};
+function initializeTaskState(historyState = null) {
+  const clonedTasks = data.tasks.map((task) => ({
+    ...task,
+    attachments: (task.attachments ?? []).map((attachment) => ({ ...attachment })),
+    assignees: (task.assignees ?? []).map((assignee) => ({ ...assignee })),
+    feedback: task.feedback.map((entry) => ({
+      ...entry,
+      attachments: (entry.attachments ?? []).map((attachment) => ({ ...attachment })),
+      mentionedUserIds: (entry.mentionedUserIds ?? []).slice()
+    })),
+    subtasks: []
+  }));
+  const clonedTaskById = new Map(clonedTasks.map((task) => [task.id, task]));
+  clonedTasks.forEach((task) => {
+    if (task.parentId && clonedTaskById.has(task.parentId)) clonedTaskById.get(task.parentId).subtasks.push(task);
+  });
+  const clonedMembers = data.members.map((member, index) => ({ ...member, id: member.id || `mock-member-${index}` }));
+  const currentMember = clonedMembers.find((member) => member.name.toLocaleLowerCase() === currentUser.name.toLocaleLowerCase());
+  const now = new Date();
+  const storedViewMode = getSessionValue("team-tasks-view-mode");
+  const restored = historyState && typeof historyState === "object" ? historyState : {};
+  state = {
+    summary: { ...data.summary },
+    members: clonedMembers,
+    tasks: clonedTasks,
+    board: data.board.map((column) => ({ ...column, tasks: column.tasks.map((task) => clonedTaskById.get(task.id)).filter(Boolean) })),
+    currentUser: { ...currentUser, id: currentUser.employeeId || currentMember?.id || "" },
+    permissions,
+    liveReadOnly: authenticated,
+    liveTaskWrites: authenticated,
+    mode: ["overview", "board"].includes(restored.mode) ? restored.mode : "overview",
+    overviewExpanded: new Set(Array.isArray(restored.overviewExpanded) ? restored.overviewExpanded : []),
+    overviewCompletedExpanded: new Set(Array.isArray(restored.overviewCompletedExpanded) ? restored.overviewCompletedExpanded : []),
+    onlyMine: typeof restored.onlyMine === "boolean" ? restored.onlyMine : getSessionValue("team-tasks-only-mine") === "1",
+    calendarYear: Number.isInteger(restored.calendarYear) ? restored.calendarYear : now.getFullYear(),
+    calendarMonth: Number.isInteger(restored.calendarMonth) ? restored.calendarMonth : now.getMonth(),
+    calendarExpandedDate: null,
+    aiOpen: false,
+    detailOpen: false,
+    selectedTaskId: null,
+    detailTab: "content",
+    submitOpen: false,
+    submitMode: "create",
+    submitTaskId: null,
+    submitOriginalDepartmentId: "",
+    submitCanAssignOthers: permissions.canAssignOthers,
+    submitDraft: { ...data.form.defaults, memberIds: [], memberQuery: "", memberMenuOpen: false, attachments: [] },
+    submitError: "",
+    feedbackDraft: { message: "", attachments: [] },
+    feedbackError: "",
+    attachmentPreview: null,
+    writeBusy: false,
+    writeError: "",
+    writeNotice: "",
+    actionTaskId: null
+  };
+  filterState = {
+    status: ["inProgress", "completed", "overdue"].includes(restored.status) ? restored.status : data.filters?.status ?? "inProgress",
+    priority: ["all", "high", "medium", "low"].includes(restored.priority) ? restored.priority : data.filters?.priority ?? "all",
+    view: ["board", "calendar"].includes(restored.view) ? restored.view : ["board", "calendar"].includes(storedViewMode) ? storedViewMode : data.filters?.view ?? "board",
+    member: typeof restored.member === "string" ? restored.member : "all"
+  };
+}
 
 function initials(name) {
   const text = String(name || "H").trim();
@@ -225,10 +220,7 @@ function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, foc
   if (focusBoard) document.querySelector("[data-task-submit-open]")?.focus();
 }
 
-const taskMobileViewport = matchMedia("(max-width: 768px)");
 const onTaskViewportChange = () => rerenderTaskPage({ focusActionMenu: Boolean(state.actionTaskId) });
-if (typeof taskMobileViewport.addEventListener === "function") taskMobileViewport.addEventListener("change", onTaskViewportChange);
-else taskMobileViewport.addListener(onTaskViewportChange);
 
 function selectedTask() {
   return state.tasks.find((task) => task.id === state.selectedTaskId);
@@ -265,7 +257,7 @@ function reconcileTaskSubmitAssignees(departmentId) {
 }
 
 function focusTaskMemberQuery() {
-  requestAnimationFrame(() => {
+  activeScope?.animationFrame(() => {
     const input = document.querySelector("[data-task-member-query]");
     if (!input || input.disabled) return;
     input.focus();
@@ -500,6 +492,7 @@ function completeWholeTask(task, completedAt) {
 
 async function performTaskAction(taskId, action) {
   if (state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites)) return;
+  const mountId = activeMountId;
   const location = taskLocation(taskId);
   if (!location) return;
   const { column, index, task } = location;
@@ -525,16 +518,18 @@ async function performTaskAction(taskId, action) {
           wholeTask,
           needsApproval: task.requiresReview
         });
+        if (mountId !== activeMountId) return;
         if (result.wholeTask) completeWholeTask(task, result.completedAt);
         else {
           targetAssignee.completedAt = result.completedAt;
           targetAssignee.abandonedAt = null;
         }
       } catch (error) {
+        if (mountId !== activeMountId) return;
         console.warn("Task completion failed", error);
         state.writeError = "tasks.write.failed";
       } finally {
-        state.writeBusy = false;
+        if (mountId === activeMountId) state.writeBusy = false;
       }
       state.actionTaskId = null;
       rerenderTaskPage({ focusBoard: true });
@@ -564,12 +559,14 @@ async function performTaskAction(taskId, action) {
       try {
         await deleteLiveTask(task.id);
       } catch (error) {
+        if (mountId !== activeMountId) return;
         console.warn("Task deletion failed", error);
         state.writeError = "tasks.write.failed";
         state.writeBusy = false;
         rerenderTaskPage({ focusBoard: true });
         return;
       }
+      if (mountId !== activeMountId) return;
       state.writeBusy = false;
     }
     const removedIds = descendantTaskIds(task.id);
@@ -600,6 +597,7 @@ function localTimestamp() {
 
 async function toggleTaskParticipation(task) {
   if (!state.liveTaskWrites || state.writeBusy) return;
+  const mountId = activeMountId;
   const assignee = taskAssignee(task, state.currentUser);
   if (!assignee) return;
   const abandoned = assignee.abandonedAt != null || ((task.assignees?.length ?? 0) === 1 && task.status === "abandoned");
@@ -617,6 +615,7 @@ async function toggleTaskParticipation(task) {
       abandoned: nextAbandoned,
       singleAssignee
     });
+    if (mountId !== activeMountId) return;
     assignee.abandonedAt = result.changedAt;
     assignee.completedAt = null;
     if (singleAssignee) {
@@ -628,15 +627,17 @@ async function toggleTaskParticipation(task) {
     }
     if (nextAbandoned) state.detailOpen = false;
   } catch (error) {
+    if (mountId !== activeMountId) return;
     console.warn("Task participation update failed", error);
     state.writeError = "tasks.write.failed";
   } finally {
-    state.writeBusy = false;
+    if (mountId === activeMountId) state.writeBusy = false;
   }
+  if (mountId !== activeMountId) return;
   rerenderTaskPage({ focusDetail: state.detailOpen, focusBoard: !state.detailOpen });
 }
 
-document.addEventListener("click", async (event) => {
+async function onTaskClick(event) {
   const completeAction = event.target.closest("[data-task-action-complete]");
   if (completeAction) {
     if (completeAction.disabled || (state.liveReadOnly && !state.liveTaskWrites)) return;
@@ -839,9 +840,9 @@ document.addEventListener("click", async (event) => {
   }
   if (state.submitDraft.memberMenuOpen && !event.target.closest("[data-task-member-editor]")) closeTaskMemberMenuInPlace();
   if (state.actionTaskId && !event.target.closest("[data-task-action-popover]")) closeTaskAction();
-});
+}
 
-document.addEventListener("keydown", (event) => {
+function onTaskKeydown(event) {
   if (event.key !== "Escape") return;
   if (event.target.closest("[data-task-member-query]") && state.submitDraft.memberMenuOpen) {
     event.preventDefault();
@@ -872,9 +873,10 @@ document.addEventListener("keydown", (event) => {
   const filterTrigger = openFilter?.parentElement.querySelector("[data-filter-trigger]");
   closeAllFilterMenus(null);
   filterTrigger?.focus();
-});
+}
 
-document.addEventListener("submit", async (event) => {
+async function onTaskSubmit(event) {
+  const mountId = activeMountId;
   const taskForm = event.target.closest("[data-task-submit-form]");
   if (taskForm) {
     event.preventDefault();
@@ -943,6 +945,7 @@ document.addEventListener("submit", async (event) => {
             trackTitleEdit: !isTaskCreator(task, state.currentUser),
             attachments: state.submitDraft.attachments
           });
+          if (mountId !== activeMountId) return;
           try {
             task.title = title;
             task.content = content;
@@ -978,6 +981,7 @@ document.addEventListener("submit", async (event) => {
             departmentId,
             files: state.submitDraft.attachments.map((attachment) => attachment.file).filter(Boolean)
           });
+          if (mountId !== activeMountId) return;
           try {
             const column = state.board.find((item) => item.key === priority) ?? state.board[0];
             const attachments = Array.isArray(result.attachments) ? result.attachments : [];
@@ -1028,11 +1032,13 @@ document.addEventListener("submit", async (event) => {
         state.submitError = "";
         state.writeError = "";
       } catch (error) {
+        if (mountId !== activeMountId) return;
         console.warn("Task save failed", error);
         state.submitError = "tasks.write.failed";
       } finally {
-        state.writeBusy = false;
+        if (mountId === activeMountId) state.writeBusy = false;
       }
+      if (mountId !== activeMountId) return;
       rerenderTaskPage({ focusBoard: !state.submitOpen, focusSubmit: state.submitOpen });
       return;
     }
@@ -1099,6 +1105,7 @@ document.addEventListener("submit", async (event) => {
         parentFeedbackId: null,
         mentionedUserIds: []
       });
+      if (mountId !== activeMountId) return;
       task.feedback.push({
         id: String(result.feedback.id),
         author: result.feedback.author_name || currentUser.name,
@@ -1114,10 +1121,11 @@ document.addEventListener("submit", async (event) => {
       task.countBadge = String(task.feedback.length);
       state.feedbackDraft = { message: "", attachments: [] };
     } catch (error) {
+      if (mountId !== activeMountId) return;
       console.warn("Task feedback save failed", error);
       state.feedbackError = "tasks.write.failed";
     } finally {
-      state.writeBusy = false;
+      if (mountId === activeMountId) state.writeBusy = false;
     }
   } else {
     task.feedback.push({
@@ -1132,8 +1140,8 @@ document.addEventListener("submit", async (event) => {
     task.countBadge = String(task.feedback.length);
     state.feedbackDraft = { message: "", attachments: [] };
   }
-  rerenderTaskPage({ focusFeedback: true });
-});
+  if (mountId === activeMountId) rerenderTaskPage({ focusFeedback: true });
+}
 
 function syncTaskSubmitDraft(form) {
   const values = new FormData(form);
@@ -1152,7 +1160,7 @@ function syncTaskSubmitSegment(control) {
   });
 }
 
-document.addEventListener("input", (event) => {
+function onTaskInput(event) {
   const feedbackInput = event.target.closest('[data-task-feedback-form] textarea[name="message"]');
   if (feedbackInput) {
     state.feedbackDraft.message = feedbackInput.value;
@@ -1167,9 +1175,9 @@ document.addEventListener("input", (event) => {
   }
   const form = event.target.closest("[data-task-submit-form]");
   if (form) syncTaskSubmitDraft(form);
-});
+}
 
-document.addEventListener("change", (event) => {
+function onTaskChange(event) {
   const feedbackAttachmentInput = event.target.closest("[data-task-feedback-file]");
   if (feedbackAttachmentInput) {
     if (state.liveReadOnly && !state.liveTaskWrites) return;
@@ -1220,31 +1228,130 @@ document.addEventListener("change", (event) => {
   // Text controls dispatch change while losing focus. Replacing the form here would remove
   // the submit button between pointerdown and click, so keep non-dependent updates in place.
   if (event.target.matches('input[type="radio"]')) syncTaskSubmitSegment(event.target);
-});
+}
 
-document.addEventListener("focusin", (event) => {
+function onTaskFocus(event) {
   const memberQuery = event.target.closest("[data-task-member-query]");
   if (!memberQuery || memberQuery.disabled) return;
   state.submitDraft.memberMenuOpen = true;
   filterTaskMemberCandidatesInPlace(memberQuery);
-});
+}
 
-attachTaskDomainController({
-  state,
-  filterState,
-  getHelpers: () => currentHelpers,
-  rerender: rerenderTaskPage,
-  closeTaskDetail,
-  leaveTaskDetailForNavigation,
-  adjustOpenTaskCounts,
-  localTimestamp,
-  toggleTaskParticipation
-});
+function hasTaskSubmitUnsavedChanges() {
+  if (!state.submitOpen) return false;
+  const draft = state.submitDraft;
+  if (state.submitMode !== "edit") {
+    return Boolean(String(draft.title || "").trim() || String(draft.content || "").trim() || draft.attachments?.length);
+  }
+  const task = state.tasks.find((item) => item.id === state.submitTaskId);
+  if (!task) return true;
+  const taskMemberIds = (task.assignees ?? []).map((assignee) => assignee.employeeId).filter(Boolean).sort();
+  const draftMemberIds = [
+    state.members.find((member) => member.name === draft.owner)?.id,
+    ...(draft.memberIds ?? [])
+  ].filter(Boolean).sort();
+  return String(draft.title || "") !== String(task.title || "")
+    || String(draft.content || "") !== String(task.content || "")
+    || String(draft.priority || "") !== String(task.priority || "")
+    || String(draft.due || "") !== String(task.due || "")
+    || String(draft.departmentId || "") !== String(task.departmentId || "")
+    || String(draft.requiresReview || "no") !== (task.requiresReview ? "yes" : "no")
+    || JSON.stringify(draftMemberIds) !== JSON.stringify(taskMemberIds)
+    || Boolean(draft.attachments?.some((attachment) => attachment.file));
+}
 
-window.__shellMenu = [
-  { key: "nav.tasks", icon: "icon-nav-task", href: "./index.html", active: true, unreadKey: "tasks" },
-  { key: "nav.team", icon: "icon-nav-user", href: "./members.html" }
-];
-window.__shellData = { unread: await getUnread(), user: currentUser };
-window.__shellContent = renderTaskManagement;
-await import("../shell/shell.js");
+function hasTaskUnsavedChanges() {
+  const subtaskValue = document.querySelector('[data-task-subtask-form] input[name="title"]')?.value?.trim();
+  return hasTaskSubmitUnsavedChanges()
+    || Boolean(state.feedbackDraft.message.trim() || state.feedbackDraft.attachments.length)
+    || Boolean(subtaskValue);
+}
+
+export async function mountPage({ scope, signal, historyState = null } = {}) {
+  const mountId = ++activeMountId;
+  activeScope = scope;
+  [data, currentUser, unreadWatermarks, unread] = await Promise.all([
+    getTeamTaskData(), getCurrentUser(), getUnreadWatermarks(), getUnread()
+  ]);
+  throwIfPageAborted(signal);
+  authenticated = typeof currentUser?.hasPermission === "function";
+  permissions = {
+    canCreate: !authenticated || currentUser.hasPermission("can_create_task"),
+    canAssignOthers: !authenticated || currentUser.hasPermission("can_assign_others"),
+    canEditOthers: !authenticated || currentUser.hasPermission("can_edit_others_tasks"),
+    canDeleteOthers: !authenticated || currentUser.hasPermission("can_delete_others_tasks"),
+    canValidate: !authenticated || currentUser.hasPermission("can_validate_task")
+  };
+  initializeTaskState(historyState);
+  taskMobileViewport = matchMedia("(max-width: 768px)");
+
+  return {
+    page: {
+      menu: [
+        { key: "nav.tasks", icon: "icon-nav-task", href: "./index.html", active: true, unreadKey: "tasks" },
+        { key: "nav.team", icon: "icon-nav-user", href: "./members.html" }
+      ],
+      data: { unread, user: currentUser },
+      render: renderTaskManagement,
+      title: "Honnmono · Tasks"
+    },
+    activate() {
+      markRead("tasks", unreadWatermarks.tasks);
+      scope.listen(document, "click", onTaskClick);
+      scope.listen(document, "keydown", onTaskKeydown);
+      scope.listen(document, "submit", onTaskSubmit);
+      scope.listen(document, "input", onTaskInput);
+      scope.listen(document, "change", onTaskChange);
+      scope.listen(document, "focusin", onTaskFocus);
+      if (typeof taskMobileViewport.addEventListener === "function") scope.listen(taskMobileViewport, "change", onTaskViewportChange);
+      else {
+        taskMobileViewport.addListener(onTaskViewportChange);
+        scope.onCleanup(() => taskMobileViewport?.removeListener(onTaskViewportChange));
+      }
+      attachTaskDomainController({
+        state,
+        filterState,
+        getHelpers: () => currentHelpers,
+        rerender: rerenderTaskPage,
+        closeTaskDetail,
+        leaveTaskDetailForNavigation,
+        adjustOpenTaskCounts,
+        localTimestamp,
+        toggleTaskParticipation,
+        scope
+      });
+    },
+    hasUnsavedChanges: hasTaskUnsavedChanges,
+    async canLeave() {
+      if (!hasTaskUnsavedChanges()) return true;
+      return confirmInPage(pageT(currentHelpers?.lang ?? "zh", "tasks.submit.leaveConfirm"));
+    },
+    captureState() {
+      return {
+        mode: state.mode,
+        overviewExpanded: [...state.overviewExpanded],
+        overviewCompletedExpanded: [...state.overviewCompletedExpanded],
+        onlyMine: state.onlyMine,
+        calendarYear: state.calendarYear,
+        calendarMonth: state.calendarMonth,
+        status: filterState.status,
+        priority: filterState.priority,
+        view: filterState.view,
+        member: filterState.member
+      };
+    },
+    dispose() {
+      if (activeMountId === mountId) activeMountId += 1;
+      closeAllFilterMenus(null);
+      data = null;
+      currentUser = null;
+      unread = null;
+      unreadWatermarks = null;
+      currentHelpers = null;
+      taskMobileViewport = null;
+      activeScope = null;
+      state = null;
+      filterState = null;
+    }
+  };
+}

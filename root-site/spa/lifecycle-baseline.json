@@ -200,30 +200,30 @@
       }
     },
     "/team/index.html": {
-      "moduleCount": 36,
+      "moduleCount": 29,
       "totals": {
-        "documentListeners": 23,
-        "windowListeners": 6,
-        "mediaQueryListeners": 2,
-        "timeouts": 24,
+        "documentListeners": 2,
+        "windowListeners": 2,
+        "mediaQueryListeners": 0,
+        "timeouts": 25,
         "intervals": 2,
         "animationFrames": 2,
         "observers": 0,
-        "authSubscriptions": 5,
+        "authSubscriptions": 4,
         "realtimeSubscriptions": 2
       }
     },
     "/team/members.html": {
-      "moduleCount": 34,
+      "moduleCount": 26,
       "totals": {
-        "documentListeners": 25,
-        "windowListeners": 6,
-        "mediaQueryListeners": 2,
-        "timeouts": 24,
+        "documentListeners": 2,
+        "windowListeners": 2,
+        "mediaQueryListeners": 0,
+        "timeouts": 25,
         "intervals": 2,
-        "animationFrames": 1,
+        "animationFrames": 2,
         "observers": 0,
-        "authSubscriptions": 5,
+        "authSubscriptions": 4,
         "realtimeSubscriptions": 2
       }
     }
