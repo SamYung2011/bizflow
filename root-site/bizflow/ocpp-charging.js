@@ -20,53 +20,21 @@ import {
   filterInput,
   filterSelect,
   makeOcppContext,
-  mountOcppShell,
-  requireOcppAccess,
+  createOcppPage,
+  requireOcppRouteAccess,
   renderOcppLayout,
   renderPager,
   renderTable,
   statusChip,
 } from "./ocpp-shared.js";
 import { renderOcppShare } from "./ocpp-charging-share.js";
+import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 
-const currentUser = await getCurrentUser();
-await requireOcppAccess(currentUser);
-const [data, unread] = await Promise.all([getOcppChargingData(), getUnread()]);
-const context = makeOcppContext();
-const state = {
-  tab: "piles",
-  shareTab: "shareCharges",
-  query: "",
-  type: "all",
-  operator: "all",
-  status: "all",
-  page: 1,
-  sharePage: 1,
-  orderPage: 1,
-  reportPage: 1,
-  reportPeriod: "day",
-  expandedShare: null,
-  expandedOrder: null,
-  stationModal: null,
-};
-const tabs = [
-  { key: "piles", labelKey: "pilesTab" },
-  { key: "stations", labelKey: "stationsTab" },
-  { key: "share", labelKey: "shareTab" },
-  { key: "orders", labelKey: "ordersTab", badge: data.orders.length },
-  { key: "reports", labelKey: "reportsTab" },
-  { key: "operators", labelKey: "operatorsTab" },
-];
-const orderDate = createDateFilter({
-  id: "ocpp-order-date",
-  initialDate: latestDateInput(
-    data.orders.map((row) => dateInputFromUnix(row.createdAt)),
-  ),
-  onChange: () => {
-    state.orderPage = 1;
-    rerender();
-  },
-});
+let data = null;
+let context = null;
+let state = null;
+let tabs = [];
+let orderDate = null;
 function h() {
   return context.helpers();
 }
@@ -288,11 +256,11 @@ function render(helpers) {
     activeTab: state.tab,
     tabAttribute: "data-ocpp-charging-tab",
     body: body(),
-    attrs: `data-ocpp-orders="${data.orders.length}" data-ocpp-stations="${data.stations.length}"`,
+    attrs: `data-ocpp-route="charging" data-ocpp-orders="${data.orders.length}" data-ocpp-stations="${data.stations.length}"`,
   });
 }
 function rerender() {
-  const page = document.querySelector("[data-ocpp-page]");
+  const page = document.querySelector('[data-ocpp-route="charging"]');
   if (page && h()) page.outerHTML = render(h());
 }
 function reset() {
@@ -304,7 +272,7 @@ function reset() {
   state.expandedShare = null;
   state.page = state.sharePage = state.orderPage = state.reportPage = 1;
 }
-document.addEventListener("click", (event) => {
+function onChargingClick(event) {
   const dateRoot = event.target.closest?.("[data-date-filter]");
   if (dateRoot) {
     if (orderDate.handleClick(event)) return;
@@ -366,12 +334,12 @@ document.addEventListener("click", (event) => {
     state.expandedOrder = state.expandedOrder === id ? null : id;
     rerender();
   }
-});
-document.addEventListener("input", (event) => {
+}
+function onChargingInput(event) {
   if (event.target.matches("[data-ocpp-query]"))
     state.query = event.target.value;
-});
-document.addEventListener("change", (event) => {
+}
+function onChargingChange(event) {
   if (event.target.matches("[data-ocpp-query]")) {
     state.page = state.sharePage = state.orderPage = 1;
     rerender();
@@ -397,9 +365,11 @@ document.addEventListener("change", (event) => {
     rerender();
   }
   orderDate.handleChange(event);
-});
-document.addEventListener("focusin", (event) => orderDate.handleFocus(event));
-document.addEventListener("keydown", (event) => {
+}
+function onChargingFocus(event) {
+  orderDate.handleFocus(event);
+}
+function onChargingKeydown(event) {
   if (event.key === "Enter" && event.target.matches("[data-ocpp-query]")) {
     state.page = state.sharePage = state.orderPage = 1;
     rerender();
@@ -412,10 +382,78 @@ document.addEventListener("keydown", (event) => {
     }
     orderDate.close();
   }
-});
-await mountOcppShell({
-  activeKey: "ocpp-charging",
-  currentUser,
-  unread,
-  render,
-});
+}
+
+const chargingTabs = ["piles", "stations", "share", "orders", "reports", "operators"];
+
+function positivePage(value) {
+  return Number.isInteger(value) && value > 0 ? value : 1;
+}
+
+function createState(historyState) {
+  const saved = historyState && typeof historyState === "object" ? historyState : {};
+  return {
+    tab: chargingTabs.includes(saved.tab) ? saved.tab : "piles",
+    shareTab: ["shareCharges", "shareIncome", "shareBookings"].includes(saved.shareTab) ? saved.shareTab : "shareCharges",
+    query: typeof saved.query === "string" ? saved.query : "",
+    type: typeof saved.type === "string" ? saved.type : "all",
+    operator: typeof saved.operator === "string" ? saved.operator : "all",
+    status: typeof saved.status === "string" ? saved.status : "all",
+    page: positivePage(saved.page),
+    sharePage: positivePage(saved.sharePage),
+    orderPage: positivePage(saved.orderPage),
+    reportPage: positivePage(saved.reportPage),
+    reportPeriod: ["day", "month", "year"].includes(saved.reportPeriod) ? saved.reportPeriod : "day",
+    expandedShare: saved.expandedShare == null ? null : String(saved.expandedShare),
+    expandedOrder: saved.expandedOrder == null ? null : String(saved.expandedOrder),
+    stationModal: saved.stationModal == null ? null : String(saved.stationModal),
+  };
+}
+
+export async function mountPage({ scope, signal, url, navigation, historyState }) {
+  const currentUser = await getCurrentUser();
+  throwIfPageAborted(signal);
+  requireOcppRouteAccess(currentUser, { url, navigation });
+  const [nextData, unread] = await Promise.all([getOcppChargingData(), getUnread()]);
+  throwIfPageAborted(signal);
+  data = nextData;
+  context = makeOcppContext();
+  state = createState(historyState);
+  tabs = [
+    { key: "piles", labelKey: "pilesTab" },
+    { key: "stations", labelKey: "stationsTab" },
+    { key: "share", labelKey: "shareTab" },
+    { key: "orders", labelKey: "ordersTab", badge: data.orders.length },
+    { key: "reports", labelKey: "reportsTab" },
+    { key: "operators", labelKey: "operatorsTab" },
+  ];
+  orderDate = createDateFilter({
+    id: "ocpp-order-date",
+    initialDate: latestDateInput(data.orders.map((row) => dateInputFromUnix(row.createdAt))),
+    onChange: () => {
+      state.orderPage = 1;
+      rerender();
+    },
+  });
+  orderDate.restoreState(historyState?.orderDate);
+
+  return {
+    page: createOcppPage({ activeKey: "ocpp-charging", currentUser, unread, render, title: "OCPP 充電站" }),
+    activate() {
+      scope.listen(document, "click", onChargingClick);
+      scope.listen(document, "input", onChargingInput);
+      scope.listen(document, "change", onChargingChange);
+      scope.listen(document, "focusin", onChargingFocus);
+      scope.listen(document, "keydown", onChargingKeydown);
+    },
+    captureState: () => ({ ...state, orderDate: orderDate.captureState() }),
+    dispose() {
+      orderDate?.close();
+      data = null;
+      context = null;
+      state = null;
+      tabs = [];
+      orderDate = null;
+    },
+  };
+}

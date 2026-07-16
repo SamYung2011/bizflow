@@ -114,8 +114,10 @@ export function createAppRouter({
     replaceCurrentHistory(arguments.length ? pageState : currentController?.captureState?.());
   }
 
-  function hardNavigate(url) {
-    windowRef.location.assign(url.href ?? String(url));
+  function hardNavigate(url, { replace = false } = {}) {
+    const href = url.href ?? String(url);
+    if (replace && typeof windowRef.location.replace === "function") windowRef.location.replace(href);
+    else windowRef.location.assign(href);
   }
 
   async function canLeave(toUrl, reason) {
@@ -222,7 +224,9 @@ export function createAppRouter({
       if (pendingAbortController === abortController) pendingAbortController = null;
       if (!isAbortError(error)) {
         console.warn("[spa] navigation failed; falling back to document navigation", error);
-        hardNavigate(url);
+        const fallbackUrl = new URL(url);
+        fallbackUrl.searchParams.set("tpSpa", "0");
+        hardNavigate(fallbackUrl);
       }
       return false;
     }

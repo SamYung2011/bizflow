@@ -117,47 +117,13 @@ import { renderBarChart } from "../components/bar-chart.js";
 import { aggregateInventoryStock, aggregateRevenue, aggregateShippingCounts } from "../components/order-metrics.js";
 import { navigationPresetKeys, setNavigationPreset } from "../components/navigation-presets.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
+import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 
-// 数据全走接口层(煊煊 2026-07-08:不写死样板,留好数据接口)
-const [homeData, orderMetricRows, inventoryMetricProducts, warrantyData, customerData, currentUser] = await Promise.all([
-  getHomeData(),
-  getHomeOrderMetricRows(),
-  getInventoryMetricProducts(),
-  getWarrantyData(),
-  getCustomersPageData(),
-  getCurrentUser()
-]);
-const data = {
-  ...homeData,
-  stats: homeData.stats.map((stat) => {
-    if (stat.key === "warranty") return { ...stat, value: warrantyData.items.length, alert: warrantyData.items.length > 0 };
-    if (stat.key === "customers") return { ...stat, value: customerData.dashboardCustomerCount };
-    return stat;
-  }),
-  warrantyItems: warrantyData.items.slice(0, 4).map((item) => ({
-    no: item.no,
-    product: item.product,
-    customer: item.customer,
-    phone: item.phone,
-    date: item.expiry
-  }))
-};
-const revenueMetrics = orderMetricRows
-  ? aggregateRevenue(orderMetricRows, { aliases: [], customers: [], products: [] }, "thisMonth")
-  : null;
-const shippingMetrics = orderMetricRows ? aggregateShippingCounts(orderMetricRows) : null;
-const inventoryMetrics = inventoryMetricProducts ? aggregateInventoryStock(inventoryMetricProducts) : null;
-const showRevenue = currentUser?.canViewRevenue !== false;
-
-data.stock
-  .map((item) => item.image)
-  .filter(Boolean)
-  .forEach((src) => {
-    const img = new Image();
-    img.decoding = "sync";
-    img.loading = "eager";
-    img.src = src;
-  });
+let data = null;
+let revenueMetrics = null;
+let shippingMetrics = null;
+let inventoryMetrics = null;
+let showRevenue = true;
 
 const STAT_TONE_CLASS = { "": "", blue: "board-card--blue", green: "board-card--green", yellow: "board-card--yellow" };
 
@@ -334,13 +300,7 @@ export function renderHome({ icon, escapeHtml, lang }) {
   </div>`;
 }
 
-// bizflow 站菜单(煊煊 2026-07-08:两站分离;team 站无主页、其主页=任务管理 558:20995,
-// 故 Home 仪表盘归 bizflow 站;顶栏消息钮=快跳 team 未读)
-window.__shellMenu = createBizflowMenu("home");
-window.__shellData = { unread: await getUnread(), user: currentUser };
-window.__shellContent = renderHome;
-
-document.addEventListener("click", (event) => {
+function onHomeClick(event) {
   const preset = event.target.closest("[data-home-preset]")?.getAttribute("data-home-preset");
   if (preset === "orders-revenue") setNavigationPreset(navigationPresetKeys.ordersTab, "revenue");
   if (preset === "customers-warranty") setNavigationPreset(navigationPresetKeys.customersTab, "warranty");
@@ -357,12 +317,73 @@ document.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-home-members]")) window.location.href = "../team/members.html";
-});
+}
 
-document.addEventListener("keydown", (event) => {
+function onHomeKeydown(event) {
   if ((event.key === "Enter" || event.key === " ") && event.target.closest("[data-home-members]")) {
     event.preventDefault();
     window.location.href = "../team/members.html";
   }
-});
-await import("../shell/shell.js");
+}
+
+export async function mountPage({ scope, signal }) {
+  // 数据全走接口层(煊煊 2026-07-08:不写死样板,留好数据接口)
+  const [homeData, orderMetricRows, inventoryMetricProducts, warrantyData, customerData, currentUser, unread] = await Promise.all([
+    getHomeData(),
+    getHomeOrderMetricRows(),
+    getInventoryMetricProducts(),
+    getWarrantyData(),
+    getCustomersPageData(),
+    getCurrentUser(),
+    getUnread()
+  ]);
+  throwIfPageAborted(signal);
+  data = {
+    ...homeData,
+    stats: homeData.stats.map((stat) => {
+      if (stat.key === "warranty") return { ...stat, value: warrantyData.items.length, alert: warrantyData.items.length > 0 };
+      if (stat.key === "customers") return { ...stat, value: customerData.dashboardCustomerCount };
+      return stat;
+    }),
+    warrantyItems: warrantyData.items.slice(0, 4).map((item) => ({
+      no: item.no,
+      product: item.product,
+      customer: item.customer,
+      phone: item.phone,
+      date: item.expiry
+    }))
+  };
+  revenueMetrics = orderMetricRows
+    ? aggregateRevenue(orderMetricRows, { aliases: [], customers: [], products: [] }, "thisMonth")
+    : null;
+  shippingMetrics = orderMetricRows ? aggregateShippingCounts(orderMetricRows) : null;
+  inventoryMetrics = inventoryMetricProducts ? aggregateInventoryStock(inventoryMetricProducts) : null;
+  showRevenue = currentUser?.canViewRevenue !== false;
+
+  data.stock.map((item) => item.image).filter(Boolean).forEach((src) => {
+    const image = new Image();
+    image.decoding = "sync";
+    image.loading = "eager";
+    image.src = src;
+  });
+
+  return {
+    page: {
+      menu: createBizflowMenu("home"),
+      data: { unread, user: currentUser },
+      render: renderHome,
+      title: "任務平台 Home Desktop"
+    },
+    activate() {
+      scope.listen(document, "click", onHomeClick);
+      scope.listen(document, "keydown", onHomeKeydown);
+    },
+    captureState: () => null,
+    dispose() {
+      data = null;
+      revenueMetrics = null;
+      shippingMetrics = null;
+      inventoryMetrics = null;
+    }
+  };
+}

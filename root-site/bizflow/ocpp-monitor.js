@@ -13,55 +13,22 @@ import {
   filterInput,
   filterSelect,
   makeOcppContext,
-  mountOcppShell,
-  requireOcppAccess,
+  createOcppPage,
+  requireOcppRouteAccess,
   renderOcppLayout,
   renderTable,
   statusChip,
 } from "./ocpp-shared.js";
+import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 
-const currentUser = await getCurrentUser();
-await requireOcppAccess(currentUser);
-const [initialData, unread] = await Promise.all([getOcppMonitorData(), getUnread()]);
-const data = { ...initialData };
-const context = makeOcppContext();
-const state = {
-  tab: "status",
-  autoRefresh: false,
-  pileQuery: "",
-  direction: "all",
-  logLimit: 50,
-  logsLoading: false,
-  logsLoaded: !data.logsDeferred,
-  expandedLog: null,
-};
-const tabs = [
-  { key: "status", labelKey: "statusTab" },
-  { key: "logs", labelKey: "logsTab" },
-  {
-    key: "commands",
-    labelKey: "commandLogsTab",
-    badge: data.commandLogs.length || null,
-  },
-  { key: "alarms", labelKey: "alarmsTab", badge: data.alarms.length || null },
-];
-const logDate = createDateFilter({
-  id: "ocpp-log-date",
-  initialDate: latestDateInput(
-    data.logs.map((row) => dateInputFromUnix(row.ts)),
-  ),
-  onChange: () => {
-    state.logLimit = 50;
-    rerender();
-  },
-});
-const alarmDate = createDateFilter({
-  id: "ocpp-alarm-date",
-  initialDate: latestDateInput(
-    data.alarms.map((row) => dateInputFromUnix(row.createdAt)),
-  ),
-  onChange: () => rerender(),
-});
+let data = null;
+let context = null;
+let state = null;
+let tabs = [];
+let logDate = null;
+let alarmDate = null;
+let instanceSequence = 0;
+let activeInstance = 0;
 
 function e(value) {
   return context.helpers().escapeHtml(value ?? "—");
@@ -117,16 +84,19 @@ function renderLogs() {
 
 async function loadLiveLogs() {
   if (state.logsLoaded || state.logsLoading) return;
+  const instance = activeInstance;
   state.logsLoading = true;
   rerender();
   try {
     const result = await getOcppMonitorLogsData();
+    if (instance !== activeInstance) return;
     data.logs = result.logs;
     data.isLive = result.isLive;
     data.logsScope = result.logsScope;
     data.generatedAt = result.generatedAt;
     state.logsLoaded = true;
   } finally {
+    if (instance !== activeInstance) return;
     state.logsLoading = false;
     rerender();
   }
@@ -166,14 +136,14 @@ function render(helpers) {
     activeTab: state.tab,
     tabAttribute: "data-ocpp-monitor-tab",
     body: body(),
-    attrs: `data-ocpp-piles="${data.piles.length}" data-ocpp-logs="${data.logs.length}"`,
+    attrs: `data-ocpp-route="monitor" data-ocpp-piles="${data.piles.length}" data-ocpp-logs="${data.logs.length}"`,
   });
 }
 function rerender() {
-  const page = document.querySelector("[data-ocpp-page]");
+  const page = document.querySelector('[data-ocpp-route="monitor"]');
   if (page && context.helpers()) page.outerHTML = render(context.helpers());
 }
-document.addEventListener("click", (event) => {
+function onMonitorClick(event) {
   const root = event.target.closest?.("[data-date-filter]");
   if (root) {
     const id = root.getAttribute("data-date-filter");
@@ -207,12 +177,12 @@ document.addEventListener("click", (event) => {
     state.logLimit += 50;
     rerender();
   }
-});
-document.addEventListener("input", (event) => {
+}
+function onMonitorInput(event) {
   if (event.target.matches("[data-ocpp-pile-query]"))
     state.pileQuery = event.target.value;
-});
-document.addEventListener("change", (event) => {
+}
+function onMonitorChange(event) {
   if (event.target.matches("[data-ocpp-auto]"))
     state.autoRefresh = event.target.checked;
   if (event.target.matches("[data-ocpp-pile-query]")) {
@@ -225,12 +195,12 @@ document.addEventListener("change", (event) => {
     rerender();
   }
   logDate.handleChange(event) || alarmDate.handleChange(event);
-});
-document.addEventListener("focusin", (event) => {
+}
+function onMonitorFocus(event) {
   logDate.handleFocus(event);
   alarmDate.handleFocus(event);
-});
-document.addEventListener("keydown", (event) => {
+}
+function onMonitorKeydown(event) {
   if (event.key === "Enter" && event.target.matches("[data-ocpp-pile-query]")) {
     state.logLimit = 50;
     rerender();
@@ -240,11 +210,85 @@ document.addEventListener("keydown", (event) => {
     logDate.close();
     alarmDate.close();
   }
-});
+}
 
-await mountOcppShell({
-  activeKey: "ocpp-monitor",
-  currentUser,
-  unread,
-  render,
-});
+function createState(historyState, logsDeferred) {
+  const saved = historyState && typeof historyState === "object" ? historyState : {};
+  return {
+    tab: ["status", "logs", "commands", "alarms"].includes(saved.tab) ? saved.tab : "status",
+    autoRefresh: saved.autoRefresh === true,
+    pileQuery: typeof saved.pileQuery === "string" ? saved.pileQuery : "",
+    direction: ["all", "in", "out"].includes(saved.direction) ? saved.direction : "all",
+    logLimit: Number.isInteger(saved.logLimit) && saved.logLimit > 0 ? saved.logLimit : 50,
+    logsLoading: false,
+    logsLoaded: !logsDeferred,
+    expandedLog: saved.expandedLog == null ? null : String(saved.expandedLog),
+  };
+}
+
+export async function mountPage({ scope, signal, url, navigation, historyState }) {
+  const currentUser = await getCurrentUser();
+  throwIfPageAborted(signal);
+  requireOcppRouteAccess(currentUser, { url, navigation });
+  const [initialData, unread] = await Promise.all([getOcppMonitorData(), getUnread()]);
+  throwIfPageAborted(signal);
+  const instance = ++instanceSequence;
+  activeInstance = instance;
+  data = { ...initialData };
+  context = makeOcppContext();
+  state = createState(historyState, data.logsDeferred);
+  tabs = [
+    { key: "status", labelKey: "statusTab" },
+    { key: "logs", labelKey: "logsTab" },
+    { key: "commands", labelKey: "commandLogsTab", badge: data.commandLogs.length || null },
+    { key: "alarms", labelKey: "alarmsTab", badge: data.alarms.length || null },
+  ];
+  logDate = createDateFilter({
+    id: "ocpp-log-date",
+    initialDate: latestDateInput(data.logs.map((row) => dateInputFromUnix(row.ts))),
+    onChange: () => {
+      state.logLimit = 50;
+      rerender();
+    },
+  });
+  alarmDate = createDateFilter({
+    id: "ocpp-alarm-date",
+    initialDate: latestDateInput(data.alarms.map((row) => dateInputFromUnix(row.createdAt))),
+    onChange: () => rerender(),
+  });
+  logDate.restoreState(historyState?.logDate);
+  alarmDate.restoreState(historyState?.alarmDate);
+
+  return {
+    page: createOcppPage({ activeKey: "ocpp-monitor", currentUser, unread, render, title: "OCPP 監控" }),
+    activate() {
+      scope.listen(document, "click", onMonitorClick);
+      scope.listen(document, "input", onMonitorInput);
+      scope.listen(document, "change", onMonitorChange);
+      scope.listen(document, "focusin", onMonitorFocus);
+      scope.listen(document, "keydown", onMonitorKeydown);
+      if (state.tab === "logs") void loadLiveLogs();
+    },
+    captureState: () => ({
+      tab: state.tab,
+      autoRefresh: state.autoRefresh,
+      pileQuery: state.pileQuery,
+      direction: state.direction,
+      logLimit: state.logLimit,
+      expandedLog: state.expandedLog,
+      logDate: logDate.captureState(),
+      alarmDate: alarmDate.captureState(),
+    }),
+    dispose() {
+      if (activeInstance === instance) activeInstance = 0;
+      logDate?.close();
+      alarmDate?.close();
+      data = null;
+      context = null;
+      state = null;
+      tabs = [];
+      logDate = null;
+      alarmDate = null;
+    },
+  };
+}

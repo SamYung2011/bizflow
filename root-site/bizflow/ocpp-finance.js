@@ -10,43 +10,20 @@ import {
   filterInput,
   filterSelect,
   makeOcppContext,
-  mountOcppShell,
-  requireOcppAccess,
+  createOcppPage,
+  requireOcppRouteAccess,
   renderOcppLayout,
   renderPager,
   renderTable,
   statusChip,
 } from "./ocpp-shared.js";
+import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 
-const currentUser = await getCurrentUser();
-await requireOcppAccess(currentUser);
-const [data, unread] = await Promise.all([getOcppFinanceData(), getUnread()]);
-const context = makeOcppContext();
+let data = null;
+let context = null;
+let state = null;
+let tabs = [];
 const defaultFilterForTab = (tab) => tab === "recharges" ? "1" : "all";
-const state = {
-  tab: "recharges",
-  query: "",
-  // Mirrors bizflow_samyung/src/views/ocpp/finance/Recharges.jsx:75.
-  filter: defaultFilterForTab("recharges"),
-  page: 1,
-  expanded: null,
-};
-const tabs = [
-  { key: "recharges", labelKey: "rechargesTab", badge: data.recharges.length },
-  {
-    key: "refunds",
-    labelKey: "refundsTab",
-    badge: data.refunds.length || null,
-  },
-  { key: "userMoney", labelKey: "userMoneyTab" },
-  { key: "operatorMoney", labelKey: "operatorMoneyTab" },
-  { key: "platformMoney", labelKey: "platformMoneyTab" },
-  {
-    key: "withdrawals",
-    labelKey: "withdrawalsTab",
-    badge: data.withdrawals.length || null,
-  },
-];
 function h() {
   return context.helpers();
 }
@@ -310,14 +287,14 @@ function render(helpers) {
     activeTab: state.tab,
     tabAttribute: "data-ocpp-finance-tab",
     body: renderFinance(),
-    attrs: `data-ocpp-recharges="${data.recharges.length}"`,
+    attrs: `data-ocpp-route="finance" data-ocpp-recharges="${data.recharges.length}"`,
   });
 }
 function rerender() {
-  const page = document.querySelector("[data-ocpp-page]");
+  const page = document.querySelector('[data-ocpp-route="finance"]');
   if (page && h()) page.outerHTML = render(h());
 }
-document.addEventListener("click", (event) => {
+function onFinanceClick(event) {
   const tab = event.target.closest("[data-ocpp-finance-tab]");
   if (tab) {
     state.tab = tab.getAttribute("data-ocpp-finance-tab");
@@ -340,12 +317,12 @@ document.addEventListener("click", (event) => {
     state.expanded = state.expanded === id ? null : id;
     rerender();
   }
-});
-document.addEventListener("input", (event) => {
+}
+function onFinanceInput(event) {
   if (event.target.matches("[data-ocpp-finance-query]"))
     state.query = event.target.value;
-});
-document.addEventListener("change", (event) => {
+}
+function onFinanceChange(event) {
   if (event.target.matches("[data-ocpp-finance-query]")) {
     state.page = 1;
     rerender();
@@ -355,8 +332,8 @@ document.addEventListener("change", (event) => {
     state.page = 1;
     rerender();
   }
-});
-document.addEventListener("keydown", (event) => {
+}
+function onFinanceKeydown(event) {
   if (
     event.key === "Enter" &&
     event.target.matches("[data-ocpp-finance-query]")
@@ -364,10 +341,54 @@ document.addEventListener("keydown", (event) => {
     state.page = 1;
     rerender();
   }
-});
-await mountOcppShell({
-  activeKey: "ocpp-finance",
-  currentUser,
-  unread,
-  render,
-});
+}
+
+const financeTabs = ["recharges", "refunds", "userMoney", "operatorMoney", "platformMoney", "withdrawals"];
+
+function createState(historyState) {
+  const saved = historyState && typeof historyState === "object" ? historyState : {};
+  const tab = financeTabs.includes(saved.tab) ? saved.tab : "recharges";
+  return {
+    tab,
+    query: typeof saved.query === "string" ? saved.query : "",
+    // Mirrors bizflow_samyung/src/views/ocpp/finance/Recharges.jsx:75.
+    filter: typeof saved.filter === "string" ? saved.filter : defaultFilterForTab(tab),
+    page: Number.isInteger(saved.page) && saved.page > 0 ? saved.page : 1,
+    expanded: saved.expanded == null ? null : String(saved.expanded),
+  };
+}
+
+export async function mountPage({ scope, signal, url, navigation, historyState }) {
+  const currentUser = await getCurrentUser();
+  throwIfPageAborted(signal);
+  requireOcppRouteAccess(currentUser, { url, navigation });
+  const [nextData, unread] = await Promise.all([getOcppFinanceData(), getUnread()]);
+  throwIfPageAborted(signal);
+  data = nextData;
+  context = makeOcppContext();
+  state = createState(historyState);
+  tabs = [
+    { key: "recharges", labelKey: "rechargesTab", badge: data.recharges.length },
+    { key: "refunds", labelKey: "refundsTab", badge: data.refunds.length || null },
+    { key: "userMoney", labelKey: "userMoneyTab" },
+    { key: "operatorMoney", labelKey: "operatorMoneyTab" },
+    { key: "platformMoney", labelKey: "platformMoneyTab" },
+    { key: "withdrawals", labelKey: "withdrawalsTab", badge: data.withdrawals.length || null },
+  ];
+  return {
+    page: createOcppPage({ activeKey: "ocpp-finance", currentUser, unread, render, title: "OCPP 財務" }),
+    activate() {
+      scope.listen(document, "click", onFinanceClick);
+      scope.listen(document, "input", onFinanceInput);
+      scope.listen(document, "change", onFinanceChange);
+      scope.listen(document, "keydown", onFinanceKeydown);
+    },
+    captureState: () => ({ ...state }),
+    dispose() {
+      data = null;
+      context = null;
+      state = null;
+      tabs = [];
+    },
+  };
+}

@@ -91,27 +91,24 @@ export function canAccessOcpp(currentUser) {
   return !authenticated || currentUser.isBfAdmin === true;
 }
 
-export async function requireOcppAccess(currentUser) {
+export function requireOcppRouteAccess(currentUser, { url, navigation }) {
   if (canAccessOcpp(currentUser)) return;
-  window.location.replace("./home.html");
-  // Stop the denied module before data fetch/mount while the replacement navigation commits.
-  await new Promise(() => {});
+  navigation.hardNavigate(new URL("./home.html", url), { replace: true });
+  // The router recognizes AbortError and does not retry the denied OCPP URL.
+  throw new DOMException("OCPP admin access required", "AbortError");
 }
 
-export async function mountOcppShell({
+export function createOcppPage({
   activeKey,
   currentUser,
   unread,
   render,
+  title,
 }) {
-  // Mirrors bizflow_samyung/src/App.jsx:1041; mock has no auth methods and retains the full demo menu.
-  if (!canAccessOcpp(currentUser)) {
-    window.location.replace("./home.html");
-    return false;
-  }
-  window.__shellMenu = createBizflowMenu(activeKey);
-  window.__shellData = { unread, user: currentUser };
-  window.__shellContent = render;
-  await import("../shell/shell.js");
-  return true;
+  return {
+    menu: createBizflowMenu(activeKey),
+    data: { unread, user: currentUser },
+    render,
+    title,
+  };
 }

@@ -10,31 +10,20 @@ import {
   filterInput,
   filterSelect,
   makeOcppContext,
-  mountOcppShell,
-  requireOcppAccess,
+  createOcppPage,
+  requireOcppRouteAccess,
   renderOcppLayout,
   renderPager,
   renderTable,
   statusChip,
 } from "./ocpp-shared.js";
+import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 
-const currentUser = await getCurrentUser();
-await requireOcppAccess(currentUser);
-const [data, unread] = await Promise.all([getOcppUsersData(), getUnread()]);
 // Admin 后台按现网惯例明文显示 email/mobile/loginip/joinip；认证凭证不属于快照字段。
-const context = makeOcppContext();
-const state = {
-  tab: "users",
-  query: "",
-  status: "all",
-  bind: "all",
-  page: 1,
-  expanded: null,
-};
-const tabs = [
-  { key: "users", labelKey: "userInfoTab", badge: data.users.length },
-  { key: "tags", labelKey: "rfidTab", badge: data.tags.length },
-];
+let data = null;
+let context = null;
+let state = null;
+let tabs = [];
 function h() {
   return context.helpers();
 }
@@ -155,14 +144,14 @@ function render(helpers) {
     activeTab: state.tab,
     tabAttribute: "data-ocpp-users-tab",
     body: state.tab === "users" ? renderUsers() : renderTags(),
-    attrs: `data-ocpp-users="${data.users.length}" data-ocpp-tags="${data.tags.length}"`,
+    attrs: `data-ocpp-route="users" data-ocpp-users="${data.users.length}" data-ocpp-tags="${data.tags.length}"`,
   });
 }
 function rerender() {
-  const page = document.querySelector("[data-ocpp-page]");
+  const page = document.querySelector('[data-ocpp-route="users"]');
   if (page && h()) page.outerHTML = render(h());
 }
-document.addEventListener("click", (event) => {
+function onUsersClick(event) {
   const tab = event.target.closest("[data-ocpp-users-tab]");
   if (tab) {
     state.tab = tab.getAttribute("data-ocpp-users-tab");
@@ -185,12 +174,12 @@ document.addEventListener("click", (event) => {
     state.expanded = state.expanded === id ? null : id;
     rerender();
   }
-});
-document.addEventListener("input", (event) => {
+}
+function onUsersInput(event) {
   if (event.target.matches("[data-ocpp-user-query]"))
     state.query = event.target.value;
-});
-document.addEventListener("change", (event) => {
+}
+function onUsersChange(event) {
   if (event.target.matches("[data-ocpp-user-query]")) {
     state.page = 1;
     rerender();
@@ -205,11 +194,53 @@ document.addEventListener("change", (event) => {
     state.page = 1;
     rerender();
   }
-});
-document.addEventListener("keydown", (event) => {
+}
+function onUsersKeydown(event) {
   if (event.key === "Enter" && event.target.matches("[data-ocpp-user-query]")) {
     state.page = 1;
     rerender();
   }
-});
-await mountOcppShell({ activeKey: "ocpp-users", currentUser, unread, render });
+}
+
+function createState(historyState) {
+  const saved = historyState && typeof historyState === "object" ? historyState : {};
+  return {
+    tab: ["users", "tags"].includes(saved.tab) ? saved.tab : "users",
+    query: typeof saved.query === "string" ? saved.query : "",
+    status: ["all", "normal", "hidden"].includes(saved.status) ? saved.status : "all",
+    bind: ["all", "true", "false"].includes(saved.bind) ? saved.bind : "all",
+    page: Number.isInteger(saved.page) && saved.page > 0 ? saved.page : 1,
+    expanded: saved.expanded == null ? null : String(saved.expanded),
+  };
+}
+
+export async function mountPage({ scope, signal, url, navigation, historyState }) {
+  const currentUser = await getCurrentUser();
+  throwIfPageAborted(signal);
+  requireOcppRouteAccess(currentUser, { url, navigation });
+  const [nextData, unread] = await Promise.all([getOcppUsersData(), getUnread()]);
+  throwIfPageAborted(signal);
+  data = nextData;
+  context = makeOcppContext();
+  state = createState(historyState);
+  tabs = [
+    { key: "users", labelKey: "userInfoTab", badge: data.users.length },
+    { key: "tags", labelKey: "rfidTab", badge: data.tags.length },
+  ];
+  return {
+    page: createOcppPage({ activeKey: "ocpp-users", currentUser, unread, render, title: "OCPP 用戶" }),
+    activate() {
+      scope.listen(document, "click", onUsersClick);
+      scope.listen(document, "input", onUsersInput);
+      scope.listen(document, "change", onUsersChange);
+      scope.listen(document, "keydown", onUsersKeydown);
+    },
+    captureState: () => ({ ...state }),
+    dispose() {
+      data = null;
+      context = null;
+      state = null;
+      tabs = [];
+    },
+  };
+}

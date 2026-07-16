@@ -667,6 +667,7 @@ export function setPage(nextPage = {}) {
     };
   }
   menuItems = buildMenuItems(state.profileUser ?? pageContext.data.user);
+  installNavigationPrerender(menuItems);
   state.profileJoinRequest = null;
   closeTransientShellUi();
   if (pageContext.title) document.title = pageContext.title;

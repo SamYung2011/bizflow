@@ -4,8 +4,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 
 import { createAppRouter, SPA_HISTORY_KEY } from "../root-site/spa/app-router.js";
-import { createPageScope, mountPageModule } from "../root-site/spa/page-lifecycle.js";
-import { routeManifest, spaRouteAllowlist } from "../root-site/spa/route-manifest.js";
+import { createPageScope, mountPageModule, throwIfPageAborted } from "../root-site/spa/page-lifecycle.js";
+import { routeManifest, spaNavigation, spaRouteAllowlist } from "../root-site/spa/route-manifest.js";
+import { createDateFilter } from "../root-site/components/date-filter.js";
+import { requireOcppRouteAccess } from "../root-site/bizflow/ocpp-shared.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const commonStyles = new Set([
@@ -15,6 +17,13 @@ const commonStyles = new Set([
   "components/styles.css",
   "shell/shell.css"
 ]);
+const expectedP1Routes = [
+  "/bizflow/home.html",
+  "/bizflow/ocpp-monitor.html",
+  "/bizflow/ocpp-charging.html",
+  "/bizflow/ocpp-users.html",
+  "/bizflow/ocpp-finance.html"
+];
 
 function attributes(tag) {
   return Object.fromEntries([...tag.matchAll(/([\w-]+)=["']([^"']*)["']/g)].map((match) => [match[1], match[2]]));
@@ -25,22 +34,36 @@ function rootRelative(file) {
 }
 
 async function verifyManifest() {
+  const spaEntry = await readFile(path.join(rootDir, "root-site/spa/entry.js"), "utf8");
+  assert.match(spaEntry, /url\.searchParams\.get\("tpSpa"\)\s*===\s*"0"/, "SPA entry must recognize one-shot document fallback mode");
+  assert.match(spaEntry, /mountWithoutRouter\(\)/, "SPA entry must preserve a no-router MPA fallback");
   const routes = Object.values(routeManifest);
-  assert.equal(routes.length, 16, "P0 manifest must enumerate the 16 approved pages");
-  assert.deepEqual([...spaRouteAllowlist], [], "P0 must ship with an empty SPA allowlist");
+  assert.equal(routes.length, 16, "manifest must enumerate the 16 approved pages");
+  assert.equal(spaNavigation, true, "SPA master switch must stay enabled");
+  assert.deepEqual([...spaRouteAllowlist], expectedP1Routes, "P1 allowlist must contain Home + four OCPP pages only");
   for (const route of routes) {
+    const migrated = expectedP1Routes.includes(route.path);
     assert.ok(route.path.endsWith(".html"), `${route.path} must retain its .html URL`);
-    assert.equal(route.load, null, `${route.path} must remain MPA-only in P0`);
+    assert.equal(typeof route.load, migrated ? "function" : "object", `${route.path} loader must match its P1 migration status`);
     const htmlFile = path.join(rootDir, "root-site", route.path);
     const html = await readFile(htmlFile, "utf8");
     const tags = [...html.matchAll(/<(?:link|script)\b[^>]*>/g)].map((match) => attributes(match[0]));
     const entry = tags.find((tag) => tag.type === "module" && tag.src)?.src;
     assert.ok(entry, `${route.path} must have one module entry`);
+    const expectedEntry = migrated
+      ? path.join(rootDir, "root-site/spa/entry.js")
+      : fileURLToPath(route.entry);
     assert.equal(
-      fileURLToPath(route.entry),
+      expectedEntry,
       path.resolve(path.dirname(htmlFile), entry),
-      `${route.path} manifest entry must match HTML`
+      `${route.path} HTML entry must match its migration status`
     );
+    if (migrated) {
+      const source = await readFile(fileURLToPath(route.entry), "utf8");
+      assert.match(source, /export\s+async\s+function\s+mountPage\s*\(/, `${route.path} must export mountPage()`);
+      const module = await route.load();
+      assert.equal(typeof module.mountPage, "function", `${route.path} loader must resolve its lifecycle controller without boot side effects`);
+    }
     const actualStyles = tags
       .filter((tag) => tag.rel === "stylesheet" && tag.href)
       .map((tag) => path.resolve(path.dirname(htmlFile), tag.href))
@@ -105,6 +128,28 @@ async function verifyLifecycle() {
   await mounted.dispose();
   assert.equal(customDisposed, 1);
   assert.equal(target.listeners.get("page")?.size, 0);
+
+  const aborted = new AbortController();
+  aborted.abort();
+  assert.throws(() => throwIfPageAborted(aborted.signal), { name: "AbortError" });
+
+  const sourceFilter = createDateFilter({ initialDate: "2026-07-16" });
+  sourceFilter.restoreState({ from: "2026-07-01", to: "2026-07-16", focus: "to", endDateEnabled: true, calendarMonth: "2026-07-01" });
+  const restoredFilter = createDateFilter({ initialDate: "2026-07-16" });
+  assert.equal(restoredFilter.restoreState(sourceFilter.captureState()), true);
+  assert.deepEqual(restoredFilter.captureState(), sourceFilter.captureState(), "date filter history state must round-trip");
+}
+
+function verifyOcppGuard() {
+  const calls = [];
+  assert.throws(() => requireOcppRouteAccess({ hasPermission() {}, isBfAdmin: false }, {
+    url: new URL("https://example.test/bizflow/ocpp-monitor.html"),
+    navigation: { hardNavigate(url, options) { calls.push({ url: String(url), options }); } }
+  }), { name: "AbortError" });
+  assert.deepEqual(calls, [{
+    url: "https://example.test/bizflow/home.html",
+    options: { replace: true }
+  }]);
 }
 
 function fakeBrowser(pathname = "/a.html") {
@@ -115,6 +160,10 @@ function fakeBrowser(pathname = "/a.html") {
     href: `https://example.test${pathname}`,
     origin: "https://example.test",
     assign(value) {
+      assigned.push(String(value));
+      this.href = new URL(value, this.href).href;
+    },
+    replace(value) {
       assigned.push(String(value));
       this.href = new URL(value, this.href).href;
     }
@@ -171,10 +220,12 @@ async function verifyRouter() {
 
   const browser = fakeBrowser();
   const pages = [];
+  const routeTarget = eventTarget();
   let allowLeave = true;
   let styleCommits = 0;
   const makeModule = (name) => ({
-    async mountPage() {
+    async mountPage({ scope }) {
+      scope.listen(routeTarget, "route", () => {});
       return {
         page: { data: { name }, render: () => name },
         canLeave: () => allowLeave,
@@ -203,6 +254,7 @@ async function verifyRouter() {
   });
   assert.equal(await router.start(), true);
   assert.deepEqual(pages, ["a"]);
+  assert.equal(routeTarget.listeners.get("route")?.size, 1);
   router.savePageState({ filter: "open" });
   assert.deepEqual(browser.history.state[SPA_HISTORY_KEY].pageState, { filter: "open" });
   allowLeave = false;
@@ -211,7 +263,12 @@ async function verifyRouter() {
   allowLeave = true;
   assert.equal(await router.navigate("/b.html"), true);
   assert.deepEqual(pages, ["a", "b"]);
-  assert.equal(styleCommits, 2);
+  for (let index = 0; index < 30; index += 1) {
+    const path = index % 2 === 0 ? "/a.html" : "/b.html";
+    assert.equal(await router.navigate(path), true);
+    assert.equal(routeTarget.listeners.get("route")?.size, 1, `route listener watermark drifted on cycle ${index + 1}`);
+  }
+  assert.equal(styleCommits, 32);
   allowLeave = false;
   assert.equal(await router.navigate("/legacy.html"), false, "canLeave must guard fallback MPA routes");
   assert.equal(browser.assigned.length, 0);
@@ -227,9 +284,10 @@ async function verifyRouter() {
     console.warn = originalWarn;
   }
   assert.equal(warnings.length, 1, "route failure must emit one observable warning");
-  assert.equal(browser.assigned.at(-1), "https://example.test/fail.html", "route failure must hard navigate");
+  assert.equal(browser.assigned.at(-1), "https://example.test/fail.html?tpSpa=0", "route failure must hard navigate to one-shot MPA mode");
   await router.dispose();
   assert.equal(browser.windowRef.listeners.get("popstate")?.size ?? 0, 0);
+  assert.equal(routeTarget.listeners.get("route")?.size ?? 0, 0);
 }
 
 async function verifyShellAdapter() {
@@ -247,6 +305,7 @@ async function verifyShellAdapter() {
 
 await verifyManifest();
 await verifyLifecycle();
+verifyOcppGuard();
 await verifyRouter();
 await verifyShellAdapter();
-console.log("SPA P0 contracts: PASS (16 routes, empty allowlist, lifecycle, fallback, shell adapter)");
+console.log("SPA P1 contracts: PASS (5 migrated routes, 11 MPA routes, 30-cycle lifecycle, fallback, shell adapter)");

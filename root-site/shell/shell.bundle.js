@@ -1611,6 +1611,7 @@
       };
     }
     menuItems = buildMenuItems(state2.profileUser ?? pageContext.data.user);
+    installNavigationPrerender(menuItems);
     state2.profileJoinRequest = null;
     closeTransientShellUi();
     if (pageContext.title) document.title = pageContext.title;

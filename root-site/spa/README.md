@@ -1,12 +1,13 @@
-# SPA P0 contract
+# SPA P1 contract
 
-P0 adds a dormant native SPA foundation. `spaRouteAllowlist` is intentionally empty, so all 16 pages keep their existing MPA navigation, direct HTML entry, login guard, and per-page boot behavior.
+P0 added the dormant native SPA foundation. P1 enables Home and the four OCPP pages; the other 11 routes keep their existing MPA navigation and per-page boot behavior.
 
 ## Fixed decisions
 
 - URLs retain `.html`.
 - `spaNavigation` is the master switch; a route also needs an allowlist entry and a static `load()` function before interception is possible.
 - Router or route-load failure falls back to a full document navigation. Existing HTML entry points stay supported for at least one release after full migration.
+- The one-shot fallback adds `?tpSpa=0`, mounts the same page controller without the router, removes the marker after mount, and leaves subsequent links as normal MPA navigations.
 - Back/Forward state lives under `history.state.tpSpa`: each page controller returns serializable filter state through `captureState()`, and the router records scroll coordinates. Each migration phase owns that page's exact restore implementation.
 - Unsaved work is declared through `hasUnsavedChanges()` and guarded through async `canLeave()`. Migrated pages must use the existing in-page confirm dialog; the router never calls `window.confirm()`.
 - P1 migrates Home and the four OCPP pages first. Bizflow and Team stay separate SPA sections until all approved pages have migrated; only then may `spaCrossSectionNavigation` be enabled.
@@ -37,7 +38,7 @@ Route CSS is prepared disabled, committed atomically after the page module mount
 Run:
 
 ```sh
-node scripts/test-spa-p0.mjs
+node scripts/test-spa-p1.mjs
 node scripts/audit-root-site-lifecycle.mjs --check
 ```
 

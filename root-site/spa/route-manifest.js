@@ -1,26 +1,30 @@
-// P0 ships with an empty allowlist: every production route remains an MPA page.
-// P1+ enables pages one by one after they export the mountPage/dispose contract.
+// P1 enables the Home + OCPP sample. Remaining routes stay on their MPA entries.
 export const spaNavigation = true;
 export const spaCrossSectionNavigation = false;
-export const spaRouteAllowlist = Object.freeze([]);
+export const spaRouteAllowlist = Object.freeze([
+  "/bizflow/home.html",
+  "/bizflow/ocpp-monitor.html",
+  "/bizflow/ocpp-charging.html",
+  "/bizflow/ocpp-users.html",
+  "/bizflow/ocpp-finance.html"
+]);
 
 const fromHere = (path) => new URL(path, import.meta.url).href;
 
-function route(path, section, entry, styles) {
+function route(path, section, entry, styles, load = null) {
   return Object.freeze({
     path,
     section,
     entry: fromHere(entry),
     styles: Object.freeze(styles.map(fromHere)),
-    // P1 replaces null with a static dynamic-import function when the page has a lifecycle controller.
-    load: null
+    load
   });
 }
 
 const routes = [
-  route("/bizflow/home.html", "bizflow", "../bizflow/home.js", ["../bizflow/home.css"]),
+  route("/bizflow/home.html", "bizflow", "../bizflow/home.js", ["../bizflow/home.css"], () => import("../bizflow/home.js")),
   route("/bizflow/orders.html", "bizflow", "../bizflow/orders.js", [
-    "../components/segment.css", "../components/date-filter.css", "../components/management-list.css",
+    "../components/segment.css", "../components/date-filter.css", "../components/date-range-panel.css", "../components/management-list.css",
     "../bizflow/orders.css", "../bizflow/orders-domain.css"
   ]),
   route("/bizflow/orders-create.html", "bizflow", "../bizflow/orders-create.js", [
@@ -30,7 +34,7 @@ const routes = [
     "../bizflow/customers.css", "../bizflow/orders.css"
   ]),
   route("/bizflow/customers.html", "bizflow", "../bizflow/customers.js", [
-    "../components/segment.css", "../components/date-filter.css", "../components/management-list.css",
+    "../components/segment.css", "../components/date-filter.css", "../components/date-range-panel.css", "../components/management-list.css",
     "../bizflow/customers.css", "../bizflow/customers-warranty.css"
   ]),
   route("/bizflow/customer-detail.html", "bizflow", "../bizflow/customer-detail.js", [
@@ -51,16 +55,16 @@ const routes = [
   ]),
   route("/bizflow/ocpp-monitor.html", "bizflow", "../bizflow/ocpp-monitor.js", [
     "../components/segment.css", "../components/date-filter.css", "../bizflow/ocpp.css"
-  ]),
+  ], () => import("../bizflow/ocpp-monitor.js")),
   route("/bizflow/ocpp-charging.html", "bizflow", "../bizflow/ocpp-charging.js", [
     "../components/segment.css", "../components/date-filter.css", "../bizflow/ocpp.css"
-  ]),
+  ], () => import("../bizflow/ocpp-charging.js")),
   route("/bizflow/ocpp-users.html", "bizflow", "../bizflow/ocpp-users.js", [
     "../components/segment.css", "../bizflow/ocpp.css"
-  ]),
+  ], () => import("../bizflow/ocpp-users.js")),
   route("/bizflow/ocpp-finance.html", "bizflow", "../bizflow/ocpp-finance.js", [
     "../components/segment.css", "../bizflow/ocpp.css"
-  ]),
+  ], () => import("../bizflow/ocpp-finance.js")),
   route("/team/index.html", "team", "../team/tasks.js", ["../team/tasks.css", "../team/tasks-domain.css"]),
   route("/team/members.html", "team", "../team/members.js", ["../team/members.css", "../team/members-domain.css"])
 ];

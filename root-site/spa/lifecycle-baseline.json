@@ -1,31 +1,31 @@
 {
   "schemaVersion": 1,
   "kind": "static-source-call-sites",
-  "note": "P0 source baseline; P1 browser acceptance must also compare runtime listener and timer watermarks.",
+  "note": "Current source baseline; browser acceptance must also compare runtime listener and timer watermarks.",
   "routes": {
     "/bizflow/home.html": {
-      "moduleCount": 26,
+      "moduleCount": 21,
       "totals": {
-        "documentListeners": 14,
-        "windowListeners": 6,
-        "mediaQueryListeners": 2,
-        "timeouts": 24,
+        "documentListeners": 1,
+        "windowListeners": 2,
+        "mediaQueryListeners": 0,
+        "timeouts": 25,
         "intervals": 2,
-        "animationFrames": 0,
+        "animationFrames": 1,
         "observers": 0,
-        "authSubscriptions": 5,
+        "authSubscriptions": 4,
         "realtimeSubscriptions": 2
       }
     },
     "/bizflow/orders.html": {
-      "moduleCount": 39,
+      "moduleCount": 40,
       "totals": {
-        "documentListeners": 32,
-        "windowListeners": 7,
+        "documentListeners": 34,
+        "windowListeners": 9,
         "mediaQueryListeners": 2,
         "timeouts": 28,
         "intervals": 2,
-        "animationFrames": 6,
+        "animationFrames": 8,
         "observers": 1,
         "authSubscriptions": 5,
         "realtimeSubscriptions": 2
@@ -60,14 +60,14 @@
       }
     },
     "/bizflow/customers.html": {
-      "moduleCount": 30,
+      "moduleCount": 31,
       "totals": {
-        "documentListeners": 17,
-        "windowListeners": 7,
+        "documentListeners": 19,
+        "windowListeners": 9,
         "mediaQueryListeners": 2,
-        "timeouts": 25,
+        "timeouts": 26,
         "intervals": 2,
-        "animationFrames": 0,
+        "animationFrames": 2,
         "observers": 0,
         "authSubscriptions": 5,
         "realtimeSubscriptions": 2
@@ -144,70 +144,70 @@
       }
     },
     "/bizflow/ocpp-monitor.html": {
-      "moduleCount": 29,
+      "moduleCount": 21,
       "totals": {
-        "documentListeners": 17,
-        "windowListeners": 6,
-        "mediaQueryListeners": 2,
-        "timeouts": 24,
+        "documentListeners": 1,
+        "windowListeners": 2,
+        "mediaQueryListeners": 0,
+        "timeouts": 25,
         "intervals": 2,
-        "animationFrames": 0,
+        "animationFrames": 1,
         "observers": 0,
-        "authSubscriptions": 5,
+        "authSubscriptions": 4,
         "realtimeSubscriptions": 2
       }
     },
     "/bizflow/ocpp-charging.html": {
-      "moduleCount": 31,
+      "moduleCount": 23,
       "totals": {
-        "documentListeners": 17,
-        "windowListeners": 6,
-        "mediaQueryListeners": 2,
-        "timeouts": 24,
+        "documentListeners": 1,
+        "windowListeners": 2,
+        "mediaQueryListeners": 0,
+        "timeouts": 25,
         "intervals": 2,
-        "animationFrames": 0,
+        "animationFrames": 1,
         "observers": 0,
-        "authSubscriptions": 5,
+        "authSubscriptions": 4,
         "realtimeSubscriptions": 2
       }
     },
     "/bizflow/ocpp-users.html": {
-      "moduleCount": 29,
+      "moduleCount": 21,
       "totals": {
-        "documentListeners": 16,
-        "windowListeners": 6,
-        "mediaQueryListeners": 2,
-        "timeouts": 24,
+        "documentListeners": 1,
+        "windowListeners": 2,
+        "mediaQueryListeners": 0,
+        "timeouts": 25,
         "intervals": 2,
-        "animationFrames": 0,
+        "animationFrames": 1,
         "observers": 0,
-        "authSubscriptions": 5,
+        "authSubscriptions": 4,
         "realtimeSubscriptions": 2
       }
     },
     "/bizflow/ocpp-finance.html": {
-      "moduleCount": 29,
+      "moduleCount": 21,
       "totals": {
-        "documentListeners": 16,
-        "windowListeners": 6,
-        "mediaQueryListeners": 2,
-        "timeouts": 24,
+        "documentListeners": 1,
+        "windowListeners": 2,
+        "mediaQueryListeners": 0,
+        "timeouts": 25,
         "intervals": 2,
-        "animationFrames": 0,
+        "animationFrames": 1,
         "observers": 0,
-        "authSubscriptions": 5,
+        "authSubscriptions": 4,
         "realtimeSubscriptions": 2
       }
     },
     "/team/index.html": {
       "moduleCount": 36,
       "totals": {
-        "documentListeners": 22,
+        "documentListeners": 23,
         "windowListeners": 6,
         "mediaQueryListeners": 2,
         "timeouts": 24,
         "intervals": 2,
-        "animationFrames": 1,
+        "animationFrames": 2,
         "observers": 0,
         "authSubscriptions": 5,
         "realtimeSubscriptions": 2

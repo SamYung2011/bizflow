@@ -1,5 +1,9 @@
 function noop() {}
 
+export function throwIfPageAborted(signal) {
+  if (signal?.aborted) throw new DOMException("SPA page mount aborted", "AbortError");
+}
+
 export function createPageScope(parentSignal = null) {
   const abortController = new AbortController();
   const cleanups = [];

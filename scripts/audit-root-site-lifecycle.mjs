@@ -78,7 +78,7 @@ for (const route of Object.values(routeManifest)) routes[route.path] = await aud
 const baseline = {
   schemaVersion: 1,
   kind: "static-source-call-sites",
-  note: "P0 source baseline; P1 browser acceptance must also compare runtime listener and timer watermarks.",
+  note: "Current source baseline; browser acceptance must also compare runtime listener and timer watermarks.",
   routes
 };
 const serialized = `${JSON.stringify(baseline, null, 2)}\n`;

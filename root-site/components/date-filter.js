@@ -386,7 +386,35 @@ export function createDateFilter({ id = "primary", initialDate = "", onChange = 
     return true;
   }
 
+  function captureState() {
+    return {
+      from: state.from,
+      to: state.to,
+      focus: state.focus,
+      endDateEnabled: state.endDateEnabled,
+      calendarMonth: state.calendarMonth
+    };
+  }
+
+  function restoreState(value) {
+    if (!value || typeof value !== "object") return false;
+    const from = normalizeDateInput(value.from);
+    const to = normalizeDateInput(value.to);
+    state.from = from;
+    state.to = to;
+    state.focus = value.focus === "to" ? "to" : "from";
+    state.endDateEnabled = value.endDateEnabled !== false;
+    if (!state.endDateEnabled) state.to = "";
+    if (state.from && state.to && dateValue(state.to) < dateValue(state.from)) {
+      [state.from, state.to] = [state.to, state.from];
+    }
+    state.calendarMonth = monthStartInput(normalizeDateInput(value.calendarMonth) || state.from || state.to || initialDate || todayInput());
+    state.panelOpen = false;
+    return true;
+  }
+
   return {
+    captureState,
     close,
     handleChange,
     handleClick,
@@ -401,6 +429,7 @@ export function createDateFilter({ id = "primary", initialDate = "", onChange = 
       if (to != null && current > to) return false;
       return true;
     },
-    render
+    render,
+    restoreState
   };
 }
