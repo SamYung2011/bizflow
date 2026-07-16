@@ -129,9 +129,8 @@ const dict = {
   }
 };
 
-const [data, , unreadWatermarks, currentUser] = await Promise.all([
+const [data, unreadWatermarks, currentUser] = await Promise.all([
   getInventoryPageData(),
-  ensurePendingDeductionData(),
   getUnreadWatermarks(),
   getCurrentUser()
 ]);
@@ -383,7 +382,10 @@ async function ensureTabData(tab) {
   if (tab === "itemMap") await ensureItemMapData();
   else if (tab === "shopify") await ensureShopifyData();
   else if (tab === "suppliers") await ensureSuppliersData();
-  else if (tab === "pending") await ensurePendingOrderLinks();
+  else if (tab === "pending") await Promise.all([
+    ensurePendingDeductionData(),
+    ensurePendingOrderLinks()
+  ]);
 }
 
 function rerenderInventoryPage({ focusSearch = false, focusAddName = false } = {}) {
@@ -537,3 +539,16 @@ window.__shellMenu = createBizflowMenu("inventory");
 window.__shellData = { unread: await getUnread(), user: currentUser };
 window.__shellContent = renderInventory;
 await import("../shell/shell.js");
+
+// The pending-deduction snapshot scans invoices, customers and movements. Warm it only
+// after the product list has painted so an unrelated tab cannot delay Inventory's first frame.
+const preloadPendingDeduction = () => {
+  ensurePendingDeductionData()
+    .then(() => rerenderInventoryPage())
+    .catch((error) => console.warn("[inventory] pending deduction preload failed", error));
+};
+if (typeof requestAnimationFrame === "function") {
+  requestAnimationFrame(() => setTimeout(preloadPendingDeduction, 0));
+} else {
+  setTimeout(preloadPendingDeduction, 0);
+}
