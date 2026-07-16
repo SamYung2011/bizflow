@@ -27,7 +27,10 @@ const expectedSpaRoutes = [
   "/bizflow/customer-detail.html",
   "/bizflow/orders.html",
   "/bizflow/orders-create.html",
-  "/bizflow/orders-detail.html"
+  "/bizflow/orders-detail.html",
+  "/bizflow/inventory.html",
+  "/bizflow/inventory-detail.html",
+  "/bizflow/expense.html"
 ];
 
 function attributes(tag) {
@@ -313,4 +316,4 @@ await verifyLifecycle();
 verifyOcppGuard();
 await verifyRouter();
 await verifyShellAdapter();
-console.log("SPA rollout contracts: PASS (10 migrated routes, 6 MPA routes, 30-cycle lifecycle, fallback, shell adapter)");
+console.log("SPA rollout contracts: PASS (13 migrated routes, 3 MPA routes, 30-cycle lifecycle, fallback, shell adapter)");

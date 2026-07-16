@@ -125,8 +125,8 @@ const state = {
 
 let rerender = () => {};
 let currentProducts = [];
-let attached = false;
 let liveReadOnly = false;
+let dataLoadVersion = 0;
 
 function writeAttributes(disabled = liveReadOnly) {
   return disabled ? ' disabled aria-disabled="true"' : "";
@@ -147,7 +147,9 @@ function withoutDefaultTitle(value) {
 
 export async function ensureItemMapData() {
   if (state.loaded) return;
+  const version = dataLoadVersion;
   const [aliasData, orderData] = await Promise.all([getInventoryAliasesData(), getOrdersPageData()]);
+  if (version !== dataLoadVersion) return;
   state.aliases = aliasData.aliases;
   state.orders = orderData.orders;
   state.loaded = true;
@@ -321,11 +323,9 @@ function closeModal() {
   rerender();
 }
 
-export function attachItemMapBehaviors({ rerender: nextRerender }) {
+export function attachItemMapBehaviors({ rerender: nextRerender, scope }) {
   rerender = nextRerender;
-  if (attached) return;
-  attached = true;
-  document.addEventListener("click", async (event) => {
+  scope.listen(document, "click", async (event) => {
     if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     const toggle = event.target.closest("[data-item-map-group-toggle]");
     if (toggle) {
@@ -373,7 +373,7 @@ export function attachItemMapBehaviors({ rerender: nextRerender }) {
       rerender();
     }
   });
-  document.addEventListener("input", (event) => {
+  scope.listen(document, "input", (event) => {
     if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     if (!state.draft) return;
     const field = event.target.closest("[data-item-map-field]");
@@ -381,7 +381,7 @@ export function attachItemMapBehaviors({ rerender: nextRerender }) {
     const qty = event.target.closest("[data-item-map-qty]");
     if (qty) state.draft.products[Number(qty.getAttribute("data-item-map-qty"))].qty = Math.max(1, Number(qty.value) || 1);
   });
-  document.addEventListener("change", (event) => {
+  scope.listen(document, "change", (event) => {
     if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     if (!state.draft) return;
     if (event.target.matches("[data-item-map-skip]")) {
@@ -392,7 +392,7 @@ export function attachItemMapBehaviors({ rerender: nextRerender }) {
     const product = event.target.closest("[data-item-map-product]");
     if (product) state.draft.products[Number(product.getAttribute("data-item-map-product"))].product_id = product.value;
   });
-  document.addEventListener("submit", (event) => {
+  scope.listen(document, "submit", (event) => {
     if (!event.target.matches("[data-item-map-form]") || !state.draft) return;
     event.preventDefault();
     if (liveReadOnly) return;
@@ -416,9 +416,34 @@ export function attachItemMapBehaviors({ rerender: nextRerender }) {
     else state.aliases.unshift(saved);
     closeModal();
   });
-  document.addEventListener("keydown", (event) => {
+  scope.listen(document, "keydown", (event) => {
     if (event.key === "Escape" && state.draft) closeModal();
   });
+}
+
+export function captureItemMapState() {
+  return { expanded: [...state.expanded] };
+}
+
+export function restoreItemMapState(value = null) {
+  state.expanded = new Set(Array.isArray(value?.expanded) ? value.expanded.map(String) : []);
+  state.draft = null;
+}
+
+export function hasItemMapUnsavedChanges() {
+  return state.draft !== null;
+}
+
+export function disposeItemMapState() {
+  dataLoadVersion += 1;
+  state.loaded = false;
+  state.aliases = [];
+  state.orders = [];
+  state.expanded = new Set();
+  state.draft = null;
+  currentProducts = [];
+  liveReadOnly = false;
+  rerender = () => {};
 }
 
 function currentHelpersLang() {

@@ -7,11 +7,23 @@ import { managementPageSize, renderManagementList, renderManagementPager } from 
 import { renderSegment as renderSharedSegment } from "../components/segment.js";
 import { consumeNavigationPreset, navigationPresetKeys } from "../components/navigation-presets.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
-import { attachItemMapBehaviors, ensureItemMapData, renderItemMap } from "./inventory-item-map.js";
-import { attachShopifyBehaviors, ensureShopifyData, renderShopify } from "./inventory-shopify.js";
-import { attachSupplierBehaviors, ensureSuppliersData, renderSuppliers } from "./inventory-suppliers.js";
+import { confirmInPage } from "../components/confirm-dialog.js";
+import { throwIfPageAborted } from "../spa/page-lifecycle.js";
+import {
+  attachItemMapBehaviors, captureItemMapState, disposeItemMapState, ensureItemMapData,
+  hasItemMapUnsavedChanges, renderItemMap, restoreItemMapState
+} from "./inventory-item-map.js";
+import {
+  attachShopifyBehaviors, captureShopifyState, disposeShopifyState, ensureShopifyData,
+  hasShopifyUnsavedChanges, renderShopify, restoreShopifyState
+} from "./inventory-shopify.js";
+import {
+  attachSupplierBehaviors, captureSupplierState, disposeSupplierState, ensureSuppliersData,
+  hasSupplierUnsavedChanges, renderSuppliers, restoreSupplierState
+} from "./inventory-suppliers.js";
 import {
   attachPendingDeductionBehaviors,
+  disposePendingDeductionState,
   ensurePendingDeductionData,
   ensurePendingOrderLinks,
   pendingDeductionCount,
@@ -53,7 +65,8 @@ const dict = {
     "inventory.addModal.warranty": "保修月數",
     "inventory.addModal.cancel": "取消",
     "inventory.addModal.confirm": "確認新增",
-    "inventory.addModal.close": "關閉"
+    "inventory.addModal.close": "關閉",
+    "inventory.leaveUnsaved": "尚有未保存的庫存資料，確定離開？"
   },
   en: {
     "inventory.title": "Product inventory",
@@ -89,7 +102,8 @@ const dict = {
     "inventory.addModal.warranty": "Warranty months",
     "inventory.addModal.cancel": "Cancel",
     "inventory.addModal.confirm": "Add product",
-    "inventory.addModal.close": "Close"
+    "inventory.addModal.close": "Close",
+    "inventory.leaveUnsaved": "There are unsaved inventory changes. Leave this page?"
   },
   fr: {
     "inventory.title": "Stock produits",
@@ -125,19 +139,17 @@ const dict = {
     "inventory.addModal.warranty": "Garantie en mois",
     "inventory.addModal.cancel": "Annuler",
     "inventory.addModal.confirm": "Ajouter",
-    "inventory.addModal.close": "Fermer"
+    "inventory.addModal.close": "Fermer",
+    "inventory.leaveUnsaved": "Des modifications de stock ne sont pas enregistrées. Quitter cette page ?"
   }
 };
 
-const [data, unreadWatermarks, currentUser] = await Promise.all([
-  getInventoryPageData(),
-  getUnreadWatermarks(),
-  getCurrentUser()
-]);
-const liveReadOnly = typeof currentUser?.hasPermission === "function";
-const writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
-markRead("inventory", unreadWatermarks.inventory);
-const presetSearch = consumeNavigationPreset(navigationPresetKeys.inventorySearch) ?? "";
+let data = null;
+let unreadWatermarks = null;
+let unread = null;
+let currentUser = null;
+let liveReadOnly = false;
+let writeAttributes = "";
 const tabs = ["products", "itemMap", "shopify", "suppliers", "pending"];
 const categoryLabelKeys = {
   "轉插": "inventory.category.adapter",
@@ -147,16 +159,19 @@ const categoryLabelKeys = {
   "其它": "inventory.category.other"
 };
 
-const state = {
+let state = {
   tab: "products",
   category: "all",
   categoryOpen: false,
   addModalOpen: false,
-  search: presetSearch,
-  page: 1
+  search: "",
+  page: 1,
+  addDraftDirty: false
 };
 
 let currentHelpers = null;
+let activeScope = null;
+let activeNavigation = null;
 
 function pageT(lang, key) {
   return dict[lang]?.[key] ?? dict.zh[key] ?? key;
@@ -412,17 +427,19 @@ function closeCategoryMenu() {
   if (popover) popover.classList.remove("menu-popover--open");
 }
 
-document.addEventListener("click", (event) => {
+async function onInventoryClick(event) {
   if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
   if (event.target.closest("[data-inventory-add]")) {
     state.addModalOpen = true;
     state.categoryOpen = false;
+    state.addDraftDirty = false;
     rerenderInventoryPage({ focusAddName: true });
     return;
   }
 
   if (event.target.closest("[data-inventory-add-close]") || event.target.matches("[data-inventory-add-overlay]")) {
     state.addModalOpen = false;
+    state.addDraftDirty = false;
     rerenderInventoryPage();
     return;
   }
@@ -431,13 +448,17 @@ document.addEventListener("click", (event) => {
   if (tab) {
     const nextTab = tab.getAttribute("data-inventory-tab");
     if (tabs.includes(nextTab) && state.tab !== nextTab) {
+      if (hasInventoryUnsavedChanges()) {
+        const leave = await confirmInPage(pageT(currentHelpers?.lang ?? "zh", "inventory.leaveUnsaved"));
+        if (!leave) return;
+        discardTransientDrafts();
+      }
       state.tab = nextTab;
       state.page = 1;
       closeCategoryMenu();
       rerenderInventoryPage();
-      ensureTabData(nextTab).then(() => {
-        if (state.tab === nextTab) rerenderInventoryPage();
-      });
+      await ensureTabData(nextTab);
+      if (!activeScope?.disposed && state.tab === nextTab) rerenderInventoryPage();
     }
     return;
   }
@@ -472,33 +493,35 @@ document.addEventListener("click", (event) => {
   const product = event.target.closest("[data-inventory-product]");
   if (product) {
     const id = product.getAttribute("data-product-id");
-    if (id) window.location.href = `./inventory-detail.html?id=${encodeURIComponent(id)}`;
+    if (id) navigateTo(`./inventory-detail.html?id=${encodeURIComponent(id)}`);
     return;
   }
 
   if (!event.target.closest("[data-inventory-category-menu]")) closeCategoryMenu();
-});
+}
 
-document.addEventListener("input", (event) => {
+function onInventoryInput(event) {
+  if (event.target.closest("[data-inventory-add-form]")) state.addDraftDirty = true;
   const search = event.target.closest("[data-inventory-search]");
   if (!search) return;
   state.search = search.value;
   state.page = 1;
   state.categoryOpen = false;
   rerenderInventoryPage({ focusSearch: true });
-});
+}
 
-document.addEventListener("keydown", (event) => {
+function onInventoryKeydown(event) {
   if (event.key !== "Escape") return;
   if (state.addModalOpen) {
     state.addModalOpen = false;
+    state.addDraftDirty = false;
     rerenderInventoryPage();
     return;
   }
   closeCategoryMenu();
-});
+}
 
-document.addEventListener("submit", (event) => {
+function onInventorySubmit(event) {
   const form = event.target.closest("[data-inventory-add-form]");
   if (!form) return;
   event.preventDefault();
@@ -524,31 +547,119 @@ document.addEventListener("submit", (event) => {
     detail: { productId: id, warrantyMonths, specs, collections: [], tags: [], images: [], warehouses: [], variants: [] }
   });
   state.addModalOpen = false;
+  state.addDraftDirty = false;
   state.category = "all";
   state.search = "";
   state.page = 1;
   rerenderInventoryPage();
-});
+}
 
-attachItemMapBehaviors({ rerender: rerenderInventoryPage });
-attachShopifyBehaviors({ rerender: rerenderInventoryPage });
-attachSupplierBehaviors({ rerender: rerenderInventoryPage });
-attachPendingDeductionBehaviors({ rerender: rerenderInventoryPage });
+function navigateTo(relative) {
+  const url = new URL(relative, window.location.href);
+  if (typeof activeNavigation?.navigate === "function") void activeNavigation.navigate(url);
+  else if (typeof activeNavigation?.hardNavigate === "function") activeNavigation.hardNavigate(url);
+  else window.location.assign(url.href);
+}
 
-window.__shellMenu = createBizflowMenu("inventory");
-window.__shellData = { unread: await getUnread(), user: currentUser };
-window.__shellContent = renderInventory;
-await import("../shell/shell.js");
+function hasInventoryUnsavedChanges() {
+  return (state.addModalOpen && state.addDraftDirty)
+    || hasItemMapUnsavedChanges()
+    || hasShopifyUnsavedChanges()
+    || hasSupplierUnsavedChanges();
+}
 
-// The pending-deduction snapshot scans invoices, customers and movements. Warm it only
-// after the product list has painted so an unrelated tab cannot delay Inventory's first frame.
-const preloadPendingDeduction = () => {
-  ensurePendingDeductionData()
-    .then(() => rerenderInventoryPage())
-    .catch((error) => console.warn("[inventory] pending deduction preload failed", error));
-};
-if (typeof requestAnimationFrame === "function") {
-  requestAnimationFrame(() => setTimeout(preloadPendingDeduction, 0));
-} else {
-  setTimeout(preloadPendingDeduction, 0);
+function discardTransientDrafts() {
+  state.addModalOpen = false;
+  state.addDraftDirty = false;
+  restoreItemMapState(captureItemMapState());
+  restoreShopifyState(captureShopifyState());
+  restoreSupplierState(captureSupplierState());
+}
+
+function restoredState(value = null, presetSearch = "") {
+  const next = value && typeof value === "object" ? value : {};
+  return {
+    tab: tabs.includes(next.tab) ? next.tab : "products",
+    category: typeof next.category === "string" ? next.category : "all",
+    categoryOpen: false,
+    addModalOpen: false,
+    search: typeof next.search === "string" ? next.search : presetSearch,
+    page: Number.isInteger(next.page) && next.page > 0 ? next.page : 1,
+    addDraftDirty: false
+  };
+}
+
+export async function mountPage({ scope, signal, historyState = null, navigation = null } = {}) {
+  activeScope = scope;
+  activeNavigation = navigation;
+  const presetSearch = consumeNavigationPreset(navigationPresetKeys.inventorySearch) ?? "";
+  [data, unreadWatermarks, currentUser, unread] = await Promise.all([
+    getInventoryPageData(), getUnreadWatermarks(), getCurrentUser(), getUnread()
+  ]);
+  throwIfPageAborted(signal);
+  liveReadOnly = typeof currentUser?.hasPermission === "function";
+  writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
+  state = restoredState(historyState, presetSearch);
+  restoreItemMapState(historyState?.itemMap);
+  restoreSupplierState(historyState?.suppliers);
+  await ensureTabData(state.tab);
+  throwIfPageAborted(signal);
+  restoreShopifyState(historyState?.shopify);
+
+  return {
+    page: {
+      menu: createBizflowMenu("inventory"),
+      data: { unread, user: currentUser },
+      render: renderInventory,
+      title: "Honnmono · Inventory"
+    },
+    activate() {
+      markRead("inventory", unreadWatermarks.inventory);
+      scope.listen(document, "click", onInventoryClick);
+      scope.listen(document, "input", onInventoryInput);
+      scope.listen(document, "change", onInventoryInput);
+      scope.listen(document, "keydown", onInventoryKeydown);
+      scope.listen(document, "submit", onInventorySubmit);
+      attachItemMapBehaviors({ rerender: rerenderInventoryPage, scope });
+      attachShopifyBehaviors({ rerender: rerenderInventoryPage, scope });
+      attachSupplierBehaviors({ rerender: rerenderInventoryPage, scope });
+      attachPendingDeductionBehaviors({ rerender: rerenderInventoryPage, scope });
+      // Warm the expensive pending snapshot only after the visible product list has painted.
+      scope.animationFrame(() => scope.timeout(() => {
+        ensurePendingDeductionData()
+          .then(() => { if (!scope.disposed) rerenderInventoryPage(); })
+          .catch((error) => console.warn("[inventory] pending deduction preload failed", error));
+      }, 0));
+    },
+    hasUnsavedChanges: hasInventoryUnsavedChanges,
+    async canLeave() {
+      if (!hasInventoryUnsavedChanges()) return true;
+      return confirmInPage(pageT(currentHelpers?.lang ?? "zh", "inventory.leaveUnsaved"));
+    },
+    captureState() {
+      return {
+        tab: state.tab,
+        category: state.category,
+        search: state.search,
+        page: state.page,
+        itemMap: captureItemMapState(),
+        shopify: captureShopifyState(),
+        suppliers: captureSupplierState()
+      };
+    },
+    dispose() {
+      closeCategoryMenu();
+      disposeItemMapState();
+      disposeShopifyState();
+      disposeSupplierState();
+      disposePendingDeductionState();
+      data = null;
+      unreadWatermarks = null;
+      unread = null;
+      currentUser = null;
+      currentHelpers = null;
+      activeScope = null;
+      activeNavigation = null;
+    }
+  };
 }

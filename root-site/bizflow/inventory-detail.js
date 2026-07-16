@@ -3,6 +3,8 @@
 
 import { getInventoryDetailData, getUnread, getCurrentUser } from "../data/provider.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
+import { confirmInPage } from "../components/confirm-dialog.js";
+import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 
 const dict = {
   zh: {
@@ -37,7 +39,8 @@ const dict = {
     "inventory.empty.warehouses": "暫無倉存資料",
     "inventory.cancel": "取消",
     "inventory.confirm": "確認",
-    "inventory.close": "關閉"
+    "inventory.close": "關閉",
+    "inventory.leaveUnsaved": "商品修改尚未保存，確定離開？"
   },
   en: {
     "inventory.detail.product": "Product",
@@ -71,7 +74,8 @@ const dict = {
     "inventory.empty.warehouses": "No warehouse stock",
     "inventory.cancel": "Cancel",
     "inventory.confirm": "Confirm",
-    "inventory.close": "Close"
+    "inventory.close": "Close",
+    "inventory.leaveUnsaved": "Product changes have not been saved. Leave this page?"
   },
   fr: {
     "inventory.detail.product": "Produit",
@@ -105,31 +109,32 @@ const dict = {
     "inventory.empty.warehouses": "Aucun stock d'entrepôt",
     "inventory.cancel": "Annuler",
     "inventory.confirm": "Confirmer",
-    "inventory.close": "Fermer"
+    "inventory.close": "Fermer",
+    "inventory.leaveUnsaved": "Les modifications du produit ne sont pas enregistrées. Quitter cette page ?"
   }
 };
 
-const params = new URLSearchParams(window.location.search);
-const [detail, currentUser] = await Promise.all([
-  getInventoryDetailData(params.get("id")),
-  getCurrentUser()
-]);
-const liveReadOnly = typeof currentUser?.hasPermission === "function";
-const writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
-const statusOptions = ["active", "discontinued"].includes(detail.product.status)
-  ? ["active", "discontinued"]
-  : ["enabled", "draft"];
+let detail = null;
+let currentUser = null;
+let unread = null;
+let liveReadOnly = false;
+let writeAttributes = "";
+let statusOptions = [];
 const warehouseOptions = ["hk", "zh"];
 
-const state = {
-  status: detail.product.status,
+let state = {
+  status: "",
   statusOpen: false,
   modalOpen: false,
   modalItem: null,
-  warehouseOpen: null
+  warehouseOpen: null,
+  basicDirty: false,
+  seriesCount: 0
 };
 
 let currentHelpers = null;
+let activeNavigation = null;
+let detailCommitted = false;
 
 function pageT(lang, key) {
   return dict[lang]?.[key] ?? dict.zh[key] ?? key;
@@ -378,10 +383,11 @@ function openModal(item) {
   rerenderDetailPage();
 }
 
-document.addEventListener("click", (event) => {
+function onInventoryDetailClick(event) {
   if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
   if (event.target.closest("[data-detail-back]")) {
-    window.location.href = "./inventory.html";
+    if (event.target.closest("[data-inventory-write]")) detailCommitted = true;
+    navigateTo("./inventory.html");
     return;
   }
 
@@ -451,10 +457,11 @@ document.addEventListener("click", (event) => {
 
   if (!event.target.closest("[data-detail-status-menu]")) closeStatusMenu();
   if (!event.target.closest("[data-modal-warehouse-menu]")) closeWarehouseMenus();
-});
+}
 
-document.addEventListener("input", (event) => {
+function onInventoryDetailInput(event) {
   if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
+  if (event.target.closest(".inventory-input, .inventory-subitem-row > .inventory-quantity-input")) state.basicDirty = true;
   if (!state.modalItem) return;
   const price = event.target.closest("[data-modal-price]");
   const warranty = event.target.closest("[data-modal-warranty]");
@@ -465,9 +472,9 @@ document.addEventListener("input", (event) => {
     const index = Number(qty.getAttribute("data-modal-warehouse-qty"));
     if (state.modalItem.warehouses[index]) state.modalItem.warehouses[index].quantity = qty.value;
   }
-});
+}
 
-document.addEventListener("keydown", (event) => {
+function onInventoryDetailKeydown(event) {
   if (event.key !== "Escape") return;
   if (state.modalOpen) {
     closeModal();
@@ -475,9 +482,71 @@ document.addEventListener("keydown", (event) => {
   }
   closeStatusMenu();
   closeWarehouseMenus();
-});
+}
 
-window.__shellMenu = createBizflowMenu("inventory");
-window.__shellData = { unread: await getUnread(), user: currentUser };
-window.__shellContent = renderInventoryDetail;
-await import("../shell/shell.js");
+function navigateTo(relative) {
+  const url = new URL(relative, window.location.href);
+  if (typeof activeNavigation?.navigate === "function") void activeNavigation.navigate(url);
+  else if (typeof activeNavigation?.hardNavigate === "function") activeNavigation.hardNavigate(url);
+  else window.location.assign(url.href);
+}
+
+function hasInventoryDetailUnsavedChanges() {
+  if (detailCommitted) return false;
+  return state.status !== detail?.product.status
+    || state.basicDirty
+    || detail?.series.length !== state.seriesCount
+    || state.modalItem !== null;
+}
+
+export async function mountPage({ scope, signal, url = new URL(window.location.href), navigation = null } = {}) {
+  activeNavigation = navigation;
+  detailCommitted = false;
+  const productId = url.searchParams.get("id");
+  [detail, currentUser, unread] = await Promise.all([
+    getInventoryDetailData(productId), getCurrentUser(), getUnread()
+  ]);
+  throwIfPageAborted(signal);
+  liveReadOnly = typeof currentUser?.hasPermission === "function";
+  writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
+  statusOptions = ["active", "discontinued"].includes(detail.product.status)
+    ? ["active", "discontinued"]
+    : ["enabled", "draft"];
+  state = {
+    status: detail.product.status,
+    statusOpen: false,
+    modalOpen: false,
+    modalItem: null,
+    warehouseOpen: null,
+    basicDirty: false,
+    seriesCount: detail.series.length
+  };
+
+  return {
+    page: {
+      menu: createBizflowMenu("inventory"),
+      data: { unread, user: currentUser },
+      render: renderInventoryDetail,
+      title: `Honnmono · ${detail.product.name}`
+    },
+    activate() {
+      scope.listen(document, "click", onInventoryDetailClick);
+      scope.listen(document, "input", onInventoryDetailInput);
+      scope.listen(document, "keydown", onInventoryDetailKeydown);
+    },
+    hasUnsavedChanges: hasInventoryDetailUnsavedChanges,
+    async canLeave() {
+      if (!hasInventoryDetailUnsavedChanges()) return true;
+      return confirmInPage(pageT(currentHelpers?.lang ?? "zh", "inventory.leaveUnsaved"));
+    },
+    captureState: () => null,
+    dispose() {
+      detail = null;
+      currentUser = null;
+      unread = null;
+      currentHelpers = null;
+      activeNavigation = null;
+      state.modalItem = null;
+    }
+  };
+}

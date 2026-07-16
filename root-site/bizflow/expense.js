@@ -13,6 +13,7 @@ import {
 } from "./expense-model.js";
 import { createLiveExpense } from "../data/live-expense-writes.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
+import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 
 const copy = {
   zh: {
@@ -67,7 +68,8 @@ const copy = {
     categoryRequired: "請選擇類別",
     saveFailed: "提交失敗，請稍後重試",
     noDescription: "—",
-    receiptCount: "{count} 張"
+    receiptCount: "{count} 張",
+    leaveUnsaved: "報銷草稿尚未提交，確定離開？"
   },
   en: {
     title: "Finance",
@@ -121,7 +123,8 @@ const copy = {
     categoryRequired: "Select a category",
     saveFailed: "Submission failed. Please try again.",
     noDescription: "—",
-    receiptCount: "{count} images"
+    receiptCount: "{count} images",
+    leaveUnsaved: "This reimbursement draft has not been submitted. Leave this page?"
   },
   fr: {
     title: "Finance",
@@ -175,27 +178,31 @@ const copy = {
     categoryRequired: "Sélectionnez une catégorie",
     saveFailed: "Échec de l’envoi. Réessayez.",
     noDescription: "—",
-    receiptCount: "{count} images"
+    receiptCount: "{count} images",
+    leaveUnsaved: "Ce brouillon de remboursement n’est pas envoyé. Quitter cette page ?"
   }
 };
 
-const [snapshot, currentUser, unread] = await Promise.all([getExpenseData(), getCurrentUser(), getUnread()]);
-const authenticated = typeof currentUser?.hasPermission === "function";
-const isAdmin = !authenticated || currentUser?.isBfAdmin === true;
-const liveReadOnly = authenticated;
-const localWriteAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
-const ownerKey = String(currentUser.employeeId || currentUser.email || currentUser.name || "");
+let snapshot = null;
+let currentUser = null;
+let unread = null;
+let authenticated = false;
+let isAdmin = true;
+let liveReadOnly = false;
+let localWriteAttributes = "";
+let ownerKey = "";
 const currencySymbols = { RMB: "¥", HKD: "HK$", USD: "US$" };
 
-const state = {
-  rows: normalizeExpenseRows(snapshot.reimbursements),
-  filter: isAdmin ? "pending" : "mine",
+let state = {
+  rows: [],
+  filter: "pending",
   draft: null,
   error: "",
   writeBusy: false
 };
 
 let currentHelpers = null;
+let activeMountId = 0;
 
 function t(lang, key, values = {}) {
   const template = copy[lang]?.[key] ?? copy.zh[key] ?? key;
@@ -379,7 +386,7 @@ function findLocalRow(id) {
   return state.rows.find((row) => row.id === id && row.local);
 }
 
-document.addEventListener("click", async (event) => {
+async function onExpenseClick(event) {
   if (liveReadOnly && event.target.closest("[data-expense-write]")) return;
   if (state.writeBusy && event.target.closest("[data-expense-create-write]")) return;
   const filter = event.target.closest("[data-expense-filter]");
@@ -449,18 +456,18 @@ document.addEventListener("click", async (event) => {
       rerender();
     }
   }
-});
+}
 
-document.addEventListener("input", (event) => {
+function onExpenseInput(event) {
   if (liveReadOnly && event.target.closest("[data-expense-write]")) return;
   if (state.writeBusy && event.target.closest("[data-expense-create-write]")) return;
   const field = event.target.closest("[data-expense-field]");
   if (!field || !state.draft) return;
   state.draft[field.getAttribute("data-expense-field")] = field.value;
   state.error = "";
-});
+}
 
-document.addEventListener("change", (event) => {
+function onExpenseChange(event) {
   if (liveReadOnly && event.target.closest("[data-expense-write]")) return;
   if (state.writeBusy && event.target.closest("[data-expense-create-write]")) return;
   const field = event.target.closest("[data-expense-field]");
@@ -474,9 +481,9 @@ document.addEventListener("change", (event) => {
     state.draft.receipts.push({ file, url: URL.createObjectURL(file), name: file.name });
   });
   rerender();
-});
+}
 
-document.addEventListener("submit", async (event) => {
+async function onExpenseSubmit(event) {
   if (!event.target.matches("[data-expense-form]") || !state.draft) return;
   event.preventDefault();
   if (state.writeBusy) return;
@@ -485,6 +492,7 @@ document.addEventListener("submit", async (event) => {
   else if (!Number.isFinite(amount) || amount <= 0) state.error = "amountRequired";
   else if (!categories.includes(state.draft.category)) state.error = "categoryRequired";
   else if (authenticated) {
+    const mountId = activeMountId;
     state.writeBusy = true;
     state.error = "";
     rerender();
@@ -497,6 +505,7 @@ document.addEventListener("submit", async (event) => {
         description: state.draft.description.trim(),
         files: state.draft.receipts.map((receipt) => receipt.file).filter(Boolean)
       });
+      if (mountId !== activeMountId) return;
       const row = normalizeExpenseRows([{ ...result.row, employee: currentUser.name }])[0];
       revokeReceipts(state.draft.receipts);
       state.rows.unshift(row);
@@ -504,9 +513,11 @@ document.addEventListener("submit", async (event) => {
       state.draft = null;
       state.error = "";
     } catch (error) {
+      if (mountId !== activeMountId) return;
       console.warn("Expense submission failed", error);
       state.error = "saveFailed";
     } finally {
+      if (mountId !== activeMountId) return;
       state.writeBusy = false;
     }
     rerender();
@@ -533,13 +544,67 @@ document.addEventListener("submit", async (event) => {
     state.error = "";
   }
   rerender();
-});
+}
 
-document.addEventListener("keydown", (event) => {
+function onExpenseKeydown(event) {
   if (event.key === "Escape" && state.draft) closeModal();
-});
+}
 
-window.__shellMenu = createBizflowMenu("finance");
-window.__shellData = { unread, user: currentUser };
-window.__shellContent = renderExpense;
-await import("../shell/shell.js");
+function hasExpenseUnsavedChanges() {
+  if (!state.draft) return false;
+  const blank = blankDraft();
+  return state.draft.receipts.length > 0
+    || ["date", "currency", "amount", "category", "description"]
+      .some((key) => String(state.draft[key] ?? "") !== String(blank[key] ?? ""));
+}
+
+export async function mountPage({ scope, signal, historyState = null } = {}) {
+  const mountId = ++activeMountId;
+  [snapshot, currentUser, unread] = await Promise.all([getExpenseData(), getCurrentUser(), getUnread()]);
+  throwIfPageAborted(signal);
+  authenticated = typeof currentUser?.hasPermission === "function";
+  isAdmin = !authenticated || currentUser?.isBfAdmin === true;
+  liveReadOnly = authenticated;
+  localWriteAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
+  ownerKey = String(currentUser.employeeId || currentUser.email || currentUser.name || "");
+  const restoredFilter = filters.includes(historyState?.filter) ? historyState.filter : isAdmin ? "pending" : "mine";
+  state = {
+    rows: normalizeExpenseRows(snapshot.reimbursements),
+    filter: isAdmin ? restoredFilter : "mine",
+    draft: null,
+    error: "",
+    writeBusy: false
+  };
+
+  return {
+    page: {
+      menu: createBizflowMenu("finance"),
+      data: { unread, user: currentUser },
+      render: renderExpense,
+      title: "Honnmono · Finance"
+    },
+    activate() {
+      scope.listen(document, "click", onExpenseClick);
+      scope.listen(document, "input", onExpenseInput);
+      scope.listen(document, "change", onExpenseChange);
+      scope.listen(document, "submit", onExpenseSubmit);
+      scope.listen(document, "keydown", onExpenseKeydown);
+    },
+    hasUnsavedChanges: hasExpenseUnsavedChanges,
+    async canLeave() {
+      if (!hasExpenseUnsavedChanges()) return true;
+      return confirmInPage(t(currentHelpers?.lang ?? "zh", "leaveUnsaved"));
+    },
+    captureState: () => ({ filter: state.filter }),
+    dispose() {
+      if (activeMountId === mountId) activeMountId += 1;
+      if (state.draft) revokeReceipts(state.draft.receipts);
+      state.rows.forEach((row) => revokeReceipts(row.receipts ?? []));
+      snapshot = null;
+      currentUser = null;
+      unread = null;
+      currentHelpers = null;
+      state.draft = null;
+    }
+  };
+}

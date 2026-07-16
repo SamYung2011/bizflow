@@ -115,8 +115,8 @@ const state = {
 
 let rerender = () => {};
 let currentProducts = [];
-let attached = false;
 let liveReadOnly = false;
+let dataLoadVersion = 0;
 
 function writeAttributes(disabled = liveReadOnly) {
   return disabled ? ' disabled aria-disabled="true"' : "";
@@ -128,7 +128,9 @@ function t(lang, key) {
 
 export async function ensureShopifyData() {
   if (state.loaded) return;
+  const version = dataLoadVersion;
   const data = await getShopifyLinksData();
+  if (version !== dataLoadVersion) return;
   state.links = data.links;
   const variants = new Map();
   for (const link of data.links) {
@@ -144,7 +146,7 @@ export async function ensureShopifyData() {
   }
   state.variants = [...variants.values()];
   const firstGroups = [...new Set(state.variants.map((variant) => variant.shopifyProductId))].slice(0, 3);
-  state.expanded = new Set(firstGroups);
+  if (!state.expanded.size) state.expanded = new Set(firstGroups);
   state.loaded = true;
 }
 
@@ -253,11 +255,9 @@ function closeModal() {
   rerender();
 }
 
-export function attachShopifyBehaviors({ rerender: nextRerender }) {
+export function attachShopifyBehaviors({ rerender: nextRerender, scope }) {
   rerender = nextRerender;
-  if (attached) return;
-  attached = true;
-  document.addEventListener("click", async (event) => {
+  scope.listen(document, "click", async (event) => {
     if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     const group = event.target.closest("[data-shopify-group]");
     if (group) {
@@ -291,26 +291,26 @@ export function attachShopifyBehaviors({ rerender: nextRerender }) {
     }
     if (event.target.closest("[data-shopify-close]") || event.target.matches("[data-shopify-overlay]")) closeModal();
   });
-  document.addEventListener("input", (event) => {
+  scope.listen(document, "input", (event) => {
     if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     const search = event.target.closest("[data-shopify-search]");
     if (search) {
       state.search = search.value;
       rerender();
-      requestAnimationFrame(() => focusAtEnd("[data-shopify-search]"));
+      scope.animationFrame(() => focusAtEnd("[data-shopify-search]"));
       return;
     }
     const productSearch = event.target.closest("[data-shopify-product-search]");
     if (productSearch) {
       state.productSearch = productSearch.value;
       rerender();
-      requestAnimationFrame(() => focusAtEnd("[data-shopify-product-search]"));
+      scope.animationFrame(() => focusAtEnd("[data-shopify-product-search]"));
       return;
     }
     const qty = event.target.closest("[data-shopify-link-qty]");
     if (qty) state.qty = Math.max(1, Number(qty.value) || 1);
   });
-  document.addEventListener("submit", (event) => {
+  scope.listen(document, "submit", (event) => {
     if (!event.target.matches("[data-shopify-link-form]") || !state.modal || !state.selectedProductId) return;
     event.preventDefault();
     if (liveReadOnly) return;
@@ -329,9 +329,42 @@ export function attachShopifyBehaviors({ rerender: nextRerender }) {
     });
     closeModal();
   });
-  document.addEventListener("keydown", (event) => {
+  scope.listen(document, "keydown", (event) => {
     if (event.key === "Escape" && state.modal) closeModal();
   });
+}
+
+export function captureShopifyState() {
+  return { expanded: [...state.expanded], search: state.search };
+}
+
+export function restoreShopifyState(value = null) {
+  state.expanded = new Set(Array.isArray(value?.expanded) ? value.expanded.map(String) : []);
+  state.search = typeof value?.search === "string" ? value.search : "";
+  state.modal = null;
+  state.productSearch = "";
+  state.selectedProductId = "";
+  state.qty = 1;
+}
+
+export function hasShopifyUnsavedChanges() {
+  return state.modal !== null && Boolean(state.selectedProductId || state.productSearch || state.qty !== 1);
+}
+
+export function disposeShopifyState() {
+  dataLoadVersion += 1;
+  state.loaded = false;
+  state.links = [];
+  state.variants = [];
+  state.expanded = new Set();
+  state.search = "";
+  state.modal = null;
+  state.productSearch = "";
+  state.selectedProductId = "";
+  state.qty = 1;
+  currentProducts = [];
+  liveReadOnly = false;
+  rerender = () => {};
 }
 
 function focusAtEnd(selector) {

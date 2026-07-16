@@ -11,7 +11,10 @@ export const spaRouteAllowlist = Object.freeze([
   "/bizflow/customer-detail.html",
   "/bizflow/orders.html",
   "/bizflow/orders-create.html",
-  "/bizflow/orders-detail.html"
+  "/bizflow/orders-detail.html",
+  "/bizflow/inventory.html",
+  "/bizflow/inventory-detail.html",
+  "/bizflow/expense.html"
 ]);
 
 const fromHere = (path) => new URL(path, import.meta.url).href;
@@ -48,13 +51,13 @@ const routes = [
   route("/bizflow/inventory.html", "bizflow", "../bizflow/inventory.js", [
     "../components/segment.css", "../components/management-list.css",
     "../bizflow/inventory.css", "../bizflow/inventory-domain.css"
-  ]),
+  ], () => import("../bizflow/inventory.js")),
   route("/bizflow/inventory-detail.html", "bizflow", "../bizflow/inventory-detail.js", [
     "../bizflow/customers.css", "../bizflow/inventory.css"
-  ]),
+  ], () => import("../bizflow/inventory-detail.js")),
   route("/bizflow/expense.html", "bizflow", "../bizflow/expense.js", [
     "../components/segment.css", "../bizflow/expense.css"
-  ]),
+  ], () => import("../bizflow/expense.js")),
   route("/bizflow/whatsapp.html", "bizflow", "../bizflow/whatsapp.js", [
     "../components/segment.css", "../components/date-filter.css", "../bizflow/whatsapp.css"
   ]),

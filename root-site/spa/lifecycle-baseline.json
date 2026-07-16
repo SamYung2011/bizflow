@@ -88,44 +88,44 @@
       }
     },
     "/bizflow/inventory.html": {
-      "moduleCount": 31,
+      "moduleCount": 26,
       "totals": {
-        "documentListeners": 31,
-        "windowListeners": 6,
-        "mediaQueryListeners": 2,
-        "timeouts": 26,
+        "documentListeners": 2,
+        "windowListeners": 2,
+        "mediaQueryListeners": 0,
+        "timeouts": 25,
         "intervals": 2,
-        "animationFrames": 5,
+        "animationFrames": 2,
         "observers": 0,
-        "authSubscriptions": 5,
+        "authSubscriptions": 4,
         "realtimeSubscriptions": 2
       }
     },
     "/bizflow/inventory-detail.html": {
-      "moduleCount": 24,
+      "moduleCount": 17,
       "totals": {
-        "documentListeners": 15,
-        "windowListeners": 6,
-        "mediaQueryListeners": 2,
-        "timeouts": 24,
+        "documentListeners": 2,
+        "windowListeners": 2,
+        "mediaQueryListeners": 0,
+        "timeouts": 25,
         "intervals": 2,
-        "animationFrames": 0,
+        "animationFrames": 2,
         "observers": 0,
-        "authSubscriptions": 5,
+        "authSubscriptions": 4,
         "realtimeSubscriptions": 2
       }
     },
     "/bizflow/expense.html": {
-      "moduleCount": 28,
+      "moduleCount": 20,
       "totals": {
-        "documentListeners": 18,
-        "windowListeners": 6,
-        "mediaQueryListeners": 2,
-        "timeouts": 24,
+        "documentListeners": 2,
+        "windowListeners": 2,
+        "mediaQueryListeners": 0,
+        "timeouts": 25,
         "intervals": 2,
-        "animationFrames": 1,
+        "animationFrames": 2,
         "observers": 0,
-        "authSubscriptions": 5,
+        "authSubscriptions": 4,
         "realtimeSubscriptions": 2
       }
     },

@@ -95,8 +95,8 @@ const state = {
 };
 
 let rerender = () => {};
-let attached = false;
 let liveReadOnly = false;
+let dataLoadVersion = 0;
 
 function writeAttributes() {
   return liveReadOnly ? ' disabled aria-disabled="true"' : "";
@@ -108,7 +108,9 @@ function t(lang, key) {
 
 export async function ensureSuppliersData() {
   if (state.loaded) return;
+  const version = dataLoadVersion;
   const data = await getSuppliersData();
+  if (version !== dataLoadVersion) return;
   state.suppliers = data.suppliers;
   state.loaded = true;
 }
@@ -195,11 +197,9 @@ function closeModal() {
   rerender();
 }
 
-export function attachSupplierBehaviors({ rerender: nextRerender }) {
+export function attachSupplierBehaviors({ rerender: nextRerender, scope }) {
   rerender = nextRerender;
-  if (attached) return;
-  attached = true;
-  document.addEventListener("click", async (event) => {
+  scope.listen(document, "click", async (event) => {
     if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     if (event.target.closest("[data-supplier-new]")) {
       state.draft = blankSupplier();
@@ -228,13 +228,13 @@ export function attachSupplierBehaviors({ rerender: nextRerender }) {
     }
     if (event.target.closest("[data-supplier-close]") || event.target.matches("[data-supplier-overlay]")) closeModal();
   });
-  document.addEventListener("input", (event) => {
+  scope.listen(document, "input", (event) => {
     if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     const search = event.target.closest("[data-supplier-search]");
     if (search) {
       state.search = search.value;
       rerender();
-      requestAnimationFrame(() => focusAtEnd("[data-supplier-search]"));
+      scope.animationFrame(() => focusAtEnd("[data-supplier-search]"));
       return;
     }
     const field = event.target.closest("[data-supplier-field]");
@@ -243,7 +243,7 @@ export function attachSupplierBehaviors({ rerender: nextRerender }) {
       state.error = "";
     }
   });
-  document.addEventListener("submit", (event) => {
+  scope.listen(document, "submit", (event) => {
     if (!event.target.matches("[data-supplier-form]") || !state.draft) return;
     event.preventDefault();
     if (liveReadOnly) return;
@@ -267,9 +267,40 @@ export function attachSupplierBehaviors({ rerender: nextRerender }) {
     else state.suppliers.unshift(saved);
     closeModal();
   });
-  document.addEventListener("keydown", (event) => {
+  scope.listen(document, "keydown", (event) => {
     if (event.key === "Escape" && state.draft) closeModal();
   });
+}
+
+export function captureSupplierState() {
+  return { search: state.search, category: state.category };
+}
+
+export function restoreSupplierState(value = null) {
+  state.search = typeof value?.search === "string" ? value.search : "";
+  state.category = typeof value?.category === "string" ? value.category : "all";
+  state.draft = null;
+  state.error = "";
+}
+
+export function hasSupplierUnsavedChanges() {
+  if (!state.draft) return false;
+  const original = state.draft.id ? state.suppliers.find((supplier) => supplier.id === state.draft.id) : blankSupplier();
+  if (!original) return true;
+  return ["name", "contactUrl", "contactPerson", "category", "note"]
+    .some((key) => String(state.draft[key] || "") !== String(original[key] || ""));
+}
+
+export function disposeSupplierState() {
+  dataLoadVersion += 1;
+  state.loaded = false;
+  state.suppliers = [];
+  state.search = "";
+  state.category = "all";
+  state.draft = null;
+  state.error = "";
+  liveReadOnly = false;
+  rerender = () => {};
 }
 
 function focusAtEnd(selector) {

@@ -58,8 +58,8 @@ const state = {
 };
 
 let rerender = () => {};
-let attached = false;
 let liveReadOnly = false;
+let dataLoadVersion = 0;
 
 function t(lang, key) {
   return copy[lang]?.[key] ?? copy.zh[key] ?? key;
@@ -67,14 +67,18 @@ function t(lang, key) {
 
 export async function ensurePendingDeductionData() {
   if (state.loaded) return;
+  const version = dataLoadVersion;
   const pending = await getPendingDeductionData();
+  if (version !== dataLoadVersion) return;
   state.invoices = pending.invoices;
   state.loaded = true;
 }
 
 export async function ensurePendingOrderLinks() {
   if (state.orderLinksLoaded) return;
+  const version = dataLoadVersion;
   const orders = await getOrdersPageData();
+  if (version !== dataLoadVersion) return;
   state.orderIds = new Map(orders.orders.map((order) => [order.detail?.orderNo, order.id]).filter(([orderNo]) => orderNo));
   state.orderLinksLoaded = true;
 }
@@ -126,11 +130,9 @@ function removeInvoice(orderNo) {
   rerender();
 }
 
-export function attachPendingDeductionBehaviors({ rerender: nextRerender }) {
+export function attachPendingDeductionBehaviors({ rerender: nextRerender, scope }) {
   rerender = nextRerender;
-  if (attached) return;
-  attached = true;
-  document.addEventListener("click", async (event) => {
+  scope.listen(document, "click", async (event) => {
     if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     const review = event.target.closest("[data-pending-review]");
     if (review && await confirmInPage(t(currentLang(), "reviewConfirm"))) {
@@ -144,6 +146,16 @@ export function attachPendingDeductionBehaviors({ rerender: nextRerender }) {
       removeInvoice(dismiss.getAttribute("data-pending-dismiss"));
     }
   });
+}
+
+export function disposePendingDeductionState() {
+  dataLoadVersion += 1;
+  state.loaded = false;
+  state.orderLinksLoaded = false;
+  state.invoices = [];
+  state.orderIds = new Map();
+  liveReadOnly = false;
+  rerender = () => {};
 }
 
 function currentLang() {
