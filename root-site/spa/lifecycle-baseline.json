@@ -1,0 +1,231 @@
+{
+  "schemaVersion": 1,
+  "kind": "static-source-call-sites",
+  "note": "P0 source baseline; P1 browser acceptance must also compare runtime listener and timer watermarks.",
+  "routes": {
+    "/bizflow/home.html": {
+      "moduleCount": 26,
+      "totals": {
+        "documentListeners": 14,
+        "windowListeners": 6,
+        "mediaQueryListeners": 2,
+        "timeouts": 24,
+        "intervals": 2,
+        "animationFrames": 0,
+        "observers": 0,
+        "authSubscriptions": 5,
+        "realtimeSubscriptions": 2
+      }
+    },
+    "/bizflow/orders.html": {
+      "moduleCount": 39,
+      "totals": {
+        "documentListeners": 32,
+        "windowListeners": 7,
+        "mediaQueryListeners": 2,
+        "timeouts": 28,
+        "intervals": 2,
+        "animationFrames": 6,
+        "observers": 1,
+        "authSubscriptions": 5,
+        "realtimeSubscriptions": 2
+      }
+    },
+    "/bizflow/orders-create.html": {
+      "moduleCount": 26,
+      "totals": {
+        "documentListeners": 16,
+        "windowListeners": 6,
+        "mediaQueryListeners": 2,
+        "timeouts": 24,
+        "intervals": 2,
+        "animationFrames": 0,
+        "observers": 0,
+        "authSubscriptions": 5,
+        "realtimeSubscriptions": 2
+      }
+    },
+    "/bizflow/orders-detail.html": {
+      "moduleCount": 31,
+      "totals": {
+        "documentListeners": 19,
+        "windowListeners": 6,
+        "mediaQueryListeners": 2,
+        "timeouts": 25,
+        "intervals": 2,
+        "animationFrames": 0,
+        "observers": 1,
+        "authSubscriptions": 5,
+        "realtimeSubscriptions": 2
+      }
+    },
+    "/bizflow/customers.html": {
+      "moduleCount": 30,
+      "totals": {
+        "documentListeners": 17,
+        "windowListeners": 7,
+        "mediaQueryListeners": 2,
+        "timeouts": 25,
+        "intervals": 2,
+        "animationFrames": 0,
+        "observers": 0,
+        "authSubscriptions": 5,
+        "realtimeSubscriptions": 2
+      }
+    },
+    "/bizflow/customer-detail.html": {
+      "moduleCount": 30,
+      "totals": {
+        "documentListeners": 17,
+        "windowListeners": 6,
+        "mediaQueryListeners": 2,
+        "timeouts": 25,
+        "intervals": 2,
+        "animationFrames": 0,
+        "observers": 1,
+        "authSubscriptions": 5,
+        "realtimeSubscriptions": 2
+      }
+    },
+    "/bizflow/inventory.html": {
+      "moduleCount": 31,
+      "totals": {
+        "documentListeners": 31,
+        "windowListeners": 6,
+        "mediaQueryListeners": 2,
+        "timeouts": 26,
+        "intervals": 2,
+        "animationFrames": 5,
+        "observers": 0,
+        "authSubscriptions": 5,
+        "realtimeSubscriptions": 2
+      }
+    },
+    "/bizflow/inventory-detail.html": {
+      "moduleCount": 24,
+      "totals": {
+        "documentListeners": 15,
+        "windowListeners": 6,
+        "mediaQueryListeners": 2,
+        "timeouts": 24,
+        "intervals": 2,
+        "animationFrames": 0,
+        "observers": 0,
+        "authSubscriptions": 5,
+        "realtimeSubscriptions": 2
+      }
+    },
+    "/bizflow/expense.html": {
+      "moduleCount": 28,
+      "totals": {
+        "documentListeners": 18,
+        "windowListeners": 6,
+        "mediaQueryListeners": 2,
+        "timeouts": 24,
+        "intervals": 2,
+        "animationFrames": 1,
+        "observers": 0,
+        "authSubscriptions": 5,
+        "realtimeSubscriptions": 2
+      }
+    },
+    "/bizflow/whatsapp.html": {
+      "moduleCount": 30,
+      "totals": {
+        "documentListeners": 17,
+        "windowListeners": 6,
+        "mediaQueryListeners": 2,
+        "timeouts": 24,
+        "intervals": 2,
+        "animationFrames": 0,
+        "observers": 0,
+        "authSubscriptions": 5,
+        "realtimeSubscriptions": 2
+      }
+    },
+    "/bizflow/ocpp-monitor.html": {
+      "moduleCount": 29,
+      "totals": {
+        "documentListeners": 17,
+        "windowListeners": 6,
+        "mediaQueryListeners": 2,
+        "timeouts": 24,
+        "intervals": 2,
+        "animationFrames": 0,
+        "observers": 0,
+        "authSubscriptions": 5,
+        "realtimeSubscriptions": 2
+      }
+    },
+    "/bizflow/ocpp-charging.html": {
+      "moduleCount": 31,
+      "totals": {
+        "documentListeners": 17,
+        "windowListeners": 6,
+        "mediaQueryListeners": 2,
+        "timeouts": 24,
+        "intervals": 2,
+        "animationFrames": 0,
+        "observers": 0,
+        "authSubscriptions": 5,
+        "realtimeSubscriptions": 2
+      }
+    },
+    "/bizflow/ocpp-users.html": {
+      "moduleCount": 29,
+      "totals": {
+        "documentListeners": 16,
+        "windowListeners": 6,
+        "mediaQueryListeners": 2,
+        "timeouts": 24,
+        "intervals": 2,
+        "animationFrames": 0,
+        "observers": 0,
+        "authSubscriptions": 5,
+        "realtimeSubscriptions": 2
+      }
+    },
+    "/bizflow/ocpp-finance.html": {
+      "moduleCount": 29,
+      "totals": {
+        "documentListeners": 16,
+        "windowListeners": 6,
+        "mediaQueryListeners": 2,
+        "timeouts": 24,
+        "intervals": 2,
+        "animationFrames": 0,
+        "observers": 0,
+        "authSubscriptions": 5,
+        "realtimeSubscriptions": 2
+      }
+    },
+    "/team/index.html": {
+      "moduleCount": 36,
+      "totals": {
+        "documentListeners": 22,
+        "windowListeners": 6,
+        "mediaQueryListeners": 2,
+        "timeouts": 24,
+        "intervals": 2,
+        "animationFrames": 1,
+        "observers": 0,
+        "authSubscriptions": 5,
+        "realtimeSubscriptions": 2
+      }
+    },
+    "/team/members.html": {
+      "moduleCount": 34,
+      "totals": {
+        "documentListeners": 25,
+        "windowListeners": 6,
+        "mediaQueryListeners": 2,
+        "timeouts": 24,
+        "intervals": 2,
+        "animationFrames": 1,
+        "observers": 0,
+        "authSubscriptions": 5,
+        "realtimeSubscriptions": 2
+      }
+    }
+  }
+}
