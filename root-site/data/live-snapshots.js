@@ -588,43 +588,62 @@ async function buildMembersSnapshot() {
   };
 }
 
-async function buildTeamExtrasSnapshot() {
-  const [logs, comments, employees, companies, bindings, joins] = await Promise.all([
-    allRows("team_update_logs", "created_at", false),
-    allRows("team_update_log_comments", "created_at"),
-    allRows("employees", "created_at"),
-    allRows("companies", "created_at"),
-    allRows("employee_companies", "joined_at"),
-    allRows("company_join_pending", "requested_at", false)
-  ]);
-  const employeeById = new Map(employees.map((employee) => [employee.id, employee]));
+function mapTeamUpdateLogs(logs, comments, employees) {
   const employeeByUserId = new Map(employees.map((employee) => [employee.user_id, employee]));
-  const companyById = new Map(companies.map((company) => [company.id, company]));
   const commentsByLog = new Map();
   for (const comment of comments) {
     const list = commentsByLog.get(comment.update_log_id) ?? [];
     list.push(comment);
     commentsByLog.set(comment.update_log_id, list);
   }
+  return logs.map((log) => ({
+    id: log.id,
+    author: asText(employeeByUserId.get(log.author_user_id)?.name, "—"),
+    summary: asText(log.summary),
+    detail: asText(log.detail),
+    createdAt: formatDateTime(log.created_at),
+    edited: timestamp(log.updated_at) > timestamp(log.created_at) + 60_000,
+    comments: (commentsByLog.get(log.id) ?? []).map((comment) => ({
+      id: comment.id,
+      authorUserId: asText(comment.author_user_id) || null,
+      author: asText(comment.author_name, "—"),
+      body: asText(comment.body),
+      parentId: comment.parent_comment_id ?? null,
+      time: formatDateTime(comment.created_at)
+    }))
+  }));
+}
+
+async function buildTeamUpdateLogsSnapshot() {
+  const [logs, comments, employees] = await Promise.all([
+    allRows("team_update_logs", "created_at", false),
+    allRows("team_update_log_comments", "created_at"),
+    allRows("employees", "created_at")
+  ]);
+  return {
+    generated_at: new Date().toISOString(),
+    scope: "RLS-visible team update logs",
+    teamUpdateLogs: mapTeamUpdateLogs(logs, comments, employees),
+    companies: [],
+    joinHistory: [],
+    commission: []
+  };
+}
+
+async function buildTeamExtrasSnapshot() {
+  const [updateLogsSnapshot, employees, companies, bindings, joins] = await Promise.all([
+    buildTeamUpdateLogsSnapshot(),
+    allRows("employees", "created_at"),
+    allRows("companies", "created_at"),
+    allRows("employee_companies", "joined_at"),
+    allRows("company_join_pending", "requested_at", false)
+  ]);
+  const employeeById = new Map(employees.map((employee) => [employee.id, employee]));
+  const companyById = new Map(companies.map((company) => [company.id, company]));
   return {
     generated_at: new Date().toISOString(),
     scope: "RLS-visible team extras",
-    teamUpdateLogs: logs.map((log) => ({
-      id: log.id,
-      author: asText(employeeByUserId.get(log.author_user_id)?.name, "—"),
-      summary: asText(log.summary),
-      detail: asText(log.detail),
-      createdAt: formatDateTime(log.created_at),
-      edited: timestamp(log.updated_at) > timestamp(log.created_at) + 60_000,
-      comments: (commentsByLog.get(log.id) ?? []).map((comment) => ({
-        id: comment.id,
-        authorUserId: asText(comment.author_user_id) || null,
-        author: asText(comment.author_name, "—"),
-        body: asText(comment.body),
-        parentId: comment.parent_comment_id ?? null,
-        time: formatDateTime(comment.created_at)
-      }))
-    })),
+    teamUpdateLogs: updateLogsSnapshot.teamUpdateLogs,
     companies: companies.map((company) => ({
       id: company.id,
       name: asText(company.name),
@@ -791,6 +810,7 @@ const builders = {
   "home.json": buildHomeSnapshot,
   "tasks.json": buildTasksSnapshot,
   "team-extras.json": buildTeamExtrasSnapshot,
+  "team-update-logs.json": buildTeamUpdateLogsSnapshot,
   "members.json": buildMembersSnapshot,
   "customers.json": buildCustomersSnapshot,
   "warranty.json": buildWarrantySnapshot,

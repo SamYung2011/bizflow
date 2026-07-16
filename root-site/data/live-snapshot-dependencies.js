@@ -15,6 +15,7 @@ const SNAPSHOT_TABLES = Object.freeze({
     "team_update_logs", "team_update_log_comments", "employees", "companies",
     "employee_companies", "company_join_pending"
   ],
+  "team-update-logs.json": ["team_update_logs", "team_update_log_comments", "employees"],
   "members.json": [
     "employees", "employee_companies", "departments", "employee_departments", "roles",
     "employee_tasks", "task_assignees", "task_pending", "company_join_pending"

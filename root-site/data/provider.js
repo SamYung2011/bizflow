@@ -364,6 +364,7 @@ const TEAM_EXTRAS_SNAPSHOT_URL = new URL("./snapshots/team-extras.json", import.
 
 let tasksSnapshotPromise = null;
 let teamExtrasSnapshotPromise = null;
+let teamUpdateLogsSnapshotPromise = null;
 function loadTasksSnapshot() {
   if (!tasksSnapshotPromise) {
     tasksSnapshotPromise = fetchSnapshot(TASKS_SNAPSHOT_URL, "tasks.json", "task mock/kanban contract");
@@ -376,6 +377,14 @@ function loadTeamExtrasSnapshot() {
     teamExtrasSnapshotPromise = fetchSnapshot(TEAM_EXTRAS_SNAPSHOT_URL, "team-extras.json", "empty team extras");
   }
   return teamExtrasSnapshotPromise;
+}
+
+function loadTeamUpdateLogsSnapshot() {
+  if (!teamUpdateLogsSnapshotPromise) {
+    // Live uses the narrow three-table builder; mock reuses the full static file.
+    teamUpdateLogsSnapshotPromise = fetchSnapshot(TEAM_EXTRAS_SNAPSHOT_URL, "team-update-logs.json", "empty team update logs");
+  }
+  return teamUpdateLogsSnapshotPromise;
 }
 
 const isNum = (n) => typeof n === "number";
@@ -936,11 +945,54 @@ function buildR9MembersData(snapshot, home, teamExtras) {
   };
 }
 
-export async function getTeamMembersData() {
-  const [snapshot, home, extrasSnapshot] = await Promise.all([loadMembersSnapshot(), getHomeData(), loadTeamExtrasSnapshot()]);
+function buildEmptyTeamMembersData(teamExtras) {
+  return {
+    unread: mock.unread,
+    currentUserName: "",
+    summary: { total: 0, active: 0, reviewPending: 0, departed: 0 },
+    tabs: [
+      { key: "members", active: true, update: false },
+      { key: "permissions", active: false, update: false },
+      { key: "departments", active: false, update: false },
+      { key: "reviews", active: false, update: false },
+      { key: "commission", active: false, update: false },
+      { key: "updates", active: false, update: false },
+      { key: "companies", active: false, update: false }
+    ],
+    members: [],
+    form: {
+      defaults: { name: "", position: "", email: "", joinedAt: hongKongDateInput(), dept: "", role: "" },
+      departments: [],
+      roles: []
+    },
+    reviews: [],
+    reviewHistory: [],
+    joinPending: [],
+    joinHistory: teamExtras.joinHistory,
+    commission: teamExtras.commission,
+    commissionSales: [],
+    updateLogs: teamExtras.updateLogs,
+    companies: teamExtras.companies,
+    departments: [],
+    permissions: {
+      rows: R9_PERMISSION_KEYS.map((id) => ({ id, labelKey: R9_PERMISSION_LABEL_KEYS[id] })),
+      roles: []
+    }
+  };
+}
+
+export async function getTeamMembersData({ includeMembers = true, includeExtras = true, extrasScope = "all" } = {}) {
+  const extrasSnapshot = includeExtras
+    ? await (extrasScope === "updates" ? loadTeamUpdateLogsSnapshot() : loadTeamExtrasSnapshot())
+    : null;
   const teamExtras = cloneTeamExtras(extrasSnapshot);
-  if (isR9MembersSnapshot(snapshot)) return buildR9MembersData(snapshot, home, teamExtras);
+  if (!includeMembers) return buildEmptyTeamMembersData(teamExtras);
+  const snapshot = await loadMembersSnapshot();
+  // A valid members snapshot is self-contained. Home is only a legacy fallback
+  // and must not pull its large dependency graph during the normal members boot.
+  if (isR9MembersSnapshot(snapshot)) return buildR9MembersData(snapshot, null, teamExtras);
   if (snapshot) warnProviderFallback("members.json", "home/mock members");
+  const home = await getHomeData();
   return buildFallbackTeamMembersData(home);
 }
 

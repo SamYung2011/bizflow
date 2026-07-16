@@ -13,7 +13,10 @@ import { attachMemberUpdateLogController, renderMemberUpdateLogs } from "./membe
 import { attachMemberCompanyController, renderMemberCompanies } from "./members-companies.js";
 
 const HELEN_EMAIL = "a1017339632@gmail.com";
-const [data, currentUser, session] = await Promise.all([getTeamMembersData(), getCurrentUser(), getSession()]);
+const MEMBER_TAB_ORDER = ["members", "permissions", "departments", "reviews", "commission", "updates", "companies"];
+const MEMBER_DATA_TABS = new Set(["members", "permissions", "departments", "reviews", "commission"]);
+const MEMBER_EXTRAS_TABS = new Set(["reviews", "commission", "updates", "companies"]);
+const [currentUser, session] = await Promise.all([getCurrentUser(), getSession()]);
 const authenticated = typeof currentUser?.hasPermission === "function";
 const sessionEmail = String(session?.user?.email || "").toLowerCase();
 // Mirrors bizflow_samyung/team/src/admin.jsx:28,32: sales can always view their own commission.
@@ -43,8 +46,19 @@ const visibleTabKeys = authenticated
       ...(memberAccess.canManageRoles ? ["permissions", "departments"] : []),
       ...(memberAccess.canManageCompanies ? ["companies"] : [])
     ])
-  : new Set(data.tabs.map((tab) => tab.key));
+  : new Set(MEMBER_TAB_ORDER);
+const initialTab = MEMBER_TAB_ORDER.find((key) => visibleTabKeys.has(key)) ?? "updates";
+const initialIncludesMembers = MEMBER_DATA_TABS.has(initialTab);
+const initialIncludesExtras = MEMBER_EXTRAS_TABS.has(initialTab);
+const initialExtrasScope = initialTab === "updates" ? "updates" : "all";
+const data = await getTeamMembersData({
+  includeMembers: initialIncludesMembers,
+  includeExtras: initialIncludesExtras,
+  extrasScope: initialExtrasScope
+});
 const visibleTabs = data.tabs.filter((tab) => visibleTabKeys.has(tab.key));
+let memberDataLoaded = initialIncludesMembers;
+let memberExtrasScope = initialIncludesExtras ? initialExtrasScope : "none";
 const state = {
   members: data.members.map((member) => ({
     ...member,
@@ -79,7 +93,7 @@ const state = {
   companies: data.companies.map((company) => ({ ...company })),
   editingCompanyId: null,
   summary: { ...data.summary, reviewPending: data.reviews.length + data.joinPending.length },
-  activeTab: visibleTabs[0]?.key ?? "updates",
+  activeTab: initialTab,
   access: memberAccess,
   liveReadOnly: authenticated,
   departmentFilter: null,
@@ -93,6 +107,56 @@ const state = {
   editingPermissionRoleId: null
 };
 let currentHelpers = null;
+
+function cloneMembers(rows) {
+  return rows.map((member) => ({
+    ...member,
+    tasks: {
+      tasking: member.tasks.tasking.map((task) => ({ ...task })),
+      tasked: member.tasks.tasked.map((task) => ({ ...task }))
+    }
+  }));
+}
+
+function mergeMemberData(nextData, { members, extras }) {
+  if (members) {
+    state.members = cloneMembers(nextData.members);
+    state.reviews = nextData.reviews.map((review) => ({ ...review }));
+    state.reviewHistory = nextData.reviewHistory.map((review) => ({ ...review }));
+    state.joinPending = nextData.joinPending.map((review) => ({ ...review }));
+    state.departments = nextData.departments.map((department) => ({ ...department, memberIds: department.memberIds.slice() }));
+    state.permissions = {
+      rows: nextData.permissions.rows.map((row) => ({ ...row })),
+      roles: nextData.permissions.roles.map((role) => ({ ...role, grants: { ...role.grants } }))
+    };
+    state.summary = {
+      ...nextData.summary,
+      reviewPending: nextData.reviews.length + nextData.joinPending.length
+    };
+    data.form = nextData.form;
+    data.commissionSales = nextData.commissionSales;
+  }
+  if (extras) {
+    state.joinHistory = nextData.joinHistory.map((review) => ({ ...review }));
+    state.commission = nextData.commission.map((entry) => ({ ...entry }));
+    state.updateLogs = nextData.updateLogs.map((entry) => ({
+      ...entry,
+      comments: entry.comments.map((comment) => ({ ...comment }))
+    }));
+    state.companies = nextData.companies.map((company) => ({ ...company }));
+  }
+}
+
+async function ensureMemberTabData(tabKey) {
+  const includeMembers = MEMBER_DATA_TABS.has(tabKey) && !memberDataLoaded;
+  const requestedExtrasScope = tabKey === "updates" ? "updates" : "all";
+  const includeExtras = MEMBER_EXTRAS_TABS.has(tabKey) && memberExtrasScope !== "all" && memberExtrasScope !== requestedExtrasScope;
+  if (!includeMembers && !includeExtras) return;
+  const nextData = await getTeamMembersData({ includeMembers, includeExtras, extrasScope: requestedExtrasScope });
+  mergeMemberData(nextData, { members: includeMembers, extras: includeExtras });
+  memberDataLoaded ||= includeMembers;
+  if (includeExtras) memberExtrasScope = requestedExtrasScope;
+}
 
 function renderStatCard({ title, value, tone }, { escapeHtml }) {
   const mod = tone ? ` team-members-stat--${tone}` : "";
@@ -294,11 +358,12 @@ function closeDepartmentModal() {
   state.departmentDraft = null;
 }
 
-document.addEventListener("click", (event) => {
+document.addEventListener("click", async (event) => {
   const pageTab = event.target.closest("[data-members-tab]");
   if (pageTab) {
     const nextTab = pageTab.getAttribute("data-members-tab") || "members";
     if (!visibleTabKeys.has(nextTab)) return;
+    await ensureMemberTabData(nextTab);
     state.activeTab = nextTab;
     if (nextTab === "members") state.departmentFilter = null;
     rerenderMembers();
@@ -623,7 +688,7 @@ document.addEventListener("keydown", (event) => {
 
 window.__shellMenu = [
   { key: "nav.tasks", icon: "icon-nav-task", href: "./index.html", unreadKey: "tasks" },
-  { key: "nav.team", icon: "icon-nav-user", href: "./members.html", active: true }
+  { key: authenticated && !memberAccess.canManageEmployees ? "nav.updates" : "nav.team", icon: "icon-nav-user", href: "./members.html", active: true }
 ];
 attachMemberCommissionController({ state, rerender: rerenderMembers });
 attachMemberUpdateLogController({ state, rerender: rerenderMembers });
