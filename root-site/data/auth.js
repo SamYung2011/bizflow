@@ -32,6 +32,7 @@ let configPromise = null;
 let clientPromise = null;
 let currentUserPromise = null;
 let currentUserPromiseVersion = "";
+const tableFetchPromises = new Map();
 
 function clearCurrentUserMemory() {
   currentUserPromise = null;
@@ -259,6 +260,18 @@ async function fetchAllTableFromNetwork(client, table, orderCol, ascending, seco
   return rows;
 }
 
+function fetchAllTableOnce(client, userId, table, orderCol, ascending, secondaryOrder) {
+  const key = `${userId}:${table}:${orderCol || ""}:${ascending}:${secondaryOrder || ""}`;
+  if (!tableFetchPromises.has(key)) {
+    const promise = fetchAllTableFromNetwork(client, table, orderCol, ascending, secondaryOrder)
+      .finally(() => {
+        if (tableFetchPromises.get(key) === promise) tableFetchPromises.delete(key);
+      });
+    tableFetchPromises.set(key, promise);
+  }
+  return tableFetchPromises.get(key);
+}
+
 export async function fetchAllTable(table, orderCol, ascending = true, secondaryOrder = "id", { refresh = false } = {}) {
   const client = requireClient(await getSupabaseClient());
   const { data: sessionData, error: sessionError } = await client.auth.getSession();
@@ -270,12 +283,12 @@ export async function fetchAllTable(table, orderCol, ascending = true, secondary
   const cached = userId && !refresh ? await readLiveTableCache(cacheArgs) : null;
   if (cached && !cached.stale) return cached.rows;
   if (cached) {
-    void fetchAllTableFromNetwork(client, table, orderCol, ascending, secondaryOrder)
+    void fetchAllTableOnce(client, userId, table, orderCol, ascending, secondaryOrder)
       .then((rows) => writeLiveTableCache({ ...cacheArgs, rows, version: cacheVersion }))
       .catch((error) => console.warn(`[live-table-cache] ${table} refresh failed`, error));
     return cached.rows;
   }
-  const rows = await fetchAllTableFromNetwork(client, table, orderCol, ascending, secondaryOrder);
+  const rows = await fetchAllTableOnce(client, userId, table, orderCol, ascending, secondaryOrder);
   if (userId) await writeLiveTableCache({ ...cacheArgs, rows, version: cacheVersion });
   return rows;
 }
