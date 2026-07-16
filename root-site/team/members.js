@@ -688,7 +688,7 @@ document.addEventListener("keydown", (event) => {
 
 window.__shellMenu = [
   { key: "nav.tasks", icon: "icon-nav-task", href: "./index.html", unreadKey: "tasks" },
-  { key: authenticated && !memberAccess.canManageEmployees ? "nav.updates" : "nav.team", icon: "icon-nav-user", href: "./members.html", active: true }
+  { key: "nav.team", icon: "icon-nav-user", href: "./members.html", active: true }
 ];
 attachMemberCommissionController({ state, rerender: rerenderMembers });
 attachMemberUpdateLogController({ state, rerender: rerenderMembers });

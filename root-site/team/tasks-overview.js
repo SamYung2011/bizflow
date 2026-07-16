@@ -25,7 +25,7 @@ export function renderTaskOverview({ members, tasks, expanded, completedExpanded
       if (!list.length) return "";
       return `<section class="task-overview__group task-overview__group--${priority}"><h4>${escapeHtml(taskT(lang, `tasks.priority.${priority}`))}<span>${list.length}</span></h4>${list.map((row) => renderTaskRow(row, helpers)).join("")}</section>`;
     }).join("");
-    const completedToggle = summary.completedCount > 5
+    const completedToggle = summary.recentlyCompleted.length > 5
       ? `<button type="button" class="task-overview__completed-toggle" data-overview-completed-toggle="${escapeHtml(memberId)}" aria-expanded="${showAllCompleted}">${escapeHtml(taskT(lang, showAllCompleted ? "tasks.overview.collapseCompleted" : "tasks.overview.viewAllCompleted", { count: summary.completedCount }))}</button>`
       : "";
     return `<article class="task-overview__member" data-overview-member="${escapeHtml(memberId)}" data-open-count="${summary.open.length}" data-completed-count="${summary.completedCount}">
@@ -34,7 +34,7 @@ export function renderTaskOverview({ members, tasks, expanded, completedExpanded
         <span class="task-overview__count task-overview__count--open">${summary.open.length} ${escapeHtml(taskT(lang, "tasks.overview.open"))}</span>
         <span class="task-overview__count task-overview__count--done">${summary.completedCount} ${escapeHtml(taskT(lang, "tasks.overview.completed"))}</span>
       </button>
-      ${isExpanded ? `<div class="task-overview__member-body">${groups || `<p>${escapeHtml(taskT(lang, "tasks.overview.noOpen"))}</p>`}${visibleCompleted.length ? `<section class="task-overview__recent" data-completed-visible="${visibleCompleted.length}"><div class="task-overview__recent-head"><h4>${escapeHtml(taskT(lang, "tasks.overview.recent"))}<span>${summary.completedCount}</span></h4>${completedToggle}</div>${visibleCompleted.map((row) => renderTaskRow(row, helpers, true)).join("")}</section>` : ""}</div>` : ""}
+      ${isExpanded ? `${completedToggle}<div class="task-overview__member-body">${groups || `<p>${escapeHtml(taskT(lang, "tasks.overview.noOpen"))}</p>`}${visibleCompleted.length ? `<section class="task-overview__recent" data-completed-visible="${visibleCompleted.length}"><div class="task-overview__recent-head"><h4>${escapeHtml(taskT(lang, "tasks.overview.recent"))}<span>${summary.completedCount}</span></h4></div>${visibleCompleted.map((row) => renderTaskRow(row, helpers, true)).join("")}</section>` : ""}</div>` : ""}
     </article>`;
   }).join("");
   return `<section class="task-overview" data-task-overview data-member-count="${members.filter((member) => member.dept !== "all").length}"><h2>${escapeHtml(taskT(lang, "tasks.overview.title"))}</h2><div>${rows}</div></section>`;

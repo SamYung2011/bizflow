@@ -289,8 +289,8 @@
 }
 
 .task-overview__completed-toggle {
-  flex: none;
-  margin: 0;
+  width: fit-content;
+  margin: var(--space-10) var(--space-20) 0;
   padding: var(--space-4) var(--space-10);
   border: 0;
   border-radius: var(--radius-10);
@@ -298,6 +298,7 @@
   background: var(--gray-5);
   font-size: var(--font-description-size);
   font-weight: var(--font-description-weight);
+  cursor: pointer;
 }
 
 /* Calendar */

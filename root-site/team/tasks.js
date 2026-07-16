@@ -24,8 +24,6 @@ const permissions = {
   canDeleteOthers: !authenticated || currentUser.hasPermission("can_delete_others_tasks"),
   canValidate: !authenticated || currentUser.hasPermission("can_validate_task")
 };
-const canManageEmployees = !authenticated || currentUser.isSuperAdmin === true || currentUser.isAdminOfAny === true ||
-  currentUser.hasPermission("can_manage_employees");
 const unreadWatermarks = await getUnreadWatermarks();
 markRead("tasks", unreadWatermarks.tasks);
 const clonedTasks = data.tasks.map((task) => ({
@@ -554,6 +552,8 @@ async function toggleTaskParticipation(task) {
   if (!assignee) return;
   const abandoned = assignee.abandonedAt != null || ((task.assignees?.length ?? 0) === 1 && task.status === "abandoned");
   const nextAbandoned = !abandoned;
+  // Mirrors old team: this is per-assignee participation, not task deletion.
+  // Abandoning removes the task from that member's open scope without deleting its row.
   const singleAssignee = task.assignees.length === 1 && !task.requiresReview;
   state.writeBusy = true;
   state.writeError = "";
@@ -1126,7 +1126,7 @@ attachTaskDomainController({
 
 window.__shellMenu = [
   { key: "nav.tasks", icon: "icon-nav-task", href: "./index.html", active: true, unreadKey: "tasks" },
-  { key: authenticated && !canManageEmployees ? "nav.updates" : "nav.team", icon: "icon-nav-user", href: "./members.html" }
+  { key: "nav.team", icon: "icon-nav-user", href: "./members.html" }
 ];
 window.__shellData = { unread: await getUnread(), user: currentUser };
 window.__shellContent = renderTaskManagement;

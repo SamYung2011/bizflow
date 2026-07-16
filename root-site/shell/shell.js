@@ -53,10 +53,13 @@ const menuSource = window.__shellMenu ?? defaultMenu;
 function buildMenuItems(user) {
   const authenticated = typeof user?.hasPermission === "function";
   const canViewAdminItems = !authenticated || user.isBfAdmin === true;
+  const canManageEmployees = !authenticated || user.isSuperAdmin === true || user.isAdminOfAny === true ||
+    user.hasPermission("can_manage_employees");
   return menuSource
     .filter((item) => !item.adminOnly || canViewAdminItems)
     .map((item) => ({
       ...item,
+      key: ["nav.team", "nav.updates"].includes(item.key) && !canManageEmployees ? "nav.updates" : item.key,
       update: item.unreadKey ? (unread[item.unreadKey] ?? 0) > 0 : false
     }));
 }
