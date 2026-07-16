@@ -1055,8 +1055,6 @@
   var authApi = null;
   var authSubscription = null;
   var lastResumeRefreshAt = 0;
-  var unread = window.__shellData?.unread ?? {};
-  var unreadWatermarks2 = getRememberedUnreadWatermarks();
   var defaultMenu = [
     { key: "nav.home", icon: "icon-nav-home", active: true },
     { key: "nav.tasks", icon: "icon-nav-task", unreadKey: "tasks" },
@@ -1065,7 +1063,15 @@
     { key: "nav.customers", icon: "icon-nav-user" },
     { key: "nav.inventory", icon: "icon-nav-inventory", unreadKey: "inventory" }
   ];
-  var menuSource = window.__shellMenu ?? defaultMenu;
+  var pageContext = {
+    menu: Array.isArray(window.__shellMenu) ? window.__shellMenu : null,
+    data: window.__shellData && typeof window.__shellData === "object" ? window.__shellData : {},
+    render: typeof window.__shellContent === "function" ? window.__shellContent : null,
+    title: ""
+  };
+  var menuSource = pageContext.menu ?? defaultMenu;
+  var unread = pageContext.data.unread ?? {};
+  var unreadWatermarks2 = getRememberedUnreadWatermarks();
   function buildMenuItems(user) {
     const authenticated = typeof user?.hasPermission === "function";
     const canViewAdminItems = !authenticated || user.isBfAdmin === true;
@@ -1076,7 +1082,7 @@
       update: item.unreadKey ? (unread[item.unreadKey] ?? 0) > 0 : false
     }));
   }
-  var menuItems = buildMenuItems(window.__shellData?.user);
+  var menuItems = buildMenuItems(pageContext.data.user);
   var hasUnreadMessages = (unread.messages ?? 0) > 0;
   mountIconSprite();
   function escapeHtml2(value) {
@@ -1150,10 +1156,10 @@
   </span>`;
   }
   function syncProfileUser() {
-    if (!state2.profileUser && window.__shellData?.user) {
+    if (!state2.profileUser && pageContext.data.user) {
       state2.profileUser = {
-        ...window.__shellData.user,
-        availableCompanies: (window.__shellData.user.availableCompanies ?? []).map((company) => ({ ...company }))
+        ...pageContext.data.user,
+        availableCompanies: (pageContext.data.user.availableCompanies ?? []).map((company) => ({ ...company }))
       };
     }
   }
@@ -1223,7 +1229,7 @@
   </nav>`;
   }
   function renderAddRow() {
-    const user = state2.profileUser ?? window.__shellData?.user;
+    const user = state2.profileUser ?? pageContext.data.user;
     const liveReadOnly = typeof user?.hasPermission === "function";
     return `<button type="button" class="tp-component add-row shell-add-row" aria-label="${escapeHtml2(t("shell.add"))}"${liveReadOnly ? ' disabled aria-disabled="true"' : ""}>
     ${icon2("icon-add-surface-add")}
@@ -1245,9 +1251,9 @@
   </aside>`;
   }
   function renderContent() {
-    if (typeof window.__shellContent === "function") {
+    if (typeof pageContext.render === "function") {
       return `<main class="shell-main">
-      <div class="shell-page-inner">${window.__shellContent({ t, icon: icon2, line, redDot, escapeHtml: escapeHtml2, lang: state2.lang })}</div>
+      <div class="shell-page-inner">${pageContext.render({ t, icon: icon2, line, redDot, escapeHtml: escapeHtml2, lang: state2.lang })}</div>
     </main>`;
     }
     return `<main class="shell-main">
@@ -1338,7 +1344,7 @@
       const { getUnread } = await import(providerPath);
       unread = await getUnread();
     }
-    if (window.__shellData) window.__shellData.unread = { ...unread };
+    pageContext = { ...pageContext, data: { ...pageContext.data, unread: { ...unread } } };
     unreadWatermarks2 = getRememberedUnreadWatermarks();
     syncUnreadIndicators();
   }
@@ -1544,7 +1550,7 @@
       return false;
     }
     state2.profileUser = { ...user, availableCompanies: user.availableCompanies.map((company) => ({ ...company })) };
-    if (window.__shellData) window.__shellData.user = state2.profileUser;
+    pageContext = { ...pageContext, data: { ...pageContext.data, user: state2.profileUser } };
     menuItems = buildMenuItems(state2.profileUser);
     const switchable = user.switchableCompanies.map((company) => ({ key: company.id, label: company.name }));
     if (switchable.length) {
@@ -1571,5 +1577,31 @@
     attachShellBehaviors();
     if (state2.forcePasswordOpen) root.querySelector('[data-force-password-form] input[name="password"]')?.focus();
   }
-  bootShell();
+  function setPage(nextPage = {}) {
+    if (!nextPage || typeof nextPage.render !== "function") {
+      throw new TypeError("setPage() requires a page descriptor with render().");
+    }
+    pageContext = {
+      menu: Array.isArray(nextPage.menu) ? nextPage.menu : null,
+      data: nextPage.data && typeof nextPage.data === "object" ? nextPage.data : {},
+      render: nextPage.render,
+      title: typeof nextPage.title === "string" ? nextPage.title : ""
+    };
+    menuSource = pageContext.menu ?? defaultMenu;
+    unread = pageContext.data.unread ?? {};
+    unreadWatermarks2 = getRememberedUnreadWatermarks();
+    hasUnreadMessages = (unread.messages ?? 0) > 0;
+    if (pageContext.data.user) {
+      state2.profileUser = {
+        ...pageContext.data.user,
+        availableCompanies: (pageContext.data.user.availableCompanies ?? []).map((company) => ({ ...company }))
+      };
+    }
+    menuItems = buildMenuItems(state2.profileUser ?? pageContext.data.user);
+    state2.profileJoinRequest = null;
+    closeTransientShellUi();
+    if (pageContext.title) document.title = pageContext.title;
+    render();
+  }
+  var shellReady = bootShell();
 })();

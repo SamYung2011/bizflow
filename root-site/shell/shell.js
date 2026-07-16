@@ -32,13 +32,6 @@ let authApi = null;
 let authSubscription = null;
 let lastResumeRefreshAt = 0;
 
-// 红点=数据驱动(煊煊 2026-07-08:有未读才亮,禁照版面摆装饰红点)。
-// 屏页在 import 本文件前设 window.__shellData = { unread: {...} }。
-// 分站菜单(煊煊 2026-07-08:team/bizflow 两个网页):屏页可设 window.__shellMenu 覆盖;
-// 不设=壳演示用全量 7 项(Figma 模板帧原样)。
-let unread = window.__shellData?.unread ?? {};
-let unreadWatermarks = getRememberedUnreadWatermarks();
-
 const defaultMenu = [
   { key: "nav.home", icon: "icon-nav-home", active: true },
   { key: "nav.tasks", icon: "icon-nav-task", unreadKey: "tasks" },
@@ -48,7 +41,18 @@ const defaultMenu = [
   { key: "nav.inventory", icon: "icon-nav-inventory", unreadKey: "inventory" }
 ];
 
-const menuSource = window.__shellMenu ?? defaultMenu;
+// Existing MPA pages set these globals before importing the shell. P0 consumes
+// them once as a compatibility adapter; SPA pages switch through setPage().
+let pageContext = {
+  menu: Array.isArray(window.__shellMenu) ? window.__shellMenu : null,
+  data: window.__shellData && typeof window.__shellData === "object" ? window.__shellData : {},
+  render: typeof window.__shellContent === "function" ? window.__shellContent : null,
+  title: ""
+};
+let menuSource = pageContext.menu ?? defaultMenu;
+// 红点=数据驱动(煊煊 2026-07-08:有未读才亮,禁照版面摆装饰红点)。
+let unread = pageContext.data.unread ?? {};
+let unreadWatermarks = getRememberedUnreadWatermarks();
 
 function buildMenuItems(user) {
   const authenticated = typeof user?.hasPermission === "function";
@@ -64,7 +68,7 @@ function buildMenuItems(user) {
     }));
 }
 
-let menuItems = buildMenuItems(window.__shellData?.user);
+let menuItems = buildMenuItems(pageContext.data.user);
 
 let hasUnreadMessages = (unread.messages ?? 0) > 0;
 
@@ -167,10 +171,10 @@ function renderLanguageButton() {
 }
 
 function syncProfileUser() {
-  if (!state.profileUser && window.__shellData?.user) {
+  if (!state.profileUser && pageContext.data.user) {
     state.profileUser = {
-      ...window.__shellData.user,
-      availableCompanies: (window.__shellData.user.availableCompanies ?? []).map((company) => ({ ...company }))
+      ...pageContext.data.user,
+      availableCompanies: (pageContext.data.user.availableCompanies ?? []).map((company) => ({ ...company }))
     };
   }
 }
@@ -254,7 +258,7 @@ function renderNav() {
 }
 
 function renderAddRow() {
-  const user = state.profileUser ?? window.__shellData?.user;
+  const user = state.profileUser ?? pageContext.data.user;
   const liveReadOnly = typeof user?.hasPermission === "function";
   return `<button type="button" class="tp-component add-row shell-add-row" aria-label="${escapeHtml(t("shell.add"))}"${liveReadOnly ? " disabled aria-disabled=\"true\"" : ""}>
     ${icon("icon-add-surface-add")}
@@ -279,10 +283,9 @@ function renderDrawer() {
 }
 
 function renderContent() {
-  // 屏幕页注入钩子:screens/*.js 在 import 本文件前设 window.__shellContent,壳只管骨架
-  if (typeof window.__shellContent === "function") {
+  if (typeof pageContext.render === "function") {
     return `<main class="shell-main">
-      <div class="shell-page-inner">${window.__shellContent({ t, icon, line, redDot, escapeHtml, lang: state.lang })}</div>
+      <div class="shell-page-inner">${pageContext.render({ t, icon, line, redDot, escapeHtml, lang: state.lang })}</div>
     </main>`;
   }
   return `<main class="shell-main">
@@ -381,7 +384,7 @@ async function refreshUnreadIndicators(event) {
     const { getUnread } = await import(providerPath);
     unread = await getUnread();
   }
-  if (window.__shellData) window.__shellData.unread = { ...unread };
+  pageContext = { ...pageContext, data: { ...pageContext.data, unread: { ...unread } } };
   unreadWatermarks = getRememberedUnreadWatermarks();
   syncUnreadIndicators();
 }
@@ -600,7 +603,7 @@ async function guardAuthenticatedShell() {
     return false;
   }
   state.profileUser = { ...user, availableCompanies: user.availableCompanies.map((company) => ({ ...company })) };
-  if (window.__shellData) window.__shellData.user = state.profileUser;
+  pageContext = { ...pageContext, data: { ...pageContext.data, user: state.profileUser } };
   menuItems = buildMenuItems(state.profileUser);
   const switchable = user.switchableCompanies.map((company) => ({ key: company.id, label: company.name }));
   if (switchable.length) {
@@ -629,4 +632,31 @@ async function bootShell() {
   if (state.forcePasswordOpen) root.querySelector('[data-force-password-form] input[name="password"]')?.focus();
 }
 
-bootShell();
+export function setPage(nextPage = {}) {
+  if (!nextPage || typeof nextPage.render !== "function") {
+    throw new TypeError("setPage() requires a page descriptor with render().");
+  }
+  pageContext = {
+    menu: Array.isArray(nextPage.menu) ? nextPage.menu : null,
+    data: nextPage.data && typeof nextPage.data === "object" ? nextPage.data : {},
+    render: nextPage.render,
+    title: typeof nextPage.title === "string" ? nextPage.title : ""
+  };
+  menuSource = pageContext.menu ?? defaultMenu;
+  unread = pageContext.data.unread ?? {};
+  unreadWatermarks = getRememberedUnreadWatermarks();
+  hasUnreadMessages = (unread.messages ?? 0) > 0;
+  if (pageContext.data.user) {
+    state.profileUser = {
+      ...pageContext.data.user,
+      availableCompanies: (pageContext.data.user.availableCompanies ?? []).map((company) => ({ ...company }))
+    };
+  }
+  menuItems = buildMenuItems(state.profileUser ?? pageContext.data.user);
+  state.profileJoinRequest = null;
+  closeTransientShellUi();
+  if (pageContext.title) document.title = pageContext.title;
+  render();
+}
+
+export const shellReady = bootShell();
