@@ -23,8 +23,10 @@
 
 .warranty-date-filter {
   display: inline-flex;
-  min-width: 0;
+  width: calc(var(--space-40) * 3 + var(--space-20));
+  min-width: calc(var(--space-40) * 3 + var(--space-20));
   height: 36px;
+  flex: 0 0 calc(var(--space-40) * 3 + var(--space-20));
   align-items: stretch;
   border: 1px solid var(--gray-15);
   border-radius: var(--radius-10);
@@ -122,9 +124,9 @@
 .warranty-search {
   display: flex;
   width: min(100%, 320px);
-  min-width: 220px;
+  min-width: calc(var(--space-40) * 3);
   height: 36px;
-  flex: none;
+  flex: 1 1 220px;
   align-items: center;
   gap: var(--space-10);
   padding: 0 var(--space-10);
@@ -345,6 +347,8 @@
 
   .warranty-date-filter {
     width: 100%;
+    min-width: 0;
+    flex: none;
   }
 
   .warranty-date-filter__trigger {
