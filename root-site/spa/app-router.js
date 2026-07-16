@@ -19,6 +19,13 @@ function isAbortError(error) {
   return error?.name === "AbortError";
 }
 
+function observeViewTransition(promise, phase) {
+  void Promise.resolve(promise).catch((error) => {
+    if (["AbortError", "InvalidStateError"].includes(error?.name)) return;
+    console.warn(`[spa] view transition ${phase} failed`, error);
+  });
+}
+
 function safeHistoryValue(value) {
   if (value === undefined) return null;
   try {
@@ -134,6 +141,11 @@ export function createAppRouter({
     };
     if (typeof documentRef.startViewTransition === "function") {
       const transition = documentRef.startViewTransition(update);
+      // Rapid navigation can supersede a transition after its DOM update has
+      // committed. Observe both auxiliary promises immediately so the browser's
+      // expected interruption never becomes an unhandled rejection.
+      observeViewTransition(transition.ready, "ready");
+      observeViewTransition(transition.finished, "finished");
       await transition.updateCallbackDone;
     } else {
       update();

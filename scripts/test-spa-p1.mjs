@@ -248,6 +248,17 @@ async function verifyRouter() {
   assert.equal(idle.documentRef.listeners.size, 0, "empty allowlist must not attach document listeners");
 
   const browser = fakeBrowser();
+  browser.documentRef.startViewTransition = (update) => {
+    update();
+    return {
+      updateCallbackDone: Promise.resolve(),
+      ready: Promise.reject(new DOMException("superseded", "InvalidStateError")),
+      finished: Promise.reject(new DOMException("superseded", "AbortError"))
+    };
+  };
+  const transitionUnhandled = [];
+  const onTransitionUnhandled = (error) => transitionUnhandled.push(error);
+  process.on("unhandledRejection", onTransitionUnhandled);
   const pages = [];
   const routeTarget = eventTarget();
   let allowLeave = true;
@@ -321,6 +332,9 @@ async function verifyRouter() {
   await router.dispose();
   assert.equal(browser.windowRef.listeners.get("popstate")?.size ?? 0, 0);
   assert.equal(routeTarget.listeners.get("route")?.size ?? 0, 0);
+  await new Promise((resolve) => setImmediate(resolve));
+  process.off("unhandledRejection", onTransitionUnhandled);
+  assert.deepEqual(transitionUnhandled, [], "aborted view-transition promises must never be unhandled");
 }
 
 async function verifyShellAdapter() {
@@ -341,6 +355,8 @@ async function verifyTransitions() {
   const router = await readFile(path.join(rootDir, "root-site/spa/app-router.js"), "utf8");
   const base = await readFile(path.join(rootDir, "root-site/tokens/base.css"), "utf8");
   assert.match(router, /documentRef\.startViewTransition\(update\)/, "SPA navigation must use one shared same-document transition");
+  assert.match(router, /\["AbortError", "InvalidStateError"\]/, "expected transition interruptions must be silent");
+  assert.match(router, /console\.warn\(`\[spa\] view transition \$\{phase\} failed`/, "unexpected transition failures must stay observable");
   assert.match(base, /@view-transition\s*{\s*navigation:\s*auto;/, "direct-load fallback must retain progressive MPA transitions");
 }
 
