@@ -1,10 +1,17 @@
-import { fetchAllTable, getSession } from "./auth.js";
-import { activateLiveTableCacheUser, clearLiveTableCache, invalidateLiveAuthCache, invalidateLiveTableCache } from "./live-table-cache.js";
+import { fetchAllTable, getSession, TRANSIENT_AUTH_RESET_EVENT } from "./auth.js";
+import { activateLiveTableCacheUser, invalidateLiveAuthCache, invalidateLiveTableCache } from "./live-table-cache.js";
 
 const HK_TIME_ZONE = "Asia/Hong_Kong";
 const tablePromises = new Map();
 const tableQueries = new Map();
 let liveUserId = "";
+
+if (typeof window !== "undefined") {
+  window.addEventListener(TRANSIENT_AUTH_RESET_EVENT, () => {
+    liveUserId = "";
+    tablePromises.clear();
+  });
+}
 
 export function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -81,7 +88,6 @@ export async function ensureLiveSession() {
   if (!session) {
     liveUserId = "";
     tablePromises.clear();
-    await clearLiveTableCache();
     return null;
   }
   if (liveUserId !== session.user.id) {

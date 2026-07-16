@@ -14,6 +14,7 @@ import {
 const CONFIG_URL = new URL("../config.local.js", import.meta.url);
 const ADMIN_EMAIL = "samyung2011@gmail.com";
 const PAGE_SIZE = 1000;
+export const TRANSIENT_AUTH_RESET_EVENT = "tp:auth-transient-reset";
 
 export const RBAC_KEYS = Object.freeze([
   "can_create_task",
@@ -37,11 +38,22 @@ function clearCurrentUserMemory() {
   currentUserPromiseVersion = "";
 }
 
+function notifyTransientAuthReset() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(TRANSIENT_AUTH_RESET_EVENT));
+  }
+}
+
 function handleAuthCacheEvent(event) {
   // INITIAL_SESSION is page bootstrap, not a state transition; clearing it would defeat cross-page caching.
   if (event === "INITIAL_SESSION") return;
   clearCurrentUserMemory();
-  const operation = event === "SIGNED_OUT" ? clearLiveTableCache() : invalidateLiveAuthCache();
+  if (event === "SIGNED_OUT") {
+    // Only explicit signOut() owns persistent cache removal; SDK refresh races can emit transient SIGNED_OUT.
+    notifyTransientAuthReset();
+    return;
+  }
+  const operation = invalidateLiveAuthCache();
   void operation.catch((error) => console.warn("[auth-cache] auth event invalidation failed", error));
 }
 
