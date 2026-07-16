@@ -343,8 +343,12 @@ export function activateLiveTableCacheUser(userId) {
       || (storedUserId && storedUserId !== nextUserId)
       || (indexedOwner && indexedOwner !== nextUserId)
     );
-    if (userChanged) {
-      await clearCacheStores();
+    if (activeUserId && activeUserId !== nextUserId) {
+      // Versions are page-local. User-keyed IndexedDB/sessionStorage entries stay isolated
+      // and coexist across account switches; only explicit signOut clears persisted data.
+      tableVersions.clear();
+      snapshotVersions.clear();
+      authVersion = 0;
     }
     activeUserId = nextUserId;
     setFallbackValue(CACHE_USER_KEY, nextUserId);
@@ -359,7 +363,7 @@ export async function readLiveTableCache({ userId, table, orderCol, ascending, s
   const normalizedUserId = String(userId || "");
   if (!normalizedUserId) return null;
   await activateLiveTableCacheUser(normalizedUserId);
-  if (getFallbackValue(CACHE_USER_KEY) !== normalizedUserId) return null;
+  if (activeUserId !== normalizedUserId) return null;
   const key = cacheKey(normalizedUserId, table, orderCol, ascending, secondaryOrder);
   const currentVersion = liveTableCacheVersion(table);
   const indexed = await readIndexedValue(key);
@@ -406,7 +410,7 @@ export async function readLiveSnapshotCache({ userId, snapshot }) {
   const normalizedSnapshot = String(snapshot || "");
   if (!normalizedUserId || !normalizedSnapshot) return null;
   await activateLiveTableCacheUser(normalizedUserId);
-  if (getFallbackValue(CACHE_USER_KEY) !== normalizedUserId) return null;
+  if (activeUserId !== normalizedUserId) return null;
   const key = snapshotCacheKey(normalizedUserId, normalizedSnapshot);
   const currentVersion = liveSnapshotCacheVersion(normalizedSnapshot);
   const usePayload = async (payload, remove) => {
@@ -497,21 +501,11 @@ export async function invalidateLiveSnapshotCache(...snapshots) {
   }
 }
 
-export async function hasLiveSnapshotCache(...snapshots) {
-  const targets = snapshots.flat().map((snapshot) => String(snapshot || "")).filter(Boolean);
-  if (!targets.length) return false;
-  let userId = getFallbackValue(CACHE_USER_KEY) || "";
-  if (!userId) userId = String((await readIndexedValue(CACHE_USER_KEY)).value?.userId || "");
-  if (!userId) return false;
-  const results = await Promise.all(targets.map((snapshot) => readLiveSnapshotCache({ userId, snapshot })));
-  return results.every(Boolean);
-}
-
 export async function readLiveAuthCache(userId) {
   const normalizedUserId = String(userId || "");
   if (!normalizedUserId) return null;
   await activateLiveTableCacheUser(normalizedUserId);
-  if (getFallbackValue(CACHE_USER_KEY) !== normalizedUserId) return null;
+  if (activeUserId !== normalizedUserId) return null;
   const key = authCacheKey(normalizedUserId);
   const currentVersion = liveAuthCacheVersion();
   const indexed = await readIndexedValue(key);

@@ -37,21 +37,6 @@ const SNAPSHOT_TABLES = Object.freeze({
   "pending-deduction.json": ["invoices", "customers", "inventory_movements"]
 });
 
-const PAGE_SNAPSHOTS = Object.freeze({
-  "home.html": ["home.json", "home-order-metrics.json", "inventory.json", "warranty.json", "customers.json"],
-  "orders.html": ["orders.json"],
-  "orders-detail.html": ["orders.json", "customers.json", "inventory.json"],
-  "orders-create.html": ["customers.json", "inventory.json"],
-  "customers.html": ["customers.json"],
-  "customer-detail.html": ["customers.json"],
-  "inventory.html": ["inventory.json"],
-  "inventory-detail.html": ["inventory.json"],
-  "expense.html": ["expense.json"],
-  "whatsapp.html": ["whatsapp.json"],
-  "index.html": ["home.json", "tasks.json", "members.json", "team-extras.json"],
-  "members.html": ["home.json", "members.json", "team-extras.json"]
-});
-
 const TABLE_SNAPSHOTS = new Map();
 Object.entries(SNAPSHOT_TABLES).forEach(([snapshot, tables]) => {
   tables.forEach((table) => {
@@ -67,11 +52,4 @@ export function snapshotsForTables(tables) {
     TABLE_SNAPSHOTS.get(String(table || ""))?.forEach((snapshot) => snapshots.add(snapshot));
   });
   return snapshots;
-}
-
-export function snapshotsForPathname(pathname) {
-  const parts = String(pathname || "").split("/").filter(Boolean);
-  const page = parts.at(-1) || "index.html";
-  if (page === "index.html" && !parts.includes("team")) return [];
-  return (PAGE_SNAPSHOTS[page] ?? []).slice();
 }
