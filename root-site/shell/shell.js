@@ -30,6 +30,7 @@ const state = {
 };
 let authApi = null;
 let authSubscription = null;
+let lastResumeRefreshAt = 0;
 
 // 红点=数据驱动(煊煊 2026-07-08:有未读才亮,禁照版面摆装饰红点)。
 // 屏页在 import 本文件前设 window.__shellData = { unread: {...} }。
@@ -305,6 +306,7 @@ function renderForcedPasswordModal() {
 }
 
 function render() {
+  window.__shellBootCleanup?.();
   document.documentElement.lang = state.lang === "zh" ? "zh-Hant" : state.lang;
   root.innerHTML = `<div class="shell-app shell-app--${mode} ${state.drawerOpen ? "is-drawer-open" : ""}">
     ${renderTopbar()}
@@ -481,6 +483,22 @@ function attachShellBehaviors() {
     const onViewportChange = (event) => setViewportMode(event.matches);
     if (typeof mobileViewport.addEventListener === "function") mobileViewport.addEventListener("change", onViewportChange);
     else mobileViewport.addListener(onViewportChange);
+  }
+
+  if (state.authEnabled && authApi) {
+    const refreshStaleCaches = () => {
+      if (document.visibilityState === "hidden") return;
+      const now = Date.now();
+      if (now - lastResumeRefreshAt < 1_000) return;
+      lastResumeRefreshAt = now;
+      const snapshotsPath = "../data/live-snapshot-utils.js";
+      void Promise.all([
+        authApi.getCurrentUser({ refresh: true }),
+        import(snapshotsPath).then(({ refreshStaleLiveTables }) => refreshStaleLiveTables())
+      ]).catch((error) => console.warn("[live-cache] resume refresh failed", error));
+    };
+    document.addEventListener("visibilitychange", refreshStaleCaches);
+    window.addEventListener("focus", refreshStaleCaches);
   }
 
   attachMenuBehaviors(document, {

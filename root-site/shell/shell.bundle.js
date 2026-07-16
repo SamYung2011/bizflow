@@ -1,5 +1,5 @@
 (() => {
-  // html/shell/shell-i18n.js
+  // root-site/shell/shell-i18n.js
   var dictionaries = {
     zh: {
       "shell.company": "HONNMONO",
@@ -177,7 +177,7 @@
     }
   };
 
-  // html/assets/icons/inline-sprite.js
+  // root-site/assets/icons/inline-sprite.js
   var iconSprite = `<svg id="tp-icon-sprite" aria-hidden="true" style="display:none" xmlns="http://www.w3.org/2000/svg">
 <symbol id="icon-nav-honnmono" viewBox="0 0 36 23.5379">
 <g id="nav-honnmono-Group">
@@ -505,7 +505,7 @@
     document.body.prepend(sprite);
   }
 
-  // html/components/shared.js
+  // root-site/components/shared.js
   var iconsUrl = "../assets/icons/icons.svg";
   function escapeHtml(value) {
     return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
@@ -518,7 +518,7 @@
     return `<svg class="${safeClass}" ${aria}><use href="${href}"></use></svg>`;
   }
 
-  // html/components/menus.js
+  // root-site/components/menus.js
   function identity(value) {
     return value;
   }
@@ -757,7 +757,7 @@
     };
   }
 
-  // html/data/session-state.js
+  // root-site/data/session-state.js
   var memorySession = /* @__PURE__ */ new Map();
   var consumedKeys = /* @__PURE__ */ new Set();
   function normalizeKey(key) {
@@ -774,7 +774,42 @@
     }
   }
 
-  // html/components/navigation-presets.js
+  // root-site/components/navigation-prerender.js
+  var RULES_ID = "tp-navigation-prerender";
+  var TEAM_ENTRY = "../team/index.html";
+  function eligibleUrl(href) {
+    try {
+      const url = new URL(href, window.location.href);
+      if (url.origin !== window.location.origin || !url.pathname.endsWith(".html")) return "";
+      url.hash = "";
+      return url.href;
+    } catch {
+      return "";
+    }
+  }
+  function installNavigationPrerender(menuItems2) {
+    if (typeof document === "undefined" || !window.location.pathname.includes("/bizflow/")) return false;
+    if (document.getElementById(RULES_ID)) return true;
+    const currentUrl = eligibleUrl(window.location.href);
+    const urls = [...new Set([
+      ...(menuItems2 ?? []).map((item) => eligibleUrl(item.href)),
+      eligibleUrl(TEAM_ENTRY)
+    ].filter((url) => url && url !== currentUrl))];
+    if (!urls.length) return false;
+    const rules = document.createElement("script");
+    rules.id = RULES_ID;
+    rules.type = "speculationrules";
+    rules.textContent = JSON.stringify({
+      prerender: [{ urls, eagerness: "moderate" }]
+    });
+    document.head.append(rules);
+    return true;
+  }
+  function cancelNavigationPrerender() {
+    document.getElementById(RULES_ID)?.remove();
+  }
+
+  // root-site/components/navigation-presets.js
   var navigationPresetKeys = Object.freeze({
     ordersTab: "task-platform.orders.initialTab",
     ordersShipping: "task-platform.orders.initialShipping",
@@ -786,10 +821,11 @@
   var allowedPresetKeys = new Set(Object.values(navigationPresetKeys));
   function setNavigationPreset(key, value) {
     if (!allowedPresetKeys.has(key) || value === null || value === void 0 || value === "") return;
+    cancelNavigationPrerender();
     setSessionValue(key, String(value));
   }
 
-  // html/shell/shell-search.js
+  // root-site/shell/shell-search.js
   var state = {
     query: "",
     open: false,
@@ -938,7 +974,7 @@
     });
   }
 
-  // html/data/read-state.js
+  // root-site/data/read-state.js
   var READ_STATE_STORAGE_KEY = "tp-read-state-v1";
   var READ_KEYS = /* @__PURE__ */ new Set(["tasks", "orders", "messages", "inventory"]);
   var memoryState = {};
@@ -959,6 +995,10 @@
   }
   function markRead(key, watermark) {
     if (!READ_KEYS.has(key) || typeof watermark !== "string" || watermark === "") return;
+    if (document.prerendering) {
+      document.addEventListener("prerenderingchange", () => markRead(key, watermark), { once: true });
+      return;
+    }
     memoryState = { ...getReadState(), [key]: watermark };
     try {
       window.localStorage.setItem(READ_STATE_STORAGE_KEY, JSON.stringify(memoryState));
@@ -970,7 +1010,7 @@
     return { ...unreadWatermarks };
   }
 
-  // html/shell/shell.js
+  // root-site/shell/shell.js
   var iconsUrl2 = "../assets/icons/icons.svg";
   var root = document.getElementById("shell-root");
   var mobileViewport = window.matchMedia?.("(max-width: 768px)") ?? null;
@@ -994,6 +1034,7 @@
   };
   var authApi = null;
   var authSubscription = null;
+  var lastResumeRefreshAt = 0;
   var unread = window.__shellData?.unread ?? {};
   var unreadWatermarks2 = getRememberedUnreadWatermarks();
   var defaultMenu = [
@@ -1209,6 +1250,7 @@
   </div>`;
   }
   function render() {
+    window.__shellBootCleanup?.();
     document.documentElement.lang = state2.lang === "zh" ? "zh-Hant" : state2.lang;
     root.innerHTML = `<div class="shell-app shell-app--${mode} ${state2.drawerOpen ? "is-drawer-open" : ""}">
     ${renderTopbar()}
@@ -1370,6 +1412,21 @@
       if (typeof mobileViewport.addEventListener === "function") mobileViewport.addEventListener("change", onViewportChange);
       else mobileViewport.addListener(onViewportChange);
     }
+    if (state2.authEnabled && authApi) {
+      const refreshStaleCaches = () => {
+        if (document.visibilityState === "hidden") return;
+        const now = Date.now();
+        if (now - lastResumeRefreshAt < 1e3) return;
+        lastResumeRefreshAt = now;
+        const snapshotsPath = "../data/live-snapshot-utils.js";
+        void Promise.all([
+          authApi.getCurrentUser({ refresh: true }),
+          import(snapshotsPath).then(({ refreshStaleLiveTables }) => refreshStaleLiveTables())
+        ]).catch((error) => console.warn("[live-cache] resume refresh failed", error));
+      };
+      document.addEventListener("visibilitychange", refreshStaleCaches);
+      window.addEventListener("focus", refreshStaleCaches);
+    }
     attachMenuBehaviors(document, {
       onSelectLang(code) {
         if (langs.includes(code)) {
@@ -1488,6 +1545,7 @@
       return;
     }
     render();
+    installNavigationPrerender(menuItems);
     attachShellBehaviors();
     if (state2.forcePasswordOpen) root.querySelector('[data-force-password-form] input[name="password"]')?.focus();
   }

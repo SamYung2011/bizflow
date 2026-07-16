@@ -338,26 +338,33 @@ async function loadCurrentUser() {
   const client = requireClient(await getSupabaseClient());
   const userId = session.user.id;
   const cached = await readLiveAuthCache(userId);
-  const refreshAuthTables = !cached || cached.stale;
-  const authRowsPromise = cached && !cached.stale
+  const fetchAuthRows = async () => {
+    const version = liveAuthCacheVersion();
+    const employeeResult = await client.from("employees").select("*").eq("user_id", userId).maybeSingle();
+    if (employeeResult.error) throw employeeResult.error;
+    if (!employeeResult.data) return null;
+    const pendingResult = await client.from("company_join_pending")
+      .select("company_id")
+      .eq("employee_id", employeeResult.data.id)
+      .is("approved", null);
+    if (pendingResult.error) throw pendingResult.error;
+    const authRows = {
+      employee: employeeResult.data,
+      pendingCompanyIds: (pendingResult.data ?? []).map((row) => row.company_id)
+    };
+    await writeLiveAuthCache({ userId, ...authRows, version });
+    return authRows;
+  };
+  const refreshAuthTables = !cached;
+  const authRowsPromise = cached
     ? Promise.resolve({ employee: cached.employee, pendingCompanyIds: cached.pendingCompanyIds })
-    : (async () => {
-        const version = liveAuthCacheVersion();
-        const employeeResult = await client.from("employees").select("*").eq("user_id", userId).maybeSingle();
-        if (employeeResult.error) throw employeeResult.error;
-        if (!employeeResult.data) return null;
-        const pendingResult = await client.from("company_join_pending")
-          .select("company_id")
-          .eq("employee_id", employeeResult.data.id)
-          .is("approved", null);
-        if (pendingResult.error) throw pendingResult.error;
-        const authRows = {
-          employee: employeeResult.data,
-          pendingCompanyIds: (pendingResult.data ?? []).map((row) => row.company_id)
-        };
-        await writeLiveAuthCache({ userId, ...authRows, version });
-        return authRows;
-      })();
+    : fetchAuthRows();
+  if (cached?.stale) {
+    void fetchAuthRows().then((rows) => {
+      if (!rows) return invalidateLiveAuthCache();
+      return null;
+    }).catch((error) => console.warn("[auth-cache] background refresh failed", error));
+  }
   const [authRows, bindings, companies, roles] = await Promise.all([
     authRowsPromise,
     fetchAllTable("employee_companies", "joined_at", true, "id", { refresh: refreshAuthTables }),

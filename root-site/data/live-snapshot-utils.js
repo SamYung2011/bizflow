@@ -3,6 +3,7 @@ import { activateLiveTableCacheUser, clearLiveTableCache, invalidateLiveAuthCach
 
 const HK_TIME_ZONE = "Asia/Hong_Kong";
 const tablePromises = new Map();
+const tableQueries = new Map();
 let liveUserId = "";
 
 export function asArray(value) {
@@ -93,10 +94,28 @@ export async function ensureLiveSession() {
 
 export function allRows(table, orderCol = "created_at", ascending = true, secondaryOrder = "id") {
   const key = `${table}:${orderCol || ""}:${ascending}:${secondaryOrder || ""}`;
+  tableQueries.set(key, { table, orderCol, ascending, secondaryOrder });
   if (!tablePromises.has(key)) {
     tablePromises.set(key, fetchAllTable(table, orderCol, ascending, secondaryOrder));
   }
   return tablePromises.get(key);
+}
+
+export async function refreshStaleLiveTables() {
+  // getCurrentUser refreshes these exact cache signatures during the same resume pass.
+  const authTableKeys = new Set([
+    "employee_companies:joined_at:true:id",
+    "companies:name:true:id",
+    "roles:name:true:id"
+  ]);
+  const queries = [...tableQueries].filter(([key]) => !authTableKeys.has(key)).map(([, query]) => query);
+  const results = await Promise.allSettled(queries.map(({ table, orderCol, ascending, secondaryOrder }) =>
+    fetchAllTable(table, orderCol, ascending, secondaryOrder)));
+  results.forEach((result, index) => {
+    if (result.status === "rejected") {
+      console.warn(`[live-table-cache] ${queries[index].table} resume refresh failed`, result.reason);
+    }
+  });
 }
 
 export async function invalidateLiveTables(...tables) {

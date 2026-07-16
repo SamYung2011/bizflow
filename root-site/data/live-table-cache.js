@@ -7,6 +7,7 @@ const CACHE_DB_VERSION = 1;
 const CACHE_STORE_NAME = "rows";
 
 export const LIVE_TABLE_CACHE_TTL_MS = 60_000;
+export const LIVE_AUTH_CACHE_TTL_MS = 5 * 60_000;
 // IndexedDB is the primary store. This limit only applies to the sessionStorage fallback.
 export const LIVE_TABLE_CACHE_MAX_BYTES = 1.5 * 1024 * 1024;
 
@@ -377,7 +378,7 @@ export async function readLiveAuthCache(userId) {
       return {
         employee: payload.employee,
         pendingCompanyIds: payload.pendingCompanyIds.slice(),
-        stale: Date.now() - payload.cachedAt >= LIVE_TABLE_CACHE_TTL_MS
+        stale: Date.now() - payload.cachedAt >= LIVE_AUTH_CACHE_TTL_MS
       };
     } catch {
       await removeIndexedValue(key);
@@ -399,7 +400,7 @@ export async function readLiveAuthCache(userId) {
     return {
       employee: payload.employee,
       pendingCompanyIds: payload.pendingCompanyIds.slice(),
-      stale: Date.now() - payload.cachedAt >= LIVE_TABLE_CACHE_TTL_MS
+      stale: Date.now() - payload.cachedAt >= LIVE_AUTH_CACHE_TTL_MS
     };
   } catch {
     removeFallbackValue(key);
