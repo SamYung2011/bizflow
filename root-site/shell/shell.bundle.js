@@ -777,6 +777,10 @@
   // root-site/components/navigation-prerender.js
   var RULES_ID = "tp-navigation-prerender";
   var TEAM_ENTRY = "../team/index.html";
+  var HIGH_FREQUENCY_TARGETS = Object.freeze({
+    bizflow: ["./orders.html", "./customers.html"],
+    team: ["./index.html", "./members.html"]
+  });
   function eligibleUrl(href) {
     try {
       const url = new URL(href, window.location.href);
@@ -788,20 +792,27 @@
     }
   }
   function installNavigationPrerender(menuItems2) {
-    if (typeof document === "undefined" || !window.location.pathname.includes("/bizflow/")) return false;
+    if (typeof document === "undefined") return false;
+    const section = window.location.pathname.includes("/bizflow/") ? "bizflow" : window.location.pathname.includes("/team/") ? "team" : "";
+    if (!section) return false;
     if (document.getElementById(RULES_ID)) return true;
     const currentUrl = eligibleUrl(window.location.href);
-    const urls = [...new Set([
+    const menuUrls = [...new Set([
       ...(menuItems2 ?? []).map((item) => eligibleUrl(item.href)),
-      eligibleUrl(TEAM_ENTRY)
+      section === "bizflow" ? eligibleUrl(TEAM_ENTRY) : ""
     ].filter((url) => url && url !== currentUrl))];
-    if (!urls.length) return false;
+    const eagerUrls = [...new Set(HIGH_FREQUENCY_TARGETS[section].map(eligibleUrl).filter((url) => url && url !== currentUrl))].slice(0, 2);
+    const eagerSet = new Set(eagerUrls);
+    const moderateUrls = menuUrls.filter((url) => !eagerSet.has(url));
+    const prerender = [
+      ...eagerUrls.length ? [{ urls: eagerUrls, eagerness: "eager" }] : [],
+      ...moderateUrls.length ? [{ urls: moderateUrls, eagerness: "moderate" }] : []
+    ];
+    if (!prerender.length) return false;
     const rules = document.createElement("script");
     rules.id = RULES_ID;
     rules.type = "speculationrules";
-    rules.textContent = JSON.stringify({
-      prerender: [{ urls, eagerness: "moderate" }]
-    });
+    rules.textContent = JSON.stringify({ prerender });
     document.head.append(rules);
     return true;
   }

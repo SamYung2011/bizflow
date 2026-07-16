@@ -2,6 +2,10 @@
   box-sizing: border-box;
 }
 
+@view-transition {
+  navigation: auto;
+}
+
 html {
   min-height: 100%;
   color: var(--gray-80);
@@ -72,4 +76,11 @@ svg {
   font-size: var(--font-body-size);
   font-weight: var(--font-body-weight);
   line-height: var(--lh-body);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: .01ms !important;
+  }
 }
