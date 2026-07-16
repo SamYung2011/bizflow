@@ -1,6 +1,5 @@
 import { getCurrentUser, getSession, getSupabaseClient } from "./auth.js";
 import { invalidateLiveTables } from "./live-snapshot-utils.js";
-import { invalidateLiveSnapshot } from "./live-snapshots.js";
 
 async function writeContext() {
   const [client, session, currentUser] = await Promise.all([
@@ -59,7 +58,6 @@ function storedAttachment(value) {
 async function invalidateTaskReads(...tables) {
   try {
     await invalidateLiveTables(tables);
-    invalidateLiveSnapshot("tasks.json", "home.json");
   } catch (error) {
     console.warn("Task cache invalidation failed", error);
   }

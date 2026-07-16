@@ -6,6 +6,8 @@ import path from "node:path";
 import { createAppRouter, SPA_HISTORY_KEY } from "../root-site/spa/app-router.js";
 import { createPageScope, mountPageModule, throwIfPageAborted } from "../root-site/spa/page-lifecycle.js";
 import { routeManifest, spaCrossSectionNavigation, spaNavigation, spaRouteAllowlist } from "../root-site/spa/route-manifest.js";
+import { invalidateProviderSnapshotMemo, loadProviderSnapshot } from "../root-site/data/provider-snapshot-cache.js";
+import { snapshotsForTables } from "../root-site/data/live-snapshot-dependencies.js";
 import { createDateFilter } from "../root-site/components/date-filter.js";
 import { requireOcppRouteAccess } from "../root-site/bizflow/ocpp-shared.js";
 import { whatsappCopy } from "../root-site/bizflow/whatsapp-i18n.js";
@@ -241,10 +243,75 @@ async function verifyDataRaceGuards() {
   const auth = await readFile(path.join(rootDir, "root-site/data/auth.js"), "utf8");
   const snapshotUtils = await readFile(path.join(rootDir, "root-site/data/live-snapshot-utils.js"), "utf8");
   const snapshots = await readFile(path.join(rootDir, "root-site/data/live-snapshots.js"), "utf8");
+  const provider = await readFile(path.join(rootDir, "root-site/data/provider.js"), "utf8");
+  const expenseWrites = await readFile(path.join(rootDir, "root-site/data/live-expense-writes.js"), "utf8");
   assert.match(auth, /secondaryOrder \|\| ""\}:\$\{cacheVersion\}/, "table in-flight keys must include the invalidation generation");
   assert.match(snapshotUtils, /freshTablePromises\.get\(key\) === promise/, "fresh table requests must clear only their own generation");
   assert.match(snapshotUtils, /freshTablePromises\.keys\(\)/, "table invalidation must evict fresh in-flight reuse keys");
   assert.match(snapshots, /LIVE_REFRESHES\.get\(snapshot\) === promise/, "snapshot refreshes must clear only their own generation");
+  assert.match(snapshots, /invalidateProviderSnapshotMemo\(snapshots\)/, "snapshot invalidation events must clear provider memos");
+  assert.match(snapshots, /updateProviderSnapshotMemo\(snapshot, value\)/, "background refreshes must replace provider memos");
+  assert.doesNotMatch(provider, /let\s+\w*SnapshotPromise\s*=|r11SnapshotPromises/, "provider must not retain untracked snapshot promises");
+  assert.match(provider, /loadProviderSnapshot\(/, "provider snapshots must use the invalidation-aware memo");
+  assert.match(expenseWrites, /invalidateLiveTables\("expense_reimbursements"\)/, "expense writes must invalidate their table cache");
+
+  const expectedDependencies = {
+    northbound_records: ["northbound.json"],
+    northbound_statuses: ["northbound.json"],
+    employee_tasks: ["tasks.json", "home.json", "members.json"],
+    task_assignees: ["tasks.json", "home.json", "members.json"],
+    employee_task_feedbacks: ["tasks.json", "home.json"],
+    invoices: ["orders.json", "customers.json", "warranty.json", "home.json", "home-order-metrics.json", "pending-deduction.json"],
+    customers: ["customers.json", "warranty.json", "orders.json", "home.json", "home-order-metrics.json", "pending-deduction.json"],
+    customer_devices: ["customers.json", "warranty.json", "home.json"],
+    products: ["inventory.json", "warranty.json", "home.json"],
+    warehouses: ["inventory.json", "home.json"],
+    inventory_stock: ["inventory.json", "home.json"],
+    expense_reimbursements: ["expense.json"]
+  };
+  Object.entries(expectedDependencies).forEach(([table, required]) => {
+    const actual = snapshotsForTables(new Set([table]));
+    required.forEach((snapshot) => assert.ok(actual.has(snapshot), `${table} invalidation must reach ${snapshot}`));
+  });
+}
+
+async function verifyWriteInvalidateRemount() {
+  const snapshot = "spa-write-remount-contract.json";
+  let rows = [{ id: "before" }];
+  let reads = 0;
+  const readRows = () => loadProviderSnapshot(snapshot, async () => {
+    reads += 1;
+    return rows.map((row) => ({ ...row }));
+  });
+
+  invalidateProviderSnapshotMemo(snapshot);
+  const firstScope = createPageScope();
+  assert.deepEqual(await readRows(), [{ id: "before" }]);
+  rows = [{ id: "after-create" }, { id: "before" }];
+  invalidateProviderSnapshotMemo(snapshot);
+  firstScope.dispose();
+
+  const remountScope = createPageScope();
+  const remounted = await readRows();
+  assert.equal(remountScope.commit(() => {}), true);
+  assert.deepEqual(remounted.map((row) => row.id), ["after-create", "before"], "first remount after write invalidation must read the new value");
+  assert.equal(reads, 2, "write invalidation must force exactly one new provider read");
+  remountScope.dispose();
+
+  const delayedSnapshot = "spa-write-inflight-contract.json";
+  let releaseOld;
+  const oldGate = new Promise((resolve) => { releaseOld = resolve; });
+  invalidateProviderSnapshotMemo(delayedSnapshot);
+  const oldRead = loadProviderSnapshot(delayedSnapshot, async () => {
+    await oldGate;
+    return [{ id: "stale" }];
+  });
+  invalidateProviderSnapshotMemo(delayedSnapshot);
+  const freshRead = loadProviderSnapshot(delayedSnapshot, async () => [{ id: "fresh" }]);
+  releaseOld();
+  assert.deepEqual(await freshRead, [{ id: "fresh" }]);
+  assert.deepEqual(await oldRead, [{ id: "stale" }]);
+  assert.deepEqual(await loadProviderSnapshot(delayedSnapshot, async () => [{ id: "wrong" }]), [{ id: "fresh" }], "late pre-invalidation promise must not replace the fresh memo");
 }
 
 function verifyOcppGuard() {
@@ -453,6 +520,7 @@ verifyWhatsappI18n();
 await verifyRouter();
 await verifyRouteGenerationRace();
 await verifyDataRaceGuards();
+await verifyWriteInvalidateRemount();
 await verifyShellAdapter();
 await verifyTransitions();
 console.log("SPA rollout contracts: PASS (16 migrated routes, cross-section navigation, 30-cycle lifecycle, fallback, shell adapter)");

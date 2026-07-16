@@ -13,7 +13,12 @@ import {
   readLiveSnapshotCache,
   writeLiveSnapshotCache
 } from "./live-table-cache.js";
-import { LIVE_SNAPSHOT_INVALIDATED_EVENT } from "./live-snapshot-dependencies.js";
+import { LIVE_SNAPSHOT_INVALIDATED_EVENT, LIVE_SNAPSHOT_UPDATED_EVENT } from "./live-snapshot-dependencies.js";
+import {
+  clearProviderSnapshotMemo,
+  invalidateProviderSnapshotMemo,
+  updateProviderSnapshotMemo
+} from "./provider-snapshot-cache.js";
 import { buildCustomerGroups } from "./customer-groups.js";
 import { customerSourceFromInvoices } from "./customer-source.js";
 import {
@@ -39,7 +44,9 @@ let snapshotUserId = "";
 
 if (typeof window !== "undefined") {
   window.addEventListener(LIVE_SNAPSHOT_INVALIDATED_EVENT, (event) => {
-    (event.detail?.snapshots ?? []).forEach((snapshot) => {
+    const snapshots = event.detail?.snapshots ?? [];
+    invalidateProviderSnapshotMemo(snapshots);
+    snapshots.forEach((snapshot) => {
       LIVE_BUILDERS.delete(String(snapshot || ""));
       LIVE_REFRESHES.delete(String(snapshot || ""));
     });
@@ -848,8 +855,9 @@ function refreshLiveSnapshot(snapshot, builder, userId, cachedValue) {
     .then(({ value, stored }) => {
       if (!stored || userId !== snapshotUserId) return value;
       LIVE_BUILDERS.set(snapshot, Promise.resolve(value));
+      updateProviderSnapshotMemo(snapshot, value);
       if (comparableSnapshot(value) !== comparableSnapshot(cachedValue) && typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("tp:live-snapshot-updated", { detail: { snapshot, value } }));
+        window.dispatchEvent(new CustomEvent(LIVE_SNAPSHOT_UPDATED_EVENT, { detail: { snapshot, value } }));
       }
       return value;
     })
@@ -879,6 +887,7 @@ export async function getLiveSnapshot(snapshot) {
     snapshotUserId = session.user.id;
     LIVE_BUILDERS.clear();
     LIVE_REFRESHES.clear();
+    clearProviderSnapshotMemo();
   }
   // OCPP stays on its separately approved read-only snapshot line (docs/41); P0 never invents a Supabase source for it.
   const builder = builders[snapshot];
@@ -895,6 +904,7 @@ export async function getLiveSnapshot(snapshot) {
 
 export function invalidateLiveSnapshot(...snapshots) {
   const targets = snapshots.flat().map((snapshot) => String(snapshot || "")).filter(Boolean);
+  invalidateProviderSnapshotMemo(targets);
   targets.forEach((snapshot) => {
     LIVE_BUILDERS.delete(snapshot);
     LIVE_REFRESHES.delete(snapshot);

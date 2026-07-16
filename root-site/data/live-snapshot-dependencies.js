@@ -1,4 +1,5 @@
 export const LIVE_SNAPSHOT_INVALIDATED_EVENT = "tp:live-snapshot-invalidated";
+export const LIVE_SNAPSHOT_UPDATED_EVENT = "tp:live-snapshot-updated";
 
 const SNAPSHOT_TABLES = Object.freeze({
   "home.json": [

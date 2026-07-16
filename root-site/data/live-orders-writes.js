@@ -1,6 +1,5 @@
 import { getCurrentUser, getSession, getSupabaseClient } from "./auth.js";
 import { allRows, invalidateLiveTables } from "./live-snapshot-utils.js";
-import { invalidateLiveSnapshot } from "./live-snapshots.js";
 
 const COMMISSION_CUTOFF = "2026-05-09";
 const COMMISSION_RULES = { "轉插": 600 };
@@ -102,14 +101,6 @@ function itemImeis(items) {
 
 async function invalidateOrderReads(...tables) {
   await invalidateLiveTables(...tables);
-  invalidateLiveSnapshot(
-    "orders.json",
-    "customers.json",
-    "inventory.json",
-    "warranty.json",
-    "home.json",
-    "pending-deduction.json"
-  );
 }
 
 async function insertInvoiceWithRetry(client, buildPayload, maxAttempts = 8) {

@@ -1,5 +1,5 @@
 import { getSession, getSupabaseClient } from "./auth.js";
-import { invalidateLiveAuthCache } from "./live-table-cache.js";
+import { invalidateLiveTables } from "./live-snapshot-utils.js";
 
 async function writeContext() {
   const [client, session] = await Promise.all([getSupabaseClient(), getSession()]);
@@ -11,9 +11,9 @@ function throwIfError(error) {
   if (error) throw error;
 }
 
-async function finishWrite(result) {
+async function finishWrite(result, ...tables) {
   throwIfError(result.error);
-  await invalidateLiveAuthCache();
+  await invalidateLiveTables(tables);
   return result.data;
 }
 
@@ -24,7 +24,7 @@ export async function createTeamUpdateLog({ summary, detail }) {
     detail: detail || null,
     author_user_id: session.user.id
   }).select("*").single();
-  return finishWrite(result);
+  return finishWrite(result, "team_update_logs");
 }
 
 export async function updateTeamUpdateLog(id, { summary, detail }) {
@@ -34,13 +34,13 @@ export async function updateTeamUpdateLog(id, { summary, detail }) {
     detail: detail || null,
     updated_at: new Date().toISOString()
   }).eq("id", id).select("*").single();
-  return finishWrite(result);
+  return finishWrite(result, "team_update_logs");
 }
 
 export async function deleteTeamUpdateLog(id) {
   const { client } = await writeContext();
   const result = await client.from("team_update_logs").delete().eq("id", id).select("id").single();
-  return finishWrite(result);
+  return finishWrite(result, "team_update_logs");
 }
 
 export async function createTeamUpdateComment({ updateLogId, authorName, body }) {
@@ -51,11 +51,11 @@ export async function createTeamUpdateComment({ updateLogId, authorName, body })
     author_name: authorName,
     body
   }).select("*").single();
-  return finishWrite(result);
+  return finishWrite(result, "team_update_log_comments");
 }
 
 export async function deleteTeamUpdateComment(id) {
   const { client } = await writeContext();
   const result = await client.from("team_update_log_comments").delete().eq("id", id).select("id").single();
-  return finishWrite(result);
+  return finishWrite(result, "team_update_log_comments");
 }

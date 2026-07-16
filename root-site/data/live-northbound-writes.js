@@ -1,6 +1,5 @@
 import { getCurrentUser, getSession, getSupabaseClient } from "./auth.js";
 import { invalidateLiveTables } from "./live-snapshot-utils.js";
-import { invalidateLiveSnapshot } from "./live-snapshots.js";
 
 const RECORD_FIELDS = new Set([
   "remarks",
@@ -55,7 +54,6 @@ function recordPatch(values) {
 
 async function invalidateNorthboundReads() {
   await invalidateLiveTables("northbound_records", "northbound_statuses");
-  invalidateLiveSnapshot("northbound.json");
 }
 
 export async function updateLiveNorthboundRecord(id, values) {

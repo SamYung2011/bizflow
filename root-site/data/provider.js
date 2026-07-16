@@ -5,6 +5,7 @@
 
 import { getCurrentUser as getAuthCurrentUser, getSession } from "./auth.js";
 import { getLiveSnapshot, LIVE_SNAPSHOT_MISS } from "./live-snapshots.js";
+import { loadProviderSnapshot, providerSnapshotRevision } from "./provider-snapshot-cache.js";
 import {
   getLiveOcppChargingData,
   getLiveOcppFinanceData,
@@ -142,12 +143,9 @@ const teamTaskMock = {
 // 用 import.meta.url 是为了任何页面引用本模块时路径都不跑偏)
 const SNAPSHOT_URL = new URL("./snapshots/home.json", import.meta.url);
 
-let snapshotPromise = null;
 function loadSnapshot() {
-  if (!snapshotPromise) {
-    snapshotPromise = fetchSnapshot(SNAPSHOT_URL, "home.json", "field-level home mock");
-  }
-  return snapshotPromise;
+  return loadProviderSnapshot("home.json", () =>
+    fetchSnapshot(SNAPSHOT_URL, "home.json", "field-level home mock"));
 }
 
 // 从宽校验:类型对得上就用真数据;某字段缺失/形状不对只回退该字段的 mock
@@ -244,7 +242,7 @@ let unreadStatePromise = null;
 
 function buildUnreadState() {
   const read = getReadState();
-  const memoKey = JSON.stringify(read);
+  const memoKey = `${providerSnapshotRevision()}:${JSON.stringify(read)}`;
   if (unreadStatePromise && unreadStateMemoKey === memoKey) return unreadStatePromise;
   unreadStateMemoKey = memoKey;
   const promise = computeUnreadState(read).catch((error) => {
@@ -362,29 +360,20 @@ export async function getCurrentUser() {
 const TASKS_SNAPSHOT_URL = new URL("./snapshots/tasks.json", import.meta.url);
 const TEAM_EXTRAS_SNAPSHOT_URL = new URL("./snapshots/team-extras.json", import.meta.url);
 
-let tasksSnapshotPromise = null;
-let teamExtrasSnapshotPromise = null;
-let teamUpdateLogsSnapshotPromise = null;
 function loadTasksSnapshot() {
-  if (!tasksSnapshotPromise) {
-    tasksSnapshotPromise = fetchSnapshot(TASKS_SNAPSHOT_URL, "tasks.json", "task mock/kanban contract");
-  }
-  return tasksSnapshotPromise;
+  return loadProviderSnapshot("tasks.json", () =>
+    fetchSnapshot(TASKS_SNAPSHOT_URL, "tasks.json", "task mock/kanban contract"));
 }
 
 function loadTeamExtrasSnapshot() {
-  if (!teamExtrasSnapshotPromise) {
-    teamExtrasSnapshotPromise = fetchSnapshot(TEAM_EXTRAS_SNAPSHOT_URL, "team-extras.json", "empty team extras");
-  }
-  return teamExtrasSnapshotPromise;
+  return loadProviderSnapshot("team-extras.json", () =>
+    fetchSnapshot(TEAM_EXTRAS_SNAPSHOT_URL, "team-extras.json", "empty team extras"));
 }
 
 function loadTeamUpdateLogsSnapshot() {
-  if (!teamUpdateLogsSnapshotPromise) {
-    // Live uses the narrow three-table builder; mock reuses the full static file.
-    teamUpdateLogsSnapshotPromise = fetchSnapshot(TEAM_EXTRAS_SNAPSHOT_URL, "team-update-logs.json", "empty team update logs");
-  }
-  return teamUpdateLogsSnapshotPromise;
+  // Live uses the narrow three-table builder; mock reuses the full static file.
+  return loadProviderSnapshot("team-update-logs.json", () =>
+    fetchSnapshot(TEAM_EXTRAS_SNAPSHOT_URL, "team-update-logs.json", "empty team update logs"));
 }
 
 const isNum = (n) => typeof n === "number";
@@ -787,12 +776,9 @@ const R9_PERMISSION_LABEL_KEYS = {
   can_approve_registration: "members.permission.approveRegistration"
 };
 
-let membersSnapshotPromise = null;
 function loadMembersSnapshot() {
-  if (!membersSnapshotPromise) {
-    membersSnapshotPromise = fetchSnapshot(MEMBERS_SNAPSHOT_URL, "members.json", "home/mock members");
-  }
-  return membersSnapshotPromise;
+  return loadProviderSnapshot("members.json", () =>
+    fetchSnapshot(MEMBERS_SNAPSHOT_URL, "members.json", "home/mock members"));
 }
 
 function isR9Member(member) {
@@ -1080,18 +1066,18 @@ function customerSnapshotGroups(customers) {
 
 const CUSTOMERS_SNAPSHOT_URL = new URL("./snapshots/customers.json", import.meta.url);
 
-let customersSnapshotPromise = null;
 let groupedCustomersPromise = null;
+let groupedCustomersSource = null;
 function loadCustomersSnapshot() {
-  if (!customersSnapshotPromise) {
-    customersSnapshotPromise = fetchSnapshot(CUSTOMERS_SNAPSHOT_URL, "customers.json", "20-row customer mock");
-  }
-  return customersSnapshotPromise;
+  return loadProviderSnapshot("customers.json", () =>
+    fetchSnapshot(CUSTOMERS_SNAPSHOT_URL, "customers.json", "20-row customer mock"));
 }
 
 function loadGroupedCustomers() {
-  if (!groupedCustomersPromise) {
-    groupedCustomersPromise = loadCustomersSnapshot().then((snap) => {
+  const source = loadCustomersSnapshot();
+  if (!groupedCustomersPromise || groupedCustomersSource !== source) {
+    groupedCustomersSource = source;
+    groupedCustomersPromise = source.then((snap) => {
       const customersOk = Array.isArray(snap?.customers) && (snap.__live === true || snap.customers.length > 0) && snap.customers.every(isValidCustomer);
       if (snap && !customersOk) warnProviderFallback("customers.json:customers", "20-row customer mock");
       const customers = customersOk ? snap.customers : customersMock.customers.map((customer) => ({ ...customer }));
@@ -1115,12 +1101,9 @@ export async function getCustomersPageData() {
 
 const WARRANTY_SNAPSHOT_URL = new URL("./snapshots/warranty.json", import.meta.url);
 
-let warrantySnapshotPromise = null;
 function loadWarrantySnapshot() {
-  if (!warrantySnapshotPromise) {
-    warrantySnapshotPromise = fetchSnapshot(WARRANTY_SNAPSHOT_URL, "warranty.json", "empty warranty list");
-  }
-  return warrantySnapshotPromise;
+  return loadProviderSnapshot("warranty.json", () =>
+    fetchSnapshot(WARRANTY_SNAPSHOT_URL, "warranty.json", "empty warranty list"));
 }
 
 function isValidWarrantyItem(item) {
@@ -1251,20 +1234,14 @@ const withOrderIds = (orders) => orders.map((order, index) => ({ id: order.id ??
 const ORDERS_SNAPSHOT_URL = new URL("./snapshots/orders.json", import.meta.url);
 const HOME_ORDER_METRICS_URL = new URL("./snapshots/home-order-metrics.json", import.meta.url);
 
-let ordersSnapshotPromise = null;
-let homeOrderMetricsPromise = null;
 function loadOrdersSnapshot() {
-  if (!ordersSnapshotPromise) {
-    ordersSnapshotPromise = fetchSnapshot(ORDERS_SNAPSHOT_URL, "orders.json", "home.ordersPage/orders mock");
-  }
-  return ordersSnapshotPromise;
+  return loadProviderSnapshot("orders.json", () =>
+    fetchSnapshot(ORDERS_SNAPSHOT_URL, "orders.json", "home.ordersPage/orders mock"));
 }
 
 function loadHomeOrderMetricsSnapshot() {
-  if (!homeOrderMetricsPromise) {
-    homeOrderMetricsPromise = fetchSnapshot(HOME_ORDER_METRICS_URL, "home-order-metrics.json", "null home metrics");
-  }
-  return homeOrderMetricsPromise;
+  return loadProviderSnapshot("home-order-metrics.json", () =>
+    fetchSnapshot(HOME_ORDER_METRICS_URL, "home-order-metrics.json", "null home metrics"));
 }
 
 export async function getHomeOrderMetricRows() {
@@ -1448,13 +1425,9 @@ const inventoryDetailMock = {
 const isInventoryProduct = (x) => x && typeof x.id === "string" && typeof x.name === "string" && typeof x.status === "string";
 
 const INVENTORY_SNAPSHOT_URL = new URL("./snapshots/inventory.json", import.meta.url);
-let inventorySnapshotPromise = null;
-
 function loadInventorySnapshot() {
-  if (!inventorySnapshotPromise) {
-    inventorySnapshotPromise = fetchSnapshot(INVENTORY_SNAPSHOT_URL, "inventory.json", "inventory mock/empty metrics");
-  }
-  return inventorySnapshotPromise;
+  return loadProviderSnapshot("inventory.json", () =>
+    fetchSnapshot(INVENTORY_SNAPSHOT_URL, "inventory.json", "inventory mock/empty metrics"));
 }
 
 function isInventoryDetail(detail) {
@@ -1632,14 +1605,9 @@ const EXPENSE_SNAPSHOT_URL = new URL("./snapshots/expense.json", import.meta.url
 const WHATSAPP_SNAPSHOT_URL = new URL("./snapshots/whatsapp.json", import.meta.url);
 const OCPP_SNAPSHOT_URL = new URL("./snapshots/ocpp.json", import.meta.url);
 
-const r11SnapshotPromises = new Map();
-
 function loadR11Snapshot(url, cacheKey) {
-  if (!r11SnapshotPromises.has(cacheKey)) {
-    const snapshot = url.pathname.split("/").pop() || cacheKey;
-    r11SnapshotPromises.set(cacheKey, fetchSnapshot(url, snapshot, "empty dataset"));
-  }
-  return r11SnapshotPromises.get(cacheKey);
+  const snapshot = url.pathname.split("/").pop() || cacheKey;
+  return loadProviderSnapshot(snapshot, () => fetchSnapshot(url, snapshot, "empty dataset"));
 }
 
 function isNorthboundStatus(status) {
