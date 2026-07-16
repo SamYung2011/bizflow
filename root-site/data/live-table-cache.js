@@ -9,10 +9,10 @@ const CACHE_DB_NAME = "tp-live-table-cache";
 const CACHE_DB_VERSION = 1;
 const CACHE_STORE_NAME = "rows";
 
-export const LIVE_TABLE_CACHE_TTL_MS = 60_000;
-export const LIVE_AUTH_CACHE_TTL_MS = 5 * 60_000;
+export const LIVE_TABLE_CACHE_TTL_MS = 10 * 60_000;
+export const LIVE_AUTH_CACHE_TTL_MS = 30 * 60_000;
 export const LIVE_SNAPSHOT_CACHE_TTL_MS = LIVE_TABLE_CACHE_TTL_MS;
-export const LIVE_SNAPSHOT_CACHE_MAX_AGE_MS = 5 * 60_000;
+export const LIVE_SNAPSHOT_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
 // IndexedDB is the primary store. This limit only applies to the sessionStorage fallback.
 export const LIVE_TABLE_CACHE_MAX_BYTES = 1.5 * 1024 * 1024;
 
@@ -414,14 +414,16 @@ export async function readLiveSnapshotCache({ userId, snapshot }) {
   const key = snapshotCacheKey(normalizedUserId, normalizedSnapshot);
   const currentVersion = liveSnapshotCacheVersion(normalizedSnapshot);
   const usePayload = async (payload, remove) => {
-    if (Date.now() - payload.cachedAt >= LIVE_SNAPSHOT_CACHE_MAX_AGE_MS ||
-      (snapshotVersionChangedInThisPage(normalizedSnapshot) && payload.version !== undefined && payload.version !== currentVersion)) {
+    if (snapshotVersionChangedInThisPage(normalizedSnapshot) && payload.version !== undefined && payload.version !== currentVersion) {
       await remove();
       return null;
     }
+    const age = Date.now() - payload.cachedAt;
     return {
       value: payload.value,
-      stale: Date.now() - payload.cachedAt >= LIVE_SNAPSHOT_CACHE_TTL_MS,
+      // Age never turns a usable snapshot into a blank screen. Entries beyond the
+      // retention window remain stale and are replaced after a successful SWR refresh.
+      stale: age >= LIVE_SNAPSHOT_CACHE_TTL_MS || age >= LIVE_SNAPSHOT_CACHE_MAX_AGE_MS,
       cachedAt: payload.cachedAt
     };
   };
