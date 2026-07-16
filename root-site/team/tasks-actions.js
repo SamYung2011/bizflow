@@ -1,13 +1,12 @@
 import { taskT } from "./tasks-i18n.js";
-import { isWaitingApproval } from "./tasks-model.js";
+import { isTaskCreator, isWaitingApproval, taskAssignee } from "./tasks-model.js";
 
 export function renderTaskActionPopover({ task, open, state, helpers }) {
   if (!open) return "";
   const { escapeHtml, lang } = helpers;
-  const currentName = String(state.currentUser.name || "").toLocaleLowerCase();
-  const ownTask = String(task.creator || "").toLocaleLowerCase() === currentName;
-  const assigned = (task.assignees ?? []).some((assignee) => String(assignee.name || "").toLocaleLowerCase() === currentName);
-  const currentAssignee = (task.assignees ?? []).find((assignee) => String(assignee.name || "").toLocaleLowerCase() === currentName);
+  const ownTask = isTaskCreator(task, state.currentUser);
+  const currentAssignee = taskAssignee(task, state.currentUser);
+  const assigned = currentAssignee !== null;
   const canComplete = ownTask || assigned || (!state.liveTaskWrites && state.permissions.canEditOthers);
   const canEdit = ownTask || state.currentUser.isSuperAdmin || state.currentUser.isAdminOfActive || state.permissions.canEditOthers;
   const canDelete = ownTask || state.currentUser.isSuperAdmin || state.currentUser.isAdminOfActive || state.permissions.canDeleteOthers;

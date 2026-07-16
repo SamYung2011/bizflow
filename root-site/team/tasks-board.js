@@ -1,7 +1,7 @@
 import { taskT } from "./tasks-i18n.js";
 import { filterTaskColumns, renderTaskFilter } from "./tasks-filters.js";
 import { renderTaskActionPopover } from "./tasks-actions.js";
-import { isWaitingApproval, memberIdentity, scopedTopTasks, taskSubtaskProgress } from "./tasks-model.js";
+import { isTaskCreator, isWaitingApproval, memberIdentity, scopedTopTasks, taskAssignee, taskSubtaskProgress } from "./tasks-model.js";
 
 function renderTaskCard(task, columnKey, state, helpers) {
   const { escapeHtml, lang } = helpers;
@@ -12,9 +12,8 @@ function renderTaskCard(task, columnKey, state, helpers) {
   const assignees = (task.assignees ?? []).length > 1
     ? task.assignees.map((assignee) => `<span class="${assignee.completedAt ? "is-completed" : ""}" title="${escapeHtml(assignee.completedAt || assignee.name)}">${assignee.completedAt ? "✓ " : ""}${escapeHtml(assignee.name)}</span>`).join("")
     : "";
-  const currentName = String(state.currentUser.name || "").toLocaleLowerCase();
-  const ownTask = String(task.creator || "").toLocaleLowerCase() === currentName;
-  const assigned = (task.assignees ?? []).some((assignee) => String(assignee.name || "").toLocaleLowerCase() === currentName);
+  const ownTask = isTaskCreator(task, state.currentUser);
+  const assigned = taskAssignee(task, state.currentUser) !== null;
   const canOpenActions = ownTask || assigned || state.permissions.canCreate || state.permissions.canEditOthers || state.permissions.canDeleteOthers;
   return `<article class="team-task-card team-task-card--${columnKey}${actionOpen ? " team-task-card--action-open" : ""}" data-task-card="${escapeHtml(task.id)}">
     <button type="button" class="team-task-card__body" data-task-detail-open="${escapeHtml(task.id)}" aria-label="${escapeHtml(`${taskT(lang, "tasks.detail.open")}: ${task.title}`)}">
