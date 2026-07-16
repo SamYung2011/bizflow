@@ -134,6 +134,7 @@ export const whatsappCopy = {
     loadMore: "載入更多",
     visibleLogs: "顯示 {visible} / {total} 條",
     noLogs: "此條件下沒有日誌",
+    leaveUnsaved: "本頁尚有未儲存修改，確定離開？",
     unknown: "未知",
     empty: "—"
   },
@@ -272,6 +273,7 @@ export const whatsappCopy = {
     loadMore: "Load more",
     visibleLogs: "Showing {visible} of {total}",
     noLogs: "No logs match these filters",
+    leaveUnsaved: "This page has unsaved changes. Leave anyway?",
     unknown: "Unknown",
     empty: "—"
   },
@@ -410,6 +412,7 @@ export const whatsappCopy = {
     loadMore: "Charger plus",
     visibleLogs: "{visible} sur {total} affichés",
     noLogs: "Aucun journal pour ces filtres",
+    leaveUnsaved: "Cette page contient des modifications non enregistrées. Quitter quand même ?",
     unknown: "Inconnu",
     empty: "—"
   }

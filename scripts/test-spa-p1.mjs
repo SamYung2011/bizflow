@@ -5,9 +5,10 @@ import path from "node:path";
 
 import { createAppRouter, SPA_HISTORY_KEY } from "../root-site/spa/app-router.js";
 import { createPageScope, mountPageModule, throwIfPageAborted } from "../root-site/spa/page-lifecycle.js";
-import { routeManifest, spaNavigation, spaRouteAllowlist } from "../root-site/spa/route-manifest.js";
+import { routeManifest, spaCrossSectionNavigation, spaNavigation, spaRouteAllowlist } from "../root-site/spa/route-manifest.js";
 import { createDateFilter } from "../root-site/components/date-filter.js";
 import { requireOcppRouteAccess } from "../root-site/bizflow/ocpp-shared.js";
+import { whatsappCopy } from "../root-site/bizflow/whatsapp-i18n.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const commonStyles = new Set([
@@ -31,6 +32,7 @@ const expectedSpaRoutes = [
   "/bizflow/inventory.html",
   "/bizflow/inventory-detail.html",
   "/bizflow/expense.html",
+  "/bizflow/whatsapp.html",
   "/team/index.html",
   "/team/members.html"
 ];
@@ -50,7 +52,8 @@ async function verifyManifest() {
   const routes = Object.values(routeManifest);
   assert.equal(routes.length, 16, "manifest must enumerate the 16 approved pages");
   assert.equal(spaNavigation, true, "SPA master switch must stay enabled");
-  assert.deepEqual([...spaRouteAllowlist], expectedSpaRoutes, "SPA allowlist must contain the P1-P5 migrated routes");
+  assert.equal(spaCrossSectionNavigation, true, "P6 must enable same-document Bizflow/Team navigation");
+  assert.deepEqual([...spaRouteAllowlist], expectedSpaRoutes, "SPA allowlist must contain all 16 routes");
   for (const route of routes) {
     const migrated = expectedSpaRoutes.includes(route.path);
     assert.ok(route.path.endsWith(".html"), `${route.path} must retain its .html URL`);
@@ -68,6 +71,14 @@ async function verifyManifest() {
       path.resolve(path.dirname(htmlFile), entry),
       `${route.path} HTML entry must match its migration status`
     );
+    const preloads = tags
+      .filter((tag) => tag.rel === "modulepreload" && tag.href)
+      .map((tag) => path.resolve(path.dirname(htmlFile), tag.href));
+    assert.deepEqual(preloads, [
+      path.join(rootDir, "root-site/spa/entry.js"),
+      fileURLToPath(route.entry),
+      path.join(rootDir, "root-site/vendor/supabase-js.esm.js")
+    ], `${route.path} must keep only the P6 SPA entry, route module and Supabase preload`);
     if (migrated) {
       const source = await readFile(fileURLToPath(route.entry), "utf8");
       assert.match(source, /export\s+async\s+function\s+mountPage\s*\(/, `${route.path} must export mountPage()`);
@@ -162,6 +173,14 @@ function verifyOcppGuard() {
   }]);
 }
 
+function verifyWhatsappI18n() {
+  const reference = Object.keys(whatsappCopy.zh).sort();
+  assert.ok(reference.includes("leaveUnsaved"), "WhatsApp must translate the SPA leave guard");
+  for (const lang of ["en", "fr"]) {
+    assert.deepEqual(Object.keys(whatsappCopy[lang]).sort(), reference, `WhatsApp ${lang} dictionary must match zh`);
+  }
+}
+
 function fakeBrowser(pathname = "/a.html") {
   const windowTarget = eventTarget();
   const documentTarget = eventTarget();
@@ -246,6 +265,7 @@ async function verifyRouter() {
   const manifest = {
     "/a.html": { path: "/a.html", section: "bizflow", styles: ["a.css"], load: async () => makeModule("a") },
     "/b.html": { path: "/b.html", section: "bizflow", styles: ["b.css"], load: async () => makeModule("b") },
+    "/team.html": { path: "/team.html", section: "team", styles: ["team.css"], load: async () => makeModule("team") },
     "/fail.html": { path: "/fail.html", section: "bizflow", styles: [], load: async () => { throw new Error("expected"); } }
   };
   const router = createAppRouter({
@@ -273,12 +293,15 @@ async function verifyRouter() {
   allowLeave = true;
   assert.equal(await router.navigate("/b.html"), true);
   assert.deepEqual(pages, ["a", "b"]);
+  assert.equal(await router.navigate("/team.html"), true, "P6 must navigate across Bizflow and Team in one document");
+  assert.equal(await router.navigate("/a.html"), true);
+  assert.deepEqual(pages, ["a", "b", "team", "a"]);
   for (let index = 0; index < 30; index += 1) {
     const path = index % 2 === 0 ? "/a.html" : "/b.html";
     assert.equal(await router.navigate(path), true);
     assert.equal(routeTarget.listeners.get("route")?.size, 1, `route listener watermark drifted on cycle ${index + 1}`);
   }
-  assert.equal(styleCommits, 32);
+  assert.equal(styleCommits, 33);
   allowLeave = false;
   assert.equal(await router.navigate("/legacy.html"), false, "canLeave must guard fallback MPA routes");
   assert.equal(browser.assigned.length, 0);
@@ -303,6 +326,7 @@ async function verifyRouter() {
 async function verifyShellAdapter() {
   const source = await readFile(path.join(rootDir, "root-site/shell/shell.js"), "utf8");
   assert.match(source, /export function setPage\(/, "shell must expose setPage");
+  assert.doesNotMatch(source, /navigation-prerender|installNavigationPrerender/, "P6 shell must not reinstall MPA speculation rules");
   const adapterEnd = source.indexOf("let menuSource =");
   const legacyReads = [...source.matchAll(/window\.__shell(?:Menu|Data|Content)/g)];
   assert.deepEqual(
@@ -313,9 +337,18 @@ async function verifyShellAdapter() {
   assert.ok(legacyReads.every((match) => match.index < adapterEnd), "legacy globals must not be read after startup adaptation");
 }
 
+async function verifyTransitions() {
+  const router = await readFile(path.join(rootDir, "root-site/spa/app-router.js"), "utf8");
+  const base = await readFile(path.join(rootDir, "root-site/tokens/base.css"), "utf8");
+  assert.match(router, /documentRef\.startViewTransition\(update\)/, "SPA navigation must use one shared same-document transition");
+  assert.match(base, /@view-transition\s*{\s*navigation:\s*auto;/, "direct-load fallback must retain progressive MPA transitions");
+}
+
 await verifyManifest();
 await verifyLifecycle();
 verifyOcppGuard();
+verifyWhatsappI18n();
 await verifyRouter();
 await verifyShellAdapter();
-console.log("SPA rollout contracts: PASS (15 migrated routes, 1 MPA route, 30-cycle lifecycle, fallback, shell adapter)");
+await verifyTransitions();
+console.log("SPA rollout contracts: PASS (16 migrated routes, cross-section navigation, 30-cycle lifecycle, fallback, shell adapter)");

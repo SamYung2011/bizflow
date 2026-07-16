@@ -4,7 +4,7 @@
   "note": "Current source baseline; browser acceptance must also compare runtime listener and timer watermarks.",
   "routes": {
     "/bizflow/home.html": {
-      "moduleCount": 21,
+      "moduleCount": 20,
       "totals": {
         "documentListeners": 1,
         "windowListeners": 2,
@@ -18,7 +18,7 @@
       }
     },
     "/bizflow/orders.html": {
-      "moduleCount": 36,
+      "moduleCount": 35,
       "totals": {
         "documentListeners": 4,
         "windowListeners": 4,
@@ -60,7 +60,7 @@
       }
     },
     "/bizflow/customers.html": {
-      "moduleCount": 26,
+      "moduleCount": 25,
       "totals": {
         "documentListeners": 3,
         "windowListeners": 4,
@@ -88,7 +88,7 @@
       }
     },
     "/bizflow/inventory.html": {
-      "moduleCount": 26,
+      "moduleCount": 25,
       "totals": {
         "documentListeners": 2,
         "windowListeners": 2,
@@ -130,16 +130,16 @@
       }
     },
     "/bizflow/whatsapp.html": {
-      "moduleCount": 30,
+      "moduleCount": 23,
       "totals": {
-        "documentListeners": 17,
-        "windowListeners": 6,
-        "mediaQueryListeners": 2,
-        "timeouts": 24,
+        "documentListeners": 2,
+        "windowListeners": 2,
+        "mediaQueryListeners": 0,
+        "timeouts": 25,
         "intervals": 2,
-        "animationFrames": 0,
+        "animationFrames": 2,
         "observers": 0,
-        "authSubscriptions": 5,
+        "authSubscriptions": 4,
         "realtimeSubscriptions": 2
       }
     },

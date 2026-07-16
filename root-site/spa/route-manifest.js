@@ -1,6 +1,6 @@
-// P5 adds the Team task/member domain while cross-section navigation stays disabled until P6.
+// P6 completes all 16 routes and enables same-document Bizflow/Team navigation.
 export const spaNavigation = true;
-export const spaCrossSectionNavigation = false;
+export const spaCrossSectionNavigation = true;
 export const spaRouteAllowlist = Object.freeze([
   "/bizflow/home.html",
   "/bizflow/ocpp-monitor.html",
@@ -15,6 +15,7 @@ export const spaRouteAllowlist = Object.freeze([
   "/bizflow/inventory.html",
   "/bizflow/inventory-detail.html",
   "/bizflow/expense.html",
+  "/bizflow/whatsapp.html",
   "/team/index.html",
   "/team/members.html"
 ]);
@@ -62,7 +63,7 @@ const routes = [
   ], () => import("../bizflow/expense.js")),
   route("/bizflow/whatsapp.html", "bizflow", "../bizflow/whatsapp.js", [
     "../components/segment.css", "../components/date-filter.css", "../bizflow/whatsapp.css"
-  ]),
+  ], () => import("../bizflow/whatsapp.js")),
   route("/bizflow/ocpp-monitor.html", "bizflow", "../bizflow/ocpp-monitor.js", [
     "../components/segment.css", "../components/date-filter.css", "../bizflow/ocpp.css"
   ], () => import("../bizflow/ocpp-monitor.js")),

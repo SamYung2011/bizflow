@@ -6,6 +6,8 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const siteRoot = path.join(repoRoot, "root-site");
 const startMarker = "    <!-- modulepreload:start -->";
 const endMarker = "    <!-- modulepreload:end -->";
+const spaEntryPath = path.join(siteRoot, "spa/entry.js");
+const vendorPath = path.join(siteRoot, "vendor/supabase-js.esm.js");
 
 // These imports use computed URL/path variables, so a source regex cannot discover them.
 const computedImports = new Map([
@@ -116,14 +118,22 @@ async function businessHtmlFiles() {
   return files;
 }
 
+function routeEntryForHtml(htmlPath) {
+  if (sitePath(htmlPath) === "team/index.html") return path.join(siteRoot, "team/tasks.js");
+  return htmlPath.replace(/\.html$/, ".js");
+}
+
 const htmlFiles = await businessHtmlFiles();
 const allModules = new Set();
 for (const htmlPath of htmlFiles) {
   const html = await fs.readFile(htmlPath, "utf8");
-  const modules = await collectModuleGraph(moduleEntry(html, htmlPath));
-  const vendorPath = path.join(siteRoot, "vendor/supabase-js.esm.js");
+  const entryPath = moduleEntry(html, htmlPath);
+  const modules = entryPath === spaEntryPath
+    ? [spaEntryPath, routeEntryForHtml(htmlPath), vendorPath]
+    : await collectModuleGraph(entryPath);
+  for (const modulePath of modules) await fs.access(modulePath);
   if (!modules.includes(vendorPath)) {
-    throw new Error(`${sitePath(htmlPath)} module graph does not include vendor/supabase-js.esm.js`);
+    throw new Error(`${sitePath(htmlPath)} preload set does not include vendor/supabase-js.esm.js`);
   }
   modules.forEach((modulePath) => allModules.add(modulePath));
   const links = modules.map((modulePath) => `    <link rel="modulepreload" href="${preloadHref(htmlPath, modulePath)}">`);
