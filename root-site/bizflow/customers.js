@@ -461,6 +461,18 @@ async function onCustomersClick(event) {
   if (!event.target.closest("[data-date-filter]")) dateFilter.close();
 }
 
+async function onCustomersContextMenu(event) {
+  if (state.tab !== "warranty") return;
+  const row = event.target.closest("[data-warranty-row]");
+  if (!row || row.getAttribute("aria-disabled") === "true" || !row.getAttribute("data-customer-id")) return;
+  const phone = row.querySelector("[data-warranty-phone]")?.getAttribute("data-warranty-phone")?.trim();
+  if (!phone) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const scope = activeScope;
+  await copyWarrantyPhone(phone, currentHelpers.lang, { scope });
+}
+
 function onCustomersInput(event) {
   const customerSearch = event.target.closest("[data-customers-search]");
   if (customerSearch && state.tab === "list") {
@@ -566,6 +578,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
     },
     activate() {
       scope.listen(document, "click", onCustomersClick);
+      scope.listen(document, "contextmenu", onCustomersContextMenu);
       scope.listen(document, "input", onCustomersInput);
       scope.listen(document, "focusin", onCustomersFocus);
       scope.listen(document, "change", onCustomersChange);

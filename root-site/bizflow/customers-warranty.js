@@ -23,7 +23,7 @@ const copy = {
     cancel: "取消",
     complete: "完成",
     copyPhone: "複製電話 {phone}",
-    copied: "已複製",
+    copied: "已複製 {phone}",
     copyFailed: "未能複製",
     purchase: "購買日期",
     expiry: "到期日",
@@ -54,7 +54,7 @@ const copy = {
     cancel: "Cancel",
     complete: "Done",
     copyPhone: "Copy phone {phone}",
-    copied: "Copied",
+    copied: "Copied {phone}",
     copyFailed: "Could not copy",
     purchase: "Purchased",
     expiry: "Expires",
@@ -85,7 +85,7 @@ const copy = {
     cancel: "Annuler",
     complete: "Terminer",
     copyPhone: "Copier le téléphone {phone}",
-    copied: "Copié",
+    copied: "Copié {phone}",
     copyFailed: "Copie impossible",
     purchase: "Achat",
     expiry: "Expiration",
@@ -314,7 +314,7 @@ export async function copyWarrantyPhone(phone, lang, { scope = null } = {}) {
   try {
     await navigator.clipboard.writeText(value);
     if (scope && !scope.isCurrent()) return false;
-    showCopyNotice(t(lang, "copied"));
+    showCopyNotice(t(lang, "copied", { phone: value }));
     return true;
   } catch (error) {
     if (scope && !scope.isCurrent()) return false;
