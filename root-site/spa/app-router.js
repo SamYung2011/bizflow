@@ -202,6 +202,7 @@ export function createAppRouter({
     currentController = null;
     if (signal?.aborted) throw abortError();
     const update = () => {
+      if (signal?.aborted) return;
       styles.commit();
       shell.setLoadingPage(route.frame);
     };
