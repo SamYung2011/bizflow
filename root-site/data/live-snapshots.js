@@ -14,6 +14,7 @@ import {
   writeLiveSnapshotCache
 } from "./live-table-cache.js";
 import { LIVE_SNAPSHOT_INVALIDATED_EVENT, LIVE_SNAPSHOT_UPDATED_EVENT } from "./live-snapshot-dependencies.js";
+import { ensureLiveRealtime } from "./live-realtime.js";
 import {
   clearProviderSnapshotMemo,
   invalidateProviderSnapshotMemo,
@@ -883,6 +884,7 @@ async function loadLiveSnapshot(snapshot, builder, userId) {
 export async function getLiveSnapshot(snapshot) {
   const session = await ensureLiveSession();
   if (!session) return LIVE_SNAPSHOT_MISS;
+  void ensureLiveRealtime().catch((error) => console.warn("[live-realtime] startup failed", error));
   if (snapshotUserId !== session.user.id) {
     snapshotUserId = session.user.id;
     LIVE_BUILDERS.clear();

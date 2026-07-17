@@ -147,8 +147,11 @@ export async function refreshStaleLiveTables() {
   });
 }
 
-export async function invalidateLiveTables(...tables) {
-  const targets = new Set(tables.flat().map((table) => String(table || "")).filter(Boolean));
+function liveTableTargets(tables) {
+  return new Set(tables.flat().map((table) => String(table || "")).filter(Boolean));
+}
+
+function evictLiveTablePromises(targets) {
   if (!targets.size) return;
   for (const key of tablePromises.keys()) {
     if (targets.has(key.split(":", 1)[0])) tablePromises.delete(key);
@@ -156,6 +159,33 @@ export async function invalidateLiveTables(...tables) {
   for (const key of freshTablePromises.keys()) {
     if (targets.has(key.split(":", 1)[0])) freshTablePromises.delete(key);
   }
+}
+
+export async function refreshLiveTables(...tables) {
+  const targets = liveTableTargets(tables);
+  if (!targets.size) return [];
+  const queries = [...tableQueries.values()].filter(({ table }) => targets.has(table));
+  const results = await Promise.allSettled(queries.map(({ table, orderCol, ascending, secondaryOrder }) =>
+    fetchAllTable(table, orderCol, ascending, secondaryOrder, { refresh: true })));
+  results.forEach((result, index) => {
+    if (result.status === "rejected") {
+      console.warn(`[live-realtime] ${queries[index].table} refresh failed`, result.reason);
+    }
+  });
+  return results;
+}
+
+export async function invalidateLiveTableData(...tables) {
+  const targets = liveTableTargets(tables);
+  if (!targets.size) return;
+  evictLiveTablePromises(targets);
+  await invalidateLiveTableCache([...targets]);
+}
+
+export async function invalidateLiveTables(...tables) {
+  const targets = liveTableTargets(tables);
+  if (!targets.size) return;
+  evictLiveTablePromises(targets);
   await Promise.all([
     invalidateLiveTableCache([...targets]),
     invalidateLiveAuthCache()
