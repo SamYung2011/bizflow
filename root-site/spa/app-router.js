@@ -27,6 +27,17 @@ function observeViewTransition(promise, phase) {
   });
 }
 
+async function commitViewUpdate(documentRef, update) {
+  if (typeof documentRef.startViewTransition !== "function") {
+    update();
+    return;
+  }
+  const transition = documentRef.startViewTransition(update);
+  observeViewTransition(transition.ready, "ready");
+  observeViewTransition(transition.finished, "finished");
+  await transition.updateCallbackDone;
+}
+
 function safeHistoryValue(value) {
   if (value === undefined) return null;
   try {
@@ -100,8 +111,8 @@ export function createAppRouter({
   navigationTimeoutMs = DEFAULT_NAVIGATION_TIMEOUT_MS,
   mountWarningMs = DEFAULT_MOUNT_WARNING_MS
 } = {}) {
-  if (!shell || typeof shell.setPage !== "function") {
-    throw new TypeError("createAppRouter() requires shell.setPage().");
+  if (!shell || typeof shell.setPage !== "function" || typeof shell.setLoadingPage !== "function") {
+    throw new TypeError("createAppRouter() requires shell.setLoadingPage() and shell.setPage().");
   }
 
   const allowedPaths = new Set(allowlist);
@@ -149,30 +160,35 @@ export function createAppRouter({
     return currentController.canLeave({ from: currentUrl, to: toUrl, reason });
   }
 
-  async function commitController({ controller, route, url, styles, historyState, index, signal }) {
+  function accessRedirectForRoute(route, url) {
+    if (route.frame?.access !== "bf-admin") return null;
+    const user = shell.getCurrentShellUser?.() ?? null;
+    const authenticated = typeof user?.hasPermission === "function";
+    if (!authenticated || user.isBfAdmin === true) return null;
+    return new URL("/bizflow/home.html", url);
+  }
+
+  async function commitFrame({ route, url, styles, index, signal }) {
     await currentController?.dispose?.();
+    currentController = null;
     if (signal?.aborted) throw abortError();
     const update = () => {
       styles.commit();
-      shell.setPage(controller.page);
+      shell.setLoadingPage(route.frame);
     };
-    if (typeof documentRef.startViewTransition === "function") {
-      const transition = documentRef.startViewTransition(update);
-      // Rapid navigation can supersede a transition after its DOM update has
-      // committed. Observe both auxiliary promises immediately so the browser's
-      // expected interruption never becomes an unhandled rejection.
-      observeViewTransition(transition.ready, "ready");
-      observeViewTransition(transition.finished, "finished");
-      await transition.updateCallbackDone;
-    } else {
-      update();
-    }
+    await commitViewUpdate(documentRef, update);
     if (signal?.aborted) throw abortError();
-    currentController = controller;
     currentRoute = route;
     currentUrl = url;
     currentIndex = index;
+  }
+
+  async function commitController({ controller, historyState, signal }) {
+    if (signal?.aborted) throw abortError();
+    shell.setPage(controller.page);
+    currentController = controller;
     await controller.activate();
+    if (signal?.aborted) throw abortError();
     const scroll = historyDetails(historyState)?.scroll;
     const x = Number.isFinite(scroll?.x) ? scroll.x : 0;
     const y = Number.isFinite(scroll?.y) ? scroll.y : 0;
@@ -207,6 +223,13 @@ export function createAppRouter({
     }
 
     pendingAbortController?.abort();
+    const accessRedirect = accessRedirectForRoute(route, url);
+    if (accessRedirect) {
+      routeGeneration += 1;
+      pendingAbortController = null;
+      hardNavigate(accessRedirect, { replace: true });
+      return false;
+    }
     const generation = ++routeGeneration;
     const abortController = new AbortController();
     pendingAbortController = abortController;
@@ -218,21 +241,6 @@ export function createAppRouter({
         route.load()
       ]), navigationTimeoutMs, abortController.signal);
       styles = preparedStyles;
-      // ES modules are singletons. Dispose a same-path controller before mounting
-      // another query-string instance so module-scoped page state cannot overlap.
-      if (currentController && route === currentRoute) {
-        await currentController.dispose();
-        currentController = null;
-      }
-      controller = await waitForPageMount(mountPageModule(module, {
-        url,
-        route,
-        signal: abortController.signal,
-        historyState: historyDetails(historyState)?.pageState ?? null,
-        isCurrent: () => !disposed && generation === routeGeneration && !abortController.signal.aborted,
-        navigation: Object.freeze({ navigate, savePageState, hardNavigate })
-      }), mountWarningMs, route, abortController.signal);
-      if (abortController.signal.aborted) throw abortError();
 
       let targetIndex = historyDetails(historyState)?.index;
       if (!fromPopstate) {
@@ -244,21 +252,30 @@ export function createAppRouter({
         else windowRef.history.pushState(nextState, "", url.href);
         historyState = nextState;
       }
-      await commitController({
-        controller,
+      await commitFrame({
         route,
         url,
         styles,
-        historyState,
         index: targetIndex ?? currentIndex,
         signal: abortController.signal
       });
+      controller = await waitForPageMount(mountPageModule(module, {
+        url,
+        route,
+        signal: abortController.signal,
+        historyState: historyDetails(historyState)?.pageState ?? null,
+        isCurrent: () => !disposed && generation === routeGeneration && !abortController.signal.aborted,
+        navigation: Object.freeze({ navigate, savePageState, hardNavigate })
+      }), mountWarningMs, route, abortController.signal);
+      if (abortController.signal.aborted) throw abortError();
+      await commitController({ controller, historyState, signal: abortController.signal });
       if (pendingAbortController === abortController) pendingAbortController = null;
       return true;
     } catch (error) {
       abortController.abort();
       styles?.rollback?.();
       await controller?.dispose?.();
+      if (currentController === controller) currentController = null;
       if (pendingAbortController === abortController) pendingAbortController = null;
       if (!isAbortError(error)) {
         console.warn("[spa] navigation failed; falling back to document navigation", error);

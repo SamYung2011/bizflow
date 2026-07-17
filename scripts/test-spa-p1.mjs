@@ -6,7 +6,7 @@ import path from "node:path";
 import { createAppRouter, SPA_HISTORY_KEY } from "../root-site/spa/app-router.js";
 import { createPageScope, mountPageModule, throwIfPageAborted } from "../root-site/spa/page-lifecycle.js";
 import { routeManifest, spaCrossSectionNavigation, spaNavigation, spaRouteAllowlist } from "../root-site/spa/route-manifest.js";
-import { createRouteMenu } from "../root-site/spa/route-menu.js";
+import { createRouteFrame, createRouteMenu } from "../root-site/spa/route-menu.js";
 import { invalidateProviderSnapshotMemo, loadProviderSnapshot } from "../root-site/data/provider-snapshot-cache.js";
 import { snapshotsForTables } from "../root-site/data/live-snapshot-dependencies.js";
 import { createDateFilter } from "../root-site/components/date-filter.js";
@@ -65,9 +65,13 @@ async function verifyManifest() {
   const teamFallbackMenu = createRouteMenu("/team/members.html");
   assert.deepEqual(teamFallbackMenu.map((item) => item.href), ["/team/index.html", "/team/members.html"]);
   assert.equal(teamFallbackMenu.find((item) => item.active)?.key, "nav.team");
+  assert.equal(createRouteFrame("/bizflow/ocpp-monitor.html").access, "bf-admin", "OCPP frames must carry the pre-render admin gate");
+  assert.equal(createRouteFrame("/bizflow/orders.html").access, "default");
   for (const route of routes) {
     const migrated = expectedSpaRoutes.includes(route.path);
     assert.ok(route.path.endsWith(".html"), `${route.path} must retain its .html URL`);
+    assert.deepEqual(route.frame, createRouteFrame(route.path), `${route.path} must use shared frame metadata`);
+    assert.ok(route.frame.title && route.frame.skeleton?.kind, `${route.path} must declare a title and skeleton`);
     assert.equal(typeof route.load, migrated ? "function" : "object", `${route.path} loader must match its rollout status`);
     const htmlFile = path.join(rootDir, "root-site", route.path);
     const html = await readFile(htmlFile, "utf8");
@@ -127,6 +131,10 @@ function eventTarget() {
       listeners.get(type)?.delete(handler);
     }
   };
+}
+
+function testFrame(name, access = "default") {
+  return { menu: [], title: name, skeleton: { kind: "table", stats: 0 }, access };
 }
 
 async function verifyLifecycle() {
@@ -204,7 +212,7 @@ async function verifyRouteGenerationRace() {
     const secondGate = new Promise((resolve) => { releaseSecond = resolve; });
     const manifest = {
       "/a.html": {
-        path: "/a.html", section: "bizflow", styles: [],
+        path: "/a.html", section: "bizflow", styles: [], frame: testFrame("a"),
         load: async () => ({
           async mountPage({ scope }) {
             firstScope = scope;
@@ -213,7 +221,7 @@ async function verifyRouteGenerationRace() {
         })
       },
       "/b.html": {
-        path: "/b.html", section: "bizflow", styles: [],
+        path: "/b.html", section: "bizflow", styles: [], frame: testFrame("b"),
         load: async () => ({
           async mountPage() {
             secondStarted();
@@ -224,7 +232,7 @@ async function verifyRouteGenerationRace() {
       }
     };
     const router = createAppRouter({
-      shell: { setPage() {} },
+      shell: { setLoadingPage() {}, setPage() {} },
       manifest,
       allowlist: Object.keys(manifest),
       windowRef: browser.windowRef,
@@ -396,7 +404,10 @@ async function verifyRouter() {
   const idle = fakeBrowser();
   const idleStyles = { adopt() {}, prepare() { throw new Error("inactive router loaded CSS"); }, dispose() {} };
   const idleRouter = createAppRouter({
-    shell: { setPage() { throw new Error("inactive router rendered a page"); } },
+    shell: {
+      setLoadingPage() { throw new Error("inactive router rendered a frame"); },
+      setPage() { throw new Error("inactive router rendered a page"); }
+    },
     manifest: {},
     allowlist: [],
     windowRef: idle.windowRef,
@@ -421,6 +432,7 @@ async function verifyRouter() {
   const transitionUnhandled = [];
   const onTransitionUnhandled = (error) => transitionUnhandled.push(error);
   process.on("unhandledRejection", onTransitionUnhandled);
+  const frames = [];
   const pages = [];
   const routeTarget = eventTarget();
   let allowLeave = true;
@@ -436,13 +448,25 @@ async function verifyRouter() {
     }
   });
   const manifest = {
-    "/a.html": { path: "/a.html", section: "bizflow", styles: ["a.css"], load: async () => makeModule("a") },
-    "/b.html": { path: "/b.html", section: "bizflow", styles: ["b.css"], load: async () => makeModule("b") },
-    "/team.html": { path: "/team.html", section: "team", styles: ["team.css"], load: async () => makeModule("team") },
-    "/fail.html": { path: "/fail.html", section: "bizflow", styles: [], load: async () => { throw new Error("expected"); } }
+    "/a.html": { path: "/a.html", section: "bizflow", styles: ["a.css"], frame: testFrame("a"), load: async () => makeModule("a") },
+    "/b.html": { path: "/b.html", section: "bizflow", styles: ["b.css"], frame: testFrame("b"), load: async () => makeModule("b") },
+    "/team.html": { path: "/team.html", section: "team", styles: ["team.css"], frame: testFrame("team"), load: async () => makeModule("team") },
+    "/fail.html": { path: "/fail.html", section: "bizflow", styles: [], frame: testFrame("fail"), load: async () => { throw new Error("expected"); } },
+    "/mount-fail.html": {
+      path: "/mount-fail.html", section: "bizflow", styles: [], frame: testFrame("mount-fail"),
+      load: async () => ({ async mountPage() { throw new Error("expected mount failure"); } })
+    },
+    "/admin.html": {
+      path: "/admin.html", section: "bizflow", styles: [], frame: testFrame("admin", "bf-admin"),
+      load: async () => { throw new Error("denied route assets must not load"); }
+    }
   };
   const router = createAppRouter({
-    shell: { setPage(page) { pages.push(page.data.name); } },
+    shell: {
+      setLoadingPage(frame) { frames.push(frame.title); },
+      setPage(page) { pages.push(page.data.name); },
+      getCurrentShellUser() { return { hasPermission() {}, isBfAdmin: false }; }
+    },
     manifest,
     allowlist: Object.keys(manifest),
     windowRef: browser.windowRef,
@@ -456,15 +480,18 @@ async function verifyRouter() {
     }
   });
   assert.equal(await router.start(), true);
+  assert.deepEqual(frames, ["a"], "initial route must commit its frame before page data");
   assert.deepEqual(pages, ["a"]);
   assert.equal(routeTarget.listeners.get("route")?.size, 1);
   router.savePageState({ filter: "open" });
   assert.deepEqual(browser.history.state[SPA_HISTORY_KEY].pageState, { filter: "open" });
   allowLeave = false;
   assert.equal(await router.navigate("/b.html"), false, "canLeave must block SPA navigation");
+  assert.deepEqual(frames, ["a"], "blocked navigation must not commit a frame");
   assert.deepEqual(pages, ["a"]);
   allowLeave = true;
   assert.equal(await router.navigate("/b.html"), true);
+  assert.deepEqual(frames.slice(0, 2), ["a", "b"]);
   assert.deepEqual(pages, ["a", "b"]);
   assert.equal(await router.navigate("/team.html"), true, "P6 must navigate across Bizflow and Team in one document");
   assert.equal(await router.navigate("/a.html"), true);
@@ -491,6 +518,21 @@ async function verifyRouter() {
   }
   assert.equal(warnings.length, 1, "route failure must emit one observable warning");
   assert.equal(browser.assigned.at(-1), "https://example.test/fail.html?tpSpa=0", "route failure must hard navigate to one-shot MPA mode");
+  warnings.length = 0;
+  console.warn = (...values) => warnings.push(values);
+  try {
+    assert.equal(await router.navigate("/mount-fail.html"), false);
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.equal(frames.at(-1), "mount-fail", "failed data mount must occur after the target frame is visible");
+  assert.equal(pages.at(-1), "b", "failed data mount must not commit a page controller");
+  assert.equal(warnings.length, 1, "failed data mount must remain observable");
+  assert.equal(browser.assigned.at(-1), "https://example.test/mount-fail.html?tpSpa=0");
+  const frameCountBeforeDeniedRoute = frames.length;
+  assert.equal(await router.navigate("/admin.html"), false);
+  assert.equal(frames.length, frameCountBeforeDeniedRoute, "denied OCPP-style routes must not flash a loading frame");
+  assert.equal(browser.assigned.at(-1), "https://example.test/bizflow/home.html");
   await router.dispose();
   assert.equal(browser.windowRef.listeners.get("popstate")?.size ?? 0, 0);
   assert.equal(routeTarget.listeners.get("route")?.size ?? 0, 0);
@@ -499,23 +541,142 @@ async function verifyRouter() {
   assert.deepEqual(transitionUnhandled, [], "aborted view-transition promises must never be unhandled");
 }
 
+async function verifyFrameHistoryNavigation() {
+  const browser = fakeBrowser("/a.html");
+  const frames = [];
+  const pages = [];
+  const restoredStates = [];
+  const scrolls = [];
+  browser.windowRef.scrollTo = (x, y) => scrolls.push({ x, y });
+  const makeModule = (name, captureState) => ({
+    async mountPage({ historyState }) {
+      restoredStates.push({ name, historyState });
+      return {
+        page: { data: { name }, render: () => name },
+        captureState
+      };
+    }
+  });
+  const manifest = {
+    "/a.html": {
+      path: "/a.html", section: "bizflow", styles: [], frame: testFrame("a"),
+      load: async () => makeModule("a", () => ({ filter: "open" }))
+    },
+    "/b.html": {
+      path: "/b.html", section: "bizflow", styles: [], frame: testFrame("b"),
+      load: async () => makeModule("b", () => ({ filter: "closed" }))
+    }
+  };
+  const router = createAppRouter({
+    shell: {
+      setLoadingPage(frame) { frames.push(frame.title); },
+      setPage(page) { pages.push(page.data.name); }
+    },
+    manifest,
+    allowlist: Object.keys(manifest),
+    windowRef: browser.windowRef,
+    documentRef: browser.documentRef,
+    styleManager: {
+      adopt() {},
+      async prepare() { return { commit() {}, rollback() {} }; },
+      dispose() {}
+    }
+  });
+  assert.equal(await router.start(), true);
+  browser.windowRef.scrollY = 381;
+  router.savePageState({ filter: "open" });
+  const stateA = structuredClone(browser.history.state);
+  assert.equal(await router.navigate("/b.html"), true);
+  const stateB = structuredClone(browser.history.state);
+
+  browser.windowRef.location.href = "https://example.test/a.html";
+  browser.history.state = stateA;
+  await [...browser.windowRef.listeners.get("popstate")][0]({ state: stateA });
+  assert.deepEqual(restoredStates.at(-1), { name: "a", historyState: { filter: "open" } });
+  assert.deepEqual(scrolls.at(-1), { x: 0, y: 381 });
+
+  browser.windowRef.location.href = "https://example.test/b.html";
+  browser.history.state = stateB;
+  await [...browser.windowRef.listeners.get("popstate")][0]({ state: stateB });
+  assert.deepEqual(frames, ["a", "b", "a", "b"], "Back/Forward must commit the matching frame before each controller");
+  assert.deepEqual(pages, ["a", "b", "a", "b"]);
+  await router.dispose();
+}
+
+async function verifyFrameSupersedingNavigation() {
+  const browser = fakeBrowser("/a.html");
+  const frames = [];
+  const pages = [];
+  let notifyBStarted;
+  let releaseB;
+  const bStarted = new Promise((resolve) => { notifyBStarted = resolve; });
+  const bGate = new Promise((resolve) => { releaseB = resolve; });
+  const manifest = {
+    "/a.html": {
+      path: "/a.html", section: "bizflow", styles: [], frame: testFrame("a"),
+      load: async () => ({ async mountPage() { return { page: { data: { name: "a" }, render: () => "a" } }; } })
+    },
+    "/b.html": {
+      path: "/b.html", section: "bizflow", styles: [], frame: testFrame("b"),
+      load: async () => ({
+        async mountPage() {
+          notifyBStarted();
+          await bGate;
+          return { page: { data: { name: "b" }, render: () => "b" } };
+        }
+      })
+    }
+  };
+  const router = createAppRouter({
+    shell: {
+      setLoadingPage(frame) { frames.push(frame.title); },
+      setPage(page) { pages.push(page.data.name); }
+    },
+    manifest,
+    allowlist: Object.keys(manifest),
+    windowRef: browser.windowRef,
+    documentRef: browser.documentRef,
+    styleManager: {
+      adopt() {},
+      async prepare() { return { commit() {}, rollback() {} }; },
+      dispose() {}
+    }
+  });
+  assert.equal(await router.start(), true);
+  const toB = router.navigate("/b.html");
+  await bStarted;
+  assert.deepEqual(frames, ["a", "b"]);
+  assert.deepEqual(pages, ["a"], "pending route data must not commit a controller");
+  assert.equal(await router.navigate("/a.html?superseded=1"), true);
+  releaseB();
+  assert.equal(await toB, false);
+  assert.deepEqual(frames, ["a", "b", "a"]);
+  assert.deepEqual(pages, ["a", "a"], "superseded controller must never replace the current route");
+  await router.dispose();
+}
+
 async function verifyNavigationTimeoutSeparation() {
   const browser = fakeBrowser("/slow.html");
   let releaseMount;
   let notifyMountStarted;
   const mountStarted = new Promise((resolve) => { notifyMountStarted = resolve; });
   const mountGate = new Promise((resolve) => { releaseMount = resolve; });
+  const frames = [];
   const pages = [];
   const warnings = [];
   const originalWarn = console.warn;
   console.warn = (...values) => warnings.push(values);
   const router = createAppRouter({
-    shell: { setPage(page) { pages.push(page.data.name); } },
+    shell: {
+      setLoadingPage(frame) { frames.push(frame.title); },
+      setPage(page) { pages.push(page.data.name); }
+    },
     manifest: {
       "/slow.html": {
         path: "/slow.html",
         section: "bizflow",
         styles: [],
+        frame: testFrame("slow"),
         load: async () => ({
           async mountPage({ signal }) {
             notifyMountStarted();
@@ -541,6 +702,8 @@ async function verifyNavigationTimeoutSeparation() {
     const starting = router.start();
     await mountStarted;
     await new Promise((resolve) => setTimeout(resolve, 15));
+    assert.deepEqual(frames, ["slow"], "route frame must render before slow page data resolves");
+    assert.deepEqual(pages, [], "page controller must wait for slow data");
     assert.deepEqual(browser.assigned, [], "slow page data must not trigger document fallback");
     assert.equal(warnings.filter(([message]) => String(message).includes("data mount still pending")).length, 1);
     assert.equal(warnings.some(([message]) => String(message).includes("navigation failed")), false);
@@ -556,12 +719,13 @@ async function verifyNavigationTimeoutSeparation() {
   const assetWarnings = [];
   console.warn = (...values) => assetWarnings.push(values);
   const assetRouter = createAppRouter({
-    shell: { setPage() {} },
+    shell: { setLoadingPage() {}, setPage() {} },
     manifest: {
       "/asset-timeout.html": {
         path: "/asset-timeout.html",
         section: "bizflow",
         styles: [],
+        frame: testFrame("asset-timeout"),
         load: () => new Promise(() => {})
       }
     },
@@ -589,6 +753,10 @@ async function verifyNavigationTimeoutSeparation() {
 async function verifyShellAdapter() {
   const source = await readFile(path.join(rootDir, "root-site/shell/shell.js"), "utf8");
   assert.match(source, /export function setPage\(/, "shell must expose setPage");
+  assert.match(source, /export function setLoadingPage\(/, "shell must expose the frame-first loading contract");
+  assert.match(source, /pageContext = \{\s*\.\.\.pageContext,\s*menu: frame\.menu,/s, "loading frames must preserve authenticated page data and unread state");
+  assert.match(source, /root\.setAttribute\("aria-busy", "true"\)/, "loading frame must expose its busy state");
+  assert.match(source, /root\.removeAttribute\("aria-busy"\)/, "page commit must clear its busy state");
   assert.match(source, /const defaultMenu = createRouteMenu\(defaultMenuPath\)/, "loading shell must derive its real menu from shared route metadata");
   assert.doesNotMatch(source, /const defaultMenu = \[/, "loading shell must not expose the obsolete hardcoded menu");
   assert.doesNotMatch(source, /navigation-prerender|installNavigationPrerender/, "P6 shell must not reinstall MPA speculation rules");
@@ -616,6 +784,8 @@ await verifyLifecycle();
 verifyOcppGuard();
 verifyWhatsappI18n();
 await verifyRouter();
+await verifyFrameHistoryNavigation();
+await verifyFrameSupersedingNavigation();
 await verifyNavigationTimeoutSeparation();
 await verifyRouteGenerationRace();
 await verifyDataRaceGuards();

@@ -31,7 +31,15 @@ An enabled route module exports `mountPage(context)`. It performs data preparati
 
 The shell module remains mounted once. Current MPA pages are adapted from `window.__shellMenu`, `window.__shellData`, and `window.__shellContent` only at initial import; migrated pages await `shell.shellReady` and then call `shell.setPage(page)`.
 
-Route CSS is prepared disabled, committed atomically after the page module mounts, and rolled back on load failure. Common tokens, components, icons, and shell CSS remain permanent.
+## Frame-first navigation
+
+Route menu, title, skeleton, and access metadata share one source in `route-menu.js`. After target CSS and its module are ready, the router commits that route's frame through `shell.setLoadingPage()` before awaiting page data. The loading commit changes only the active menu, document title, and content skeleton; the authenticated user, company, unread state, and top-bar state remain mounted. When `mountPage()` resolves, `shell.setPage()` replaces the skeleton with the controller content and clears `aria-busy`.
+
+OCPP frames carry the same `adminOnly` metadata as their menu items. The router checks the already authenticated shell user before the frame commit, so a denied account follows the existing hard redirect to Home without briefly exposing an OCPP skeleton. Page-level OCPP guards remain as defense in depth.
+
+History is committed with the frame. Back/Forward state and scroll are restored only after the data controller activates. A superseding navigation aborts the pending controller generation; failed data mounts keep their observable warning and one-shot `?tpSpa=0` document fallback.
+
+Route CSS is prepared disabled and committed atomically with the frame after the page module loads. Asset failures roll it back before any frame change; data-mount failures retain the target frame until the one-shot document fallback takes over. Common tokens, components, icons, and shell CSS remain permanent.
 
 P6 removes the MPA speculation-rule layer because the router now owns all approved navigation. Each direct-load HTML keeps only three module preloads: the SPA entry, that route's module, and the vendored Supabase client. Same-document changes use `document.startViewTransition()` when available; direct-load and one-shot fallback documents retain the progressive `@view-transition { navigation: auto; }` rule.
 
