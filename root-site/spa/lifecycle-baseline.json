@@ -18,7 +18,7 @@
       }
     },
     "/bizflow/orders.html": {
-      "moduleCount": 37,
+      "moduleCount": 38,
       "totals": {
         "documentListeners": 4,
         "windowListeners": 4,
@@ -200,7 +200,7 @@
       }
     },
     "/team/index.html": {
-      "moduleCount": 31,
+      "moduleCount": 32,
       "totals": {
         "documentListeners": 2,
         "windowListeners": 2,

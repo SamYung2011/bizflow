@@ -26,13 +26,14 @@ let filterState = null;
 let taskMobileViewport = null;
 let activeScope = null;
 let activeMountId = 0;
+let taskLiveRefresh = null;
 
 function isCurrentTaskMount(mountId, scope = activeScope) {
   return mountId === activeMountId && Boolean(scope?.isCurrent());
 }
 
-function initializeTaskState(historyState = null) {
-  const clonedTasks = data.tasks.map((task) => ({
+function createTaskState(nextData, historyState = null) {
+  const clonedTasks = nextData.tasks.map((task) => ({
     ...task,
     attachments: (task.attachments ?? []).map((attachment) => ({ ...attachment })),
     assignees: (task.assignees ?? []).map((assignee) => ({ ...assignee })),
@@ -47,16 +48,16 @@ function initializeTaskState(historyState = null) {
   clonedTasks.forEach((task) => {
     if (task.parentId && clonedTaskById.has(task.parentId)) clonedTaskById.get(task.parentId).subtasks.push(task);
   });
-  const clonedMembers = data.members.map((member, index) => ({ ...member, id: member.id || `mock-member-${index}` }));
+  const clonedMembers = nextData.members.map((member, index) => ({ ...member, id: member.id || `mock-member-${index}` }));
   const currentMember = clonedMembers.find((member) => member.name.toLocaleLowerCase() === currentUser.name.toLocaleLowerCase());
   const now = new Date();
   const storedViewMode = getSessionValue("team-tasks-view-mode");
   const restored = historyState && typeof historyState === "object" ? historyState : {};
-  state = {
-    summary: { ...data.summary },
+  const nextState = {
+    summary: { ...nextData.summary },
     members: clonedMembers,
     tasks: clonedTasks,
-    board: data.board.map((column) => ({ ...column, tasks: column.tasks.map((task) => clonedTaskById.get(task.id)).filter(Boolean) })),
+    board: nextData.board.map((column) => ({ ...column, tasks: column.tasks.map((task) => clonedTaskById.get(task.id)).filter(Boolean) })),
     currentUser: { ...currentUser, id: currentUser.employeeId || currentMember?.id || "" },
     permissions,
     liveReadOnly: authenticated,
@@ -77,7 +78,7 @@ function initializeTaskState(historyState = null) {
     submitTaskId: null,
     submitOriginalDepartmentId: "",
     submitCanAssignOthers: permissions.canAssignOthers,
-    submitDraft: { ...data.form.defaults, memberIds: [], memberQuery: "", memberMenuOpen: false, attachments: [] },
+    submitDraft: { ...nextData.form.defaults, memberIds: [], memberQuery: "", memberMenuOpen: false, attachments: [] },
     submitError: "",
     feedbackDraft: { message: "", attachments: [] },
     feedbackError: "",
@@ -87,12 +88,17 @@ function initializeTaskState(historyState = null) {
     writeNotice: "",
     actionTaskId: null
   };
-  filterState = {
-    status: ["inProgress", "completed", "overdue"].includes(restored.status) ? restored.status : data.filters?.status ?? "inProgress",
-    priority: ["all", "high", "medium", "low"].includes(restored.priority) ? restored.priority : data.filters?.priority ?? "all",
-    view: ["board", "calendar"].includes(restored.view) ? restored.view : ["board", "calendar"].includes(storedViewMode) ? storedViewMode : data.filters?.view ?? "board",
+  const nextFilterState = {
+    status: ["inProgress", "completed", "overdue"].includes(restored.status) ? restored.status : nextData.filters?.status ?? "inProgress",
+    priority: ["all", "high", "medium", "low"].includes(restored.priority) ? restored.priority : nextData.filters?.priority ?? "all",
+    view: ["board", "calendar"].includes(restored.view) ? restored.view : ["board", "calendar"].includes(storedViewMode) ? storedViewMode : nextData.filters?.view ?? "board",
     member: typeof restored.member === "string" ? restored.member : "all"
   };
+  return { state: nextState, filterState: nextFilterState };
+}
+
+function initializeTaskState(historyState = null) {
+  ({ state, filterState } = createTaskState(data, historyState));
 }
 
 function initials(name) {
@@ -222,6 +228,7 @@ function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, foc
   if (focusActionMenu) document.querySelector("[data-task-action-popover]")?.focus();
   if (restoreActionTaskId) document.querySelector(`[data-task-action-open="${CSS.escape(restoreActionTaskId)}"]`)?.focus();
   if (focusBoard) document.querySelector("[data-task-submit-open]")?.focus();
+  if (taskLiveRefresh?.pending) queueMicrotask(() => void taskLiveRefresh.flush());
 }
 
 const onTaskViewportChange = () => rerenderTaskPage({ focusActionMenu: Boolean(state.actionTaskId) });
@@ -1275,6 +1282,66 @@ function hasTaskUnsavedChanges() {
     || Boolean(subtaskValue);
 }
 
+function hasTaskRealtimeRefreshBlock() {
+  if (state.writeBusy || state.submitOpen || hasTaskUnsavedChanges()) return true;
+  const active = document.activeElement;
+  return Boolean(active?.closest?.("[data-task-feedback-form], [data-task-subtask-form], [data-task-submit-form]"));
+}
+
+function currentTaskViewState() {
+  return {
+    mode: state.mode,
+    overviewExpanded: [...state.overviewExpanded],
+    overviewCompletedExpanded: [...state.overviewCompletedExpanded],
+    onlyMine: state.onlyMine,
+    calendarYear: state.calendarYear,
+    calendarMonth: state.calendarMonth,
+    status: filterState.status,
+    priority: filterState.priority,
+    view: filterState.view,
+    member: filterState.member
+  };
+}
+
+function applyRealtimeTaskData(nextData) {
+  const currentState = state;
+  const currentFilters = filterState;
+  const selectedTaskId = currentState.selectedTaskId;
+  const actionTaskId = currentState.actionTaskId;
+  const next = createTaskState(nextData, currentTaskViewState());
+  const nextTaskIds = new Set(next.state.tasks.map((task) => task.id));
+  const keepDetail = currentState.detailOpen && nextTaskIds.has(selectedTaskId);
+  Object.assign(next.state, {
+    calendarExpandedDate: currentState.calendarExpandedDate,
+    aiOpen: currentState.aiOpen,
+    detailOpen: keepDetail,
+    selectedTaskId: keepDetail ? selectedTaskId : null,
+    detailTab: keepDetail ? currentState.detailTab : "content",
+    feedbackDraft: keepDetail ? currentState.feedbackDraft : { message: "", attachments: [] },
+    feedbackError: keepDetail ? currentState.feedbackError : "",
+    attachmentPreview: keepDetail ? currentState.attachmentPreview : null,
+    writeError: currentState.writeError,
+    writeNotice: currentState.writeNotice,
+    actionTaskId: nextTaskIds.has(actionTaskId) ? actionTaskId : null
+  });
+  data = nextData;
+  Object.assign(currentState, next.state);
+  Object.assign(currentFilters, next.filterState);
+  state = currentState;
+  filterState = currentFilters;
+  rerenderTaskPage({ focusDetail: keepDetail });
+}
+
+async function refreshLiveTaskSnapshot({ defer, isCurrent }) {
+  const nextData = await getTeamTaskData();
+  if (!isCurrent()) return;
+  if (hasTaskRealtimeRefreshBlock()) {
+    defer();
+    return;
+  }
+  applyRealtimeTaskData(nextData);
+}
+
 export async function mountPage({ scope, signal, historyState = null } = {}) {
   const mountId = ++activeMountId;
   activeScope = scope;
@@ -1324,7 +1391,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
         viewport.addListener(guardedViewportChange);
         scope.onCleanup(() => viewport.removeListener(guardedViewportChange));
       }
-      attachTaskDomainController({
+      taskLiveRefresh = attachTaskDomainController({
         state,
         filterState,
         getHelpers: () => currentHelpers,
@@ -1334,6 +1401,8 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
         adjustOpenTaskCounts,
         localTimestamp,
         toggleTaskParticipation,
+        refreshLiveData: refreshLiveTaskSnapshot,
+        isLiveRefreshBlocked: hasTaskRealtimeRefreshBlock,
         scope
       });
     },
@@ -1366,6 +1435,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       currentHelpers = null;
       taskMobileViewport = null;
       if (activeScope === scope) activeScope = null;
+      taskLiveRefresh = null;
       state = null;
       filterState = null;
     }

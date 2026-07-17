@@ -2,6 +2,7 @@ import { taskT } from "./tasks-i18n.js";
 import { isWaitingApproval } from "./tasks-model.js";
 import { setSessionValue } from "../data/session-state.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
+import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
 
 export function attachTaskDomainController({
   state,
@@ -13,8 +14,17 @@ export function attachTaskDomainController({
   adjustOpenTaskCounts,
   localTimestamp,
   toggleTaskParticipation,
+  refreshLiveData,
+  isLiveRefreshBlocked,
   scope
 }) {
+  const liveRefresh = attachLiveSnapshotRefresh({
+    scope,
+    snapshots: ["tasks.json"],
+    tables: ["employee_tasks", "task_assignees", "employee_task_feedbacks"],
+    isBlocked: isLiveRefreshBlocked,
+    refresh: refreshLiveData
+  });
   const taskById = (taskId) => state.tasks.find((task) => task.id === taskId) ?? null;
 
   function removeSubtask(subtaskId) {
@@ -240,4 +250,8 @@ export function attachTaskDomainController({
       rerender();
     }
   });
+
+  const flushDeferredRefresh = () => scope.timeout(() => void liveRefresh.flush(), 0);
+  scope.listen(document, "focusout", flushDeferredRefresh);
+  return liveRefresh;
 }

@@ -1,5 +1,6 @@
 import { fetchAllTable, getSession, TRANSIENT_AUTH_RESET_EVENT } from "./auth.js";
 import { activateLiveTableCacheUser, invalidateLiveAuthCache, invalidateLiveTableCache } from "./live-table-cache.js";
+import { LIVE_SNAPSHOT_UPDATED_EVENT } from "./live-snapshot-dependencies.js";
 
 const HK_TIME_ZONE = "Asia/Hong_Kong";
 const tablePromises = new Map();
@@ -172,6 +173,12 @@ export async function refreshLiveTables(...tables) {
       console.warn(`[live-realtime] ${queries[index].table} refresh failed`, result.reason);
     }
   });
+  const queriedTables = new Set(queries.map(({ table }) => table));
+  const refreshedTables = [...targets].filter((table) => !queriedTables.has(table) || queries.some((query, index) =>
+    query.table === table && results[index]?.status === "fulfilled"));
+  if (refreshedTables.length && typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(LIVE_SNAPSHOT_UPDATED_EVENT, { detail: { tables: refreshedTables } }));
+  }
   return results;
 }
 

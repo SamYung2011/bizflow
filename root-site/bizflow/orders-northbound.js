@@ -1,5 +1,6 @@
 import { getNorthboundData } from "../data/provider.js";
 import { formatDateTime } from "../data/live-snapshot-utils.js";
+import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { createDateRangePanel } from "../components/date-range-panel.js";
 import {
@@ -546,6 +547,25 @@ function closeModal() {
 export function attachNorthboundBehaviors({ rerender: nextRerender, scope }) {
   rerender = nextRerender;
   activeScope = scope;
+  const liveRefresh = attachLiveSnapshotRefresh({
+    scope,
+    snapshots: ["northbound.json"],
+    tables: ["northbound_records", "northbound_statuses"],
+    isBlocked: hasNorthboundRefreshBlock,
+    async refresh({ defer, isCurrent }) {
+      const nextData = await getNorthboundData();
+      if (!isCurrent()) return;
+      if (hasNorthboundRefreshBlock()) {
+        defer();
+        return;
+      }
+      state.records = nextData.records;
+      state.statuses = nextData.statuses;
+      state.loading = false;
+      state.loaded = true;
+      rerender();
+    }
+  });
 
   scope.listen(document, "click", async (event) => {
     if (liveReadOnly() && event.target.closest("[data-orders-write]")) return;
@@ -787,6 +807,12 @@ export function attachNorthboundBehaviors({ rerender: nextRerender, scope }) {
     state.visibleLimit = PAGE_CHUNK;
     rerender();
   });
+
+  const flushDeferredRefresh = () => scope.timeout(() => void liveRefresh.flush(), 0);
+  scope.listen(document, "click", flushDeferredRefresh);
+  scope.listen(document, "focusout", flushDeferredRefresh);
+  scope.listen(document, "keyup", flushDeferredRefresh);
+  return liveRefresh;
 }
 
 export function captureNorthboundState() {
@@ -814,6 +840,12 @@ export function hasNorthboundUnsavedChanges() {
   if (state.edit) return true;
   if (!state.modalOpen) return false;
   return Object.values(state.form).some((value) => String(value || "").trim()) || Boolean(state.newStatusLabel.trim());
+}
+
+export function hasNorthboundRefreshBlock() {
+  if (state.edit || state.modalOpen || submittedRangePanel.isOpen()) return true;
+  const active = document.activeElement;
+  return Boolean(active?.closest?.("[data-northbound-page] input, [data-northbound-page] textarea, [data-northbound-page] select"));
 }
 
 export function disposeNorthboundState() {

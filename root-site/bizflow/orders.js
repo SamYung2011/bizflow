@@ -11,9 +11,10 @@ import { consumeNavigationPreset, navigationPresetKeys } from "../components/nav
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
+import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
 import {
   attachNorthboundBehaviors, captureNorthboundState, disposeNorthboundState, ensureNorthboundData,
-  hasNorthboundUnsavedChanges, renderNorthbound, restoreNorthboundState
+  hasNorthboundRefreshBlock, hasNorthboundUnsavedChanges, renderNorthbound, restoreNorthboundState
 } from "./orders-northbound.js";
 import {
   attachChargerLeadBehaviors, captureChargerLeadState, disposeChargerLeadState, ensureChargerLeadsData,
@@ -131,6 +132,8 @@ let dateFilter = null;
 let resizeTimer = 0;
 let activeScope = null;
 let activeNavigation = null;
+let ordersLiveRefresh = null;
+let northboundLiveRefresh = null;
 
 function isCurrentOrdersScope(scope = activeScope) {
   return Boolean(scope && scope === activeScope && scope.isCurrent());
@@ -344,6 +347,12 @@ function closeSourceMenu() {
 function rerenderOrdersPage() {
   const page = document.querySelector("[data-orders-page]");
   if (page && currentHelpers) page.outerHTML = renderOrders(currentHelpers);
+  if (ordersLiveRefresh?.pending || northboundLiveRefresh?.pending) {
+    queueMicrotask(() => {
+      void ordersLiveRefresh?.flush();
+      void northboundLiveRefresh?.flush();
+    });
+  }
 }
 
 async function onOrdersClick(event) {
@@ -569,9 +578,28 @@ export async function mountPage({ scope, signal, historyState = null, navigation
       scope.listen(document, "input", onOrdersInput);
       scope.listen(document, "keydown", onOrdersKeydown);
       scope.listen(window, "resize", onOrdersResize);
-      attachNorthboundBehaviors({ rerender: rerenderOrdersPage, scope });
+      northboundLiveRefresh = attachNorthboundBehaviors({ rerender: rerenderOrdersPage, scope });
       attachChargerLeadBehaviors({ rerender: rerenderOrdersPage, scope });
       attachRevenueBehaviors({ rerender: rerenderOrdersPage, scope });
+      ordersLiveRefresh = attachLiveSnapshotRefresh({
+        scope,
+        snapshots: ["orders.json"],
+        tables: ["invoices"],
+        isBlocked: hasNorthboundRefreshBlock,
+        async refresh({ defer, isCurrent }) {
+          const nextData = await getOrdersPageData();
+          if (!isCurrent()) return;
+          if (hasNorthboundRefreshBlock()) {
+            defer();
+            return;
+          }
+          data = nextData;
+          state.page = Math.min(state.page, totalPages());
+          if (state.tab === "revenue" && canViewRevenue) await ensureRevenueData(data.orders, { scope });
+          if (!isCurrent()) return;
+          rerenderOrdersPage();
+        }
+      });
     },
     hasUnsavedChanges: hasNorthboundUnsavedChanges,
     async canLeave() {
@@ -605,6 +633,8 @@ export async function mountPage({ scope, signal, historyState = null, navigation
       dateFilter = null;
       if (activeScope === scope) activeScope = null;
       if (activeNavigation === navigation) activeNavigation = null;
+      ordersLiveRefresh = null;
+      northboundLiveRefresh = null;
     }
   };
 }
