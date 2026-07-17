@@ -9,7 +9,7 @@
   display: flex;
   min-width: 0;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--space-20);
 }
 
@@ -74,51 +74,6 @@
 .warranty-date-filter__trigger:hover,
 .warranty-date-filter__clear:hover {
   color: var(--blue);
-}
-
-.warranty-buckets {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  gap: var(--space-10);
-}
-
-.warranty-bucket {
-  display: inline-flex;
-  min-height: 36px;
-  align-items: center;
-  gap: var(--space-10);
-  padding: var(--space-4) var(--space-10);
-  border: 1px solid var(--gray-15);
-  border-radius: var(--radius-20);
-  color: var(--3a);
-  background: var(--white);
-  font-size: var(--font-description-size);
-  white-space: nowrap;
-  cursor: pointer;
-  transition: border-color var(--transition), color var(--transition), background var(--transition);
-}
-
-.warranty-bucket strong {
-  min-width: 22px;
-  padding: var(--space-4);
-  border-radius: var(--radius-20);
-  background: var(--gray-10);
-  color: var(--gray-40);
-  font-size: var(--font-body-size);
-  line-height: var(--lh-num);
-  text-align: center;
-}
-
-.warranty-bucket.is-active {
-  border-color: var(--blue);
-  color: var(--white);
-  background: var(--blue);
-}
-
-.warranty-bucket.is-active strong {
-  color: var(--blue);
-  background: var(--white);
 }
 
 .warranty-search {
@@ -328,16 +283,6 @@
 @media (max-width: 768px) {
   .warranty-panel {
     gap: var(--space-10);
-  }
-
-  .warranty-buckets {
-    flex-wrap: nowrap;
-    padding-bottom: var(--space-4);
-    overflow-x: auto;
-  }
-
-  .warranty-bucket {
-    flex: none;
   }
 
   .warranty-toolbar__filters {

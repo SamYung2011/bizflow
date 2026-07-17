@@ -12,8 +12,8 @@ const copy = {
     quarter: "90 天內",
     year: "一年內",
     search: "搜尋客戶、電話、產品或單號",
-    expiryRange: "保修到期日",
-    dateRange: "保修到期日期範圍",
+    purchaseRange: "購買日期",
+    dateRange: "購買日期範圍",
     startDate: "開始日期",
     endDate: "結束日期",
     today: "今天",
@@ -43,8 +43,8 @@ const copy = {
     quarter: "Within 90 days",
     year: "Within 1 year",
     search: "Search customer, phone, product or order",
-    expiryRange: "Warranty expiry",
-    dateRange: "Warranty expiry date range",
+    purchaseRange: "Purchase date",
+    dateRange: "Purchase date range",
     startDate: "Start date",
     endDate: "End date",
     today: "Today",
@@ -74,8 +74,8 @@ const copy = {
     quarter: "Sous 90 jours",
     year: "Sous 1 an",
     search: "Rechercher client, téléphone, produit ou commande",
-    expiryRange: "Expiration de garantie",
-    dateRange: "Période d'expiration de garantie",
+    purchaseRange: "Date d'achat",
+    dateRange: "Plage de dates d'achat",
     startDate: "Date de début",
     endDate: "Date de fin",
     today: "Aujourd'hui",
@@ -98,10 +98,8 @@ const copy = {
   }
 };
 
-const bucketKeys = ["expired", "week", "month", "quarter", "year"];
 const state = {
   items: null,
-  bucket: "all",
   search: "",
   dateFrom: "",
   dateTo: "",
@@ -158,21 +156,14 @@ export async function ensureWarrantyData({ scope = null, signal = scope?.signal 
     .filter((item) => item.bucket !== null && item.daysLeft >= -30 && validCustomerIds.has(String(item.customerId)));
 }
 
-function bucketCounts() {
-  const counts = Object.fromEntries(bucketKeys.map((key) => [key, 0]));
-  for (const item of state.items ?? []) counts[item.bucket] += 1;
-  return { all: state.items?.length ?? 0, ...counts };
-}
-
 function filteredItems() {
   const term = state.search.trim().toLocaleLowerCase();
   const rangeFrom = dateValue(state.dateFrom);
   const rangeTo = dateValue(state.dateTo);
   return (state.items ?? []).filter((item) => {
-    if (state.bucket !== "all" && item.bucket !== state.bucket) return false;
-    const expiry = dateValue(item.expiry);
-    if (Number.isFinite(rangeFrom) && (!Number.isFinite(expiry) || expiry < rangeFrom)) return false;
-    if (Number.isFinite(rangeTo) && (!Number.isFinite(expiry) || expiry > rangeTo)) return false;
+    const purchaseDate = dateValue(item.purchaseDate);
+    if (Number.isFinite(rangeFrom) && (!Number.isFinite(purchaseDate) || purchaseDate < rangeFrom)) return false;
+    if (Number.isFinite(rangeTo) && (!Number.isFinite(purchaseDate) || purchaseDate > rangeTo)) return false;
     if (!term) return true;
     return [item.customer, item.phone, item.product, item.no]
       .some((value) => String(value).toLocaleLowerCase().includes(term));
@@ -180,7 +171,7 @@ function filteredItems() {
 }
 
 function dateRangeLabel(lang) {
-  if (!state.dateFrom && !state.dateTo) return t(lang, "expiryRange");
+  if (!state.dateFrom && !state.dateTo) return t(lang, "purchaseRange");
   return `${state.dateFrom || state.dateTo} - ${state.dateTo || state.dateFrom}`;
 }
 
@@ -196,16 +187,6 @@ function renderDateRangeFilter(helpers) {
   </span>`;
 }
 
-function renderBucketChips(helpers) {
-  const { escapeHtml, lang } = helpers;
-  const counts = bucketCounts();
-  return `<div class="warranty-buckets" role="group" aria-label="${escapeHtml(t(lang, "title"))}">
-    ${["all", ...bucketKeys].map((key) => `<button type="button" class="warranty-bucket warranty-bucket--${key}${state.bucket === key ? " is-active" : ""}" data-warranty-bucket="${key}" aria-pressed="${state.bucket === key}">
-      <span>${escapeHtml(t(lang, key))}</span><strong>${escapeHtml(String(counts[key]))}</strong>
-    </button>`).join("")}
-  </div>`;
-}
-
 function renderWarrantyRow(item, helpers) {
   const { escapeHtml, lang } = helpers;
   const e = escapeHtml;
@@ -216,7 +197,7 @@ function renderWarrantyRow(item, helpers) {
   const timing = item.daysLeft < 0
     ? t(lang, "overdue", { days: Math.abs(item.daysLeft) })
     : t(lang, "remaining", { days: item.daysLeft });
-  return `<article class="management-list__row warranty-row warranty-row--${item.bucket}${hasCustomer ? "" : " warranty-row--disabled"}"${hasCustomer ? "" : ' aria-disabled="true"'} data-warranty-row data-warranty-bucket-value="${item.bucket}"${item.customerId ? ` data-customer-id="${e(item.customerId)}"` : ""}>
+  return `<article class="management-list__row warranty-row warranty-row--${item.bucket}${hasCustomer ? "" : " warranty-row--disabled"}"${hasCustomer ? "" : ' aria-disabled="true"'} data-warranty-row${item.customerId ? ` data-customer-id="${e(item.customerId)}"` : ""}>
     ${detailLink}
     <span class="warranty-row__bar" aria-hidden="true"></span>
     <span class="warranty-row__customer">
@@ -259,11 +240,8 @@ export function renderWarranty(helpers) {
     previousLabel: t(lang, "previous"),
     nextLabel: t(lang, "next")
   });
-  const counts = bucketCounts();
-
-  return `<section class="warranty-panel" data-warranty-panel data-warranty-total="${counts.all}" data-warranty-filtered="${filtered.length}" ${bucketKeys.map((key) => `data-warranty-count-${key}="${counts[key]}"`).join(" ")}>
+  return `<section class="warranty-panel" data-warranty-panel data-warranty-total="${state.items.length}" data-warranty-filtered="${filtered.length}">
     <div class="warranty-toolbar">
-      ${renderBucketChips(helpers)}
       <div class="warranty-toolbar__filters">
         ${renderDateRangeFilter(helpers)}
         <label class="warranty-search">
@@ -274,13 +252,6 @@ export function renderWarranty(helpers) {
     </div>
     ${renderManagementList({ content, pager, paged: filtered.length > pageSize })}
   </section>`;
-}
-
-export function selectWarrantyBucket(bucket) {
-  if (!["all", ...bucketKeys].includes(bucket) || state.bucket === bucket) return false;
-  state.bucket = bucket;
-  state.page = 1;
-  return true;
 }
 
 export function setWarrantySearch(value) {
@@ -359,7 +330,6 @@ export function moveWarrantyPage(direction) {
 
 export function captureWarrantyState() {
   return {
-    bucket: state.bucket,
     search: state.search,
     dateFrom: state.dateFrom,
     dateTo: state.dateTo,
@@ -369,7 +339,6 @@ export function captureWarrantyState() {
 
 export function restoreWarrantyState(value = null) {
   const next = value && typeof value === "object" ? value : {};
-  state.bucket = ["all", ...bucketKeys].includes(next.bucket) ? next.bucket : "all";
   state.search = typeof next.search === "string" ? next.search : "";
   state.dateFrom = typeof next.dateFrom === "string" ? next.dateFrom : "";
   state.dateTo = typeof next.dateTo === "string" ? next.dateTo : "";

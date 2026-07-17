@@ -28,7 +28,6 @@ import {
   openWarrantyDateRange,
   renderWarranty,
   restoreWarrantyState,
-  selectWarrantyBucket,
   setWarrantySearch
 } from "./customers-warranty.js";
 
@@ -372,12 +371,6 @@ async function onCustomersClick(event) {
       if (!isCurrentCustomersScope(scope)) return;
       rerenderCustomersPage();
     }
-    return;
-  }
-
-  const warrantyBucket = event.target.closest("[data-warranty-bucket]");
-  if (warrantyBucket && state.tab === "warranty") {
-    if (selectWarrantyBucket(warrantyBucket.getAttribute("data-warranty-bucket"))) rerenderCustomersPage();
     return;
   }
 
