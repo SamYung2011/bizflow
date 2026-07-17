@@ -295,6 +295,18 @@ function renderContent() {
   </main>`;
 }
 
+function renderLoadingContent(skeleton = {}) {
+  const allowedKinds = new Set(["dashboard", "table", "form", "detail", "console", "board"]);
+  const kind = allowedKinds.has(skeleton.kind) ? skeleton.kind : "table";
+  const stats = Math.max(0, Math.min(4, Number(skeleton.stats) || 0));
+  const block = (className) => `<span class="shell-boot__block ${className}"></span>`;
+  return `<div class="shell-route-loading shell-route-loading--${kind}" aria-hidden="true" data-spa-loading-frame="${kind}">
+    ${block("shell-boot__title")}
+    ${stats ? `<div class="shell-boot__stats">${Array.from({ length: stats }, () => block("shell-boot__stat")).join("")}</div>` : ""}
+    ${block("shell-boot__panel")}
+  </div>`;
+}
+
 function renderForcedPasswordModal() {
   if (!state.forcePasswordOpen) return "";
   return `<div class="shell-auth-overlay">
@@ -665,7 +677,30 @@ export function setPage(nextPage = {}) {
   state.profileJoinRequest = null;
   closeTransientShellUi();
   if (pageContext.title) document.title = pageContext.title;
+  root.removeAttribute("aria-busy");
   renderPageContext();
+}
+
+export function setLoadingPage(frame = {}) {
+  if (!frame || !Array.isArray(frame.menu) || typeof frame.title !== "string") {
+    throw new TypeError("setLoadingPage() requires route menu and title metadata.");
+  }
+  pageContext = {
+    ...pageContext,
+    menu: frame.menu,
+    render: () => renderLoadingContent(frame.skeleton),
+    title: frame.title
+  };
+  menuSource = pageContext.menu;
+  menuItems = buildMenuItems(state.profileUser ?? pageContext.data.user);
+  closeTransientShellUi();
+  document.title = pageContext.title;
+  root.setAttribute("aria-busy", "true");
+  renderPageContext();
+}
+
+export function getCurrentShellUser() {
+  return state.profileUser ?? pageContext.data.user ?? null;
 }
 
 export const shellReady = bootShell();

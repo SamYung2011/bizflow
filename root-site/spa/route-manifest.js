@@ -1,7 +1,7 @@
 // P6 completes all 16 routes and enables same-document Bizflow/Team navigation.
-import { routeMenuKey } from "./route-menu.js";
+import { createRouteFrame, routeMenuKey } from "./route-menu.js";
 
-export { createRouteMenu } from "./route-menu.js";
+export { createRouteFrame, createRouteMenu } from "./route-menu.js";
 
 export const spaNavigation = true;
 export const spaCrossSectionNavigation = true;
@@ -31,6 +31,7 @@ function route(path, section, entry, styles, load = null) {
     path,
     section,
     menuKey: routeMenuKey(path),
+    frame: createRouteFrame(path),
     entry: fromHere(entry),
     styles: Object.freeze(styles.map(fromHere)),
     load

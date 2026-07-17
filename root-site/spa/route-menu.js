@@ -1,20 +1,22 @@
+const skeleton = (kind, stats = 0) => Object.freeze({ kind, stats });
+
 const routeMenuEntries = Object.freeze({
-  "/bizflow/home.html": { section: "bizflow", menuKey: "home" },
-  "/bizflow/orders.html": { section: "bizflow", menuKey: "orders" },
-  "/bizflow/orders-create.html": { section: "bizflow", menuKey: "orders" },
-  "/bizflow/orders-detail.html": { section: "bizflow", menuKey: "orders" },
-  "/bizflow/customers.html": { section: "bizflow", menuKey: "customers" },
-  "/bizflow/customer-detail.html": { section: "bizflow", menuKey: "customers" },
-  "/bizflow/inventory.html": { section: "bizflow", menuKey: "inventory" },
-  "/bizflow/inventory-detail.html": { section: "bizflow", menuKey: "inventory" },
-  "/bizflow/expense.html": { section: "bizflow", menuKey: "finance" },
-  "/bizflow/whatsapp.html": { section: "bizflow", menuKey: "whatsapp" },
-  "/bizflow/ocpp-monitor.html": { section: "bizflow", menuKey: "ocpp-monitor" },
-  "/bizflow/ocpp-charging.html": { section: "bizflow", menuKey: "ocpp-charging" },
-  "/bizflow/ocpp-users.html": { section: "bizflow", menuKey: "ocpp-users" },
-  "/bizflow/ocpp-finance.html": { section: "bizflow", menuKey: "ocpp-finance" },
-  "/team/index.html": { section: "team", menuKey: "tasks" },
-  "/team/members.html": { section: "team", menuKey: "team" }
+  "/bizflow/home.html": { section: "bizflow", menuKey: "home", title: "任務平台 Home Desktop", skeleton: skeleton("dashboard", 4) },
+  "/bizflow/orders.html": { section: "bizflow", menuKey: "orders", title: "Honnmono · Orders", skeleton: skeleton("table") },
+  "/bizflow/orders-create.html": { section: "bizflow", menuKey: "orders", title: "Honnmono · Create order", skeleton: skeleton("form") },
+  "/bizflow/orders-detail.html": { section: "bizflow", menuKey: "orders", title: "Honnmono · Order", skeleton: skeleton("detail", 2) },
+  "/bizflow/customers.html": { section: "bizflow", menuKey: "customers", title: "Honnmono · Customers", skeleton: skeleton("table") },
+  "/bizflow/customer-detail.html": { section: "bizflow", menuKey: "customers", title: "Honnmono · Customer", skeleton: skeleton("detail", 2) },
+  "/bizflow/inventory.html": { section: "bizflow", menuKey: "inventory", title: "Honnmono · Inventory", skeleton: skeleton("table") },
+  "/bizflow/inventory-detail.html": { section: "bizflow", menuKey: "inventory", title: "Honnmono · Inventory", skeleton: skeleton("detail", 2) },
+  "/bizflow/expense.html": { section: "bizflow", menuKey: "finance", title: "Honnmono · Finance", skeleton: skeleton("table") },
+  "/bizflow/whatsapp.html": { section: "bizflow", menuKey: "whatsapp", title: "Honnmono · WhatsApp", skeleton: skeleton("console", 3) },
+  "/bizflow/ocpp-monitor.html": { section: "bizflow", menuKey: "ocpp-monitor", title: "OCPP 監控", skeleton: skeleton("dashboard", 4) },
+  "/bizflow/ocpp-charging.html": { section: "bizflow", menuKey: "ocpp-charging", title: "OCPP 充電站", skeleton: skeleton("dashboard", 4) },
+  "/bizflow/ocpp-users.html": { section: "bizflow", menuKey: "ocpp-users", title: "OCPP 用戶", skeleton: skeleton("table") },
+  "/bizflow/ocpp-finance.html": { section: "bizflow", menuKey: "ocpp-finance", title: "OCPP 財務", skeleton: skeleton("dashboard", 4) },
+  "/team/index.html": { section: "team", menuKey: "tasks", title: "Honnmono · Tasks", skeleton: skeleton("board", 3) },
+  "/team/members.html": { section: "team", menuKey: "team", title: "Honnmono · Team", skeleton: skeleton("dashboard", 4) }
 });
 
 const sectionMenus = Object.freeze({
@@ -47,4 +49,17 @@ export function createRouteMenu(pathname) {
     ...item,
     active: id === currentRoute.menuKey
   }));
+}
+
+export function createRouteFrame(pathname) {
+  const currentRoute = routeMenuEntries[String(pathname || "")];
+  if (!currentRoute) return null;
+  const activeItem = (sectionMenus[currentRoute.section] ?? [])
+    .find((item) => item.id === currentRoute.menuKey);
+  return Object.freeze({
+    menu: Object.freeze(createRouteMenu(pathname).map((item) => Object.freeze(item))),
+    title: currentRoute.title,
+    skeleton: currentRoute.skeleton,
+    access: activeItem?.adminOnly === true ? "bf-admin" : "default"
+  });
 }

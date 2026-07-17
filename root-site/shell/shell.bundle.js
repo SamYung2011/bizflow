@@ -978,23 +978,24 @@
   }
 
   // root-site/spa/route-menu.js
+  var skeleton = (kind, stats = 0) => Object.freeze({ kind, stats });
   var routeMenuEntries = Object.freeze({
-    "/bizflow/home.html": { section: "bizflow", menuKey: "home" },
-    "/bizflow/orders.html": { section: "bizflow", menuKey: "orders" },
-    "/bizflow/orders-create.html": { section: "bizflow", menuKey: "orders" },
-    "/bizflow/orders-detail.html": { section: "bizflow", menuKey: "orders" },
-    "/bizflow/customers.html": { section: "bizflow", menuKey: "customers" },
-    "/bizflow/customer-detail.html": { section: "bizflow", menuKey: "customers" },
-    "/bizflow/inventory.html": { section: "bizflow", menuKey: "inventory" },
-    "/bizflow/inventory-detail.html": { section: "bizflow", menuKey: "inventory" },
-    "/bizflow/expense.html": { section: "bizflow", menuKey: "finance" },
-    "/bizflow/whatsapp.html": { section: "bizflow", menuKey: "whatsapp" },
-    "/bizflow/ocpp-monitor.html": { section: "bizflow", menuKey: "ocpp-monitor" },
-    "/bizflow/ocpp-charging.html": { section: "bizflow", menuKey: "ocpp-charging" },
-    "/bizflow/ocpp-users.html": { section: "bizflow", menuKey: "ocpp-users" },
-    "/bizflow/ocpp-finance.html": { section: "bizflow", menuKey: "ocpp-finance" },
-    "/team/index.html": { section: "team", menuKey: "tasks" },
-    "/team/members.html": { section: "team", menuKey: "team" }
+    "/bizflow/home.html": { section: "bizflow", menuKey: "home", title: "\u4EFB\u52D9\u5E73\u53F0 Home Desktop", skeleton: skeleton("dashboard", 4) },
+    "/bizflow/orders.html": { section: "bizflow", menuKey: "orders", title: "Honnmono \xB7 Orders", skeleton: skeleton("table") },
+    "/bizflow/orders-create.html": { section: "bizflow", menuKey: "orders", title: "Honnmono \xB7 Create order", skeleton: skeleton("form") },
+    "/bizflow/orders-detail.html": { section: "bizflow", menuKey: "orders", title: "Honnmono \xB7 Order", skeleton: skeleton("detail", 2) },
+    "/bizflow/customers.html": { section: "bizflow", menuKey: "customers", title: "Honnmono \xB7 Customers", skeleton: skeleton("table") },
+    "/bizflow/customer-detail.html": { section: "bizflow", menuKey: "customers", title: "Honnmono \xB7 Customer", skeleton: skeleton("detail", 2) },
+    "/bizflow/inventory.html": { section: "bizflow", menuKey: "inventory", title: "Honnmono \xB7 Inventory", skeleton: skeleton("table") },
+    "/bizflow/inventory-detail.html": { section: "bizflow", menuKey: "inventory", title: "Honnmono \xB7 Inventory", skeleton: skeleton("detail", 2) },
+    "/bizflow/expense.html": { section: "bizflow", menuKey: "finance", title: "Honnmono \xB7 Finance", skeleton: skeleton("table") },
+    "/bizflow/whatsapp.html": { section: "bizflow", menuKey: "whatsapp", title: "Honnmono \xB7 WhatsApp", skeleton: skeleton("console", 3) },
+    "/bizflow/ocpp-monitor.html": { section: "bizflow", menuKey: "ocpp-monitor", title: "OCPP \u76E3\u63A7", skeleton: skeleton("dashboard", 4) },
+    "/bizflow/ocpp-charging.html": { section: "bizflow", menuKey: "ocpp-charging", title: "OCPP \u5145\u96FB\u7AD9", skeleton: skeleton("dashboard", 4) },
+    "/bizflow/ocpp-users.html": { section: "bizflow", menuKey: "ocpp-users", title: "OCPP \u7528\u6236", skeleton: skeleton("table") },
+    "/bizflow/ocpp-finance.html": { section: "bizflow", menuKey: "ocpp-finance", title: "OCPP \u8CA1\u52D9", skeleton: skeleton("dashboard", 4) },
+    "/team/index.html": { section: "team", menuKey: "tasks", title: "Honnmono \xB7 Tasks", skeleton: skeleton("board", 3) },
+    "/team/members.html": { section: "team", menuKey: "team", title: "Honnmono \xB7 Team", skeleton: skeleton("dashboard", 4) }
   });
   var sectionMenus = Object.freeze({
     bizflow: Object.freeze([
@@ -1252,6 +1253,17 @@
       </div>
     </div>
   </main>`;
+  }
+  function renderLoadingContent(skeleton2 = {}) {
+    const allowedKinds = /* @__PURE__ */ new Set(["dashboard", "table", "form", "detail", "console", "board"]);
+    const kind = allowedKinds.has(skeleton2.kind) ? skeleton2.kind : "table";
+    const stats = Math.max(0, Math.min(4, Number(skeleton2.stats) || 0));
+    const block = (className) => `<span class="shell-boot__block ${className}"></span>`;
+    return `<div class="shell-route-loading shell-route-loading--${kind}" aria-hidden="true" data-spa-loading-frame="${kind}">
+    ${block("shell-boot__title")}
+    ${stats ? `<div class="shell-boot__stats">${Array.from({ length: stats }, () => block("shell-boot__stat")).join("")}</div>` : ""}
+    ${block("shell-boot__panel")}
+  </div>`;
   }
   function renderForcedPasswordModal() {
     if (!state2.forcePasswordOpen) return "";
@@ -1600,7 +1612,28 @@
     state2.profileJoinRequest = null;
     closeTransientShellUi();
     if (pageContext.title) document.title = pageContext.title;
+    root.removeAttribute("aria-busy");
     renderPageContext();
+  }
+  function setLoadingPage(frame = {}) {
+    if (!frame || !Array.isArray(frame.menu) || typeof frame.title !== "string") {
+      throw new TypeError("setLoadingPage() requires route menu and title metadata.");
+    }
+    pageContext = {
+      ...pageContext,
+      menu: frame.menu,
+      render: () => renderLoadingContent(frame.skeleton),
+      title: frame.title
+    };
+    menuSource = pageContext.menu;
+    menuItems = buildMenuItems(state2.profileUser ?? pageContext.data.user);
+    closeTransientShellUi();
+    document.title = pageContext.title;
+    root.setAttribute("aria-busy", "true");
+    renderPageContext();
+  }
+  function getCurrentShellUser() {
+    return state2.profileUser ?? pageContext.data.user ?? null;
   }
   var shellReady = bootShell();
 })();
