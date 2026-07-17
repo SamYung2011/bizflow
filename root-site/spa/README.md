@@ -9,6 +9,7 @@ P0 added the dormant native SPA foundation. P1 enabled Home and the four OCPP pa
 - Router or route-load failure falls back to a full document navigation. Existing HTML entry points stay supported for at least one release after full migration.
 - The one-shot fallback adds `?tpSpa=0`, mounts the same page controller without the router, removes the marker after mount, and leaves subsequent links as normal MPA navigations.
 - Back/Forward state lives under `history.state.tpSpa`: each page controller returns serializable filter state through `captureState()`, and the router records scroll coordinates. Each migration phase owns that page's exact restore implementation.
+- Detail breadcrumbs use `navigateBack(fallbackHref)`: the router goes back only when the preceding `tpSpa` index belongs to that list route, otherwise it navigates forward to the fallback URL. Direct HTML loads keep their normal link/button fallback.
 - Unsaved work is declared through `hasUnsavedChanges()` and guarded through async `canLeave()`. Migrated pages must use the existing in-page confirm dialog; the router never calls `window.confirm()`.
 - P1 migrated Home and the four OCPP pages; P2 customers; P3 orders; P4 inventory and finance; P5 Team; P6 WhatsApp. All approved routes now share one document and `spaCrossSectionNavigation` is enabled. Existing HTML files remain direct-load and one-shot fallback entry points for at least one release.
 

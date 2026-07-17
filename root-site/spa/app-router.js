@@ -99,6 +99,16 @@ function eligibleAnchor(event, windowRef) {
   return { anchor, url };
 }
 
+function eligibleBackTarget(event, windowRef) {
+  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return null;
+  const target = event.target?.closest?.("[data-spa-back]");
+  const fallbackHref = target?.getAttribute("data-spa-back") || target?.getAttribute("href");
+  if (!fallbackHref) return null;
+  const url = new URL(fallbackHref, windowRef.location.href);
+  if (url.origin !== windowRef.location.origin) return null;
+  return { target, url };
+}
+
 export function createAppRouter({
   shell,
   manifest = routeManifest,
@@ -136,9 +146,11 @@ export function createAppRouter({
 
   function replaceCurrentHistory(pageState = currentController?.captureState?.()) {
     if (!currentRoute) return;
+    const previous = historyDetails(windowRef.history.state)?.previous ?? null;
     const details = {
       index: currentIndex,
       path: currentUrl.pathname,
+      previous,
       pageState: safeHistoryValue(pageState),
       scroll: { x: windowRef.scrollX || 0, y: windowRef.scrollY || 0 }
     };
@@ -158,6 +170,23 @@ export function createAppRouter({
   async function canLeave(toUrl, reason) {
     if (!currentController) return true;
     return currentController.canLeave({ from: currentUrl, to: toUrl, reason });
+  }
+
+  async function navigateBack(rawFallbackHref) {
+    if (disposed) return false;
+    const fallbackUrl = new URL(rawFallbackHref, windowRef.location.href);
+    const details = historyDetails(windowRef.history.state);
+    const previous = details?.previous;
+    const canRestorePrevious = active
+      && details?.index === currentIndex
+      && Number.isInteger(previous?.index)
+      && previous.index === currentIndex - 1
+      && previous.path === fallbackUrl.pathname
+      && typeof windowRef.history.back === "function";
+    if (!canRestorePrevious) return navigate(fallbackUrl);
+    replaceCurrentHistory();
+    windowRef.history.back();
+    return true;
   }
 
   function accessRedirectForRoute(route, url) {
@@ -244,9 +273,12 @@ export function createAppRouter({
 
       let targetIndex = historyDetails(historyState)?.index;
       if (!fromPopstate) {
+        const previous = replace
+          ? historyDetails(windowRef.history.state)?.previous ?? null
+          : currentRoute ? { index: currentIndex, path: currentUrl.pathname } : null;
         replaceCurrentHistory();
         targetIndex = replace ? currentIndex : currentIndex + 1;
-        const details = { index: targetIndex, path: route.path, pageState: null, scroll: { x: 0, y: 0 } };
+        const details = { index: targetIndex, path: route.path, previous, pageState: null, scroll: { x: 0, y: 0 } };
         const nextState = nextHistoryState(replace ? windowRef.history.state : null, details);
         if (replace) windowRef.history.replaceState(nextState, "", url.href);
         else windowRef.history.pushState(nextState, "", url.href);
@@ -265,7 +297,7 @@ export function createAppRouter({
         signal: abortController.signal,
         historyState: historyDetails(historyState)?.pageState ?? null,
         isCurrent: () => !disposed && generation === routeGeneration && !abortController.signal.aborted,
-        navigation: Object.freeze({ navigate, savePageState, hardNavigate })
+        navigation: Object.freeze({ navigate, navigateBack, savePageState, hardNavigate })
       }), mountWarningMs, route, abortController.signal);
       if (abortController.signal.aborted) throw abortError();
       await commitController({ controller, historyState, signal: abortController.signal });
@@ -295,13 +327,20 @@ export function createAppRouter({
     const existing = historyDetails(windowRef.history.state);
     currentIndex = existing?.index ?? 0;
     if (!existing) {
-      const details = { index: currentIndex, path: route.path, pageState: null, scroll: { x: 0, y: 0 } };
+      const details = { index: currentIndex, path: route.path, previous: null, pageState: null, scroll: { x: 0, y: 0 } };
       windowRef.history.replaceState(nextHistoryState(windowRef.history.state, details), "", currentUrl.href);
     }
     return navigate(currentUrl, { replace: true, historyState: windowRef.history.state });
   }
 
   async function onDocumentClick(event) {
+    const backTarget = eligibleBackTarget(event, windowRef);
+    if (backTarget) {
+      event.preventDefault();
+      event.stopImmediatePropagation?.();
+      await navigateBack(backTarget.url);
+      return;
+    }
     const target = eligibleAnchor(event, windowRef);
     if (!target || (!routeForUrl(target.url) && !currentController)) return;
     event.preventDefault();
@@ -359,6 +398,7 @@ export function createAppRouter({
     enabled: active,
     start,
     navigate,
+    navigateBack,
     savePageState,
     dispose
   });

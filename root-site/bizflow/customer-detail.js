@@ -357,7 +357,7 @@ function renderCustomerDetail(helpers) {
     return `<div class="orders-workspace customer-detail-page" data-customer-detail-page data-live-read-only="${liveReadOnly}" data-customer-not-found>
       <header class="orders-workspace__head customer-detail-head">
         <nav class="orders-breadcrumb" aria-label="${escapeHtml(pageT(lang, "customer.root"))}">
-          <a href="./customers.html">${escapeHtml(pageT(lang, "customer.root"))}</a>
+          <a href="./customers.html" data-spa-back="./customers.html">${escapeHtml(pageT(lang, "customer.root"))}</a>
           <span>${escapeHtml(">")}</span>
           <span class="orders-breadcrumb__current">${escapeHtml(notFound)}</span>
         </nav>
@@ -369,7 +369,7 @@ function renderCustomerDetail(helpers) {
   return `<div class="orders-workspace customer-detail-page" data-customer-detail-page data-live-read-only="${liveReadOnly}">
     <header class="orders-workspace__head customer-detail-head">
       <nav class="orders-breadcrumb" aria-label="${escapeHtml(pageT(lang, "customer.root"))}">
-        <a href="./customers.html">${escapeHtml(pageT(lang, "customer.root"))}</a>
+        <a href="./customers.html" data-spa-back="./customers.html">${escapeHtml(pageT(lang, "customer.root"))}</a>
         <span>${escapeHtml(">")}</span>
         <span class="orders-breadcrumb__current" title="${escapeHtml(customer.name)}">${escapeHtml(customer.name)}</span>
       </nav>

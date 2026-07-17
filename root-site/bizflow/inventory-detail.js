@@ -328,7 +328,7 @@ export function renderInventoryDetail(helpers) {
   return `<div class="inventory-detail-page" data-node-id="676:99575" data-inventory-detail-page data-live-read-only="${liveReadOnly}" data-detail-id="${escapeHtml(detail.requestedId)}" data-modal-open="${state.modalOpen}" data-status-open="${state.statusOpen}">
     <header class="inventory-detail-head">
       <nav class="inventory-breadcrumb" aria-label="${escapeHtml(pageT(lang, "inventory.detail.product"))}">
-        <button type="button" class="inventory-breadcrumb__link" data-detail-back title="${escapeHtml(pageT(lang, "inventory.detail.product"))}">${escapeHtml(pageT(lang, "inventory.detail.product"))}</button>
+        <button type="button" class="inventory-breadcrumb__link" data-detail-back data-spa-back="./inventory.html" title="${escapeHtml(pageT(lang, "inventory.detail.product"))}">${escapeHtml(pageT(lang, "inventory.detail.product"))}</button>
         ${icon("icon-arrow-right", "icon")}
         <span class="inventory-breadcrumb__current" title="${escapeHtml(detail.product.breadcrumbName)}">${escapeHtml(detail.product.breadcrumbName)}</span>
       </nav>

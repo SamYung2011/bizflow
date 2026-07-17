@@ -624,7 +624,7 @@ function renderDetail(helpers) {
     return `<div class="orders-workspace" data-orders-detail-page data-live-read-only="${liveReadOnly}" data-order-not-found>
       <header class="orders-workspace__head">
         <nav class="orders-breadcrumb" aria-label="${escapeHtml(pageT(lang, "orders.root"))}">
-          <a href="./orders.html">${escapeHtml(pageT(lang, "orders.root"))}</a>
+          <a href="./orders.html" data-spa-back="./orders.html">${escapeHtml(pageT(lang, "orders.root"))}</a>
           <span>${escapeHtml(">")}</span>
           <span class="orders-breadcrumb__current">${escapeHtml(notFound)}</span>
         </nav>
@@ -643,7 +643,7 @@ function renderDetail(helpers) {
     <header class="orders-workspace__head">
       <div>
         <nav class="orders-breadcrumb" aria-label="${escapeHtml(pageT(lang, "orders.root"))}">
-          <a href="./orders.html">${escapeHtml(pageT(lang, "orders.root"))}</a>
+          <a href="./orders.html" data-spa-back="./orders.html">${escapeHtml(pageT(lang, "orders.root"))}</a>
           <span>${escapeHtml(">")}</span>
           <span class="orders-breadcrumb__current">${escapeHtml(detail.orderNo)}</span>
         </nav>

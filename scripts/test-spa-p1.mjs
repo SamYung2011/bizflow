@@ -116,6 +116,14 @@ async function verifyManifest() {
       `${route.path} route CSS must match HTML order exactly`
     );
   }
+  for (const [file, fallback] of [
+    ["bizflow/orders-detail.js", "./orders.html"],
+    ["bizflow/customer-detail.js", "./customers.html"],
+    ["bizflow/inventory-detail.js", "./inventory.html"]
+  ]) {
+    const source = await readFile(path.join(rootDir, "root-site", file), "utf8");
+    assert.match(source, new RegExp(`data-spa-back=["']${fallback.replace(".", "\\.")}["']`), `${file} breadcrumb must use smart list return`);
+  }
 }
 
 function eventTarget() {
@@ -370,6 +378,7 @@ function fakeBrowser(pathname = "/a.html") {
   const history = {
     state: null,
     writes: 0,
+    backCalls: 0,
     replaceState(state, _title, url) {
       this.state = state;
       this.writes += 1;
@@ -379,6 +388,9 @@ function fakeBrowser(pathname = "/a.html") {
       this.state = state;
       this.writes += 1;
       location.href = new URL(url, location.href).href;
+    },
+    back() {
+      this.backCalls += 1;
     },
     go() {}
   };
@@ -603,6 +615,87 @@ async function verifyFrameHistoryNavigation() {
   await router.dispose();
 }
 
+async function verifySmartBackNavigation() {
+  function manifestFor(restoredStates) {
+    const moduleFor = (name) => ({
+      async mountPage({ historyState }) {
+        restoredStates.push({ name, historyState });
+        return {
+          page: { data: { name }, render: () => name },
+          captureState: () => name === "list" ? { page: 52 } : null
+        };
+      }
+    });
+    return Object.fromEntries(["list", "detail-a", "detail-b"].map((name) => [
+      `/${name}.html`,
+      {
+        path: `/${name}.html`,
+        section: "bizflow",
+        styles: [],
+        frame: testFrame(name),
+        load: async () => moduleFor(name)
+      }
+    ]));
+  }
+
+  function routerFor(browser, restoredStates, scrolls = []) {
+    browser.windowRef.scrollTo = (x, y) => scrolls.push({ x, y });
+    const manifest = manifestFor(restoredStates);
+    return createAppRouter({
+      shell: { setLoadingPage() {}, setPage() {} },
+      manifest,
+      allowlist: Object.keys(manifest),
+      windowRef: browser.windowRef,
+      documentRef: browser.documentRef,
+      styleManager: {
+        adopt() {},
+        async prepare() { return { commit() {}, rollback() {} }; },
+        dispose() {}
+      }
+    });
+  }
+
+  const browser = fakeBrowser("/list.html");
+  const restoredStates = [];
+  const scrolls = [];
+  const router = routerFor(browser, restoredStates, scrolls);
+  assert.equal(await router.start(), true);
+  browser.windowRef.scrollY = 681;
+  router.savePageState({ page: 52 });
+  const listState = structuredClone(browser.history.state);
+  assert.equal(await router.navigate("/detail-a.html?id=a"), true);
+  assert.deepEqual(browser.history.state[SPA_HISTORY_KEY].previous, { index: 0, path: "/list.html" });
+  assert.equal(await router.navigateBack("/list.html"), true);
+  assert.equal(browser.history.backCalls, 1, "matching list history must use history.back()");
+  browser.windowRef.location.href = "https://example.test/list.html";
+  browser.history.state = listState;
+  await [...browser.windowRef.listeners.get("popstate")][0]({ state: listState });
+  assert.deepEqual(restoredStates.at(-1), { name: "list", historyState: { page: 52 } });
+  assert.deepEqual(scrolls.at(-1), { x: 0, y: 681 }, "smart back must restore list scroll");
+  await router.dispose();
+
+  const directBrowser = fakeBrowser("/detail-a.html?id=a");
+  const directStates = [];
+  const directRouter = routerFor(directBrowser, directStates);
+  assert.equal(await directRouter.start(), true);
+  assert.equal(await directRouter.navigateBack("/list.html"), true);
+  assert.equal(directBrowser.history.backCalls, 0, "direct detail loads must not leave the site history");
+  assert.equal(directStates.at(-1).name, "list", "direct detail loads must navigate forward to the list fallback");
+  await directRouter.dispose();
+
+  const layeredBrowser = fakeBrowser("/list.html");
+  const layeredStates = [];
+  const layeredRouter = routerFor(layeredBrowser, layeredStates);
+  assert.equal(await layeredRouter.start(), true);
+  assert.equal(await layeredRouter.navigate("/detail-a.html?id=a"), true);
+  assert.equal(await layeredRouter.navigate("/detail-b.html?id=b"), true);
+  assert.deepEqual(layeredBrowser.history.state[SPA_HISTORY_KEY].previous, { index: 1, path: "/detail-a.html" });
+  assert.equal(await layeredRouter.navigateBack("/list.html"), true);
+  assert.equal(layeredBrowser.history.backCalls, 0, "detail-to-detail history must not back into another detail page");
+  assert.equal(layeredStates.at(-1).name, "list");
+  await layeredRouter.dispose();
+}
+
 async function verifyFrameSupersedingNavigation() {
   const browser = fakeBrowser("/a.html");
   const frames = [];
@@ -785,6 +878,7 @@ verifyOcppGuard();
 verifyWhatsappI18n();
 await verifyRouter();
 await verifyFrameHistoryNavigation();
+await verifySmartBackNavigation();
 await verifyFrameSupersedingNavigation();
 await verifyNavigationTimeoutSeparation();
 await verifyRouteGenerationRace();
