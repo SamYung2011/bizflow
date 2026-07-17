@@ -18,12 +18,12 @@
       }
     },
     "/bizflow/orders.html": {
-      "moduleCount": 38,
+      "moduleCount": 39,
       "totals": {
         "documentListeners": 4,
         "windowListeners": 4,
         "mediaQueryListeners": 0,
-        "timeouts": 27,
+        "timeouts": 28,
         "intervals": 2,
         "animationFrames": 4,
         "observers": 1,
@@ -60,7 +60,7 @@
       }
     },
     "/bizflow/customers.html": {
-      "moduleCount": 27,
+      "moduleCount": 28,
       "totals": {
         "documentListeners": 3,
         "windowListeners": 4,

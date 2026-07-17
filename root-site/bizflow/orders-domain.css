@@ -247,6 +247,16 @@
   max-width: 0;
 }
 
+.northbound-cell--address:not([data-northbound-edit-active]) {
+  height: auto;
+  overflow: hidden;
+  line-height: var(--lh-body);
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .northbound-status-chip {
   display: inline-flex;
   max-width: 100%;

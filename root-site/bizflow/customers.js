@@ -15,13 +15,13 @@ import { renderSegment } from "../components/segment.js";
 import { consumeNavigationPreset, navigationPresetKeys } from "../components/navigation-presets.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { renderNewCustomerFields } from "../components/new-customer-fields.js";
+import { copyPhoneNumber } from "../components/phone-copy.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { createCustomerSorter, customerSortKeys } from "./customers-sort.js";
 import {
   captureWarrantyState,
   clearWarrantyDateRange,
   closeWarrantyDateRange,
-  copyWarrantyPhone,
   disposeWarrantyState,
   ensureWarrantyData,
   moveWarrantyPage,
@@ -379,7 +379,7 @@ async function onCustomersClick(event) {
     event.preventDefault();
     event.stopPropagation();
     const scope = activeScope;
-    await copyWarrantyPhone(warrantyPhone.getAttribute("data-warranty-phone"), currentHelpers.lang, { scope });
+    await copyPhoneNumber(warrantyPhone.getAttribute("data-warranty-phone"), currentHelpers.lang, { scope });
     return;
   }
 
@@ -470,7 +470,7 @@ async function onCustomersContextMenu(event) {
   event.preventDefault();
   event.stopPropagation();
   const scope = activeScope;
-  await copyWarrantyPhone(phone, currentHelpers.lang, { scope });
+  await copyPhoneNumber(phone, currentHelpers.lang, { scope });
 }
 
 function onCustomersInput(event) {

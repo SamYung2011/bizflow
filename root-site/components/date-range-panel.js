@@ -56,6 +56,11 @@ function weekdayLabels(lang) {
   });
 }
 
+function monthLabels(lang) {
+  const formatter = new Intl.DateTimeFormat(localeForLang(lang), { month: "short" });
+  return Array.from({ length: 12 }, (_, month) => formatter.format(new Date(2026, month, 1)));
+}
+
 function calendarDays(viewMonth) {
   const start = new Date(viewMonth);
   start.setDate(1 - start.getDay());
@@ -87,6 +92,7 @@ export function createDateRangePanel() {
   let draft = { start: "", end: "" };
   let activeSide = "start";
   let viewMonth = monthStart("");
+  let jumpOpen = false;
   let onComplete = async () => {};
 
   function isOpen() {
@@ -123,6 +129,7 @@ export function createDateRangePanel() {
     panel.remove();
     panel = null;
     anchor = null;
+    jumpOpen = false;
     if (restoreFocus && returnFocus?.isConnected) requestAnimationFrame(() => returnFocus.focus());
     return true;
   }
@@ -162,20 +169,26 @@ export function createDateRangePanel() {
       ].filter(Boolean).join(" ");
       return `<button type="button" class="${classes}" data-date-range-day="${day.value}" aria-pressed="${selected}" title="${escapeHtml(panelDate(day.value))}"><span>${day.label}</span></button>`;
     }).join("");
+    const jump = `<div class="date-range-panel__jump" data-date-range-jump>
+      <label class="date-range-panel__year"><span>${escapeHtml(translate("year"))}</span><input type="number" inputmode="numeric" min="1900" max="2200" value="${viewMonth.getFullYear()}" data-date-range-year></label>
+      <div class="date-range-panel__months" role="group" aria-label="${escapeHtml(translate("chooseMonth"))}">
+        ${monthLabels(lang).map((label, month) => `<button type="button" class="date-range-panel__month${month === viewMonth.getMonth() ? " is-active" : ""}" data-date-range-month="${month}">${escapeHtml(label)}</button>`).join("")}
+      </div>
+    </div>`;
     panel.innerHTML = `
       <div class="date-range-panel__inputs">
         <button type="button" class="date-range-panel__date${activeSide === "start" ? " is-active" : ""}" data-date-range-side="start">${escapeHtml(panelDate(draft.start) || translate("startDate"))}</button>
         <button type="button" class="date-range-panel__date${activeSide === "end" ? " is-active" : ""}" data-date-range-side="end">${escapeHtml(panelDate(draft.end) || translate("endDate"))}</button>
       </div>
       <div class="date-range-panel__head">
-        <strong>${escapeHtml(monthTitle(viewMonth, lang))}</strong>
+        <button type="button" class="date-range-panel__month-trigger" data-date-range-action="jump" aria-expanded="${jumpOpen}" aria-label="${escapeHtml(translate("chooseMonth"))}">${escapeHtml(monthTitle(viewMonth, lang))}</button>
         <span class="date-range-panel__head-actions">
           <button type="button" class="date-range-panel__today" data-date-range-action="today">${escapeHtml(translate("today"))}</button>
           <button type="button" class="date-range-panel__nav" data-date-range-action="previous" aria-label="${escapeHtml(translate("previousMonth"))}">‹</button>
           <button type="button" class="date-range-panel__nav" data-date-range-action="next" aria-label="${escapeHtml(translate("nextMonth"))}">›</button>
         </span>
       </div>
-      <div class="date-range-panel__calendar">${weekdays}${days}</div>
+      ${jumpOpen ? jump : `<div class="date-range-panel__calendar">${weekdays}${days}</div>`}
       <footer class="date-range-panel__footer">
         <button type="button" class="date-range-panel__clear" data-date-range-action="clear">${escapeHtml(translate("clear"))}</button>
         <span class="date-range-panel__footer-actions">
@@ -216,12 +229,33 @@ export function createDateRangePanel() {
       selectDay(day.getAttribute("data-date-range-day"));
       return;
     }
+    const month = event.target.closest("[data-date-range-month]");
+    if (month) {
+      const yearInput = panel.querySelector("[data-date-range-year]");
+      const year = Number(yearInput?.value);
+      const monthIndex = Number(month.getAttribute("data-date-range-month"));
+      if (!Number.isInteger(year) || year < 1900 || year > 2200 || !Number.isInteger(monthIndex)) {
+        yearInput?.focus();
+        yearInput?.setAttribute("aria-invalid", "true");
+        return;
+      }
+      viewMonth = new Date(year, monthIndex, 1);
+      jumpOpen = false;
+      render({ focus: '[data-date-range-action="jump"]' });
+      return;
+    }
     const action = event.target.closest("[data-date-range-action]")?.getAttribute("data-date-range-action");
-    if (action === "previous" || action === "next") {
+    if (action === "jump") {
+      jumpOpen = !jumpOpen;
+      render({ focus: jumpOpen ? "[data-date-range-year]" : '[data-date-range-action="jump"]' });
+      if (jumpOpen) panel.querySelector("[data-date-range-year]")?.select();
+    } else if (action === "previous" || action === "next") {
       viewMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + (action === "next" ? 1 : -1), 1);
+      jumpOpen = false;
       render({ focus: `[data-date-range-action="${action}"]` });
     } else if (action === "today") {
       viewMonth = monthStart(inputFromDate(new Date()));
+      jumpOpen = false;
       render({ focus: '[data-date-range-action="today"]' });
     } else if (action === "clear") {
       draft = { start: "", end: "" };
@@ -247,6 +281,7 @@ export function createDateRangePanel() {
     draft = normalizeRange(start, end);
     activeSide = draft.start && !draft.end ? "end" : "start";
     viewMonth = monthStart(draft.start || draft.end);
+    jumpOpen = false;
     onComplete = onCommit;
     panel = document.createElement("section");
     panel.className = "tp-component date-range-panel";

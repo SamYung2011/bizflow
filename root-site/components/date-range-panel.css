@@ -61,9 +61,22 @@
   color: var(--gray-60);
 }
 
-.date-range-panel__head strong {
+.date-range-panel__month-trigger {
+  padding: var(--space-4);
+  border: 0;
+  border-radius: var(--radius-10);
+  background: transparent;
+  color: inherit;
   font-size: var(--font-description-size);
   font-weight: var(--font-title-3-weight);
+}
+
+.date-range-panel__month-trigger:hover,
+.date-range-panel__month-trigger:focus-visible,
+.date-range-panel__month-trigger[aria-expanded="true"] {
+  outline: 0;
+  background: color-mix(in srgb, var(--blue) 10%, var(--white));
+  color: var(--blue);
 }
 
 .date-range-panel__head-actions {
@@ -98,6 +111,66 @@
 .date-range-panel__nav:hover,
 .date-range-panel__clear:hover {
   color: var(--blue);
+}
+
+.date-range-panel__jump {
+  display: grid;
+  gap: var(--space-10);
+  min-height: 216px;
+  align-content: start;
+  padding: var(--space-10) 0;
+}
+
+.date-range-panel__year {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-10);
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+}
+
+.date-range-panel__year input {
+  width: 100%;
+  height: var(--date-range-control-height);
+  min-width: 0;
+  padding: 0 var(--space-10);
+  border: 1px solid var(--gray-12);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  color: var(--gray-60);
+  font: inherit;
+}
+
+.date-range-panel__year input:focus-visible {
+  border-color: var(--blue);
+  outline: 0;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--blue) 18%, transparent);
+}
+
+.date-range-panel__months {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.date-range-panel__month {
+  min-width: 0;
+  height: var(--space-40);
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-10);
+  background: var(--gray-5);
+  color: var(--gray-60);
+  font-size: var(--font-description-size);
+}
+
+.date-range-panel__month:hover,
+.date-range-panel__month:focus-visible,
+.date-range-panel__month.is-active {
+  outline: 0;
+  background: var(--blue);
+  color: var(--white);
 }
 
 .date-range-panel__calendar {

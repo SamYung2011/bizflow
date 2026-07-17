@@ -10,6 +10,7 @@ import { aggregateShippingCounts, matchesShippingFilter } from "../components/or
 import { consumeNavigationPreset, navigationPresetKeys } from "../components/navigation-presets.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
+import { clearPhoneCopyNotice, copyPhoneNumber, phoneCopyLabel } from "../components/phone-copy.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
 import {
@@ -203,14 +204,17 @@ function renderOrderCard(order, helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const e = escapeHtml;
   const cancelled = order.status === "cancelled";
+  const phone = String(order.phone || "").trim();
   const statusLabel = pageT(lang, STATUS_KEY[order.status] ?? "orders.status.completed");
-  return `<article class="management-list__row order-card" data-order-card data-order-id="${e(order.id)}" tabindex="0" role="link" title="${e(order.customer)}">
+  return `<article class="management-list__row order-card" data-order-card data-order-id="${e(order.id)}"${phone ? ` data-order-phone="${e(phone)}"` : ""} tabindex="0" role="link" title="${e(order.customer)}">
     <div class="order-card__lead">
       <span class="order-status ${STATUS_CLASS[order.status] ?? "order-status--completed"}" role="img" aria-label="${e(statusLabel)}" title="${e(statusLabel)}">${statusMark(order.status)}</span>
       <div class="order-card__text">
         <div class="order-card__line1">
           <span class="order-card__name" title="${e(order.customer)}">${e(order.customer)}</span>
-          <span class="order-card__phone" title="${e(order.phone)}">${e(order.phone)}</span>
+          ${phone
+            ? `<button type="button" class="order-card__phone" data-order-phone-copy="${e(phone)}" title="${e(phoneCopyLabel(phone, lang))}" aria-label="${e(phoneCopyLabel(phone, lang))}">${e(phone)}</button>`
+            : `<span class="order-card__phone"></span>`}
           <span class="order-card__channel" title="${e(sourceLabel(order.channel, lang))}">${e(sourceLabel(order.channel, lang))}</span>
         </div>
         <div class="order-card__line2">
@@ -435,6 +439,14 @@ async function onOrdersClick(event) {
     return;
   }
 
+  const phoneButton = event.target.closest("[data-order-phone-copy]");
+  if (phoneButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    await copyPhoneNumber(phoneButton.getAttribute("data-order-phone-copy"), currentHelpers.lang, { scope: activeScope });
+    return;
+  }
+
   const printBtn = event.target.closest("[data-order-print]");
   if (printBtn && !printBtn.disabled) {
     event.stopPropagation();
@@ -452,6 +464,15 @@ async function onOrdersClick(event) {
 
   if (!event.target.closest("[data-source-popover]")) closeSourceMenu();
   if (!event.target.closest("[data-date-filter]")) dateFilter.close();
+}
+
+async function onOrdersContextMenu(event) {
+  const card = event.target.closest("[data-order-card]");
+  const phone = card?.getAttribute("data-order-phone")?.trim();
+  if (!phone) return;
+  event.preventDefault();
+  event.stopPropagation();
+  await copyPhoneNumber(phone, currentHelpers.lang, { scope: activeScope });
 }
 
 function onOrdersFocus(event) {
@@ -573,6 +594,7 @@ export async function mountPage({ scope, signal, historyState = null, navigation
     activate() {
       if (state.tab === "list") markRead("orders", unreadWatermarks.orders);
       scope.listen(document, "click", onOrdersClick);
+      scope.listen(document, "contextmenu", onOrdersContextMenu);
       scope.listen(document, "focusin", onOrdersFocus);
       scope.listen(document, "change", onOrdersChange);
       scope.listen(document, "input", onOrdersInput);
@@ -621,6 +643,7 @@ export async function mountPage({ scope, signal, historyState = null, navigation
       closeSourceMenu();
       dateFilter?.close();
       printDialog?.dispose();
+      clearPhoneCopyNotice();
       disposeNorthboundState();
       disposeChargerLeadState();
       disposeRevenueState();

@@ -1,6 +1,7 @@
 import { getWarrantyData } from "../data/provider.js";
 import { managementPageSize, renderManagementList, renderManagementPager } from "../components/management-list.js";
 import { createDateRangePanel } from "../components/date-range-panel.js";
+import { clearPhoneCopyNotice, phoneCopyLabel } from "../components/phone-copy.js";
 
 const copy = {
   zh: {
@@ -19,12 +20,11 @@ const copy = {
     today: "今天",
     previousMonth: "上個月",
     nextMonth: "下個月",
+    year: "年份",
+    chooseMonth: "選擇年月",
     clear: "清除",
     cancel: "取消",
     complete: "完成",
-    copyPhone: "複製電話 {phone}",
-    copied: "已複製 {phone}",
-    copyFailed: "未能複製",
     purchase: "購買日期",
     expiry: "到期日",
     remaining: "剩餘 {days} 天",
@@ -50,12 +50,11 @@ const copy = {
     today: "Today",
     previousMonth: "Previous month",
     nextMonth: "Next month",
+    year: "Year",
+    chooseMonth: "Choose year and month",
     clear: "Clear",
     cancel: "Cancel",
     complete: "Done",
-    copyPhone: "Copy phone {phone}",
-    copied: "Copied {phone}",
-    copyFailed: "Could not copy",
     purchase: "Purchased",
     expiry: "Expires",
     remaining: "{days} days remaining",
@@ -81,12 +80,11 @@ const copy = {
     today: "Aujourd'hui",
     previousMonth: "Mois précédent",
     nextMonth: "Mois suivant",
+    year: "Année",
+    chooseMonth: "Choisir l’année et le mois",
     clear: "Effacer",
     cancel: "Annuler",
     complete: "Terminer",
-    copyPhone: "Copier le téléphone {phone}",
-    copied: "Copié {phone}",
-    copyFailed: "Copie impossible",
     purchase: "Achat",
     expiry: "Expiration",
     remaining: "{days} jours restants",
@@ -107,7 +105,6 @@ const state = {
 };
 let validCustomerIds = new Set();
 const dateRangePanel = createDateRangePanel();
-let copyNoticeTimer = 0;
 let dataLoadVersion = 0;
 
 function t(lang, key, values = {}) {
@@ -202,7 +199,7 @@ function renderWarrantyRow(item, helpers) {
     <span class="warranty-row__bar" aria-hidden="true"></span>
     <span class="warranty-row__customer">
       <strong title="${e(item.customer)}">${e(item.customer)}</strong>
-      <button type="button" class="warranty-row__phone" data-warranty-phone="${e(item.phone)}" title="${e(t(lang, "copyPhone", { phone: item.phone }))}" aria-label="${e(t(lang, "copyPhone", { phone: item.phone }))}">${e(item.phone)}</button>
+      <button type="button" class="warranty-row__phone" data-warranty-phone="${e(item.phone)}" title="${e(phoneCopyLabel(item.phone, lang))}" aria-label="${e(phoneCopyLabel(item.phone, lang))}">${e(item.phone)}</button>
       <span class="warranty-row__badge">${e(t(lang, item.bucket))}</span>
     </span>
     <span class="warranty-row__product">
@@ -295,35 +292,6 @@ export function closeWarrantyDateRange() {
   return dateRangePanel.close({ restoreFocus: false });
 }
 
-function showCopyNotice(message, tone = "success") {
-  window.clearTimeout(copyNoticeTimer);
-  document.querySelector("[data-warranty-copy-notice]")?.remove();
-  const notice = document.createElement("p");
-  notice.className = `warranty-copy-notice warranty-copy-notice--${tone}`;
-  notice.dataset.warrantyCopyNotice = "";
-  notice.setAttribute("role", tone === "success" ? "status" : "alert");
-  notice.setAttribute("aria-live", "polite");
-  notice.textContent = message;
-  document.body.append(notice);
-  copyNoticeTimer = window.setTimeout(() => notice.remove(), 1800);
-}
-
-export async function copyWarrantyPhone(phone, lang, { scope = null } = {}) {
-  const value = String(phone || "").trim();
-  if (!value) return false;
-  try {
-    await navigator.clipboard.writeText(value);
-    if (scope && !scope.isCurrent()) return false;
-    showCopyNotice(t(lang, "copied", { phone: value }));
-    return true;
-  } catch (error) {
-    if (scope && !scope.isCurrent()) return false;
-    console.warn("Warranty phone copy failed", error);
-    showCopyNotice(t(lang, "copyFailed"), "error");
-    return false;
-  }
-}
-
 export function moveWarrantyPage(direction) {
   state.page += direction === "next" ? 1 : -1;
 }
@@ -349,9 +317,7 @@ export function restoreWarrantyState(value = null) {
 export function disposeWarrantyState() {
   dataLoadVersion += 1;
   dateRangePanel.close({ restoreFocus: false });
-  window.clearTimeout(copyNoticeTimer);
-  copyNoticeTimer = 0;
-  document.querySelector("[data-warranty-copy-notice]")?.remove();
+  clearPhoneCopyNotice();
   state.items = null;
   validCustomerIds = new Set();
 }

@@ -71,6 +71,8 @@ const copy = {
     today: "今天",
     previousMonth: "上個月",
     nextMonth: "下個月",
+    year: "年份",
+    chooseMonth: "選擇年月",
     clear: "清除",
     complete: "完成"
   },
@@ -119,6 +121,8 @@ const copy = {
     today: "Today",
     previousMonth: "Previous month",
     nextMonth: "Next month",
+    year: "Year",
+    chooseMonth: "Choose year and month",
     clear: "Clear",
     complete: "Done"
   },
@@ -167,6 +171,8 @@ const copy = {
     today: "Aujourd’hui",
     previousMonth: "Mois précédent",
     nextMonth: "Mois suivant",
+    year: "Année",
+    chooseMonth: "Choisir l’année et le mois",
     clear: "Effacer",
     complete: "Terminer"
   }
@@ -357,7 +363,7 @@ function renderRecord(record, helpers) {
     ${renderEditableCell(record, "hkid", escapeHtml(displayValue(record.hkid)), helpers)}
     ${renderEditableCell(record, "phoneHk", escapeHtml(displayValue(record.phoneHk)), helpers)}
     ${renderEditableCell(record, "phoneMainland", escapeHtml(displayValue(record.phoneMainland)), helpers)}
-    ${renderEditableCell(record, "address", escapeHtml(displayValue(record.address)), helpers, "northbound-cell--long")}
+    ${renderEditableCell(record, "address", escapeHtml(displayValue(record.address)), helpers, "northbound-cell--long northbound-cell--address")}
     ${renderEditableCell(record, "hrpNo", escapeHtml(displayValue(record.hrpNo)), helpers)}
     ${renderEditableCell(record, "remarks", escapeHtml(displayValue(record.remarks)), helpers, "northbound-cell--long")}
     <td class="northbound-cell northbound-cell--nowrap">${escapeHtml(displayValue(record.createdAt))}</td>
