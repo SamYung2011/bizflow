@@ -49,6 +49,18 @@ function rootRelative(file) {
 }
 
 async function verifyManifest() {
+  const vercelConfig = JSON.parse(await readFile(path.join(rootDir, "vercel.json"), "utf8"));
+  const cacheHeaders = vercelConfig.headers.flatMap((rule) => rule.headers.map((header) => ({ source: rule.source, ...header })));
+  assert.equal(
+    cacheHeaders.find(({ source, key }) => source === "/(.*)" && key === "Cache-Control")?.value,
+    "public, max-age=0, must-revalidate",
+    "HTML, JS and CSS routes must revalidate instead of serving stale releases"
+  );
+  assert.equal(
+    cacheHeaders.some(({ value }) => String(value).includes("stale-while-revalidate")),
+    false,
+    "deployment cache headers must not serve a previous release while revalidating"
+  );
   const spaEntry = await readFile(path.join(rootDir, "root-site/spa/entry.js"), "utf8");
   assert.match(spaEntry, /url\.searchParams\.get\("tpSpa"\)\s*===\s*"0"/, "SPA entry must recognize one-shot document fallback mode");
   assert.match(spaEntry, /mountWithoutRouter\(\)/, "SPA entry must preserve a no-router MPA fallback");
