@@ -20,12 +20,51 @@ export const spaRouteAllowlist = Object.freeze([
   "/team/members.html"
 ]);
 
+const routeMenuKeys = Object.freeze({
+  "/bizflow/home.html": "home",
+  "/bizflow/orders.html": "orders",
+  "/bizflow/orders-create.html": "orders",
+  "/bizflow/orders-detail.html": "orders",
+  "/bizflow/customers.html": "customers",
+  "/bizflow/customer-detail.html": "customers",
+  "/bizflow/inventory.html": "inventory",
+  "/bizflow/inventory-detail.html": "inventory",
+  "/bizflow/expense.html": "finance",
+  "/bizflow/whatsapp.html": "whatsapp",
+  "/bizflow/ocpp-monitor.html": "ocpp-monitor",
+  "/bizflow/ocpp-charging.html": "ocpp-charging",
+  "/bizflow/ocpp-users.html": "ocpp-users",
+  "/bizflow/ocpp-finance.html": "ocpp-finance",
+  "/team/index.html": "tasks",
+  "/team/members.html": "team"
+});
+
+const sectionMenus = Object.freeze({
+  bizflow: Object.freeze([
+    { id: "home", key: "nav.home", icon: "icon-nav-home", href: "/bizflow/home.html" },
+    { id: "orders", key: "nav.orders", icon: "icon-nav-list", href: "/bizflow/orders.html", unreadKey: "orders" },
+    { id: "customers", key: "nav.customers", icon: "icon-nav-user", href: "/bizflow/customers.html" },
+    { id: "inventory", key: "nav.inventory", icon: "icon-nav-inventory", href: "/bizflow/inventory.html", unreadKey: "inventory" },
+    { id: "finance", key: "nav.finance", icon: "icon-nav-sales", href: "/bizflow/expense.html" },
+    { id: "whatsapp", key: "nav.whatsapp", icon: "icon-nav-messenger", href: "/bizflow/whatsapp.html" },
+    { id: "ocpp-monitor", key: "nav.ocppMonitor", icon: "icon-nav-remix", href: "/bizflow/ocpp-monitor.html", adminOnly: true },
+    { id: "ocpp-charging", key: "nav.ocppCharging", icon: "icon-nav-cloud", href: "/bizflow/ocpp-charging.html", adminOnly: true },
+    { id: "ocpp-users", key: "nav.ocppUsers", icon: "icon-nav-user", href: "/bizflow/ocpp-users.html", adminOnly: true },
+    { id: "ocpp-finance", key: "nav.ocppFinance", icon: "icon-nav-sales", href: "/bizflow/ocpp-finance.html", adminOnly: true }
+  ]),
+  team: Object.freeze([
+    { id: "tasks", key: "nav.tasks", icon: "icon-nav-task", href: "/team/index.html", unreadKey: "tasks" },
+    { id: "team", key: "nav.team", icon: "icon-nav-user", href: "/team/members.html" }
+  ])
+});
+
 const fromHere = (path) => new URL(path, import.meta.url).href;
 
 function route(path, section, entry, styles, load = null) {
   return Object.freeze({
     path,
     section,
+    menuKey: routeMenuKeys[path] ?? "",
     entry: fromHere(entry),
     styles: Object.freeze(styles.map(fromHere)),
     load
@@ -84,4 +123,13 @@ export const routeManifest = Object.freeze(Object.fromEntries(routes.map((item) 
 
 export function routeForPath(pathname) {
   return routeManifest[String(pathname || "")] ?? null;
+}
+
+export function createRouteMenu(pathname) {
+  const currentRoute = routeForPath(pathname);
+  if (!currentRoute) return [];
+  return (sectionMenus[currentRoute.section] ?? []).map(({ id, ...item }) => ({
+    ...item,
+    active: id === currentRoute.menuKey
+  }));
 }

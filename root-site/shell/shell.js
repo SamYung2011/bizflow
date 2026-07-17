@@ -3,6 +3,7 @@ import { mountIconSprite } from "../assets/icons/inline-sprite.js";
 import { renderLanguageMenu, renderUserPanel, attachMenuBehaviors } from "../components/menus.js";
 import { attachGlobalSearch, renderGlobalSearch } from "./shell-search.js";
 import { getRememberedUnreadWatermarks, markRead, READ_STATE_STORAGE_KEY } from "../data/read-state.js";
+import { createRouteMenu } from "../spa/route-manifest.js";
 
 const iconsUrl = "../assets/icons/icons.svg";
 const root = document.getElementById("shell-root");
@@ -31,14 +32,7 @@ let authApi = null;
 let authSubscription = null;
 let lastResumeRefreshAt = 0;
 
-const defaultMenu = [
-  { key: "nav.home", icon: "icon-nav-home", active: true },
-  { key: "nav.tasks", icon: "icon-nav-task", unreadKey: "tasks" },
-  { key: "nav.team", icon: "icon-nav-user" },
-  { key: "nav.orders", icon: "icon-nav-list", unreadKey: "orders" },
-  { key: "nav.customers", icon: "icon-nav-user" },
-  { key: "nav.inventory", icon: "icon-nav-inventory", unreadKey: "inventory" }
-];
+const defaultMenu = createRouteMenu(window.location.pathname);
 
 // Existing MPA pages set these globals before importing the shell. P0 consumes
 // them once as a compatibility adapter; SPA pages switch through setPage().

@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { createAppRouter, SPA_HISTORY_KEY } from "../root-site/spa/app-router.js";
 import { createPageScope, mountPageModule, throwIfPageAborted } from "../root-site/spa/page-lifecycle.js";
-import { routeManifest, spaCrossSectionNavigation, spaNavigation, spaRouteAllowlist } from "../root-site/spa/route-manifest.js";
+import { createRouteMenu, routeManifest, spaCrossSectionNavigation, spaNavigation, spaRouteAllowlist } from "../root-site/spa/route-manifest.js";
 import { invalidateProviderSnapshotMemo, loadProviderSnapshot } from "../root-site/data/provider-snapshot-cache.js";
 import { snapshotsForTables } from "../root-site/data/live-snapshot-dependencies.js";
 import { createDateFilter } from "../root-site/components/date-filter.js";
@@ -56,6 +56,14 @@ async function verifyManifest() {
   assert.equal(spaNavigation, true, "SPA master switch must stay enabled");
   assert.equal(spaCrossSectionNavigation, true, "P6 must enable same-document Bizflow/Team navigation");
   assert.deepEqual([...spaRouteAllowlist], expectedSpaRoutes, "SPA allowlist must contain all 16 routes");
+  const bizflowFallbackMenu = createRouteMenu("/bizflow/orders-detail.html");
+  assert.equal(bizflowFallbackMenu.length, 10, "Bizflow loading shell must expose the complete formal menu");
+  assert.equal(bizflowFallbackMenu.find((item) => item.active)?.key, "nav.orders", "detail routes must highlight their owning domain");
+  assert.ok(bizflowFallbackMenu.every((item) => routeManifest[item.href]), "Bizflow loading menu links must resolve to manifest routes");
+  assert.equal(bizflowFallbackMenu.filter((item) => item.adminOnly).length, 4, "loading menu must preserve the OCPP admin gate");
+  const teamFallbackMenu = createRouteMenu("/team/members.html");
+  assert.deepEqual(teamFallbackMenu.map((item) => item.href), ["/team/index.html", "/team/members.html"]);
+  assert.equal(teamFallbackMenu.find((item) => item.active)?.key, "nav.team");
   for (const route of routes) {
     const migrated = expectedSpaRoutes.includes(route.path);
     assert.ok(route.path.endsWith(".html"), `${route.path} must retain its .html URL`);
@@ -490,9 +498,98 @@ async function verifyRouter() {
   assert.deepEqual(transitionUnhandled, [], "aborted view-transition promises must never be unhandled");
 }
 
+async function verifyNavigationTimeoutSeparation() {
+  const browser = fakeBrowser("/slow.html");
+  let releaseMount;
+  let notifyMountStarted;
+  const mountStarted = new Promise((resolve) => { notifyMountStarted = resolve; });
+  const mountGate = new Promise((resolve) => { releaseMount = resolve; });
+  const pages = [];
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...values) => warnings.push(values);
+  const router = createAppRouter({
+    shell: { setPage(page) { pages.push(page.data.name); } },
+    manifest: {
+      "/slow.html": {
+        path: "/slow.html",
+        section: "bizflow",
+        styles: [],
+        load: async () => ({
+          async mountPage({ signal }) {
+            notifyMountStarted();
+            await mountGate;
+            assert.equal(signal.aborted, false);
+            return { page: { data: { name: "slow" }, render: () => "slow" } };
+          }
+        })
+      }
+    },
+    allowlist: ["/slow.html"],
+    windowRef: browser.windowRef,
+    documentRef: browser.documentRef,
+    navigationTimeoutMs: 20,
+    mountWarningMs: 5,
+    styleManager: {
+      adopt() {},
+      async prepare() { return { commit() {}, rollback() {} }; },
+      dispose() {}
+    }
+  });
+  try {
+    const starting = router.start();
+    await mountStarted;
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    assert.deepEqual(browser.assigned, [], "slow page data must not trigger document fallback");
+    assert.equal(warnings.filter(([message]) => String(message).includes("data mount still pending")).length, 1);
+    assert.equal(warnings.some(([message]) => String(message).includes("navigation failed")), false);
+    releaseMount();
+    assert.equal(await starting, true);
+    assert.deepEqual(pages, ["slow"]);
+  } finally {
+    console.warn = originalWarn;
+    await router.dispose();
+  }
+
+  const assetBrowser = fakeBrowser("/asset-timeout.html");
+  const assetWarnings = [];
+  console.warn = (...values) => assetWarnings.push(values);
+  const assetRouter = createAppRouter({
+    shell: { setPage() {} },
+    manifest: {
+      "/asset-timeout.html": {
+        path: "/asset-timeout.html",
+        section: "bizflow",
+        styles: [],
+        load: () => new Promise(() => {})
+      }
+    },
+    allowlist: ["/asset-timeout.html"],
+    windowRef: assetBrowser.windowRef,
+    documentRef: assetBrowser.documentRef,
+    navigationTimeoutMs: 5,
+    mountWarningMs: 5,
+    styleManager: {
+      adopt() {},
+      async prepare() { return { commit() {}, rollback() {} }; },
+      dispose() {}
+    }
+  });
+  try {
+    assert.equal(await assetRouter.start(), false);
+    assert.equal(assetWarnings.filter(([message]) => String(message).includes("navigation failed")).length, 1);
+    assert.equal(assetBrowser.assigned.at(-1), "https://example.test/asset-timeout.html?tpSpa=0");
+  } finally {
+    console.warn = originalWarn;
+    await assetRouter.dispose();
+  }
+}
+
 async function verifyShellAdapter() {
   const source = await readFile(path.join(rootDir, "root-site/shell/shell.js"), "utf8");
   assert.match(source, /export function setPage\(/, "shell must expose setPage");
+  assert.match(source, /const defaultMenu = createRouteMenu\(window\.location\.pathname\)/, "loading shell must derive its real menu from the route manifest");
+  assert.doesNotMatch(source, /const defaultMenu = \[/, "loading shell must not expose the obsolete hardcoded menu");
   assert.doesNotMatch(source, /navigation-prerender|installNavigationPrerender/, "P6 shell must not reinstall MPA speculation rules");
   const adapterEnd = source.indexOf("let menuSource =");
   const legacyReads = [...source.matchAll(/window\.__shell(?:Menu|Data|Content)/g)];
@@ -518,6 +615,7 @@ await verifyLifecycle();
 verifyOcppGuard();
 verifyWhatsappI18n();
 await verifyRouter();
+await verifyNavigationTimeoutSeparation();
 await verifyRouteGenerationRace();
 await verifyDataRaceGuards();
 await verifyWriteInvalidateRemount();

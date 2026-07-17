@@ -10,6 +10,7 @@ import { createRouteStyleManager } from "./route-styles.js";
 export const SPA_HISTORY_KEY = "tpSpa";
 export const SPA_HISTORY_VERSION = 1;
 const DEFAULT_NAVIGATION_TIMEOUT_MS = 15_000;
+const DEFAULT_MOUNT_WARNING_MS = 60_000;
 
 function abortError() {
   return new DOMException("SPA navigation aborted", "AbortError");
@@ -63,6 +64,20 @@ function withTimeout(promise, timeoutMs, signal) {
   });
 }
 
+async function waitForPageMount(promise, warningMs, route, signal) {
+  const timeoutMs = Number(warningMs);
+  const timer = Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? setTimeout(() => {
+      if (!signal?.aborted) console.warn(`[spa] ${route.path} data mount still pending after ${timeoutMs}ms`);
+    }, timeoutMs)
+    : 0;
+  try {
+    return await promise;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function eligibleAnchor(event, windowRef) {
   if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return null;
   const anchor = event.target?.closest?.("a[href]");
@@ -82,7 +97,8 @@ export function createAppRouter({
   windowRef = window,
   documentRef = document,
   styleManager = createRouteStyleManager(documentRef),
-  navigationTimeoutMs = DEFAULT_NAVIGATION_TIMEOUT_MS
+  navigationTimeoutMs = DEFAULT_NAVIGATION_TIMEOUT_MS,
+  mountWarningMs = DEFAULT_MOUNT_WARNING_MS
 } = {}) {
   if (!shell || typeof shell.setPage !== "function") {
     throw new TypeError("createAppRouter() requires shell.setPage().");
@@ -208,13 +224,14 @@ export function createAppRouter({
         await currentController.dispose();
         currentController = null;
       }
-      controller = await withTimeout(mountPageModule(module, {
+      controller = await waitForPageMount(mountPageModule(module, {
         url,
         route,
+        signal: abortController.signal,
         historyState: historyDetails(historyState)?.pageState ?? null,
         isCurrent: () => !disposed && generation === routeGeneration && !abortController.signal.aborted,
         navigation: Object.freeze({ navigate, savePageState, hardNavigate })
-      }), navigationTimeoutMs, abortController.signal);
+      }), mountWarningMs, route, abortController.signal);
       if (abortController.signal.aborted) throw abortError();
 
       let targetIndex = historyDetails(historyState)?.index;
