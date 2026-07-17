@@ -9,9 +9,18 @@ export function createRouteStyleManager(documentRef = document) {
     return new URL(String(value || ""), documentRef.baseURI).href;
   }
 
-  function stylesheetFor(href) {
+  function stylesheetFor(href, { includePending = false } = {}) {
     return [...documentRef.querySelectorAll('link[rel="stylesheet"][href]')]
-      .find((link) => link.href === href) ?? null;
+      .find((link) => link.href === href && (includePending || link.dataset.spaRouteStyle !== "pending")) ?? null;
+  }
+
+  function createStylesheet(href, { media = "not all", state = "pending" } = {}) {
+    const link = documentRef.createElement("link");
+    link.rel = "stylesheet";
+    link.href = href;
+    link.media = media;
+    link.dataset.spaRouteStyle = state;
+    return link;
   }
 
   function adopt(styles = []) {
@@ -36,11 +45,9 @@ export function createRouteStyleManager(documentRef = document) {
           resolve();
           return;
         }
-        const link = documentRef.createElement("link");
-        link.rel = "stylesheet";
-        link.href = href;
-        link.media = "not all";
-        link.dataset.spaRouteStyle = "pending";
+        // Pending links are owned by this prepare call. Reusing one would let
+        // a superseded navigation remove a stylesheet required by its successor.
+        const link = createStylesheet(href);
         let loaded = false;
         const finish = (error) => {
           if (loaded) return;
@@ -77,6 +84,28 @@ export function createRouteStyleManager(documentRef = document) {
           if (!targetLinks.has(link)) link.remove();
         });
         activeLinks = targetLinks;
+      },
+      ensureActive() {
+        const repaired = [];
+        const attachedLinks = new Set();
+        targetHrefs.forEach((href) => {
+          let link = stylesheetFor(href);
+          if (!link) {
+            link = createStylesheet(href, { media: "all", state: "active" });
+            documentRef.head.append(link);
+            repaired.push(href);
+          } else if (link.media !== "all") {
+            link.media = "all";
+            link.dataset.spaRouteStyle = "active";
+            repaired.push(href);
+          }
+          attachedLinks.add(link);
+        });
+        activeLinks = attachedLinks;
+        if (repaired.length) {
+          console.warn(`[spa] repaired missing route styles: ${repaired.join(", ")}`);
+        }
+        return repaired.length === 0;
       },
       rollback() {
         if (settled) return;

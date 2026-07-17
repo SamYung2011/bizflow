@@ -449,6 +449,7 @@ async function verifyRouter() {
   const routeTarget = eventTarget();
   let allowLeave = true;
   let styleCommits = 0;
+  let styleEnsures = 0;
   const makeModule = (name) => ({
     async mountPage({ scope }) {
       scope.listen(routeTarget, "route", () => {});
@@ -486,7 +487,11 @@ async function verifyRouter() {
     styleManager: {
       adopt() {},
       async prepare() {
-        return { commit: () => styleCommits += 1, rollback() {} };
+        return {
+          commit: () => styleCommits += 1,
+          ensureActive: () => styleEnsures += 1,
+          rollback() {}
+        };
       },
       dispose() {}
     }
@@ -514,6 +519,7 @@ async function verifyRouter() {
     assert.equal(routeTarget.listeners.get("route")?.size, 1, `route listener watermark drifted on cycle ${index + 1}`);
   }
   assert.equal(styleCommits, 33);
+  assert.equal(styleEnsures, styleCommits, "each committed controller must verify its route styles");
   allowLeave = false;
   assert.equal(await router.navigate("/legacy.html"), false, "canLeave must guard fallback MPA routes");
   assert.equal(browser.assigned.length, 0);

@@ -301,6 +301,7 @@ export function createAppRouter({
       }), mountWarningMs, route, abortController.signal);
       if (abortController.signal.aborted) throw abortError();
       await commitController({ controller, historyState, signal: abortController.signal });
+      styles.ensureActive?.();
       if (pendingAbortController === abortController) pendingAbortController = null;
       return true;
     } catch (error) {
