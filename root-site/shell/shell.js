@@ -3,7 +3,7 @@ import { mountIconSprite } from "../assets/icons/inline-sprite.js";
 import { renderLanguageMenu, renderUserPanel, attachMenuBehaviors } from "../components/menus.js";
 import { attachGlobalSearch, renderGlobalSearch } from "./shell-search.js";
 import { getRememberedUnreadWatermarks, markRead, READ_STATE_STORAGE_KEY } from "../data/read-state.js";
-import { createRouteMenu } from "../spa/route-manifest.js";
+import { createRouteMenu } from "../spa/route-menu.js";
 
 const iconsUrl = "../assets/icons/icons.svg";
 const root = document.getElementById("shell-root");
@@ -32,7 +32,10 @@ let authApi = null;
 let authSubscription = null;
 let lastResumeRefreshAt = 0;
 
-const defaultMenu = createRouteMenu(window.location.pathname);
+const defaultMenuPath = document.body.dataset.shellPreview === "true"
+  ? "/bizflow/home.html"
+  : window.location.pathname;
+const defaultMenu = createRouteMenu(defaultMenuPath);
 
 // Existing MPA pages set these globals before importing the shell. P0 consumes
 // them once as a compatibility adapter; SPA pages switch through setPage().

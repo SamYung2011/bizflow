@@ -5,7 +5,8 @@ import path from "node:path";
 
 import { createAppRouter, SPA_HISTORY_KEY } from "../root-site/spa/app-router.js";
 import { createPageScope, mountPageModule, throwIfPageAborted } from "../root-site/spa/page-lifecycle.js";
-import { createRouteMenu, routeManifest, spaCrossSectionNavigation, spaNavigation, spaRouteAllowlist } from "../root-site/spa/route-manifest.js";
+import { routeManifest, spaCrossSectionNavigation, spaNavigation, spaRouteAllowlist } from "../root-site/spa/route-manifest.js";
+import { createRouteMenu } from "../root-site/spa/route-menu.js";
 import { invalidateProviderSnapshotMemo, loadProviderSnapshot } from "../root-site/data/provider-snapshot-cache.js";
 import { snapshotsForTables } from "../root-site/data/live-snapshot-dependencies.js";
 import { createDateFilter } from "../root-site/components/date-filter.js";
@@ -588,7 +589,7 @@ async function verifyNavigationTimeoutSeparation() {
 async function verifyShellAdapter() {
   const source = await readFile(path.join(rootDir, "root-site/shell/shell.js"), "utf8");
   assert.match(source, /export function setPage\(/, "shell must expose setPage");
-  assert.match(source, /const defaultMenu = createRouteMenu\(window\.location\.pathname\)/, "loading shell must derive its real menu from the route manifest");
+  assert.match(source, /const defaultMenu = createRouteMenu\(defaultMenuPath\)/, "loading shell must derive its real menu from shared route metadata");
   assert.doesNotMatch(source, /const defaultMenu = \[/, "loading shell must not expose the obsolete hardcoded menu");
   assert.doesNotMatch(source, /navigation-prerender|installNavigationPrerender/, "P6 shell must not reinstall MPA speculation rules");
   const adapterEnd = source.indexOf("let menuSource =");
