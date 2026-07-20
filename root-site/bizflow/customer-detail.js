@@ -2,8 +2,10 @@
 // 视觉块复用 orders-detail 的订单/顾客卡片类与 customers 的弹窗/菜单类;本文件只做页面装配与交互。
 
 import { getCurrentUser, getCustomerDetailData, getOrdersPageData, getUnread } from "../data/provider.js";
+import { confirmInPage } from "../components/confirm-dialog.js";
 import { renderManagementPager } from "../components/management-list.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
+import { updateLiveOrderCustomer } from "../data/live-orders-writes.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { createPrintDialog } from "./print/print-dialog.js";
 import { toPrintableOrder } from "./print/print-invoice.js";
@@ -46,6 +48,14 @@ const dict = {
     "customer.action.cancel": "取消",
     "customer.action.submit": "提交",
     "customer.action.close": "關閉",
+    "customer.action.saving": "保存中…",
+    "customer.saved": "顧客資料已更新",
+    "customer.failed": "更新顧客資料失敗，請稍後再試",
+    "customer.deviceFailed": "顧客資料已更新，但 IMEI 未能保存",
+    "customer.imeiConflict": "顧客資料已更新，但 IMEI 已屬於其他顧客",
+    "customer.validation.name": "請輸入顧客姓名",
+    "customer.validation.imei": "IMEI 必須為 15 位數字",
+    "customer.leaveUnsaved": "顧客資料尚未保存，確定離開？",
     "customer.empty": "—",
     "customer.notFound": "該記錄不存在或已合併",
     "customer.currency": "HKD$"
@@ -87,6 +97,14 @@ const dict = {
     "customer.action.cancel": "Cancel",
     "customer.action.submit": "Submit",
     "customer.action.close": "Close",
+    "customer.action.saving": "Saving…",
+    "customer.saved": "Customer details updated",
+    "customer.failed": "Could not update the customer. Please try again.",
+    "customer.deviceFailed": "Customer updated, but the IMEI could not be saved",
+    "customer.imeiConflict": "Customer updated, but the IMEI belongs to another customer",
+    "customer.validation.name": "Enter a customer name",
+    "customer.validation.imei": "IMEI must contain 15 digits",
+    "customer.leaveUnsaved": "Customer changes have not been saved. Leave this page?",
     "customer.empty": "—",
     "customer.notFound": "This record does not exist or has been merged",
     "customer.currency": "HKD$"
@@ -128,6 +146,14 @@ const dict = {
     "customer.action.cancel": "Annuler",
     "customer.action.submit": "Soumettre",
     "customer.action.close": "Fermer",
+    "customer.action.saving": "Enregistrement…",
+    "customer.saved": "Informations client mises à jour",
+    "customer.failed": "Impossible de mettre à jour le client. Réessayez.",
+    "customer.deviceFailed": "Client mis à jour, mais l’IMEI n’a pas pu être enregistré",
+    "customer.imeiConflict": "Client mis à jour, mais l’IMEI appartient à un autre client",
+    "customer.validation.name": "Saisissez le nom du client",
+    "customer.validation.imei": "L’IMEI doit contenir 15 chiffres",
+    "customer.leaveUnsaved": "Les modifications du client ne sont pas enregistrées. Quitter cette page ?",
     "customer.empty": "—",
     "customer.notFound": "Cet enregistrement n’existe pas ou a été fusionné",
     "customer.currency": "HKD$"
@@ -137,12 +163,20 @@ const dict = {
 let detailData = null;
 let currentUser = null;
 let unread = null;
+let liveMode = false;
+let liveWritable = false;
 let liveReadOnly = false;
 let writeAttributes = "";
+let deferredActionAttributes = "";
 
 let state = {
   actionMenuOpen: false,
   editModalOpen: false,
+  editDraft: {},
+  editModelFallback: false,
+  writeBusy: false,
+  notice: "",
+  noticeType: "error",
   purchasePage: 1
 };
 
@@ -195,14 +229,14 @@ function shippingStatusLabel(value, lang) {
 function renderActionMenu(helpers) {
   const { escapeHtml, lang } = helpers;
   return `<span class="customer-detail-action-anchor">
-    <button type="button" class="orders-primary orders-hug-small" data-customer-actions-trigger data-customer-write aria-haspopup="menu" aria-expanded="${state.actionMenuOpen}" title="${escapeHtml(pageT(lang, "customer.moreActions"))}"${writeAttributes}>
+    <button type="button" class="orders-primary orders-hug-small" data-customer-actions-trigger data-customer-write aria-haspopup="menu" aria-expanded="${state.actionMenuOpen}" title="${escapeHtml(pageT(lang, "customer.moreActions"))}"${deferredActionAttributes}>
       ${escapeHtml(pageT(lang, "customer.moreActions"))}
     </button>
     <div class="menu-popover customers-filter-menu customer-detail-action-menu${state.actionMenuOpen ? " menu-popover--open" : ""}" data-customer-actions-menu role="menu" ${state.actionMenuOpen ? "" : "hidden"}>
-      <button type="button" class="dropdown-item" data-customer-action="merge" data-customer-write role="menuitem" title="${escapeHtml(pageT(lang, "customer.merge"))}"${writeAttributes}>
+      <button type="button" class="dropdown-item" data-customer-action="merge" data-customer-write role="menuitem" title="${escapeHtml(pageT(lang, "customer.merge"))}"${deferredActionAttributes}>
         <span class="tp-line">${escapeHtml(pageT(lang, "customer.merge"))}</span>
       </button>
-      <button type="button" class="dropdown-item customer-detail-action-danger" data-customer-action="delete" data-customer-write role="menuitem" title="${escapeHtml(pageT(lang, "customer.delete"))}"${writeAttributes}>
+      <button type="button" class="dropdown-item customer-detail-action-danger" data-customer-action="delete" data-customer-write role="menuitem" title="${escapeHtml(pageT(lang, "customer.delete"))}"${deferredActionAttributes}>
         <span class="tp-line">${escapeHtml(pageT(lang, "customer.delete"))}</span>
       </button>
     </div>
@@ -313,37 +347,40 @@ function renderPurchaseHistory(helpers) {
   </section>`;
 }
 
-function renderEditInput(key, value, helpers) {
+function renderEditInput(key, value, helpers, disabledAttributes = "") {
   const { escapeHtml, lang } = helpers;
   return `<div class="form-new-customer__field">
     <label class="form-new-customer__label" for="customer-edit-${escapeHtml(key)}">${escapeHtml(pageT(lang, `customer.field.${key}`))}</label>
-    <input id="customer-edit-${escapeHtml(key)}" class="form-new-customer__value" data-customer-edit-field="${escapeHtml(key)}" value="${escapeHtml(value)}"${writeAttributes}>
+    <input id="customer-edit-${escapeHtml(key)}" class="form-new-customer__value" data-customer-edit-field="${escapeHtml(key)}" value="${escapeHtml(value)}"${disabledAttributes}>
   </div>`;
 }
 
 function renderEditModal(helpers) {
   const { escapeHtml, lang } = helpers;
-  const { customer, detail } = detailData;
+  const disabled = liveReadOnly || state.writeBusy;
+  const disabledAttributes = disabled ? ' disabled aria-disabled="true"' : "";
+  const values = state.editDraft;
   return `<div class="customers-modal-overlay${state.editModalOpen ? " customers-modal-overlay--open" : ""}" data-customer-edit-overlay ${state.editModalOpen ? "" : 'hidden aria-hidden="true"'}>
     <section class="tp-component form-new-customer customer-detail-edit-modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(pageT(lang, "customer.modal.title"))}">
-      <button type="button" class="form-new-customer__close" data-customer-edit-close aria-label="${escapeHtml(pageT(lang, "customer.action.close"))}"></button>
+      <button type="button" class="form-new-customer__close" data-customer-edit-close aria-label="${escapeHtml(pageT(lang, "customer.action.close"))}"${state.writeBusy ? disabledAttributes : ""}></button>
       <h2 class="form-new-customer__title">${escapeHtml(pageT(lang, "customer.modal.title"))}</h2>
+      ${state.notice ? `<p class="customer-write-notice customer-write-notice--${escapeHtml(state.noticeType || "error")}" role="${state.noticeType === "success" ? "status" : "alert"}">${escapeHtml(state.notice)}</p>` : ""}
       <div class="form-new-customer__fields">
         <div class="form-new-customer__row">
-          ${renderEditInput("name", customer.name, helpers)}
-          ${renderEditInput("phone", fieldValue(customer.phone, lang), helpers)}
+          ${renderEditInput("name", values.name ?? "", helpers, disabledAttributes)}
+          ${renderEditInput("phone", values.phone ?? "", helpers, disabledAttributes)}
         </div>
-        ${renderEditInput("email", detail.email ?? "", helpers)}
-        ${renderEditInput("carModel", detail.carModel ?? "", helpers)}
-        ${renderEditInput("imei", fieldValue(customer.imei, lang), helpers)}
+        ${renderEditInput("email", values.email ?? "", helpers, disabledAttributes)}
+        ${renderEditInput("carModel", values.carModel ?? "", helpers, disabledAttributes)}
+        ${renderEditInput("imei", values.imei ?? "", helpers, disabledAttributes)}
         <div class="form-new-customer__field">
           <label class="form-new-customer__address-label" for="customer-edit-address">${escapeHtml(pageT(lang, "customer.field.address"))}</label>
-          <textarea id="customer-edit-address" class="form-new-customer__address" data-customer-edit-field="address"${writeAttributes}>${escapeHtml(detail.shippingAddress ?? "")}</textarea>
+          <textarea id="customer-edit-address" class="form-new-customer__address" data-customer-edit-field="address"${disabledAttributes}>${escapeHtml(values.address ?? "")}</textarea>
         </div>
       </div>
       <div class="form-new-customer__footer">
-        <button type="button" class="btn--hug btn--hug--gray" data-customer-edit-close>${escapeHtml(pageT(lang, "customer.action.cancel"))}</button>
-        <button type="button" class="btn--hug btn--hug--blue" data-customer-edit-close data-customer-write${writeAttributes}>${escapeHtml(pageT(lang, "customer.action.submit"))}</button>
+        <button type="button" class="btn--hug btn--hug--gray" data-customer-edit-close${state.writeBusy ? disabledAttributes : ""}>${escapeHtml(pageT(lang, "customer.action.cancel"))}</button>
+        <button type="button" class="btn--hug btn--hug--blue" data-customer-edit-submit data-customer-write${disabledAttributes}>${escapeHtml(pageT(lang, state.writeBusy ? "customer.action.saving" : "customer.action.submit"))}</button>
       </div>
     </section>
   </div>`;
@@ -367,6 +404,7 @@ function renderCustomerDetail(helpers) {
   }
   const { customer } = detailData;
   return `<div class="orders-workspace customer-detail-page" data-customer-detail-page data-live-read-only="${liveReadOnly}">
+    ${state.notice && !state.editModalOpen ? `<p class="customer-write-notice customer-write-notice--${escapeHtml(state.noticeType || "error")}" role="${state.noticeType === "success" ? "status" : "alert"}">${escapeHtml(state.notice)}</p>` : ""}
     <header class="orders-workspace__head customer-detail-head">
       <nav class="orders-breadcrumb" aria-label="${escapeHtml(pageT(lang, "customer.root"))}">
         <a href="./customers.html" data-spa-back="./customers.html">${escapeHtml(pageT(lang, "customer.root"))}</a>
@@ -393,14 +431,108 @@ function closeActionMenu() {
   rerender();
 }
 
-function closeEditModal() {
-  if (!state.editModalOpen) return;
-  state.editModalOpen = false;
+function setCustomerDetailNotice(message, type = "error") {
+  state.notice = message;
+  state.noticeType = type;
+}
+
+function customerEditBaseline() {
+  if (!detailData) return {};
+  const { customer, detail } = detailData;
+  return {
+    name: customer.name || "",
+    phone: customer.phone || "",
+    email: detail.email || "",
+    carModel: liveMode ? (detail.carModelValue ?? detail.carModel ?? "") : (detail.carModel ?? ""),
+    imei: liveMode ? "" : (customer.imei || ""),
+    address: detail.shippingAddress || ""
+  };
+}
+
+function customerEditChanged() {
+  if (!state.editModalOpen) return false;
+  const baseline = customerEditBaseline();
+  return Object.keys(baseline).some((key) => String(state.editDraft[key] ?? "") !== String(baseline[key]));
+}
+
+function hasCustomerDetailUnsavedChanges() {
+  return state.writeBusy || customerEditChanged();
+}
+
+function openEditModal() {
+  state.editDraft = customerEditBaseline();
+  state.editModelFallback = liveMode && detailData?.detail?.carModelValue === undefined;
+  state.editModalOpen = true;
+  state.actionMenuOpen = false;
+  setCustomerDetailNotice("");
   rerender();
 }
 
+function closeEditModal() {
+  if (!state.editModalOpen || state.writeBusy) return;
+  state.editModalOpen = false;
+  state.editDraft = {};
+  state.editModelFallback = false;
+  setCustomerDetailNotice("");
+  rerender();
+}
+
+function friendlyCustomerDetailWriteError(error) {
+  const message = String(error?.message || "");
+  const lang = currentHelpers?.lang ?? "zh";
+  if (message.includes("Customer name is required")) return pageT(lang, "customer.validation.name");
+  if (message.includes("IMEI")) return pageT(lang, "customer.validation.imei");
+  return pageT(lang, "customer.failed");
+}
+
+function applyUpdatedCustomer(result, values) {
+  const { customer, detail } = detailData;
+  customer.name = result.customer.name || "";
+  customer.phone = result.customer.phone || "";
+  detail.email = result.customer.email || "";
+  detail.carMake = result.customer.car_make || "";
+  detail.carModelValue = result.customer.car_model || "";
+  detail.carModel = [result.customer.car_make, result.customer.car_model].filter(Boolean).join(" ") || null;
+  detail.shippingAddress = result.customer.address || "";
+  const imei = String(values.imei || "").replace(/[\s-]+/g, "");
+  if (imei && !result.deviceConflicts.length && !result.deviceError) customer.imei = imei;
+}
+
+async function saveCustomerEdit() {
+  const mountId = activeMountId;
+  const scope = activeScope;
+  const values = { ...state.editDraft };
+  const preserveCarModel = state.editModelFallback && values.carModel === customerEditBaseline().carModel;
+  state.writeBusy = true;
+  setCustomerDetailNotice("");
+  rerender();
+  try {
+    const result = await updateLiveOrderCustomer(detailData.customer.id, values, { preserveCarModel });
+    if (!isCurrentCustomerDetailMount(mountId, scope)) return;
+    applyUpdatedCustomer(result, values);
+    state.editModalOpen = false;
+    state.editDraft = {};
+    state.editModelFallback = false;
+    if (result.deviceError) console.error("[customer-detail] customer device write failed", result.deviceError);
+    const noticeKey = result.deviceError
+      ? "customer.deviceFailed"
+      : result.deviceConflicts.length
+        ? "customer.imeiConflict"
+        : "customer.saved";
+    setCustomerDetailNotice(pageT(currentHelpers?.lang ?? "zh", noticeKey), noticeKey === "customer.saved" ? "success" : "error");
+  } catch (error) {
+    if (!isCurrentCustomerDetailMount(mountId, scope)) return;
+    console.error("[customer-detail] customer write failed", error);
+    setCustomerDetailNotice(friendlyCustomerDetailWriteError(error));
+  } finally {
+    if (!isCurrentCustomerDetailMount(mountId, scope)) return;
+    state.writeBusy = false;
+    rerender();
+  }
+}
+
 async function onCustomerDetailClick(event) {
-  if (liveReadOnly && event.target.closest("[data-customer-write]")) return;
+  if ((liveReadOnly || state.writeBusy) && event.target.closest("[data-customer-write]")) return;
   if (event.target.closest("[data-customer-actions-trigger]")) {
     state.actionMenuOpen = !state.actionMenuOpen;
     rerender();
@@ -414,9 +546,13 @@ async function onCustomerDetailClick(event) {
   }
 
   if (event.target.closest("[data-customer-edit-open]")) {
-    state.editModalOpen = true;
-    state.actionMenuOpen = false;
-    rerender();
+    openEditModal();
+    return;
+  }
+
+  if (event.target.closest("[data-customer-edit-submit]")) {
+    if (!liveMode) closeEditModal();
+    else if (liveWritable && !state.writeBusy) await saveCustomerEdit();
     return;
   }
 
@@ -461,6 +597,12 @@ async function onCustomerDetailClick(event) {
   }
 }
 
+function onCustomerDetailInput(event) {
+  const field = event.target.closest("[data-customer-edit-field]");
+  if (!field || !state.editModalOpen || state.writeBusy) return;
+  state.editDraft[field.getAttribute("data-customer-edit-field")] = field.value;
+}
+
 function onCustomerDetailKeydown(event) {
   if (event.key !== "Escape") return;
   if (state.editModalOpen) closeEditModal();
@@ -472,6 +614,11 @@ function restoredState(value = null) {
   return {
     actionMenuOpen: false,
     editModalOpen: false,
+    editDraft: {},
+    editModelFallback: false,
+    writeBusy: false,
+    notice: "",
+    noticeType: "error",
     purchasePage: Number.isInteger(next.purchasePage) && next.purchasePage > 0 ? next.purchasePage : 1
   };
 }
@@ -489,8 +636,13 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
   detailData = nextDetailData;
   currentUser = nextCurrentUser;
   unread = nextUnread;
-  liveReadOnly = typeof currentUser?.hasPermission === "function";
+  liveMode = typeof currentUser?.hasPermission === "function";
+  liveWritable = liveMode && currentUser?.bizflowMainAccess === true;
+  liveReadOnly = liveMode && !liveWritable;
   writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
+  // Merge/delete are delivered in batch 3; keep their live shell disabled while
+  // this batch unlocks only the now-wired edit path. Demo behavior stays unchanged.
+  deferredActionAttributes = liveMode ? ' disabled aria-disabled="true"' : "";
   state = restoredState(historyState);
   printOrdersPromise = null;
   printDialog = createPrintDialog({ getLang: () => currentHelpers?.lang ?? "zh", scope });
@@ -504,7 +656,13 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
     },
     activate() {
       scope.listen(document, "click", onCustomerDetailClick);
+      scope.listen(document, "input", onCustomerDetailInput);
       scope.listen(document, "keydown", onCustomerDetailKeydown);
+    },
+    hasUnsavedChanges: hasCustomerDetailUnsavedChanges,
+    async canLeave() {
+      if (!hasCustomerDetailUnsavedChanges()) return true;
+      return confirmInPage(pageT(currentHelpers?.lang ?? "zh", "customer.leaveUnsaved"));
     },
     captureState: () => ({ purchasePage: state.purchasePage }),
     dispose() {

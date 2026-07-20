@@ -216,12 +216,16 @@ export async function createLiveOrderCustomer(values) {
   return { customer: result.data, deviceConflicts: deviceResult.conflicts, deviceError };
 }
 
-export async function updateLiveOrderCustomer(customerId, values) {
+export async function updateLiveOrderCustomer(customerId, values, { preserveCarModel = false } = {}) {
   const { client } = await writeContext();
   const imei = String(values?.imei || "").replace(/[\s-]+/g, "");
   if (imei && !validImei(imei)) throw new Error("Customer IMEI must contain 15 digits");
+  const payload = customerPayload(values);
+  // A pre-release cached customer snapshot may only contain the combined make/model
+  // display string. Preserve the database model when that untouched fallback is saved.
+  if (preserveCarModel) delete payload.car_model;
   const result = await client.from("customers")
-    .update(customerPayload(values))
+    .update(payload)
     .eq("id", customerId)
     .select("*")
     .single();

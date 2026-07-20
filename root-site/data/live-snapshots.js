@@ -271,6 +271,8 @@ async function buildCustomersSnapshot() {
         totalAmount,
         firstOrderDate: formatDate(oldest?.date),
         email: asText(customer.email),
+        carMake: asText(customer.car_make),
+        carModelValue: asText(customer.car_model),
         carModel: `${asText(customer.car_make)} ${asText(customer.car_model)}`.trim() || null,
         shippingAddress: asText(customer.address),
         order: newest ? customerOrder(newest) : null,

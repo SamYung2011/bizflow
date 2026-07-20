@@ -16,6 +16,7 @@ import { consumeNavigationPreset, navigationPresetKeys } from "../components/nav
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { renderNewCustomerFields } from "../components/new-customer-fields.js";
 import { copyPhoneNumber } from "../components/phone-copy.js";
+import { createLiveOrderCustomer } from "../data/live-orders-writes.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { createCustomerSorter, customerSortKeys } from "./customers-sort.js";
 import {
@@ -65,7 +66,14 @@ const dict = {
     "customers.field.address": "收貨地址",
     "customers.action.cancel": "取消",
     "customers.action.submit": "提交",
-    "customers.action.close": "關閉"
+    "customers.action.close": "關閉",
+    "customers.action.saving": "保存中…",
+    "customers.customer.created": "顧客已新增",
+    "customers.customer.failed": "新增顧客失敗，請稍後再試",
+    "customers.customer.deviceFailed": "顧客已新增，但 IMEI 未能保存",
+    "customers.customer.imeiConflict": "顧客已新增，但 IMEI 已屬於其他顧客",
+    "customers.validation.name": "請輸入顧客姓名",
+    "customers.validation.imei": "IMEI 必須為 15 位數字"
   },
   en: {
     "customers.title": "Customer management",
@@ -100,7 +108,14 @@ const dict = {
     "customers.field.address": "Shipping address",
     "customers.action.cancel": "Cancel",
     "customers.action.submit": "Submit",
-    "customers.action.close": "Close"
+    "customers.action.close": "Close",
+    "customers.action.saving": "Saving…",
+    "customers.customer.created": "Customer added",
+    "customers.customer.failed": "Could not add the customer. Please try again.",
+    "customers.customer.deviceFailed": "Customer added, but the IMEI could not be saved",
+    "customers.customer.imeiConflict": "Customer added, but the IMEI belongs to another customer",
+    "customers.validation.name": "Enter a customer name",
+    "customers.validation.imei": "IMEI must contain 15 digits"
   },
   fr: {
     "customers.title": "Gestion des clients",
@@ -135,7 +150,14 @@ const dict = {
     "customers.field.address": "Adresse de livraison",
     "customers.action.cancel": "Annuler",
     "customers.action.submit": "Soumettre",
-    "customers.action.close": "Fermer"
+    "customers.action.close": "Fermer",
+    "customers.action.saving": "Enregistrement…",
+    "customers.customer.created": "Client ajouté",
+    "customers.customer.failed": "Impossible d’ajouter le client. Réessayez.",
+    "customers.customer.deviceFailed": "Client ajouté, mais l’IMEI n’a pas pu être enregistré",
+    "customers.customer.imeiConflict": "Client ajouté, mais l’IMEI appartient à un autre client",
+    "customers.validation.name": "Saisissez le nom du client",
+    "customers.validation.imei": "L’IMEI doit contenir 15 chiffres"
   }
 };
 
@@ -146,6 +168,8 @@ function pageT(lang, key) {
 let data = null;
 let currentUser = null;
 let unread = null;
+let liveMode = false;
+let liveWritable = false;
 let liveReadOnly = false;
 let writeAttributes = "";
 
@@ -157,7 +181,11 @@ let state = {
   imei: "all",
   search: "",
   page: 1,
-  modalOpen: false
+  modalOpen: false,
+  customerDraft: {},
+  writeBusy: false,
+  notice: "",
+  noticeType: "error"
 };
 
 let currentHelpers = null;
@@ -262,28 +290,30 @@ function renderToolbar(helpers) {
   </div>`;
 }
 
-// 新增顾客弹窗(509:21612):表单为本地草稿,取消/提交/关闭 三键在 Figma 里都是
-// NAVIGATE 回列表页的 reaction,故本屏统一处理成"关闭弹层",不接真提交逻辑。
 function renderAddCustomerModal(helpers) {
   const { escapeHtml, lang } = helpers;
   const tt = (key) => pageT(lang, key);
+  const disabled = liveReadOnly || state.writeBusy;
+  const disabledAttributes = disabled ? ' disabled aria-disabled="true"' : "";
 
   return `<div class="customers-modal-overlay${state.modalOpen ? " customers-modal-overlay--open" : ""}" data-customers-modal-overlay ${state.modalOpen ? "" : 'aria-hidden="true"'}>
     <section class="tp-component form-new-customer" role="dialog" aria-modal="true" aria-label="${escapeHtml(tt("customers.modal.title"))}">
-      <button type="button" class="form-new-customer__close" data-customers-modal-close aria-label="${escapeHtml(tt("customers.action.close"))}"></button>
+      <button type="button" class="form-new-customer__close" data-customers-modal-close aria-label="${escapeHtml(tt("customers.action.close"))}"${state.writeBusy ? disabledAttributes : ""}></button>
       <h2 class="form-new-customer__title">${escapeHtml(tt("customers.modal.title"))}</h2>
+      ${state.notice ? `<p class="customer-write-notice customer-write-notice--${escapeHtml(state.noticeType || "error")}" role="${state.noticeType === "success" ? "status" : "alert"}">${escapeHtml(state.notice)}</p>` : ""}
       <div class="form-new-customer__fields">
         ${renderNewCustomerFields({
           lang,
           escapeHtml,
           label: (key) => tt(`customers.field.${key}`),
           idPrefix: "customers-new",
-          disabled: liveReadOnly
+          disabled,
+          values: state.customerDraft
         })}
       </div>
       <div class="form-new-customer__footer">
-        <button type="button" class="btn--hug btn--hug--gray" data-customers-modal-close>${escapeHtml(tt("customers.action.cancel"))}</button>
-        <button type="button" class="btn--hug btn--hug--blue" data-customers-modal-close data-customers-write${writeAttributes}>${escapeHtml(tt("customers.action.submit"))}</button>
+        <button type="button" class="btn--hug btn--hug--gray" data-customers-modal-close${state.writeBusy ? disabledAttributes : ""}>${escapeHtml(tt("customers.action.cancel"))}</button>
+        <button type="button" class="btn--hug btn--hug--blue" data-customers-modal-submit data-customers-write${disabledAttributes}>${escapeHtml(tt(state.writeBusy ? "customers.action.saving" : "customers.action.submit"))}</button>
       </div>
     </section>
   </div>`;
@@ -328,6 +358,7 @@ export function renderCustomers(helpers) {
   });
 
   return `<div class="customers-page" data-customers-page data-live-read-only="${liveReadOnly}" data-customers-tab-value="${state.tab}" data-customers-search-value="${escapeHtml(state.search)}" data-date-open="${dateFilter.isOpen()}" data-current-page="${state.page}">
+    ${state.notice && !state.modalOpen ? `<p class="customer-write-notice customer-write-notice--${escapeHtml(state.noticeType || "error")}" role="${state.noticeType === "success" ? "status" : "alert"}">${escapeHtml(state.notice)}</p>` : ""}
     <header class="customers-head">
       <h1 class="customers-title" title="${escapeHtml(tt("customers.title"))}">${escapeHtml(tt("customers.title"))}</h1>
       ${state.tab === "list" ? `<button type="button" class="customers-add-btn" data-customers-modal-open data-customers-write${writeAttributes}>
@@ -355,8 +386,92 @@ function rerenderCustomersPage() {
   if (page && currentHelpers) page.outerHTML = renderCustomers(currentHelpers);
 }
 
+function setCustomerNotice(message, type = "error") {
+  state.notice = message;
+  state.noticeType = type;
+}
+
+function friendlyCustomerWriteError(error) {
+  const message = String(error?.message || "");
+  const lang = currentHelpers?.lang ?? "zh";
+  if (message.includes("Customer name is required")) return pageT(lang, "customers.validation.name");
+  if (message.includes("IMEI")) return pageT(lang, "customers.validation.imei");
+  return pageT(lang, "customers.customer.failed");
+}
+
+function closeAddCustomerModal() {
+  if (!state.modalOpen || state.writeBusy) return;
+  state.modalOpen = false;
+  state.customerDraft = {};
+  setCustomerNotice("");
+  rerenderCustomersPage();
+}
+
+function fallbackCreatedCustomer(result) {
+  const customer = result.customer;
+  const createdAt = String(customer.created_at || "").slice(0, 10).replaceAll("-", "/");
+  return {
+    id: customer.id,
+    groupCids: [customer.id],
+    name: customer.name || "",
+    phone: customer.phone || "",
+    source: "other",
+    joinedAt: createdAt,
+    imei: result.deviceConflicts.length || result.deviceError ? "" : String(state.customerDraft.imei || "").replace(/[\s-]+/g, ""),
+    orderCount: 0,
+    detail: {
+      totalAmount: 0,
+      firstOrderDate: null,
+      email: customer.email || "",
+      carMake: customer.car_make || "",
+      carModelValue: customer.car_model || "",
+      carModel: [customer.car_make, customer.car_model].filter(Boolean).join(" ") || null,
+      shippingAddress: customer.address || "",
+      order: null,
+      orders: []
+    }
+  };
+}
+
+async function submitLiveCustomer() {
+  const scope = activeScope;
+  const values = { ...state.customerDraft };
+  state.writeBusy = true;
+  setCustomerNotice("");
+  rerenderCustomersPage();
+  try {
+    const result = await createLiveOrderCustomer(values);
+    if (!isCurrentCustomersScope(scope)) return;
+    try {
+      data = await getCustomersPageData();
+    } catch (refreshError) {
+      console.warn("[customers] customer list refresh failed", refreshError);
+      data.customers.unshift(fallbackCreatedCustomer(result));
+    }
+    if (!isCurrentCustomersScope(scope)) return;
+    state.modalOpen = false;
+    if (result.deviceError) console.error("[customers] customer device write failed", result.deviceError);
+    const noticeKey = result.deviceError
+      ? "customers.customer.deviceFailed"
+      : result.deviceConflicts.length
+        ? "customers.customer.imeiConflict"
+        : "customers.customer.created";
+    setCustomerNotice(pageT(currentHelpers?.lang ?? "zh", noticeKey), noticeKey === "customers.customer.created" ? "success" : "error");
+    state.customerDraft = {};
+    state.page = 1;
+  } catch (error) {
+    if (!isCurrentCustomersScope(scope)) return;
+    console.error("[customers] customer write failed", error);
+    setCustomerNotice(friendlyCustomerWriteError(error));
+  } finally {
+    if (!isCurrentCustomersScope(scope)) return;
+    state.writeBusy = false;
+    rerenderCustomersPage();
+  }
+}
+
 async function onCustomersClick(event) {
-  if (liveReadOnly && event.target.closest("[data-customers-write]")) return;
+  if ((liveReadOnly || state.writeBusy) && event.target.closest("[data-customers-write]")) return;
   const customerTab = event.target.closest("[data-customers-tab]");
   if (customerTab) {
     const scope = activeScope;
@@ -445,14 +560,26 @@ async function onCustomersClick(event) {
     closeAllFilterMenus(null);
     dateFilter.close();
     state.modalOpen = true;
+    state.customerDraft = {};
+    setCustomerNotice("");
     rerenderCustomersPage();
     return;
   }
 
-  // 关闭弹窗:X / 取消 / 提交(Figma 三键 reaction 都是 NAVIGATE 回列表页 = 纯关闭)/ 点遮罩本身
+  if (event.target.closest("[data-customers-modal-submit]")) {
+    if (!liveMode) {
+      state.modalOpen = false;
+      state.customerDraft = {};
+      rerenderCustomersPage();
+    } else if (liveWritable && !state.writeBusy) {
+      await submitLiveCustomer();
+    }
+    return;
+  }
+
+  // X / 取消 / 点遮罩本身只关闭，不触发写入。
   if (event.target.closest("[data-customers-modal-close]") || event.target.matches("[data-customers-modal-overlay]")) {
-    state.modalOpen = false;
-    rerenderCustomersPage();
+    closeAddCustomerModal();
     return;
   }
 
@@ -475,6 +602,11 @@ async function onCustomersContextMenu(event) {
 }
 
 function onCustomersInput(event) {
+  const customerField = event.target.closest("[data-customers-modal-overlay] [data-new-customer-field]");
+  if (customerField) {
+    state.customerDraft[customerField.getAttribute("data-new-customer-field")] = customerField.value;
+    return;
+  }
   const customerSearch = event.target.closest("[data-customers-search]");
   if (customerSearch && state.tab === "list") {
     state.search = customerSearch.value;
@@ -501,10 +633,7 @@ function onCustomersKeydown(event) {
   if (event.key !== "Escape") return;
   closeAllFilterMenus(null);
   dateFilter.close();
-  if (state.modalOpen) {
-    state.modalOpen = false;
-    rerenderCustomersPage();
-  }
+  if (state.modalOpen) closeAddCustomerModal();
 }
 
 function onCustomersResize() {
@@ -526,7 +655,11 @@ function restoredState(value = null, presetTab = null) {
     imei: ["all", "has", "none"].includes(next.imei) ? next.imei : "all",
     search: typeof next.search === "string" ? next.search : "",
     page: Number.isInteger(next.page) && next.page > 0 ? next.page : 1,
-    modalOpen: false
+    modalOpen: false,
+    customerDraft: {},
+    writeBusy: false,
+    notice: "",
+    noticeType: "error"
   };
 }
 
@@ -542,7 +675,9 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
   data = nextData;
   currentUser = nextCurrentUser;
   unread = nextUnread;
-  liveReadOnly = typeof currentUser?.hasPermission === "function";
+  liveMode = typeof currentUser?.hasPermission === "function";
+  liveWritable = liveMode && currentUser?.bizflowMainAccess === true;
+  liveReadOnly = liveMode && !liveWritable;
   writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
   state = restoredState(historyState, presetTab);
   customerSorter = createCustomerSorter();

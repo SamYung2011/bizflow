@@ -13,6 +13,22 @@
   gap: var(--space-20);
 }
 
+.customer-write-notice {
+  margin: 0;
+  padding: var(--space-10) var(--space-20);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-10);
+  background: var(--white);
+  color: var(--red);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-body);
+}
+
+.customer-write-notice--success {
+  color: var(--blue);
+}
+
 /* ---------- 页头:标题 + 主操作(637:61288 实测 40 Semi Bold + 120×39 蓝钮) ---------- */
 .customers-head {
   display: flex;
@@ -63,6 +79,11 @@
 .customers-page[data-live-read-only="true"] .form-new-customer :disabled,
 .customer-detail-page[data-live-read-only="true"] [data-customer-write]:disabled,
 .customer-detail-page[data-live-read-only="true"] .form-new-customer :disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.customer-detail-action-anchor button:disabled {
   opacity: .5;
   cursor: not-allowed;
 }
