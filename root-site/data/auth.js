@@ -10,11 +10,11 @@ import {
   writeLiveAuthCache,
   writeLiveTableCache
 } from "./live-table-cache.js";
+import { fetchAllTablePages } from "./fetch-all-pages.js";
 
 const CONFIG_URL = new URL("../config.local.js", import.meta.url);
 const ADMIN_EMAIL = "samyung2011@gmail.com";
 const WA_ADMIN_EMAILS = Object.freeze([ADMIN_EMAIL, "a1017339632@gmail.com"]);
-const PAGE_SIZE = 1000;
 export const TRANSIENT_AUTH_RESET_EVENT = "tp:auth-transient-reset";
 
 export const RBAC_KEYS = Object.freeze([
@@ -235,30 +235,7 @@ export async function completeForcedPasswordChange(password, employeeId) {
 }
 
 async function fetchAllTableFromNetwork(client, table, orderCol, ascending, secondaryOrder) {
-  const { count, error: countError } = await client.from(table).select("*", { count: "exact", head: true });
-  if (countError) throw new Error(`${table} count: ${countError.message || countError}`);
-  const pageCount = Math.max(1, Math.ceil((count || 0) / PAGE_SIZE));
-  const requests = Array.from({ length: pageCount }, (_, index) => {
-    const from = index * PAGE_SIZE;
-    let query = client.from(table).select("*").range(from, from + PAGE_SIZE - 1);
-    if (orderCol) query = query.order(orderCol, { ascending });
-    if (secondaryOrder) query = query.order(secondaryOrder, { ascending: true });
-    return query;
-  });
-  const responses = await Promise.all(requests);
-  const rows = [];
-  const seen = new Set();
-  for (const response of responses) {
-    if (response.error) throw new Error(`${table}: ${response.error.message || response.error}`);
-    for (const row of response.data ?? []) {
-      if (row?.id != null) {
-        if (seen.has(row.id)) continue;
-        seen.add(row.id);
-      }
-      rows.push(row);
-    }
-  }
-  return rows;
+  return fetchAllTablePages({ client, table, orderCol, ascending, secondaryOrder });
 }
 
 function fetchAllTableOnce(client, userId, table, orderCol, ascending, secondaryOrder, cacheVersion) {

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient.js";
+import { fetchAllTablePages } from "../../root-site/data/fetch-all-pages.js";
 import { Icon } from "../components/Icon.jsx";
 import { DateRangeInput, DateRangePanel, DateRangePopover, formatDateRangeForDisplay } from "../components/DateRangePicker.jsx";
 import { useT } from "../i18n.jsx";
@@ -86,40 +87,13 @@ function inlinePayloadValue(field, value) {
 }
 
 async function fetchAllNorthboundRecords() {
-  const size = 1000;
-  const { count, error: countError } = await supabase
-    .from("northbound_records")
-    .select("id", { count: "exact", head: true });
-  if (countError) throw countError;
-
-  const totalPages = Math.max(1, Math.ceil((count || 0) / size));
-  const pagePromises = [];
-  for (let i = 0; i < totalPages; i++) {
-    const from = i * size;
-    pagePromises.push(
-      supabase
-        .from("northbound_records")
-        .select(RECORD_SELECT)
-        .order("created_at", { ascending: false })
-        .order("id", { ascending: true })
-        .range(from, from + size - 1)
-    );
-  }
-
-  const pages = await Promise.all(pagePromises);
-  const seen = new Set();
-  const records = [];
-  for (const page of pages) {
-    if (page.error) throw page.error;
-    for (const row of page.data || []) {
-      if (row?.id != null) {
-        if (seen.has(row.id)) continue;
-        seen.add(row.id);
-      }
-      records.push(row);
-    }
-  }
-  return records;
+  return fetchAllTablePages({
+    client: supabase,
+    table: "northbound_records",
+    columns: RECORD_SELECT,
+    orderCol: "created_at",
+    ascending: false
+  });
 }
 
 function StatusChip({ status, t }) {
