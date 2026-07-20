@@ -7,7 +7,7 @@ import { isTaskFilterGroup } from "./tasks-filters.js";
 import { renderTaskCalendar } from "./tasks-calendar.js";
 import { renderTaskOverview } from "./tasks-overview.js";
 import { renderTaskAiDialog } from "./tasks-ai.js";
-import { calendarRelatedTasks, isTaskCreator, memberIdentity, openAssignedTaskCount, taskAssignee } from "./tasks-model.js";
+import { calendarRelatedTasks, canDeleteTaskForUser, isTaskCreator, memberIdentity, openAssignedTaskCount, taskAssignee } from "./tasks-model.js";
 import { attachTaskDomainController } from "./tasks-domain-controller.js";
 import { renderTaskBoardGrid, renderTaskToolbar } from "./tasks-board.js";
 import { getSessionValue, setSessionValue } from "../data/session-state.js";
@@ -350,11 +350,6 @@ function canEditTask(task) {
     state.currentUser.isAdminOfActive || state.permissions.canEditOthers);
 }
 
-function canDeleteTask(task) {
-  return Boolean(task) && (isTaskCreator(task, state.currentUser) || state.currentUser.isSuperAdmin ||
-    state.currentUser.isAdminOfActive || state.permissions.canDeleteOthers);
-}
-
 function openTaskCopy(taskId) {
   if (!state.permissions.canCreate || state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites)) return;
   const task = state.tasks.find((item) => item.id === taskId);
@@ -567,7 +562,7 @@ async function performTaskAction(taskId, action) {
     }
   }
   if (action === "delete") {
-    if (!canDeleteTask(task)) return;
+    if (!canDeleteTaskForUser(task, state.currentUser, state.permissions)) return;
     if (state.liveTaskWrites) {
       state.writeBusy = true;
       state.writeError = "";
@@ -599,6 +594,7 @@ async function performTaskAction(taskId, action) {
         adjustOpenTaskCounts(removedTask, -1);
       }
     });
+    if (removedIds.has(state.selectedTaskId)) leaveTaskDetailForNavigation();
   }
   state.actionTaskId = null;
   rerenderTaskPage({ focusBoard: true });
@@ -681,7 +677,7 @@ async function onTaskClick(event) {
     if (deleteAction.disabled || (state.liveReadOnly && !state.liveTaskWrites)) return;
     const taskId = deleteAction.getAttribute("data-task-action-delete");
     const task = state.tasks.find((item) => item.id === taskId);
-    if (!canDeleteTask(task)) return;
+    if (!canDeleteTaskForUser(task, state.currentUser, state.permissions)) return;
     if (await confirmInPage(pageT(currentHelpers.lang, "tasks.action.deleteConfirm"), { danger: true })) {
       if (!activeScope?.isCurrent()) return;
       await performTaskAction(taskId, "delete");

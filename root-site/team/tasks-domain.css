@@ -749,13 +749,35 @@
   gap: var(--space-4);
 }
 
-.task-detail__abandon {
+.task-detail__terminal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-10);
+}
+
+.task-detail__abandon,
+.task-detail__delete {
   align-self: flex-start;
   padding: var(--space-10) var(--space-20);
-  border: 1px solid var(--red);
   border-radius: var(--radius-10);
+}
+
+.task-detail__abandon {
+  border: 1px solid var(--red);
   color: var(--red);
   background: var(--white);
+}
+
+.task-detail__delete {
+  border: 1px solid var(--red);
+  color: var(--white);
+  background: var(--red);
+}
+
+.task-detail__abandon:disabled,
+.task-detail__delete:disabled {
+  opacity: .5;
+  cursor: not-allowed;
 }
 
 /* AI shell */

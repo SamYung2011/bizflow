@@ -1,5 +1,5 @@
 import { taskT } from "./tasks-i18n.js";
-import { isWaitingApproval } from "./tasks-model.js";
+import { canDeleteTaskForUser, isWaitingApproval } from "./tasks-model.js";
 
 function initials(name) {
   return String(name || "?").trim().slice(0, 1).toUpperCase();
@@ -106,7 +106,10 @@ function renderApproval(task, state, helpers) {
   const showParticipation = isAssignee && (state.liveTaskWrites || task.status !== "abandoned");
   const participationDisabled = state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites);
   const abandon = showParticipation ? `<button type="button" class="task-detail__abandon" data-task-abandon="${escapeHtml(task.id)}"${participationDisabled ? " disabled" : ""}>${escapeHtml(tt(abandoned ? "tasks.detail.resume" : "tasks.detail.abandon"))}</button>` : "";
-  return `${pending}${approved}${abandon}`;
+  const canDelete = canDeleteTaskForUser(task, state.currentUser, state.permissions);
+  const deleteTask = canDelete ? `<button type="button" class="task-detail__delete" data-task-action-delete="${escapeHtml(task.id)}"${participationDisabled ? ' disabled aria-disabled="true"' : ""}>${escapeHtml(tt("tasks.action.delete"))}</button>` : "";
+  const actions = abandon || deleteTask ? `<div class="task-detail__terminal-actions">${abandon}${deleteTask}</div>` : "";
+  return `${pending}${approved}${actions}`;
 }
 
 function renderDetailContent(task, state, helpers) {

@@ -22,6 +22,11 @@ export function isTaskCreator(task, member) {
   return creatorIdentity === identity;
 }
 
+export function canDeleteTaskForUser(task, member, permissions = {}) {
+  return Boolean(task) && (isTaskCreator(task, member) || member?.isSuperAdmin === true ||
+    member?.isAdminOfActive === true || permissions.canDeleteOthers === true);
+}
+
 export function isTaskAssignedTo(task, member) {
   return taskAssignee(task, member) !== null;
 }

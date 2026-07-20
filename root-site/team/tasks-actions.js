@@ -1,5 +1,5 @@
 import { taskT } from "./tasks-i18n.js";
-import { isTaskCreator, isWaitingApproval, taskAssignee } from "./tasks-model.js";
+import { canDeleteTaskForUser, isTaskCreator, isWaitingApproval, taskAssignee } from "./tasks-model.js";
 
 export function renderTaskActionPopover({ task, open, state, helpers }) {
   if (!open) return "";
@@ -9,7 +9,7 @@ export function renderTaskActionPopover({ task, open, state, helpers }) {
   const assigned = currentAssignee !== null;
   const canComplete = ownTask || assigned || (!state.liveTaskWrites && state.permissions.canEditOthers);
   const canEdit = ownTask || state.currentUser.isSuperAdmin || state.currentUser.isAdminOfActive || state.permissions.canEditOthers;
-  const canDelete = ownTask || state.currentUser.isSuperAdmin || state.currentUser.isAdminOfActive || state.permissions.canDeleteOthers;
+  const canDelete = canDeleteTaskForUser(task, state.currentUser, state.permissions);
   const canCopy = state.permissions.canCreate;
   const completeDisabled = state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites) ? " disabled aria-disabled=\"true\"" : "";
   const writeDisabled = state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites) ? " disabled aria-disabled=\"true\"" : "";

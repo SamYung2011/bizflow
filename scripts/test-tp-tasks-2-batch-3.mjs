@@ -3,7 +3,9 @@ import { readFile } from "node:fs/promises";
 
 import { dictionaries as shellDictionaries } from "../root-site/shell/shell-i18n.js";
 import { renderTaskActionPopover } from "../root-site/team/tasks-actions.js";
+import { renderTaskDetail } from "../root-site/team/tasks-detail.js";
 import { taskDictionaries } from "../root-site/team/tasks-i18n.js";
+import { canDeleteTaskForUser } from "../root-site/team/tasks-model.js";
 
 const escapeHtml = (value) => String(value ?? "")
   .replaceAll("&", "&amp;")
@@ -57,6 +59,51 @@ assert.match(menuFor(person("employee-permitted"), { canDeleteOthers: true }), /
   "can_delete_others_tasks must get the delete action");
 assert.doesNotMatch(menuFor(person("employee-member")), /data-task-action-delete=/,
   "being assigned alone must not grant task deletion");
+assert.equal(canDeleteTaskForUser(task, person("employee-jack"), {}), true);
+assert.equal(canDeleteTaskForUser(task, person("employee-member"), {}), false);
+
+const abandonedTask = {
+  ...task,
+  status: "abandoned",
+  content: "",
+  priority: "medium",
+  visibility: "team",
+  owner: "Member",
+  due: "2026/07/20",
+  attachmentCount: 0,
+  subtasks: [],
+  feedback: [],
+  assignees: [
+    { employeeId: "employee-jack", name: "Jack", completedAt: null, abandonedAt: "2026/07/20 17:00" },
+    { employeeId: "employee-member", name: "Member", completedAt: null, abandonedAt: "2026/07/20 17:00" }
+  ]
+};
+const detailFor = (currentUser, permissions = {}) => renderTaskDetail({
+  state: {
+    detailOpen: true,
+    selectedTaskId: abandonedTask.id,
+    detailTab: "content",
+    attachmentPreview: null,
+    tasks: [abandonedTask],
+    members: [],
+    currentUser,
+    permissions: { canCreate: true, canValidate: false, canDeleteOthers: false, ...permissions },
+    liveReadOnly: true,
+    liveTaskWrites: true,
+    writeBusy: false,
+    feedbackDraft: { message: "", attachments: [] },
+    feedbackError: ""
+  },
+  helpers
+});
+const creatorAbandonedDetail = detailFor(person("employee-jack"));
+assert.match(creatorAbandonedDetail, /data-task-abandon="task-delete-parity"[^>]*>恢復我的進行<\/button>/);
+assert.match(creatorAbandonedDetail, /data-task-action-delete="task-delete-parity"/,
+  "the creator must retain delete in abandoned-task detail after its card leaves the open board");
+const assigneeAbandonedDetail = detailFor(person("employee-member"));
+assert.match(assigneeAbandonedDetail, /data-task-abandon="task-delete-parity"[^>]*>恢復我的進行<\/button>/);
+assert.doesNotMatch(assigneeAbandonedDetail, /data-task-action-delete=/,
+  "an assignee may resume an abandoned task but must not gain delete permission");
 
 const [
   shellSource,
@@ -125,17 +172,18 @@ assert.match(dependencySource, /"team-update-logs\.json": \["team_update_logs", 
 
 // ③ UI visibility, click-time authorization and write-time authorization stay
 // aligned. Abandoning is participation only and intentionally has no confirm.
-assert.match(tasksSource, /function canDeleteTask\(task\)[\s\S]*?isTaskCreator\(task, state\.currentUser\)[\s\S]*?state\.currentUser\.isSuperAdmin[\s\S]*?state\.currentUser\.isAdminOfActive[\s\S]*?state\.permissions\.canDeleteOthers/);
 const deleteClickFlow = tasksSource.slice(tasksSource.indexOf("const deleteAction ="), tasksSource.indexOf("const actionTrigger ="));
-assert.match(deleteClickFlow, /if \(!canDeleteTask\(task\)\) return/);
+assert.match(deleteClickFlow, /if \(!canDeleteTaskForUser\(task, state\.currentUser, state\.permissions\)\) return/);
 assert.match(deleteClickFlow, /confirmInPage\(pageT\(currentHelpers\.lang, "tasks\.action\.deleteConfirm"\), \{ danger: true \}\)/);
 assert.match(deleteClickFlow, /if \(!activeScope\?\.isCurrent\(\)\) return/);
 const deleteActionFlow = tasksSource.slice(tasksSource.indexOf('if (action === "delete")'), tasksSource.indexOf("function localTimestamp"));
-assert.match(deleteActionFlow, /if \(!canDeleteTask\(task\)\) return/,
+assert.match(deleteActionFlow, /if \(!canDeleteTaskForUser\(task, state\.currentUser, state\.permissions\)\) return/,
   "delete execution must recheck authorization after confirmation");
 assert.match(deleteActionFlow, /await deleteLiveTask\(task\.id\)/);
 assert.match(deleteActionFlow, /descendantTaskIds\(task\.id\)/,
   "local task state must remove database-cascaded child tasks too");
+assert.match(deleteActionFlow, /if \(removedIds\.has\(state\.selectedTaskId\)\) leaveTaskDetailForNavigation\(\)/,
+  "detail deletion must return to the board instead of leaving an empty detail shell");
 const abandonFlow = tasksSource.slice(tasksSource.indexOf("async function toggleTaskParticipation"), tasksSource.indexOf("async function onTaskClick"));
 assert.match(abandonFlow, /setLiveTaskParticipation/);
 assert.doesNotMatch(abandonFlow, /confirmInPage/,
