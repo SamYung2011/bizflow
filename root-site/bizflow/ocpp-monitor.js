@@ -30,6 +30,10 @@ let alarmDate = null;
 let instanceSequence = 0;
 let activeInstance = 0;
 let activeScope = null;
+let autoRefreshTimer = null;
+let monitorRefreshBusy = false;
+
+const OCPP_AUTO_REFRESH_INTERVAL_MS = 30_000;
 
 function e(value) {
   return context.helpers().escapeHtml(value ?? "—");
@@ -145,6 +149,56 @@ function rerender() {
   const page = document.querySelector('[data-ocpp-route="monitor"]');
   if (page && context.helpers()) page.outerHTML = render(context.helpers());
 }
+
+function syncTabs() {
+  tabs = [
+    { key: "status", labelKey: "statusTab" },
+    { key: "logs", labelKey: "logsTab" },
+    { key: "commands", labelKey: "commandLogsTab", badge: data.commandLogs.length || null },
+    { key: "alarms", labelKey: "alarmsTab", badge: data.alarms.length || null },
+  ];
+}
+
+function cancelAutoRefresh() {
+  if (autoRefreshTimer !== null) clearTimeout(autoRefreshTimer);
+  autoRefreshTimer = null;
+}
+
+async function refreshMonitorData() {
+  if (monitorRefreshBusy || !state) return;
+  const instance = activeInstance;
+  const scope = activeScope;
+  monitorRefreshBusy = true;
+  try {
+    const result = await getOcppMonitorData();
+    if (instance !== activeInstance || !scope?.isCurrent() || !state) return;
+    const preserveDeferredLogs = result.logsDeferred === true;
+    data = {
+      ...data,
+      ...result,
+      logs: preserveDeferredLogs ? data.logs : result.logs,
+    };
+    if (!preserveDeferredLogs) state.logsLoaded = true;
+    syncTabs();
+    rerender();
+  } catch (error) {
+    if (instance === activeInstance && scope?.isCurrent()) {
+      console.warn("OCPP auto refresh failed", error);
+    }
+  } finally {
+    if (instance === activeInstance) monitorRefreshBusy = false;
+  }
+}
+
+function scheduleAutoRefresh() {
+  cancelAutoRefresh();
+  if (!state?.autoRefresh || !activeScope?.isCurrent()) return;
+  autoRefreshTimer = activeScope.timeout(async () => {
+    autoRefreshTimer = null;
+    await refreshMonitorData();
+    scheduleAutoRefresh();
+  }, OCPP_AUTO_REFRESH_INTERVAL_MS);
+}
 function onMonitorClick(event) {
   const root = event.target.closest?.("[data-date-range-filter]");
   if (root) {
@@ -182,8 +236,11 @@ function onMonitorInput(event) {
     state.pileQuery = event.target.value;
 }
 function onMonitorChange(event) {
-  if (event.target.matches("[data-ocpp-auto]"))
+  if (event.target.matches("[data-ocpp-auto]")) {
     state.autoRefresh = event.target.checked;
+    if (state.autoRefresh) void refreshMonitorData();
+    scheduleAutoRefresh();
+  }
   if (event.target.matches("[data-ocpp-pile-query]")) {
     state.logLimit = 50;
     rerender();
@@ -210,7 +267,7 @@ function createState(historyState, logsDeferred) {
   const saved = historyState && typeof historyState === "object" ? historyState : {};
   return {
     tab: ["status", "logs", "commands", "alarms"].includes(saved.tab) ? saved.tab : "status",
-    autoRefresh: saved.autoRefresh === true,
+    autoRefresh: typeof saved.autoRefresh === "boolean" ? saved.autoRefresh : true,
     pileQuery: typeof saved.pileQuery === "string" ? saved.pileQuery : "",
     direction: ["all", "in", "out"].includes(saved.direction) ? saved.direction : "all",
     logLimit: Number.isInteger(saved.logLimit) && saved.logLimit > 0 ? saved.logLimit : 50,
@@ -232,12 +289,7 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
   data = { ...initialData };
   context = makeOcppContext();
   state = createState(historyState, data.logsDeferred);
-  tabs = [
-    { key: "status", labelKey: "statusTab" },
-    { key: "logs", labelKey: "logsTab" },
-    { key: "commands", labelKey: "commandLogsTab", badge: data.commandLogs.length || null },
-    { key: "alarms", labelKey: "alarmsTab", badge: data.alarms.length || null },
-  ];
+  syncTabs();
   logDate = createDateRangeFilter({
     id: "ocpp-log-date",
     initialDate: latestDateInput(data.logs.map((row) => dateInputFromUnix(row.ts))),
@@ -263,6 +315,7 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
       scope.listen(document, "change", onMonitorChange);
       scope.listen(document, "keydown", onMonitorKeydown);
       if (state.tab === "logs") void loadLiveLogs();
+      scheduleAutoRefresh();
     },
     captureState: () => ({
       tab: state.tab,
@@ -275,8 +328,10 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
       alarmDate: alarmDate.captureState(),
     }),
     dispose() {
+      cancelAutoRefresh();
       if (activeInstance === instance) activeInstance = 0;
       if (activeScope === scope) activeScope = null;
+      monitorRefreshBusy = false;
       logDate?.close();
       alarmDate?.close();
       data = null;
