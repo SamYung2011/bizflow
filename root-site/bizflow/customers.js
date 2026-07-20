@@ -188,10 +188,11 @@ function initials(name) {
   return String(name || "?").trim().charAt(0).toUpperCase();
 }
 
-function renderCustomerRow(customer, helpers) {
+export function renderCustomerRow(customer, helpers) {
   const { escapeHtml, lang } = helpers;
   const sourceLabel = pageT(lang, `customers.source.${customer.source}`);
   const countTitle = `${pageT(lang, "customers.orderCount")}：${customer.orderCount}`;
+  const carModel = String(customer.detail?.carModel ?? "").trim();
   return `<a class="tp-component management-list__row management-list__row--customer customer-row" style="--component-height:60px" href="./customer-detail.html?id=${encodeURIComponent(customer.id)}" data-customer-row data-customer-id="${escapeHtml(customer.id)}">
     <span class="avatar--initial" style="--component-width:40px;--component-height:40px">${escapeHtml(initials(customer.name))}</span>
     <div class="customer-row__body">
@@ -202,6 +203,7 @@ function renderCustomerRow(customer, helpers) {
       <div class="customer-row__meta-line">
         <span class="customer-row__phone">${escapeHtml(customer.phone)}</span>
         <span class="customer-row__date">${escapeHtml(customer.joinedAt)}</span>
+        ${carModel ? `<span class="customer-row__car" title="${escapeHtml(carModel)}">${escapeHtml(carModel)}</span>` : ""}
       </div>
     </div>
     <span class="customer-row__count" title="${escapeHtml(countTitle)}">${escapeHtml(String(customer.orderCount))}</span>

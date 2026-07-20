@@ -235,6 +235,13 @@
   white-space: nowrap;
 }
 
+.customer-row__car {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .customer-row__count {
   display: inline-flex;
   flex: none;
