@@ -7,6 +7,12 @@ import {
   WHATSAPP_SNAPSHOT_TABLES
 } from "../root-site/data/live-whatsapp-contract.js";
 import {
+  WHATSAPP_CLIENT_HEARTBEAT_INTERVAL_MS,
+  WHATSAPP_CLIENT_ONLINE_THRESHOLD_MS,
+  whatsappClientLastSeenTime,
+  whatsappClientOnlineState
+} from "../root-site/bizflow/whatsapp-client-status.js";
+import {
   createLiveWhatsappWriter,
   whatsappSettingsPatch
 } from "../root-site/data/live-whatsapp-writes.js";
@@ -16,7 +22,8 @@ assert.deepEqual(WHATSAPP_REALTIME_TABLES, [
   "wa_replies",
   "wa_unresolved",
   "wa_logs",
-  "wa_heartbeat"
+  "wa_heartbeat",
+  "wa_clients"
 ]);
 assert.deepEqual(WHATSAPP_SNAPSHOT_TABLES, [
   "wa_settings",
@@ -29,6 +36,28 @@ assert.deepEqual(WHATSAPP_SNAPSHOT_TABLES, [
   "wa_daily_reports",
   "wa_logs"
 ]);
+assert.equal(WHATSAPP_CLIENT_HEARTBEAT_INTERVAL_MS, 5_000);
+assert.equal(WHATSAPP_CLIENT_ONLINE_THRESHOLD_MS, 25_000);
+const clientHeartbeatAt = whatsappClientLastSeenTime("2026/07/20 12:00:00");
+assert.equal(clientHeartbeatAt, Date.parse("2026-07-20T12:00:00+08:00"));
+assert.deepEqual(whatsappClientOnlineState([], clientHeartbeatAt), {
+  status: "never",
+  client: null,
+  lastSeen: "",
+  lastSeenAt: Number.NaN
+});
+const cloudClients = [
+  { clientId: "older", lastSeen: "2026/07/20 11:59:59" },
+  { clientId: "current", lastSeen: "2026/07/20 12:00:00" },
+  { clientId: "invalid", lastSeen: "not-a-date" }
+];
+assert.equal(whatsappClientOnlineState(cloudClients, clientHeartbeatAt + 24_999).status, "online");
+assert.deepEqual(whatsappClientOnlineState(cloudClients, clientHeartbeatAt + 25_000), {
+  status: "offline",
+  client: cloudClients[1],
+  lastSeen: "2026/07/20 12:00:00",
+  lastSeenAt: clientHeartbeatAt
+});
 
 assert.deepEqual(whatsappSettingsPatch({
   claudeMode: "api",
@@ -124,11 +153,12 @@ const unauthorized = createLiveWhatsappWriter({
 });
 await assert.rejects(() => unauthorized.updateSettings({ botName: "blocked" }), /WhatsApp admin context required/);
 
-const [providerSource, liveBuilderSource, pageSource, migrationSource] = await Promise.all([
+const [providerSource, liveBuilderSource, pageSource, migration090Source, migration091Source] = await Promise.all([
   readFile(new URL("../root-site/data/provider.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/live-admin-snapshots.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/bizflow/whatsapp.js", import.meta.url), "utf8"),
-  readFile(new URL("../migrations/090_realtime_publication_wa_live.sql", import.meta.url), "utf8")
+  readFile(new URL("../migrations/090_realtime_publication_wa_live.sql", import.meta.url), "utf8"),
+  readFile(new URL("../migrations/091_realtime_publication_wa_clients.sql", import.meta.url), "utf8")
 ]);
 const fetchSnapshotSource = providerSource.slice(providerSource.indexOf("async function fetchSnapshot"), providerSource.indexOf("const mock"));
 const whatsappProvider = providerSource.slice(providerSource.indexOf("export async function getWhatsappData"), providerSource.indexOf("function cloneOcppValue"));
@@ -144,15 +174,21 @@ assert.match(pageSource, /updateLiveWhatsappSettings/);
 assert.match(pageSource, /addLiveWhatsappWhitelist/);
 assert.match(pageSource, /t\("robotStatus"\)/);
 assert.match(pageSource, /t\("lastHeartbeat"\)/);
-assert.match(pageSource, /state\.heartbeat\.lastHeartbeatAt/);
+assert.match(pageSource, /whatsappClientOnlineState\(state\.clients\)/);
+assert.match(pageSource, /WHATSAPP_CLIENT_HEARTBEAT_INTERVAL_MS/);
+assert.match(pageSource, /state\.clients = nextData\.clients;\s+updateRobotStatus\(\);\s+defer\(\);/, "client heartbeats must update the status without overwriting an active editor");
+assert.doesNotMatch(pageSource, /state\.heartbeat/);
 assert.doesNotMatch(pageSource, /snapshotStatus|snapshotAt|lastSyncedAt/);
 assert.doesNotMatch(pageSource, /from\(["']wa_settings["']\)/, "the view must keep DB writes in the focused writer module");
-WHATSAPP_REALTIME_TABLES.forEach((table) => assert.match(migrationSource, new RegExp(`public\\.${table}`)));
-assert.doesNotMatch(migrationSource, /wa_settings|wa_whitelist|wa_clients|wa_daily_reports/);
+WHATSAPP_REALTIME_TABLES.filter((table) => table !== "wa_clients")
+  .forEach((table) => assert.match(migration090Source, new RegExp(`public\\.${table}`)));
+assert.doesNotMatch(migration090Source, /wa_settings|wa_whitelist|wa_clients|wa_daily_reports/);
+assert.match(migration091Source, /ADD TABLE public\.wa_clients/);
+assert.doesNotMatch(migration091Source, /wa_settings|wa_whitelist|wa_heartbeat|wa_daily_reports/);
 
-const liveCopyKeys = ["robotStatus", "lastHeartbeat", "liveChange", "saveLive", "savedLive", "savingLive", "writeFailed", "removeLiveConfirm"];
+const liveCopyKeys = ["robotStatus", "lastHeartbeat", "online", "offline", "never", "liveChange", "saveLive", "savedLive", "savingLive", "writeFailed", "removeLiveConfirm"];
 liveCopyKeys.forEach((key) => {
   ["zh", "en", "fr"].forEach((lang) => assert.equal(typeof whatsappCopy[lang][key], "string", `${lang}.${key} missing`));
 });
 
-console.log("WA live contracts: PASS (existing live flow, five-table realtime, admin writes, heartbeat copy, i18n)");
+console.log("WA live contracts: PASS (existing live flow, six-table realtime, wa_clients heartbeat status, admin writes, i18n)");

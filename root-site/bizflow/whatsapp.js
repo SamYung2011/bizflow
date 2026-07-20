@@ -5,6 +5,10 @@ import { renderSegment } from "../components/segment.js";
 import { renderWhatsappActivity } from "./whatsapp-activity.js";
 import { renderWhatsappConfig, renderWhatsappGuide } from "./whatsapp-config.js";
 import { translateWhatsapp } from "./whatsapp-i18n.js";
+import {
+  WHATSAPP_CLIENT_HEARTBEAT_INTERVAL_MS,
+  whatsappClientOnlineState
+} from "./whatsapp-client-status.js";
 import { channelOf, dateOnly, nextLocalId, promptPlaceholdersValid, whatsappTabs, whitelistKinds } from "./whatsapp-model.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
@@ -49,7 +53,6 @@ function initializeWhatsappState(historyState = null) {
       locationHintPrompt: settings.locationHintPrompt || ""
     },
     clients: snapshot.clients,
-    heartbeat: snapshot.heartbeat,
     generatedAt: snapshot.generatedAt,
     whitelist: snapshot.whitelist.map((row) => ({ ...row })),
     initialWhitelist: snapshot.whitelist.map((row) => ({ ...row })),
@@ -109,11 +112,28 @@ function tabItems() {
   }));
 }
 
-function heartbeatTime(value) {
-  const raw = String(value || "").trim().replaceAll("/", "-").replace(" ", "T");
-  if (!raw) return Number.NaN;
-  const zoned = /(?:Z|[+-]\d{2}:\d{2})$/i.test(raw) ? raw : `${raw}+08:00`;
-  return Date.parse(zoned);
+function robotStatusView() {
+  const onlineState = whatsappClientOnlineState(state.clients);
+  return {
+    ...onlineState,
+    label: t(onlineState.status),
+    lastSeenLabel: onlineState.lastSeen || t("empty")
+  };
+}
+
+function updateRobotStatus() {
+  if (!state || !currentHelpers) return;
+  const root = document.querySelector("[data-wa-robot-status]");
+  if (!root) return;
+  const status = robotStatusView();
+  root.classList.remove("wa-status--online", "wa-status--offline", "wa-status--never");
+  root.classList.add(`wa-status--${status.status}`);
+  root.dataset.waRobotStatus = status.status;
+  root.dataset.waClientLastSeen = status.lastSeen;
+  const label = root.querySelector("[data-wa-robot-status-label]");
+  const heartbeat = root.querySelector("[data-wa-client-last-heartbeat]");
+  if (label) label.textContent = `${t("robotStatus")}: ${status.label}`;
+  if (heartbeat) heartbeat.textContent = `${t("lastHeartbeat")}: ${status.lastSeenLabel}`;
 }
 
 function renderHeader(helpers) {
@@ -121,14 +141,8 @@ function renderHeader(helpers) {
   const customerCount = new Set(state.messages.filter((row) => row.customerId)
     .map((row) => `${channelOf(row)}:${row.customerId}`)).size;
   const openUnresolved = unresolvedCount();
-  const heartbeatAt = heartbeatTime(state.heartbeat.lastHeartbeatAt);
-  // Mirrors bizflow_samyung/src/views/Whatsapp.jsx:113-116.
-  const heartbeatStatus = !Number.isFinite(heartbeatAt)
-    ? "never"
-    : Date.now() - heartbeatAt >= 120000
-      ? "offline"
-      : state.heartbeat.status || t("unknown");
-  return `<header class="wa-head"><div><h1>${e(t("title"))}</h1><p>${e(t("subtitle"))}</p></div><div class="wa-status" title="${e(state.heartbeat.errorMessage || "")}"><span class="wa-status__dot"></span><div><strong>${e(t("robotStatus"))}: ${e(heartbeatStatus)}</strong><small>${e(t("lastHeartbeat"))}: ${e(state.heartbeat.lastHeartbeatAt || t("empty"))}</small></div></div></header><div class="wa-stats" data-wa-mode="${e(state.settings.claudeMode || "")}" data-wa-customers="${customerCount}" data-wa-messages="${state.messages.length}" data-wa-unresolved="${openUnresolved}"><span>${e(t("mode"))}<strong>${e(state.settings.claudeMode || t("unknown"))}</strong></span><span>${e(t("customers"))}<strong>${customerCount}</strong></span><span>${e(t("messages"))}<strong>${state.messages.length}</strong></span><span>${e(t("unresolved"))}<strong>${openUnresolved}</strong></span></div>`;
+  const robotStatus = robotStatusView();
+  return `<header class="wa-head"><div><h1>${e(t("title"))}</h1><p>${e(t("subtitle"))}</p></div><div class="wa-status wa-status--${e(robotStatus.status)}" data-wa-robot-status="${e(robotStatus.status)}" data-wa-client-last-seen="${e(robotStatus.lastSeen)}"><span class="wa-status__dot"></span><div><strong data-wa-robot-status-label>${e(t("robotStatus"))}: ${e(robotStatus.label)}</strong><small data-wa-client-last-heartbeat>${e(t("lastHeartbeat"))}: ${e(robotStatus.lastSeenLabel)}</small></div></div></header><div class="wa-stats" data-wa-mode="${e(state.settings.claudeMode || "")}" data-wa-customers="${customerCount}" data-wa-messages="${state.messages.length}" data-wa-unresolved="${openUnresolved}"><span>${e(t("mode"))}<strong>${e(state.settings.claudeMode || t("unknown"))}</strong></span><span>${e(t("customers"))}<strong>${customerCount}</strong></span><span>${e(t("messages"))}<strong>${state.messages.length}</strong></span><span>${e(t("unresolved"))}<strong>${openUnresolved}</strong></span></div>`;
 }
 
 export function renderWhatsapp(helpers) {
@@ -484,7 +498,6 @@ function applyWhatsappSnapshot(nextSnapshot) {
     locationHintPrompt: nextSnapshot.settings.locationHintPrompt || ""
   };
   state.clients = nextSnapshot.clients;
-  state.heartbeat = nextSnapshot.heartbeat;
   state.generatedAt = nextSnapshot.generatedAt;
   state.whitelist = nextSnapshot.whitelist.map((row) => ({ ...row }));
   state.initialWhitelist = nextSnapshot.whitelist.map((row) => ({ ...row }));
@@ -528,6 +541,8 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       scope.listen(document, "focusin", onWhatsappFocus);
       scope.listen(document, "focusout", flushWhatsappRefreshAfterFocus);
       scope.listen(document, "keydown", onWhatsappKeydown);
+      const robotStatusInterval = setInterval(updateRobotStatus, WHATSAPP_CLIENT_HEARTBEAT_INTERVAL_MS);
+      scope.onCleanup(() => clearInterval(robotStatusInterval));
       whatsappLiveRefresh = attachLiveSnapshotRefresh({
         scope,
         snapshots: [WHATSAPP_SNAPSHOT],
@@ -537,6 +552,8 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
           const nextData = await getWhatsappData();
           if (!isCurrent()) return;
           if (hasWhatsappRefreshBlock()) {
+            state.clients = nextData.clients;
+            updateRobotStatus();
             defer();
             return;
           }

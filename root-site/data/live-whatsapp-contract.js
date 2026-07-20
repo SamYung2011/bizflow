@@ -12,13 +12,14 @@ export const WHATSAPP_SNAPSHOT_TABLES = Object.freeze([
   "wa_logs"
 ]);
 
-// WA-live-1 intentionally subscribes only to the operational rows that need
-// immediate UI feedback. Settings/allowlist writes invalidate their own cache;
-// clients and daily reports stay on the lower-churn IDB/SWR path.
+// Settings/allowlist writes invalidate their own cache and daily reports stay
+// on the lower-churn IDB/SWR path. WA-live-2 adds client heartbeats so the
+// current cloud bot state updates while the page remains open.
 export const WHATSAPP_REALTIME_TABLES = Object.freeze([
   "wa_messages",
   "wa_replies",
   "wa_unresolved",
   "wa_logs",
-  "wa_heartbeat"
+  "wa_heartbeat",
+  "wa_clients"
 ]);

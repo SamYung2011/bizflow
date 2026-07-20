@@ -69,6 +69,24 @@
   background: var(--yellow);
 }
 
+.wa-status--online {
+  border-color: color-mix(in srgb, var(--green) 30%, var(--white));
+  background: color-mix(in srgb, var(--green) 10%, var(--white));
+}
+
+.wa-status--online .wa-status__dot {
+  background: var(--green);
+}
+
+.wa-status--offline {
+  border-color: color-mix(in srgb, var(--red) 30%, var(--white));
+  background: color-mix(in srgb, var(--red) 8%, var(--white));
+}
+
+.wa-status--offline .wa-status__dot {
+  background: var(--red);
+}
+
 .wa-status div {
   display: flex;
   min-width: 0;
