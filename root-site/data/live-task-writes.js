@@ -263,6 +263,45 @@ export async function completeLiveTask({ taskId, targetEmployeeId, wholeTask, ne
   return { completedAt, wholeTask: allDone && !needsApproval };
 }
 
+export async function approveLiveTask(taskId) {
+  const { client, currentUser } = await writeContext();
+  const [taskResult, assigneesResult] = await Promise.all([
+    client.from("employee_tasks")
+      .select("id,status,needs_approval,approved_at")
+      .eq("id", taskId)
+      .single(),
+    client.from("task_assignees")
+      .select("completed_at,abandoned_at")
+      .eq("task_id", taskId)
+  ]);
+  throwIfError(taskResult.error);
+  throwIfError(assigneesResult.error);
+  const task = taskResult.data;
+  const assignees = assigneesResult.data ?? [];
+  const waiting = task?.status === "open" && task.needs_approval === true && task.approved_at == null &&
+    assignees.length > 0 && assignees.every((row) => row.completed_at != null || row.abandoned_at != null);
+  if (!waiting) throw new Error("Task is not waiting for approval");
+
+  const approvedAt = new Date().toISOString();
+  const status = assignees.some((row) => row.completed_at != null) ? "done" : "abandoned";
+  const result = await client.from("employee_tasks")
+    .update({
+      status,
+      completed_at: approvedAt,
+      approved_at: approvedAt,
+      approved_by: currentUser.employeeId
+    })
+    .eq("id", taskId)
+    .eq("status", "open")
+    .eq("needs_approval", true)
+    .is("approved_at", null)
+    .select("id,status,completed_at,approved_at,approved_by")
+    .single();
+  throwIfError(result.error);
+  await invalidateTaskReads("employee_tasks");
+  return { row: result.data, approvedBy: currentUser.name };
+}
+
 export async function setLiveSubtaskCompletion({ taskId, completed }) {
   const { client, currentUser } = await writeContext();
   const taskResult = await client.from("employee_tasks")

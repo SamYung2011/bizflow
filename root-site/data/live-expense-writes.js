@@ -55,3 +55,57 @@ export async function createLiveExpense({ date, amount, currency, category, desc
     throw error;
   }
 }
+
+async function updateExpenseRow(client, expenseId, patch, constrain = (query) => query) {
+  const query = constrain(client.from("expense_reimbursements").update(patch).eq("id", expenseId));
+  const result = await query.select("*").single();
+  throwIfError(result.error);
+  await invalidateLiveTables("expense_reimbursements");
+  return result.data;
+}
+
+export async function approveLiveExpense(expenseId) {
+  const { client, currentUser } = await writeContext();
+  const reviewedAt = new Date().toISOString();
+  return updateExpenseRow(client, expenseId, {
+    status: "approved",
+    reviewed_by: currentUser.employeeId,
+    reviewed_at: reviewedAt,
+    reject_reason: null,
+    paid: false,
+    paid_at: null
+  }, (query) => query.eq("status", "pending"));
+}
+
+export async function rejectLiveExpense(expenseId, rejectReason = "") {
+  const { client, currentUser } = await writeContext();
+  const reviewedAt = new Date().toISOString();
+  return updateExpenseRow(client, expenseId, {
+    status: "rejected",
+    reviewed_by: currentUser.employeeId,
+    reviewed_at: reviewedAt,
+    reject_reason: String(rejectReason || "").trim() || null,
+    paid: false,
+    paid_at: null
+  }, (query) => query.eq("status", "pending"));
+}
+
+export async function markLiveExpensePaid(expenseId) {
+  const { client } = await writeContext();
+  return updateExpenseRow(client, expenseId, {
+    paid: true,
+    paid_at: new Date().toISOString()
+  }, (query) => query.eq("status", "approved").eq("paid", false));
+}
+
+export async function deleteLiveExpense(expenseId) {
+  const { client } = await writeContext();
+  const result = await client.from("expense_reimbursements")
+    .delete()
+    .eq("id", expenseId)
+    .select("id")
+    .single();
+  throwIfError(result.error);
+  await invalidateLiveTables("expense_reimbursements");
+  return result.data;
+}

@@ -7,13 +7,13 @@ import { isTaskFilterGroup } from "./tasks-filters.js";
 import { renderTaskCalendar } from "./tasks-calendar.js";
 import { renderTaskOverview } from "./tasks-overview.js";
 import { renderTaskAiDialog } from "./tasks-ai.js";
-import { calendarRelatedTasks, canDeleteTaskForUser, isTaskCreator, memberIdentity, openAssignedTaskCount, taskAssignee } from "./tasks-model.js";
+import { calendarRelatedTasks, canDeleteTaskForUser, isTaskCreator, isWaitingApproval, memberIdentity, openAssignedTaskCount, taskAssignee } from "./tasks-model.js";
 import { attachTaskDomainController } from "./tasks-domain-controller.js";
 import { renderTaskBoardGrid, renderTaskToolbar } from "./tasks-board.js";
 import { getSessionValue, setSessionValue } from "../data/session-state.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
-import { completeLiveTask, createLiveTask, createLiveTaskFeedback, deleteLiveTask, setLiveSubtaskCompletion, setLiveTaskParticipation, updateLiveTask } from "../data/live-task-writes.js";
+import { approveLiveTask, completeLiveTask, createLiveTask, createLiveTaskFeedback, deleteLiveTask, setLiveSubtaskCompletion, setLiveTaskParticipation, updateLiveTask } from "../data/live-task-writes.js";
 import { createDateRangePanel } from "../components/date-range-panel.js";
 import { createTaskBoardColumnReadObserver, createTaskBoardReadTracker } from "./task-board-read-state.js";
 
@@ -513,6 +513,36 @@ function completeWholeTask(task, completedAt) {
     state.summary.completed += 1;
     state.summary.inProgress = Math.max(0, state.summary.inProgress - 1);
     decrementOpenTaskCounts(task);
+  }
+}
+
+async function approveWaitingTask(task) {
+  if (!state.liveTaskWrites || state.writeBusy || !isWaitingApproval(task)) return;
+  const mountId = activeMountId;
+  const scope = activeScope;
+  state.writeBusy = true;
+  state.writeError = "";
+  rerenderTaskPage();
+  try {
+    const result = await approveLiveTask(task.id);
+    if (!isCurrentTaskMount(mountId, scope)) return;
+    const completed = result.row.status === "done";
+    task.approvedAt = result.row.approved_at;
+    task.approvedBy = result.approvedBy;
+    task.completedAt = result.row.completed_at;
+    task.done = completed;
+    task.status = completed ? "completed" : "abandoned";
+    if (completed) state.summary.completed += 1;
+    state.summary.inProgress = Math.max(0, state.summary.inProgress - 1);
+    adjustOpenTaskCounts(task, -1);
+  } catch (error) {
+    if (!isCurrentTaskMount(mountId, scope)) return;
+    console.warn("Task approval failed", error);
+    state.writeError = "tasks.write.failed";
+  } finally {
+    if (!isCurrentTaskMount(mountId, scope)) return;
+    state.writeBusy = false;
+    rerenderTaskPage();
   }
 }
 
@@ -1485,6 +1515,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
         localTimestamp,
         toggleTaskParticipation,
         toggleSubtaskCompletion,
+        approveTask: approveWaitingTask,
         refreshLiveData: refreshLiveTaskSnapshot,
         isLiveRefreshBlocked: hasTaskRealtimeRefreshBlock,
         scope

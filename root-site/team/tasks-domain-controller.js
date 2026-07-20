@@ -1,5 +1,5 @@
 import { taskT } from "./tasks-i18n.js";
-import { isWaitingApproval } from "./tasks-model.js";
+import { isTaskCreator, isWaitingApproval } from "./tasks-model.js";
 import { setSessionValue } from "../data/session-state.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
@@ -15,6 +15,7 @@ export function attachTaskDomainController({
   localTimestamp,
   toggleTaskParticipation,
   toggleSubtaskCompletion,
+  approveTask,
   refreshLiveData,
   isLiveRefreshBlocked,
   scope
@@ -120,18 +121,21 @@ export function attachTaskDomainController({
 
     const approve = event.target.closest("[data-task-approve]");
     if (approve) {
-      if (state.liveReadOnly || approve.disabled) return;
+      if (approve.disabled || state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites)) return;
       const task = taskById(approve.getAttribute("data-task-approve"));
-      const ownTask = task?.creator.toLocaleLowerCase() === state.currentUser.name.toLocaleLowerCase();
+      const ownTask = isTaskCreator(task, state.currentUser);
       if (task && isWaitingApproval(task) && (ownTask || state.permissions.canValidate)) {
-        task.approvedAt = localTimestamp();
-        task.approvedBy = state.currentUser.name;
-        task.done = true;
-        task.status = "completed";
-        state.summary.completed += 1;
-        state.summary.inProgress = Math.max(0, state.summary.inProgress - 1);
-        adjustOpenTaskCounts(task, -1);
-        rerender();
+        if (state.liveTaskWrites) await approveTask(task);
+        else {
+          task.approvedAt = localTimestamp();
+          task.approvedBy = state.currentUser.name;
+          task.done = true;
+          task.status = "completed";
+          state.summary.completed += 1;
+          state.summary.inProgress = Math.max(0, state.summary.inProgress - 1);
+          adjustOpenTaskCounts(task, -1);
+          rerender();
+        }
       }
       return;
     }

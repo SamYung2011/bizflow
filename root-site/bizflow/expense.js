@@ -11,7 +11,13 @@ import {
   filterExpenseRows,
   normalizeExpenseRows
 } from "./expense-model.js";
-import { createLiveExpense } from "../data/live-expense-writes.js";
+import {
+  approveLiveExpense,
+  createLiveExpense,
+  deleteLiveExpense,
+  markLiveExpensePaid,
+  rejectLiveExpense
+} from "../data/live-expense-writes.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { createDateRangePanel } from "../components/date-range-panel.js";
@@ -47,7 +53,7 @@ const copy = {
     reject: "拒絕",
     markPaid: "標記已打款",
     remove: "刪除",
-    deleteConfirm: "確認刪除這筆本地報銷？",
+    deleteConfirm: "確認刪除這筆報銷？",
     rejectReason: "拒絕理由（選填）",
     modalTitle: "新增報銷",
     currency: "幣種",
@@ -69,6 +75,7 @@ const copy = {
     amountRequired: "金額必須大於 0",
     categoryRequired: "請選擇類別",
     saveFailed: "提交失敗，請稍後重試",
+    actionFailed: "操作失敗，請稍後重試",
     noDescription: "—",
     receiptCount: "{count} 張",
     leaveUnsaved: "報銷草稿尚未提交，確定離開？",
@@ -109,7 +116,7 @@ const copy = {
     reject: "Reject",
     markPaid: "Mark paid",
     remove: "Delete",
-    deleteConfirm: "Delete this local reimbursement?",
+    deleteConfirm: "Delete this reimbursement?",
     rejectReason: "Rejection reason (optional)",
     modalTitle: "Add reimbursement",
     currency: "Currency",
@@ -131,6 +138,7 @@ const copy = {
     amountRequired: "Amount must be greater than 0",
     categoryRequired: "Select a category",
     saveFailed: "Submission failed. Please try again.",
+    actionFailed: "Action failed. Please try again.",
     noDescription: "—",
     receiptCount: "{count} images",
     leaveUnsaved: "This reimbursement draft has not been submitted. Leave this page?",
@@ -171,7 +179,7 @@ const copy = {
     reject: "Refuser",
     markPaid: "Marquer payé",
     remove: "Supprimer",
-    deleteConfirm: "Supprimer ce remboursement local ?",
+    deleteConfirm: "Supprimer ce remboursement ?",
     rejectReason: "Motif du refus (facultatif)",
     modalTitle: "Ajouter un remboursement",
     currency: "Devise",
@@ -193,6 +201,7 @@ const copy = {
     amountRequired: "Le montant doit être supérieur à 0",
     categoryRequired: "Sélectionnez une catégorie",
     saveFailed: "Échec de l’envoi. Réessayez.",
+    actionFailed: "Échec de l’action. Réessayez.",
     noDescription: "—",
     receiptCount: "{count} images",
     leaveUnsaved: "Ce brouillon de remboursement n’est pas envoyé. Quitter cette page ?",
@@ -212,7 +221,6 @@ let unread = null;
 let authenticated = false;
 let isAdmin = true;
 let liveReadOnly = false;
-let localWriteAttributes = "";
 let ownerKey = "";
 const currencySymbols = { RMB: "¥", HKD: "HK$", USD: "US$" };
 
@@ -221,6 +229,7 @@ let state = {
   filter: "pending",
   draft: null,
   error: "",
+  actionError: "",
   writeBusy: false
 };
 
@@ -290,18 +299,23 @@ function renderReceiptCell(row, helpers) {
 
 function renderActions(row, helpers) {
   const { escapeHtml, lang } = helpers;
-  if (!row.local) return `<span class="expense-muted">—</span>`;
-  const pending = row.status === "pending";
+  const pending = isAdmin && row.status === "pending";
+  const canDelete = isAdmin || (row.employeeId === ownerKey && row.status === "pending");
+  if (!pending && !canDelete) return `<span class="expense-muted">—</span>`;
+  const writeAttributes = state.writeBusy ? ' disabled aria-disabled="true"' : "";
   return `<span class="expense-actions">
-    ${pending ? `<button type="button" class="expense-action expense-action--approve" data-expense-approve="${escapeHtml(row.id)}" data-expense-write${localWriteAttributes}>${escapeHtml(t(lang, "approve"))}</button><button type="button" class="expense-action expense-action--reject" data-expense-reject="${escapeHtml(row.id)}" data-expense-write${localWriteAttributes}>${escapeHtml(t(lang, "reject"))}</button>` : ""}
-    <button type="button" class="expense-action expense-action--delete" data-expense-delete="${escapeHtml(row.id)}" data-expense-write${localWriteAttributes}>${escapeHtml(t(lang, "remove"))}</button>
+    ${pending ? `<button type="button" class="expense-action expense-action--approve" data-expense-approve="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "approve"))}</button><button type="button" class="expense-action expense-action--reject" data-expense-reject="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "reject"))}</button>` : ""}
+    ${canDelete ? `<button type="button" class="expense-action expense-action--delete" data-expense-delete="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "remove"))}</button>` : ""}
   </span>`;
 }
 
 function renderPayment(row, helpers) {
   const { escapeHtml, lang } = helpers;
   if (row.paid) return `<span class="expense-payment expense-payment--paid">${escapeHtml(t(lang, "paid"))}</span>`;
-  if (row.local && row.status === "approved") return `<button type="button" class="expense-action expense-action--pay" data-expense-pay="${escapeHtml(row.id)}" data-expense-write${localWriteAttributes}>${escapeHtml(t(lang, "markPaid"))}</button>`;
+  if (isAdmin && row.status === "approved") {
+    const writeAttributes = state.writeBusy ? ' disabled aria-disabled="true"' : "";
+    return `<button type="button" class="expense-action expense-action--pay" data-expense-pay="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "markPaid"))}</button>`;
+  }
   return `<span class="expense-payment">${escapeHtml(t(lang, "unpaid"))}</span>`;
 }
 
@@ -385,6 +399,7 @@ export function renderExpense(helpers) {
   }) : "";
   return `<div class="expense-page" data-expense-page data-live-read-only="${liveReadOnly}" data-expense-admin="${isAdmin}" data-expense-filter-value="${escapeHtml(state.filter)}" data-expense-visible="${rows.length}" ${filters.map((filter) => `data-expense-count-${filter}="${filterCounts[filter]}"`).join(" ")}>
     <header class="expense-head"><div><h1>${escapeHtml(t(lang, "title"))}</h1><p>${escapeHtml(t(lang, isAdmin ? "subtitleAdmin" : "subtitleMine"))}</p></div><button type="button" class="expense-add" data-expense-new data-expense-create-write${state.writeBusy ? ' disabled aria-disabled="true"' : ""}>${icon("icon-add-line-add", "icon")}<span>${escapeHtml(t(lang, "add"))}</span></button></header>
+    ${state.actionError ? `<p class="expense-error" role="alert">${escapeHtml(t(lang, state.actionError))}</p>` : ""}
     ${isAdmin ? `<div class="expense-segment">${segment}</div>` : `<div class="expense-mine-summary">${escapeHtml(t(lang, "mineSummary", { count: rows.length }))}</div>`}
     ${renderStats(rows, helpers)}
     ${renderTable(rows, helpers)}
@@ -412,12 +427,39 @@ function closeModal() {
   rerender();
 }
 
-function findLocalRow(id) {
-  return state.rows.find((row) => row.id === id && row.local);
+function findExpenseRow(id) {
+  return state.rows.find((row) => row.id === id) ?? null;
+}
+
+function replaceExpenseRow(row, nextRow) {
+  const normalized = normalizeExpenseRows([{ ...nextRow, employee: row.employee, local: false }])[0];
+  state.rows = state.rows.map((item) => item.id === row.id ? normalized : item);
+}
+
+async function performLiveExpenseWrite(operation, applyResult) {
+  const mountId = activeMountId;
+  const scope = activeScope;
+  state.writeBusy = true;
+  state.actionError = "";
+  rerender();
+  try {
+    const result = await operation();
+    if (!isCurrentExpenseMount(mountId, scope)) return;
+    applyResult(result);
+  } catch (error) {
+    if (!isCurrentExpenseMount(mountId, scope)) return;
+    console.warn("Expense action failed", error);
+    state.actionError = "actionFailed";
+  } finally {
+    if (!isCurrentExpenseMount(mountId, scope)) return;
+    state.writeBusy = false;
+    rerender();
+  }
 }
 
 async function onExpenseClick(event) {
   if (liveReadOnly && event.target.closest("[data-expense-write]")) return;
+  if (state.writeBusy && event.target.closest("[data-expense-write]")) return;
   if (state.writeBusy && event.target.closest("[data-expense-create-write]")) return;
   const filter = event.target.closest("[data-expense-filter]");
   if (filter) {
@@ -429,6 +471,7 @@ async function onExpenseClick(event) {
   if (event.target.closest("[data-expense-new]")) {
     state.draft = blankDraft();
     state.error = "";
+    state.actionError = "";
     rerender();
     return;
   }
@@ -465,44 +508,64 @@ async function onExpenseClick(event) {
   }
   const approve = event.target.closest("[data-expense-approve]");
   if (approve) {
-    const row = findLocalRow(approve.getAttribute("data-expense-approve"));
-    if (row) {
-      row.status = "approved";
-      row.rejectReason = "";
-      rerender();
+    const row = findExpenseRow(approve.getAttribute("data-expense-approve"));
+    if (row && isAdmin && row.status === "pending") {
+      if (authenticated) {
+        await performLiveExpenseWrite(() => approveLiveExpense(row.id), (result) => replaceExpenseRow(row, result));
+      } else {
+        state.actionError = "";
+        row.status = "approved";
+        row.rejectReason = "";
+        rerender();
+      }
     }
     return;
   }
   const reject = event.target.closest("[data-expense-reject]");
   if (reject) {
-    const row = findLocalRow(reject.getAttribute("data-expense-reject"));
-    if (!row) return;
+    const row = findExpenseRow(reject.getAttribute("data-expense-reject"));
+    if (!row || !isAdmin || row.status !== "pending") return;
     const reason = window.prompt(t(currentHelpers?.lang ?? "zh", "rejectReason"), row.rejectReason);
     if (reason !== null) {
-      row.status = "rejected";
-      row.paid = false;
-      row.rejectReason = reason.trim();
-      rerender();
+      if (authenticated) {
+        await performLiveExpenseWrite(() => rejectLiveExpense(row.id, reason), (result) => replaceExpenseRow(row, result));
+      } else {
+        state.actionError = "";
+        row.status = "rejected";
+        row.paid = false;
+        row.rejectReason = reason.trim();
+        rerender();
+      }
     }
     return;
   }
   const pay = event.target.closest("[data-expense-pay]");
   if (pay) {
-    const row = findLocalRow(pay.getAttribute("data-expense-pay"));
-    if (row && row.status === "approved") {
-      row.paid = true;
-      rerender();
+    const row = findExpenseRow(pay.getAttribute("data-expense-pay"));
+    if (row && isAdmin && row.status === "approved" && !row.paid) {
+      if (authenticated) {
+        await performLiveExpenseWrite(() => markLiveExpensePaid(row.id), (result) => replaceExpenseRow(row, result));
+      } else {
+        state.actionError = "";
+        row.paid = true;
+        rerender();
+      }
     }
     return;
   }
   const remove = event.target.closest("[data-expense-delete]");
-  if (remove && await confirmInPage(t(currentHelpers?.lang ?? "zh", "deleteConfirm"), { danger: true })) {
+  const removeRow = remove ? findExpenseRow(remove.getAttribute("data-expense-delete")) : null;
+  const canDelete = removeRow && (isAdmin || (removeRow.employeeId === ownerKey && removeRow.status === "pending"));
+  if (canDelete && await confirmInPage(t(currentHelpers?.lang ?? "zh", "deleteConfirm"), { danger: true })) {
     if (!activeScope?.isCurrent()) return;
-    const id = remove.getAttribute("data-expense-delete");
-    const row = findLocalRow(id);
-    if (row) {
-      revokeReceipts(row.receipts);
-      state.rows = state.rows.filter((item) => item.id !== id);
+    if (authenticated) {
+      await performLiveExpenseWrite(() => deleteLiveExpense(removeRow.id), () => {
+        state.rows = state.rows.filter((item) => item.id !== removeRow.id);
+      });
+    } else {
+      state.actionError = "";
+      revokeReceipts(removeRow.receipts);
+      state.rows = state.rows.filter((item) => item.id !== removeRow.id);
       rerender();
     }
   }
@@ -619,8 +682,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
   unread = nextUnread;
   authenticated = typeof currentUser?.hasPermission === "function";
   isAdmin = !authenticated || currentUser?.isBfAdmin === true;
-  liveReadOnly = authenticated;
-  localWriteAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
+  liveReadOnly = false;
   ownerKey = String(currentUser.employeeId || currentUser.email || currentUser.name || "");
   const restoredFilter = filters.includes(historyState?.filter) ? historyState.filter : isAdmin ? "pending" : "mine";
   state = {
@@ -628,6 +690,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
     filter: isAdmin ? restoredFilter : "mine",
     draft: null,
     error: "",
+    actionError: "",
     writeBusy: false
   };
 

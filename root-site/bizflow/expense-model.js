@@ -38,7 +38,7 @@ export function normalizeExpenseRows(items) {
     status: ["pending", "approved", "rejected"].includes(item.status) ? item.status : "pending",
     paid: item.paid === true,
     rejectReason: String(item.rejectReason ?? item.reject_reason ?? ""),
-    local: false
+    local: item.local === true
   }));
 }
 
