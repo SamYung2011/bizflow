@@ -16,6 +16,11 @@
       "shell.close": "\u95DC\u9589",
       "shell.menu": "\u9078\u55AE",
       "shell.add": "\u65B0\u589E",
+      "quickCreate.title": "\u5FEB\u901F\u65B0\u589E",
+      "quickCreate.task": "\u65B0\u589E\u4EFB\u52D9",
+      "quickCreate.order": "\u65B0\u5EFA\u8A02\u55AE",
+      "quickCreate.customer": "\u65B0\u589E\u5BA2\u6236",
+      "quickCreate.close": "\u95DC\u9589\u5FEB\u901F\u65B0\u589E",
       "nav.home": "\u4E3B\u9801",
       "nav.tasks": "\u4EFB\u52D9\u7BA1\u7406",
       "nav.team": "\u5718\u968A\u6210\u54E1",
@@ -75,6 +80,11 @@
       "shell.close": "Close",
       "shell.menu": "Menu",
       "shell.add": "Add",
+      "quickCreate.title": "Quick create",
+      "quickCreate.task": "New task",
+      "quickCreate.order": "New order",
+      "quickCreate.customer": "Add customer",
+      "quickCreate.close": "Close quick create",
       "nav.home": "Home",
       "nav.tasks": "Task management",
       "nav.team": "Team members",
@@ -134,6 +144,11 @@
       "shell.close": "Fermer",
       "shell.menu": "Menu",
       "shell.add": "Ajouter",
+      "quickCreate.title": "Cr\xE9ation rapide",
+      "quickCreate.task": "Nouvelle t\xE2che",
+      "quickCreate.order": "Nouvelle commande",
+      "quickCreate.customer": "Ajouter un client",
+      "quickCreate.close": "Fermer la cr\xE9ation rapide",
       "nav.home": "Accueil",
       "nav.tasks": "Gestion des t\xE2ches",
       "nav.team": "Membres \xE9quipe",
@@ -784,6 +799,8 @@
     ordersSearch: "task-platform.orders.initialSearch",
     inventorySearch: "task-platform.inventory.initialSearch",
     customersTab: "task-platform.customers.initialTab",
+    customersAdd: "task-platform.customers.openAdd",
+    taskCreate: "task-platform.tasks.openCreate",
     warrantySearch: "task-platform.customers.initialWarrantySearch"
   });
   var allowedPresetKeys = new Set(Object.values(navigationPresetKeys));
@@ -991,6 +1008,142 @@
     }));
   }
 
+  // root-site/components/quick-create.js
+  var ACTIONS = Object.freeze({
+    task: {
+      href: "/team/index.html",
+      labelKey: "quickCreate.task",
+      icon: "icon-nav-task",
+      preset: [navigationPresetKeys.taskCreate, "1"]
+    },
+    order: {
+      href: "/bizflow/orders-create.html",
+      labelKey: "quickCreate.order",
+      icon: "icon-nav-list"
+    },
+    customer: {
+      href: "/bizflow/customers.html",
+      labelKey: "quickCreate.customer",
+      icon: "icon-nav-user",
+      preset: [navigationPresetKeys.customersAdd, "1"]
+    }
+  });
+  function availableQuickCreateActions(user) {
+    const authenticated = typeof user?.hasPermission === "function";
+    const canCreateTask = !authenticated || user.hasPermission("can_create_task");
+    const canUseBizflow = !authenticated || user.isBfAdmin === true || user.bizflowMainAccess === true;
+    return [
+      ...canCreateTask ? ["task"] : [],
+      ...canUseBizflow ? ["order", "customer"] : []
+    ];
+  }
+  function attachQuickCreate({ root: root2, getUser, t: t2, icon: icon3, escapeHtml: escapeHtml3, onOpen } = {}) {
+    let panel = null;
+    let returnFocus = null;
+    function close({ restoreFocus = true } = {}) {
+      panel?.remove();
+      panel = null;
+      document.querySelectorAll("[data-quick-create-open]").forEach((trigger) => trigger.setAttribute("aria-expanded", "false"));
+      if (restoreFocus && returnFocus?.isConnected) requestAnimationFrame(() => returnFocus.focus());
+      returnFocus = null;
+    }
+    function position(anchor) {
+      const menu = panel?.querySelector("[data-quick-create-menu]");
+      if (!menu || matchMedia("(max-width: 768px)").matches) return;
+      const rect = anchor.getBoundingClientRect();
+      const width = menu.offsetWidth;
+      const height = menu.offsetHeight;
+      const gap = 10;
+      const left = Math.min(Math.max(gap, rect.left), window.innerWidth - width - gap);
+      const below = rect.bottom + gap;
+      const top = below + height <= window.innerHeight - gap ? below : Math.max(gap, rect.top - height - gap);
+      menu.style.left = `${left}px`;
+      menu.style.top = `${top}px`;
+    }
+    function render2(anchor, actionKeys) {
+      const items = actionKeys.map((key) => {
+        const action = ACTIONS[key];
+        const label = t2(action.labelKey);
+        return `<a class="quick-create__item" href="${escapeHtml3(action.href)}" data-quick-create-action="${escapeHtml3(key)}" role="menuitem" title="${escapeHtml3(label)}">
+        ${icon3(action.icon, "icon")}
+        <span>${escapeHtml3(label)}</span>
+      </a>`;
+      }).join("");
+      root2.insertAdjacentHTML("beforeend", `<div class="quick-create" data-quick-create-portal>
+      <button type="button" class="quick-create__overlay" data-quick-create-close tabindex="-1" aria-label="${escapeHtml3(t2("quickCreate.close"))}"></button>
+      <section class="tp-component quick-create__menu" data-quick-create-menu role="menu" aria-label="${escapeHtml3(t2("quickCreate.title"))}">
+        <header><strong>${escapeHtml3(t2("quickCreate.title"))}</strong><button type="button" data-quick-create-close aria-label="${escapeHtml3(t2("quickCreate.close"))}">\xD7</button></header>
+        <div>${items}</div>
+      </section>
+    </div>`);
+      panel = root2.querySelector("[data-quick-create-portal]");
+      position(anchor);
+      requestAnimationFrame(() => panel?.querySelector("[data-quick-create-action]")?.focus());
+    }
+    function open(anchor) {
+      const actionKeys = availableQuickCreateActions(getUser?.());
+      if (!anchor || !actionKeys.length) return;
+      if (panel && returnFocus === anchor) {
+        close();
+        return;
+      }
+      close({ restoreFocus: false });
+      onOpen?.();
+      returnFocus = anchor;
+      anchor.setAttribute("aria-expanded", "true");
+      render2(anchor, actionKeys);
+    }
+    function onClick(event) {
+      const trigger = event.target.closest("[data-quick-create-open]");
+      if (trigger) {
+        event.preventDefault();
+        open(trigger);
+        return;
+      }
+      const actionLink = event.target.closest("[data-quick-create-action]");
+      if (actionLink) {
+        const action = ACTIONS[actionLink.getAttribute("data-quick-create-action")];
+        if (action?.preset) setNavigationPreset(...action.preset);
+        close({ restoreFocus: false });
+        return;
+      }
+      if (event.target.closest("[data-quick-create-close]") || panel && !event.target.closest("[data-quick-create-menu]")) close();
+    }
+    function onKeydown(event) {
+      if (!panel) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const controls = [...panel.querySelectorAll("a[href], button:not([disabled])")].filter((element) => element.tabIndex >= 0);
+      if (!controls.length) return;
+      const first = controls[0];
+      const last = controls.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    function onResize() {
+      if (!panel || !returnFocus?.isConnected) return;
+      position(returnFocus);
+    }
+    document.addEventListener("click", onClick);
+    document.addEventListener("keydown", onKeydown);
+    window.addEventListener("resize", onResize);
+    return Object.freeze({ close, dispose() {
+      close({ restoreFocus: false });
+      document.removeEventListener("click", onClick);
+      document.removeEventListener("keydown", onKeydown);
+      window.removeEventListener("resize", onResize);
+    } });
+  }
+
   // root-site/shell/shell.js
   var iconsUrl2 = "../assets/icons/icons.svg";
   var root = document.getElementById("shell-root");
@@ -1016,6 +1169,7 @@
   var authApi = null;
   var authSubscription = null;
   var lastResumeRefreshAt = 0;
+  var quickCreate = null;
   var defaultMenuPath = document.body.dataset.shellPreview === "true" ? "/bizflow/home.html" : window.location.pathname;
   var defaultMenu = createRouteMenu(defaultMenuPath);
   var pageContext = {
@@ -1190,8 +1344,8 @@
   }
   function renderAddRow() {
     const user = state2.profileUser ?? pageContext.data.user;
-    const liveReadOnly = typeof user?.hasPermission === "function";
-    return `<button type="button" class="tp-component add-row shell-add-row" aria-label="${escapeHtml2(t("shell.add"))}"${liveReadOnly ? ' disabled aria-disabled="true"' : ""}>
+    if (!availableQuickCreateActions(user).length) return "";
+    return `<button type="button" class="tp-component add-row shell-add-row" data-quick-create-open aria-haspopup="menu" aria-expanded="false" aria-label="${escapeHtml2(t("shell.add"))}">
     ${icon2("icon-add-surface-add")}
   </button>`;
   }
@@ -1333,6 +1487,7 @@
   }
   function closeTransientShellUi() {
     state2.drawerOpen = false;
+    quickCreate?.close({ restoreFocus: false });
     root.querySelectorAll(".menu-popover--open").forEach((popover) => popover.classList.remove("menu-popover--open"));
     root.querySelectorAll("[data-menu-trigger]").forEach((trigger) => trigger.setAttribute("aria-expanded", "false"));
   }
@@ -1410,6 +1565,17 @@
   });
   function attachShellBehaviors() {
     attachGlobalSearch(root);
+    quickCreate = attachQuickCreate({
+      root,
+      getUser: () => state2.profileUser ?? pageContext.data.user,
+      t,
+      icon: icon2,
+      escapeHtml: escapeHtml2,
+      onOpen() {
+        state2.drawerOpen = false;
+        syncShellState();
+      }
+    });
     window.addEventListener("tp:unread-change", refreshUnreadIndicators);
     window.addEventListener("storage", (event) => {
       if (event.key !== READ_STATE_STORAGE_KEY) return;

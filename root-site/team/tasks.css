@@ -661,6 +661,11 @@
   color: var(--gray-15);
 }
 
+.team-kanban-column__footer {
+  display: grid;
+  gap: var(--space-10);
+}
+
 /* 筛选后无卡片的列(如「已完成」库无数据):如实空态,不编数据 */
 .team-kanban-empty {
   margin: 0;
@@ -682,6 +687,7 @@
   width: 40px;
   height: 40px;
   align-self: center;
+  justify-self: center;
   align-items: center;
   justify-content: center;
   flex-direction: column;
@@ -690,6 +696,17 @@
   background: var(--white);
   color: var(--gray-60);
   box-shadow: 0 4px 5px rgba(0, 0, 0, .1);
+}
+
+.team-column-expand--open {
+  transform: rotate(180deg);
+}
+
+.team-column-expand:focus-visible,
+.team-column-add:focus-visible,
+.team-member-add:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
 }
 
 .team-column-expand .icon {
@@ -1066,6 +1083,54 @@
   border: var(--task-detail-border-width) solid var(--gray-15);
   border-radius: var(--radius-20);
   background: var(--white);
+  cursor: pointer;
+}
+
+.chat-bubble__menu:focus-visible,
+.chat-bubble__menu-popover button:focus-visible,
+.task-detail__feedback-edit button:focus-visible,
+.task-detail__feedback-edit textarea:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+.chat-bubble__menu-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.chat-bubble__menu-popover {
+  position: absolute;
+  z-index: 12;
+  top: calc(100% + var(--space-4));
+  right: 0;
+  display: flex;
+  min-width: 112px;
+  flex-direction: column;
+  padding: var(--space-4);
+  border: var(--task-detail-border-width) solid var(--gray-15);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  box-shadow: 0 var(--space-10) var(--space-40) color-mix(in srgb, var(--gray-80) 18%, transparent);
+}
+
+.chat-bubble__menu-popover button {
+  padding: var(--space-10);
+  border: 0;
+  border-radius: var(--radius-10);
+  background: transparent;
+  color: var(--gray-80);
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-bubble__menu-popover button:hover {
+  background: var(--gray-5);
+}
+
+.chat-bubble__menu-popover button.is-danger {
+  color: var(--red);
 }
 
 .chat-bubble__menu span {
@@ -1087,6 +1152,51 @@
   line-height: var(--lh-body);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.task-detail__feedback-edit {
+  display: flex;
+  width: min(100%, var(--task-detail-bubble-max-width));
+  flex-direction: column;
+  gap: var(--space-10);
+}
+
+.task-detail__feedback-edit textarea {
+  width: 100%;
+  min-height: 92px;
+  padding: var(--space-10);
+  resize: vertical;
+  border: var(--task-detail-border-width) solid var(--gray-15);
+  border-radius: var(--radius-10);
+  color: var(--black);
+  font: inherit;
+}
+
+.task-detail__feedback-edit > p {
+  margin: 0;
+  color: var(--red);
+  font-size: var(--font-description-size);
+}
+
+.task-detail__feedback-edit footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-10);
+}
+
+.task-detail__feedback-edit button {
+  min-height: var(--space-40);
+  padding: 0 var(--space-10);
+  border: 0;
+  border-radius: var(--radius-20);
+  background: var(--gray-10);
+  color: var(--gray-80);
+  cursor: pointer;
+}
+
+.task-detail__feedback-edit button[type="submit"] {
+  background: var(--blue);
+  color: var(--white);
 }
 
 .task-detail__attachment-count {

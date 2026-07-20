@@ -6,6 +6,8 @@ export const navigationPresetKeys = Object.freeze({
   ordersSearch: "task-platform.orders.initialSearch",
   inventorySearch: "task-platform.inventory.initialSearch",
   customersTab: "task-platform.customers.initialTab",
+  customersAdd: "task-platform.customers.openAdd",
+  taskCreate: "task-platform.tasks.openCreate",
   warrantySearch: "task-platform.customers.initialWarrantySearch"
 });
 

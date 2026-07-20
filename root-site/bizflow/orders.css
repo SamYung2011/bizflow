@@ -1093,6 +1093,111 @@ button.order-card__phone:focus-visible {
   height: 16px;
 }
 
+.orders-free-select--readonly {
+  justify-content: center;
+}
+
+.orders-free-select:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+.shipping-fee-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+}
+
+.shipping-fee-panel__overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  border: 0;
+  background: transparent;
+}
+
+.shipping-fee-panel__dialog {
+  position: fixed;
+  z-index: 1;
+  display: flex;
+  width: 320px;
+  flex-direction: column;
+  gap: var(--space-10);
+  padding: var(--space-20);
+  border: 1px solid var(--gray-10);
+  border-radius: var(--radius-20);
+  background: var(--white);
+  box-shadow: 0 4px 5px rgba(0, 0, 0, .15), 0 10px 30px rgba(0, 0, 0, .12);
+}
+
+.shipping-fee-panel__dialog header,
+.shipping-fee-panel__dialog footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-10);
+}
+
+.shipping-fee-panel__dialog header > button {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-40);
+  background: transparent;
+  color: var(--gray-40);
+  font-size: 24px;
+}
+
+.shipping-fee-panel__choice {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-10);
+  padding: 0 var(--space-10);
+  border: 1px solid var(--gray-10);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  color: var(--gray-60);
+  text-align: left;
+}
+
+.shipping-fee-panel__choice.is-selected {
+  border-color: var(--blue);
+  background: var(--gray-5);
+  color: var(--blue);
+}
+
+.shipping-fee-panel__amount {
+  display: grid;
+  gap: var(--space-4);
+  color: var(--gray-60);
+}
+
+.shipping-fee-panel__amount > span:last-child {
+  display: flex;
+  height: 40px;
+  align-items: center;
+  gap: var(--space-10);
+  padding: 0 var(--space-10);
+  border: 1px solid var(--gray-15);
+  border-radius: var(--radius-10);
+}
+
+.shipping-fee-panel__amount input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  font: inherit;
+}
+
+.shipping-fee-panel__dialog button:focus-visible,
+.shipping-fee-panel__amount > span:focus-within {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
 .orders-figma-check {
   display: inline-flex;
   min-width: 0;
@@ -1916,6 +2021,22 @@ button.order-card__phone:focus-visible {
 }
 
 @media (max-width: 768px) {
+  .shipping-fee-panel__overlay {
+    background: rgba(0, 0, 0, .4);
+  }
+
+  .shipping-fee-panel__dialog {
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    padding-bottom: calc(var(--space-20) + env(safe-area-inset-bottom));
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: var(--radius-20) var(--radius-20) 0 0;
+  }
+
   .orders-workspace[data-orders-create-page] {
     --orders-create-mobile-quantity-column: 40px; /* Figma 619:52976 数量输入宽，无对应 token。 */
     --orders-create-mobile-price-column: 78px; /* Figma 619:52976 金额列实测宽，无对应 token。 */

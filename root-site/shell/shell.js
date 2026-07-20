@@ -4,6 +4,7 @@ import { renderLanguageMenu, renderUserPanel, attachMenuBehaviors } from "../com
 import { attachGlobalSearch, renderGlobalSearch } from "./shell-search.js";
 import { READ_STATE_STORAGE_KEY } from "../data/read-state.js";
 import { createRouteMenu } from "../spa/route-menu.js";
+import { attachQuickCreate, availableQuickCreateActions } from "../components/quick-create.js";
 
 const iconsUrl = "../assets/icons/icons.svg";
 const root = document.getElementById("shell-root");
@@ -31,6 +32,7 @@ const state = {
 let authApi = null;
 let authSubscription = null;
 let lastResumeRefreshAt = 0;
+let quickCreate = null;
 
 const defaultMenuPath = document.body.dataset.shellPreview === "true"
   ? "/bizflow/home.html"
@@ -260,8 +262,8 @@ function renderNav() {
 
 function renderAddRow() {
   const user = state.profileUser ?? pageContext.data.user;
-  const liveReadOnly = typeof user?.hasPermission === "function";
-  return `<button type="button" class="tp-component add-row shell-add-row" aria-label="${escapeHtml(t("shell.add"))}"${liveReadOnly ? " disabled aria-disabled=\"true\"" : ""}>
+  if (!availableQuickCreateActions(user).length) return "";
+  return `<button type="button" class="tp-component add-row shell-add-row" data-quick-create-open aria-haspopup="menu" aria-expanded="false" aria-label="${escapeHtml(t("shell.add"))}">
     ${icon("icon-add-surface-add")}
   </button>`;
 }
@@ -417,6 +419,7 @@ async function refreshUnreadIndicators(event) {
 
 function closeTransientShellUi() {
   state.drawerOpen = false;
+  quickCreate?.close({ restoreFocus: false });
   root.querySelectorAll(".menu-popover--open").forEach((popover) => popover.classList.remove("menu-popover--open"));
   root.querySelectorAll("[data-menu-trigger]").forEach((trigger) => trigger.setAttribute("aria-expanded", "false"));
 }
@@ -501,6 +504,17 @@ document.addEventListener("submit", async (event) => {
 
 function attachShellBehaviors() {
   attachGlobalSearch(root);
+  quickCreate = attachQuickCreate({
+    root,
+    getUser: () => state.profileUser ?? pageContext.data.user,
+    t,
+    icon,
+    escapeHtml,
+    onOpen() {
+      state.drawerOpen = false;
+      syncShellState();
+    }
+  });
   window.addEventListener("tp:unread-change", refreshUnreadIndicators);
   window.addEventListener("storage", (event) => {
     if (event.key !== READ_STATE_STORAGE_KEY) return;

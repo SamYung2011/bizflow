@@ -20,6 +20,9 @@ const dict = {
     "home.viewAll": "查看全部 →",
     "home.myTasks": "我的任務",
     "home.filter.inProgress": "正在進行",
+    "home.filter.completed": "已完成",
+    "home.filter.abandoned": "已放棄",
+    "home.filter.all": "全部",
     "home.tasks.empty": "暫無任務",
     "home.teamFeed": "團隊動態",
     "home.feed.posted": "發布了新任務",
@@ -56,6 +59,9 @@ const dict = {
     "home.viewAll": "View all →",
     "home.myTasks": "My tasks",
     "home.filter.inProgress": "In progress",
+    "home.filter.completed": "Completed",
+    "home.filter.abandoned": "Abandoned",
+    "home.filter.all": "All",
     "home.tasks.empty": "No tasks",
     "home.teamFeed": "Team activity",
     "home.feed.posted": "posted a new task",
@@ -92,6 +98,9 @@ const dict = {
     "home.viewAll": "Tout voir →",
     "home.myTasks": "Mes tâches",
     "home.filter.inProgress": "En cours",
+    "home.filter.completed": "Terminées",
+    "home.filter.abandoned": "Abandonnées",
+    "home.filter.all": "Toutes",
     "home.tasks.empty": "Aucune tâche",
     "home.teamFeed": "Activité de l'équipe",
     "home.feed.posted": "a publié une nouvelle tâche",
@@ -118,6 +127,7 @@ import { renderBarChart } from "../components/bar-chart.js";
 import { aggregateInventoryStock, aggregateRevenue, aggregateShippingCounts } from "../components/order-metrics.js";
 import { navigationPresetKeys, setNavigationPreset } from "../components/navigation-presets.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
+import { availableQuickCreateActions } from "../components/quick-create.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 
 let data = null;
@@ -125,15 +135,21 @@ let revenueMetrics = null;
 let shippingMetrics = null;
 let inventoryMetrics = null;
 let showRevenue = true;
+let homeCurrentUser = null;
+let homeTaskFilter = "inProgress";
+let homeTaskFilterOpen = false;
+let homeHelpers = null;
+let activeScope = null;
+
+const HOME_TASK_FILTERS = ["inProgress", "completed", "abandoned", "all"];
 
 const STAT_TONE_CLASS = { "": "", blue: "board-card--blue", green: "board-card--green", yellow: "board-card--yellow" };
 
 export function renderHome({ icon, escapeHtml, lang }) {
+  homeHelpers = { icon, escapeHtml, lang };
   const th = (key) => dict[lang]?.[key] ?? dict.zh[key] ?? key;
   const thOpt = (key) => dict[lang]?.[key] ?? dict.zh[key] ?? null; // 缺词条=不渲染,禁露 key
   const e = escapeHtml;
-  // TODO: 新增流程定稿后，FAB 与页尾新增卡接同一动作；当前依基准保持静态入口。
-
   const replace = (template, values) => Object.entries(values).reduce((text, [key, value]) => text.replace(`{${key}}`, String(value)), template);
   const money = (value) => `HKD$ ${Math.round(Number(value) || 0).toLocaleString("en-US")}`;
   const month = new Intl.DateTimeFormat(lang === "zh" ? "zh-HK" : lang, { year: "numeric", month: "2-digit", timeZone: "Asia/Hong_Kong" }).format(new Date());
@@ -158,6 +174,12 @@ export function renderHome({ icon, escapeHtml, lang }) {
       </div>
       ${count > 0 ? `<span class="tp-pill tp-pill--red">${count}</span>` : ""}
     </article>`;
+
+  const filteredTasks = (data.tasks ?? [])
+    .filter((task) => homeTaskFilter === "all" || (task.status ?? "inProgress") === homeTaskFilter)
+    .slice(0, 4);
+  const taskFilterOptions = HOME_TASK_FILTERS.map((key) => `<button type="button" class="dropdown-item${homeTaskFilter === key ? " dropdown-item--selected" : ""}" role="option" aria-selected="${homeTaskFilter === key}" data-home-task-filter-option="${key}">${e(th(`home.filter.${key}`))}</button>`).join("");
+  const hasQuickCreate = availableQuickCreateActions(homeCurrentUser).length > 0;
 
   const feedRow = ({ name, action, title, date, time, avatar }) => `
     <div class="home-feed-row">
@@ -233,12 +255,15 @@ export function renderHome({ icon, escapeHtml, lang }) {
       <section class="home-card">
         <div class="home-card__head">
           <h2 class="home-card__title">${e(th("home.myTasks"))}</h2>
-          <div class="tp-component select" style="--component-width:110px;--component-height:40px">
-            <span class="tp-line">${e(th("home.filter.inProgress"))}</span>
-            ${icon("icon-arrow-down", "icon icon--sm")}
-          </div>
+          <span class="menu-anchor home-task-filter" data-home-task-filter>
+            <button type="button" class="tp-component select" style="--component-width:130px;--component-height:40px" data-home-task-filter-trigger aria-haspopup="listbox" aria-expanded="${homeTaskFilterOpen}">
+              <span class="tp-line">${e(th(`home.filter.${homeTaskFilter}`))}</span>
+              ${icon("icon-arrow-down", "icon icon--sm")}
+            </button>
+            <div class="tp-component menu-popover menu-popover--start home-task-filter__menu${homeTaskFilterOpen ? " menu-popover--open" : ""}" data-home-task-filter-menu role="listbox">${taskFilterOptions}</div>
+          </span>
         </div>
-        <div class="home-card__list">${data.tasks.length ? data.tasks.map(taskItem).join("") : `<div class="tp-muted">${e(th("home.tasks.empty"))}</div>`}</div>
+        <div class="home-card__list">${filteredTasks.length ? filteredTasks.map(taskItem).join("") : `<div class="tp-muted">${e(th("home.tasks.empty"))}</div>`}</div>
       </section>
 
       <section class="home-card" id="team-activity" data-home-team-activity>
@@ -291,17 +316,39 @@ export function renderHome({ icon, escapeHtml, lang }) {
             <span class="home-line-row__meta"><span>${e(date)}</span></span>
           </div>`).join("")}</div>
       </section>` : ""}
-      <section class="home-card home-add-card">
+      ${hasQuickCreate ? `<button type="button" class="home-card home-add-card" data-quick-create-open aria-haspopup="menu" aria-expanded="false" aria-label="${e(th("home.add"))}">
         ${icon("icon-add-surface-add")}
-      </section>
+      </button>` : ""}
     </div>
-    <button type="button" class="tp-component fab home-fab" style="--component-width:40px;--component-height:40px" aria-label="${e(th("home.add"))}" title="${e(th("home.add"))}">
+    ${hasQuickCreate ? `<button type="button" class="tp-component fab home-fab" data-quick-create-open aria-haspopup="menu" aria-expanded="false" style="--component-width:40px;--component-height:40px" aria-label="${e(th("home.add"))}" title="${e(th("home.add"))}">
       ${icon("icon-add-line-add", "icon")}
-    </button>
+    </button>` : ""}
   </div>`;
 }
 
+function rerenderHome({ focusTaskFilter = false } = {}) {
+  const page = document.querySelector(".home-page");
+  if (!page || !homeHelpers) return;
+  page.outerHTML = renderHome(homeHelpers);
+  if (focusTaskFilter) document.querySelector("[data-home-task-filter-trigger]")?.focus();
+}
+
 function onHomeClick(event) {
+  const taskFilterTrigger = event.target.closest("[data-home-task-filter-trigger]");
+  if (taskFilterTrigger) {
+    homeTaskFilterOpen = !homeTaskFilterOpen;
+    rerenderHome();
+    if (homeTaskFilterOpen) activeScope?.animationFrame(() => document.querySelector(`[data-home-task-filter-option="${CSS.escape(homeTaskFilter)}"]`)?.focus());
+    return;
+  }
+  const taskFilterOption = event.target.closest("[data-home-task-filter-option]");
+  if (taskFilterOption) {
+    const nextFilter = taskFilterOption.getAttribute("data-home-task-filter-option");
+    if (HOME_TASK_FILTERS.includes(nextFilter)) homeTaskFilter = nextFilter;
+    homeTaskFilterOpen = false;
+    rerenderHome({ focusTaskFilter: true });
+    return;
+  }
   const preset = event.target.closest("[data-home-preset]")?.getAttribute("data-home-preset");
   if (preset === "orders-revenue") setNavigationPreset(navigationPresetKeys.ordersTab, "revenue");
   if (preset === "customers-warranty") setNavigationPreset(navigationPresetKeys.customersTab, "warranty");
@@ -318,16 +365,27 @@ function onHomeClick(event) {
   }
 
   if (event.target.closest("[data-home-members]")) window.location.href = "../team/members.html";
+  if (homeTaskFilterOpen && !event.target.closest("[data-home-task-filter]")) {
+    homeTaskFilterOpen = false;
+    rerenderHome();
+  }
 }
 
 function onHomeKeydown(event) {
+  if (event.key === "Escape" && homeTaskFilterOpen) {
+    event.preventDefault();
+    homeTaskFilterOpen = false;
+    rerenderHome({ focusTaskFilter: true });
+    return;
+  }
   if ((event.key === "Enter" || event.key === " ") && event.target.closest("[data-home-members]")) {
     event.preventDefault();
     window.location.href = "../team/members.html";
   }
 }
 
-export async function mountPage({ scope, signal }) {
+export async function mountPage({ scope, signal, historyState = null }) {
+  activeScope = scope;
   // 数据全走接口层(煊煊 2026-07-08:不写死样板,留好数据接口)
   const [homeData, orderMetricRows, inventoryMetricProducts, warrantyData, customerData, currentUser, unread, unreadWatermarks] = await Promise.all([
     getHomeData(),
@@ -362,6 +420,9 @@ export async function mountPage({ scope, signal }) {
   shippingMetrics = orderMetricRows ? aggregateShippingCounts(orderMetricRows) : null;
   inventoryMetrics = inventoryMetricProducts ? aggregateInventoryStock(inventoryMetricProducts) : null;
   showRevenue = currentUser?.canViewRevenue !== false;
+  homeCurrentUser = currentUser;
+  homeTaskFilter = HOME_TASK_FILTERS.includes(historyState?.taskFilter) ? historyState.taskFilter : "inProgress";
+  homeTaskFilterOpen = false;
 
   data.stock.map((item) => item.image).filter(Boolean).forEach((src) => {
     const image = new Image();
@@ -414,12 +475,16 @@ export async function mountPage({ scope, signal }) {
       });
       scope.listen(document, "visibilitychange", syncMessageRead);
     },
-    captureState: () => null,
+    captureState: () => ({ taskFilter: homeTaskFilter }),
     dispose() {
       data = null;
       revenueMetrics = null;
       shippingMetrics = null;
       inventoryMetrics = null;
+      homeCurrentUser = null;
+      homeHelpers = null;
+      homeTaskFilterOpen = false;
+      if (activeScope === scope) activeScope = null;
     }
   };
 }

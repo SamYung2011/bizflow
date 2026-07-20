@@ -179,6 +179,24 @@
   margin-bottom: var(--space-20);
 }
 
+.home-task-filter__menu {
+  width: 180px;
+  padding: var(--space-10);
+  border-radius: var(--radius-20);
+  background: var(--white);
+  box-shadow: 0 4px 5px rgba(0, 0, 0, .15), 0 10px 30px rgba(0, 0, 0, .08);
+}
+
+.home-task-filter__menu .dropdown-item {
+  width: 100%;
+  min-height: 39px;
+}
+
+.home-task-filter__menu .dropdown-item--selected {
+  background: var(--blue);
+  color: var(--white);
+}
+
 .home-card__title {
   margin: 0;
   font-size: var(--font-title-2-size);
@@ -499,6 +517,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+}
+
+.home-add-card:focus-visible {
+  outline: var(--home-focus-ring-width) solid var(--blue);
+  outline-offset: 2px;
 }
 
 .home-add-card .icon {

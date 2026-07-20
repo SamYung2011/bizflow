@@ -381,9 +381,11 @@ function closeAllFilterMenus(except) {
   });
 }
 
-function rerenderCustomersPage() {
+function rerenderCustomersPage({ focusModal = false, restoreAddFocus = false } = {}) {
   const page = document.querySelector(".customers-page");
   if (page && currentHelpers) page.outerHTML = renderCustomers(currentHelpers);
+  if (focusModal) document.querySelector('[data-customers-modal-overlay] [data-new-customer-field="name"]')?.focus();
+  if (restoreAddFocus) document.querySelector("[data-customers-modal-open]")?.focus();
 }
 
 function setCustomerNotice(message, type = "error") {
@@ -404,7 +406,7 @@ function closeAddCustomerModal() {
   state.modalOpen = false;
   state.customerDraft = {};
   setCustomerNotice("");
-  rerenderCustomersPage();
+  rerenderCustomersPage({ restoreAddFocus: true });
 }
 
 function fallbackCreatedCustomer(result) {
@@ -562,7 +564,7 @@ async function onCustomersClick(event) {
     state.modalOpen = true;
     state.customerDraft = {};
     setCustomerNotice("");
-    rerenderCustomersPage();
+    rerenderCustomersPage({ focusModal: true });
     return;
   }
 
@@ -669,6 +671,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
     if (activeScope === scope) disposeWarrantyState();
   });
   const presetTab = consumeNavigationPreset(navigationPresetKeys.customersTab);
+  const presetAdd = consumeNavigationPreset(navigationPresetKeys.customersAdd) === "1";
   const presetWarrantySearch = consumeNavigationPreset(navigationPresetKeys.warrantySearch) ?? "";
   const [nextData, nextCurrentUser, nextUnread] = await Promise.all([getCustomersPageData(), getCurrentUser(), getUnread()]);
   throwIfPageAborted(signal, scope);
@@ -680,6 +683,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
   liveReadOnly = liveMode && !liveWritable;
   writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
   state = restoredState(historyState, presetTab);
+  if (!historyState && presetAdd && !liveReadOnly) state.modalOpen = true;
   customerSorter = createCustomerSorter();
   restoreWarrantyState(historyState?.warranty);
   if (!historyState && presetWarrantySearch) setWarrantySearch(presetWarrantySearch);
@@ -710,6 +714,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       scope.listen(document, "input", onCustomersInput);
       scope.listen(document, "keydown", onCustomersKeydown);
       scope.listen(window, "resize", onCustomersResize);
+      if (state.modalOpen) scope.animationFrame(() => document.querySelector('[data-customers-modal-overlay] [data-new-customer-field="name"]')?.focus());
     },
     captureState() {
       return {

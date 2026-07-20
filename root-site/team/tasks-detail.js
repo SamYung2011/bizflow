@@ -42,9 +42,11 @@ function renderAttachmentViewer(state, helpers) {
   </div>`;
 }
 
-function renderFeedbackEntry(entry, helpers) {
+function renderFeedbackEntry(entry, state, helpers) {
   const { escapeHtml, lang } = helpers;
-  const message = entry.message || taskT(lang, entry.messageKey);
+  const message = entry.message || (entry.messageKey ? taskT(lang, entry.messageKey) : "");
+  const editing = entry.own && state.feedbackEditingId === entry.id;
+  const menuOpen = state.feedbackMenuId === entry.id;
   const attachmentLinks = renderAttachmentLinks(entry.attachments, helpers);
   const attachment = attachmentLinks
     ? `<div class="task-detail__attachment-links">${attachmentLinks}</div>`
@@ -55,9 +57,19 @@ function renderFeedbackEntry(entry, helpers) {
     <header class="chat-bubble__meta">
       <strong title="${escapeHtml(entry.author)}">${escapeHtml(entry.author)}</strong>
       <time>${escapeHtml(entry.timestamp)}</time>
-      <button type="button" class="chat-bubble__menu" aria-label="${escapeHtml(taskT(lang, "tasks.detail.feedbackMenu"))}" tabindex="-1"><span></span><span></span><span></span></button>
+      ${entry.own ? `<span class="chat-bubble__menu-wrap" data-task-feedback-menu-wrap="${escapeHtml(entry.id)}">
+        <button type="button" class="chat-bubble__menu" data-task-feedback-menu-open="${escapeHtml(entry.id)}" aria-label="${escapeHtml(taskT(lang, "tasks.detail.feedbackMenu"))}" aria-haspopup="menu" aria-expanded="${menuOpen}"><span></span><span></span><span></span></button>
+        ${menuOpen ? `<span class="chat-bubble__menu-popover" data-task-feedback-menu-popover role="menu">
+          ${message.trim() ? `<button type="button" role="menuitem" data-task-feedback-edit-start="${escapeHtml(entry.id)}">${escapeHtml(taskT(lang, "tasks.detail.feedbackEdit"))}</button>` : ""}
+          <button type="button" class="is-danger" role="menuitem" data-task-feedback-delete="${escapeHtml(entry.id)}">${escapeHtml(taskT(lang, "tasks.detail.feedbackDelete"))}</button>
+        </span>` : ""}
+      </span>` : ""}
     </header>
-    ${message ? `<p class="chat-bubble__body">${escapeHtml(message)}</p>` : ""}
+    ${editing ? `<form class="task-detail__feedback-edit" data-task-feedback-edit-form="${escapeHtml(entry.id)}">
+      <textarea name="feedbackEdit" required aria-label="${escapeHtml(taskT(lang, "tasks.detail.feedbackEdit"))}"${state.writeBusy ? " disabled" : ""}>${escapeHtml(state.feedbackEditDraft)}</textarea>
+      ${state.feedbackEditError ? `<p role="alert">${escapeHtml(taskT(lang, state.feedbackEditError))}</p>` : ""}
+      <footer><button type="button" data-task-feedback-edit-cancel="${escapeHtml(entry.id)}"${state.writeBusy ? " disabled" : ""}>${escapeHtml(taskT(lang, "tasks.detail.feedbackCancel"))}</button><button type="submit"${state.writeBusy ? " disabled" : ""}>${escapeHtml(taskT(lang, "tasks.detail.feedbackSave"))}</button></footer>
+    </form>` : message ? `<p class="chat-bubble__body">${escapeHtml(message)}</p>` : ""}
     ${attachment}
   </div>`;
   const avatar = `<span class="avatar--initial chat-bubble__avatar" aria-hidden="true">${escapeHtml(initials(entry.author))}</span>`;
@@ -175,11 +187,11 @@ function renderTaskFeedback(task, state, helpers) {
   const tt = (key) => taskT(lang, key);
   const attachments = state.feedbackDraft.attachments ?? [];
   const writable = !state.liveReadOnly || state.liveTaskWrites;
-  const disabled = !writable || state.writeBusy;
+  const disabled = !writable || state.writeBusy || Boolean(state.feedbackEditingId);
   return `<section class="task-detail__feedback" data-task-detail-panel="feedback">
     <h3>${escapeHtml(tt("tasks.detail.feedbackTitle"))}</h3>
     <div class="task-detail__thread">${task.feedback.length
-      ? task.feedback.map((entry) => renderFeedbackEntry(entry, helpers)).join("")
+      ? task.feedback.map((entry) => renderFeedbackEntry(entry, state, helpers)).join("")
       : `<p class="team-kanban-empty">${escapeHtml(tt("tasks.detail.feedbackEmpty"))}</p>`}</div>
     <form class="task-detail__composer" data-task-feedback-form>
       <textarea name="message" aria-label="${escapeHtml(tt("tasks.detail.feedbackPlaceholder"))}" placeholder="${escapeHtml(tt("tasks.detail.feedbackPlaceholder"))}"${disabled ? " disabled" : ""}>${escapeHtml(state.feedbackDraft.message)}</textarea>

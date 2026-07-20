@@ -440,6 +440,7 @@ function normalizeFullTask(task, currentUserName, today) {
     feedback: task.feedback.map((entry) => ({
       id: entry.id,
       author: entry.author,
+      authorUserId: typeof entry.authorUserId === "string" ? entry.authorUserId : "",
       timestamp: entry.time,
       message: entry.body,
       parentId: entry.parentId || null,

@@ -57,7 +57,9 @@ export function attachTaskDomainController({
     if (memberTrigger) {
       leaveTaskDetailForNavigation();
       state.mode = "board";
-      filterState.member = memberTrigger.getAttribute("data-task-member") || "all";
+      const nextMember = memberTrigger.getAttribute("data-task-member") || "all";
+      if (filterState.member !== nextMember) state.boardExpandedPriorities.clear();
+      filterState.member = nextMember;
       filterState.view = "board";
       setSessionValue("team-tasks-view-mode", "board");
       rerender();
@@ -245,6 +247,7 @@ export function attachTaskDomainController({
 
   scope.listen(document, "change", (event) => {
     if (!event.target.matches("[data-task-only-mine]")) return;
+    if (state.onlyMine !== event.target.checked) state.boardExpandedPriorities.clear();
     state.onlyMine = event.target.checked;
     setSessionValue("team-tasks-only-mine", state.onlyMine ? "1" : "0");
     rerender();

@@ -210,6 +210,59 @@ export async function createLiveTaskFeedback({ taskId, message, attachments = []
   }
 }
 
+export async function updateLiveTaskFeedback(feedbackId, message) {
+  const { client, currentUser } = await writeContext();
+  const body = String(message || "").trim();
+  if (!body) throw new Error("Task feedback body is required");
+  const result = await client.from("employee_task_feedbacks")
+    .update({ body, updated_at: new Date().toISOString() })
+    .eq("id", feedbackId)
+    .eq("author_user_id", currentUser.userId)
+    .select("*")
+    .single();
+  throwIfError(result.error);
+  await invalidateTaskReads("employee_task_feedbacks");
+  return result.data;
+}
+
+export function taskAttachmentStoragePath(value) {
+  try {
+    const marker = "/storage/v1/object/public/task-attachments/";
+    const pathname = new URL(String(value || "")).pathname;
+    const markerIndex = pathname.indexOf(marker);
+    if (markerIndex < 0) return "";
+    const path = decodeURIComponent(pathname.slice(markerIndex + marker.length));
+    const parts = path.split("/");
+    return parts.length >= 2 && parts.every((part) => part && part !== "." && part !== "..") ? path : "";
+  } catch {
+    return "";
+  }
+}
+
+export async function deleteLiveTaskFeedback(feedbackId) {
+  const { client, currentUser } = await writeContext();
+  const result = await client.from("employee_task_feedbacks")
+    .delete()
+    .eq("id", feedbackId)
+    .eq("author_user_id", currentUser.userId)
+    .select("id, attachments")
+    .single();
+  throwIfError(result.error);
+  await invalidateTaskReads("employee_task_feedbacks");
+  const paths = (Array.isArray(result.data.attachments) ? result.data.attachments : [])
+    .map((attachment) => taskAttachmentStoragePath(attachment?.url))
+    .filter(Boolean);
+  if (paths.length) {
+    try {
+      const removeResult = await client.storage.from("task-attachments").remove(paths);
+      throwIfError(removeResult.error);
+    } catch (error) {
+      console.warn("Task feedback deleted but attachment cleanup failed", error);
+    }
+  }
+  return result.data;
+}
+
 export async function deleteLiveTask(taskId) {
   const { client } = await writeContext();
   // Mirrors team/src/components/EditTaskModal.jsx:115-120. Database cascades own

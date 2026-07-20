@@ -4,6 +4,7 @@ import { getOrderCreateData, getUnread, getCurrentUser } from "../data/provider.
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { renderNewCustomerFields } from "../components/new-customer-fields.js";
+import { createShippingFeePanel } from "../components/shipping-fee-panel.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import {
   createAndPayLiveOrder,
@@ -31,6 +32,11 @@ const dict = {
     "orders.subtotal": "小計",
     "orders.shippingFee": "運送",
     "orders.free": "免費",
+    "orders.shippingFee.title": "運費",
+    "orders.shippingFee.custom": "自定義金額",
+    "orders.shippingFee.amount": "金額",
+    "orders.shippingFee.confirm": "確定",
+    "orders.shippingFee.close": "關閉運費面板",
     "orders.total": "總計",
     "orders.markPaid": "標記為已付款",
     "orders.deposit": "押金",
@@ -109,6 +115,11 @@ const dict = {
     "orders.subtotal": "Subtotal",
     "orders.shippingFee": "Shipping",
     "orders.free": "Free",
+    "orders.shippingFee.title": "Shipping fee",
+    "orders.shippingFee.custom": "Custom amount",
+    "orders.shippingFee.amount": "Amount",
+    "orders.shippingFee.confirm": "Confirm",
+    "orders.shippingFee.close": "Close shipping fee panel",
     "orders.total": "Total",
     "orders.markPaid": "Mark as paid",
     "orders.deposit": "Deposit",
@@ -187,6 +198,11 @@ const dict = {
     "orders.subtotal": "Sous-total",
     "orders.shippingFee": "Livraison",
     "orders.free": "Gratuit",
+    "orders.shippingFee.title": "Frais de livraison",
+    "orders.shippingFee.custom": "Montant personnalisé",
+    "orders.shippingFee.amount": "Montant",
+    "orders.shippingFee.confirm": "Confirmer",
+    "orders.shippingFee.close": "Fermer les frais de livraison",
     "orders.total": "Total",
     "orders.markPaid": "Marquer payé",
     "orders.deposit": "Dépôt",
@@ -266,6 +282,7 @@ let activeNavigation = null;
 let activeScope = null;
 let activeMountId = 0;
 let submissionComplete = false;
+const shippingFeePanel = createShippingFeePanel();
 
 function isCurrentOrderCreateMount(mountId, scope = activeScope) {
   return mountId === activeMountId && Boolean(scope?.isCurrent());
@@ -457,9 +474,9 @@ function renderCreatePaymentBox(helpers, subtotalAmount, totalAmount) {
     </div>
     <div class="orders-payment-line">
       <span>${escapeHtml(pageT(lang, "orders.shippingFee"))}</span>
-      ${liveWritable
-        ? `<input type="number" min="0" step="0.01" class="orders-free-select orders-shipping-fee-input" data-shipping-fee data-orders-write value="${escapeHtml(String(state.fees.shipping || ""))}" placeholder="${escapeHtml(pageT(lang, "orders.free"))}">`
-        : `<button type="button" class="orders-free-select" data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.free"))}${icon("icon-arrow-down", "icon")}</button>`}
+      ${!liveMode || liveWritable
+        ? `<button type="button" class="orders-free-select" data-shipping-fee-trigger data-orders-write aria-haspopup="dialog" aria-expanded="${shippingFeePanel.isOpen()}">${escapeHtml(Number(state.fees.shipping || 0) === 0 ? pageT(lang, "orders.free") : formatMoney(state.fees.shipping))}${icon("icon-arrow-down", "icon")}</button>`
+        : `<span class="orders-free-select orders-free-select--readonly">${escapeHtml(Number(state.fees.shipping || 0) === 0 ? pageT(lang, "orders.free") : formatMoney(state.fees.shipping))}</span>`}
       <strong><span>HKD$</span><output data-create-shipping>${escapeHtml(Number(state.fees.shipping || 0).toFixed(2))}</output></strong>
     </div>
     <div class="orders-payment-divider"></div>
@@ -674,8 +691,6 @@ function syncLiveFormInputs() {
   document.querySelectorAll("[data-fee-amount]").forEach((input) => {
     state.fees[input.getAttribute("data-fee-amount")] = Math.max(0, Number(input.value) || 0);
   });
-  const shippingFee = document.querySelector("[data-shipping-fee]");
-  if (shippingFee) state.fees.shipping = Math.max(0, Number(shippingFee.value) || 0);
   state.trackingNumber = document.querySelector("[data-tracking-input]")?.value ?? state.trackingNumber;
 }
 
@@ -695,11 +710,6 @@ function syncLiveNumberInput(target) {
   const feeAmount = target.closest("[data-fee-amount]");
   if (feeAmount) {
     state.fees[feeAmount.getAttribute("data-fee-amount")] = Math.max(0, Number(feeAmount.value) || 0);
-    return true;
-  }
-  const shippingFee = target.closest("[data-shipping-fee]");
-  if (shippingFee) {
-    state.fees.shipping = Math.max(0, Number(shippingFee.value) || 0);
     return true;
   }
   return false;
@@ -811,6 +821,20 @@ async function submitLiveOrder() {
 async function onOrderCreateClick(event) {
   if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
   if (state.busy && event.target.closest("[data-orders-write]")) return;
+  const shippingFeeTrigger = event.target.closest("[data-shipping-fee-trigger]");
+  if (shippingFeeTrigger) {
+    shippingFeePanel.open({
+      anchor: shippingFeeTrigger,
+      value: state.fees.shipping,
+      escapeHtml: currentHelpers.escapeHtml,
+      t: (key) => pageT(currentHelpers.lang, key),
+      onCommit(value) {
+        state.fees.shipping = value;
+        rerender();
+      }
+    });
+    return;
+  }
   if (event.target.closest("[data-order-submit]")) {
     if (liveWritable && !state.busy) await submitLiveOrder();
     return;
@@ -945,11 +969,6 @@ function onOrderCreateChange(event) {
     refreshLiveTotals();
     return;
   }
-  const shippingFee = event.target.closest("[data-shipping-fee]");
-  if (shippingFee) {
-    syncLiveNumberInput(shippingFee);
-    refreshLiveTotals();
-  }
 }
 
 function onOrderCreateInput(event) {
@@ -1054,6 +1073,7 @@ export async function mountPage({ scope, signal, navigation = null } = {}) {
     captureState: () => null,
     dispose() {
       if (activeMountId === mountId) activeMountId += 1;
+      shippingFeePanel.dispose();
       data = null;
       currentUser = null;
       unread = null;

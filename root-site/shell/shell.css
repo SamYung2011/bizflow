@@ -451,6 +451,82 @@ body {
   opacity: .5;
 }
 
+.quick-create {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+}
+
+.quick-create__overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  border: 0;
+  background: transparent;
+}
+
+.quick-create__menu {
+  position: fixed;
+  z-index: 1;
+  width: 280px;
+  padding: var(--space-10);
+  border: 1px solid var(--gray-10);
+  border-radius: var(--radius-20);
+  background: var(--white);
+  box-shadow: 0 4px 5px rgba(0, 0, 0, .15), 0 10px 30px rgba(0, 0, 0, .12);
+}
+
+.quick-create__menu header {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-10);
+  padding: 0 var(--space-10);
+  color: var(--gray-60);
+}
+
+.quick-create__menu header button {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-40);
+  background: transparent;
+  color: var(--gray-40);
+  font-size: 24px;
+}
+
+.quick-create__menu > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.quick-create__item {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: var(--space-10);
+  padding: 0 var(--space-10);
+  border-radius: var(--radius-10);
+  color: var(--gray-60);
+  text-decoration: none;
+}
+
+.quick-create__item .icon {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+
+.quick-create__item:hover,
+.quick-create__item:focus-visible,
+.quick-create__menu header button:focus-visible {
+  outline: none;
+  background: var(--gray-10);
+  color: var(--blue);
+}
+
 .shell-main {
   min-height: 100vh;
   margin-left: 320px;
@@ -625,6 +701,28 @@ body {
 .is-viewport-switching .shell-main,
 .is-viewport-switching .shell-sidebar {
   transition: none;
+}
+
+@media (max-width: 768px) {
+  .quick-create__overlay {
+    background: rgba(0, 0, 0, .4);
+  }
+
+  .quick-create__menu {
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    padding: var(--space-20) var(--grid-margin-mobile) calc(var(--space-20) + env(safe-area-inset-bottom));
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: var(--radius-20) var(--radius-20) 0 0;
+  }
+
+  .quick-create__item {
+    min-height: 52px;
+  }
 }
 
 @media (max-width: 900px) {

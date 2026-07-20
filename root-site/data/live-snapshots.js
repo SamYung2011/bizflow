@@ -746,10 +746,17 @@ async function buildHomeSnapshot() {
   });
   const chart = [...chartCounts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 11)
     .map(([label, value]) => ({ label, value }));
-  // 煊煊 2026-07-13:首页「我的任务」只取当前登录成员被指派的进行中主任务。
-  const openTasks = tasksSnapshot.tasks.filter((task) =>
-    task.status === "open" && task.parentId === null &&
-    task.assignees.some((assignee) => assignee.employeeId === currentUser?.employeeId));
+  // 首页「我的任务」只取当前登录成员直接负责的主任务。每一状态与全量各保留
+  // 最新 4 条的并集(最大 16 条)，既支持筛选，也避免把完整任务历史塞进 home 缓存。
+  const assignedTasks = tasksSnapshot.tasks.filter((task) =>
+    task.parentId === null && task.assignees.some((assignee) => assignee.employeeId === currentUser?.employeeId));
+  const homeTaskIds = new Set([
+    ...assignedTasks.slice(0, 4),
+    ...assignedTasks.filter((task) => task.status === "open").slice(0, 4),
+    ...assignedTasks.filter((task) => task.status === "done").slice(0, 4),
+    ...assignedTasks.filter((task) => task.status === "abandoned").slice(0, 4)
+  ].map((task) => task.id));
+  const homeTasks = assignedTasks.filter((task) => homeTaskIds.has(task.id));
   const mainProducts = inventorySnapshot.products.filter((product) => product.parentId === null);
   return {
     __live: true,
@@ -762,11 +769,12 @@ async function buildHomeSnapshot() {
       { key: "members", tone: "green", value: membersSnapshot.membersStats.all },
       { key: "warranty", tone: "yellow", value: warrantySnapshot.items.length, alert: warrantySnapshot.items.length > 0 }
     ],
-    tasks: openTasks.slice(0, 4).map((task) => ({
+    tasks: homeTasks.map((task) => ({
       title: task.title,
       due: task.due,
       count: task.feedback.length,
-      assignee: task.assignees.map((assignee) => assignee.name).join("、") || "—"
+      assignee: task.assignees.map((assignee) => assignee.name).join("、") || "—",
+      status: task.status === "done" ? "completed" : task.status === "abandoned" ? "abandoned" : "inProgress"
     })),
     feed: tasksSnapshot.tasks.slice(0, 3).map((task) => ({
       name: task.creator,

@@ -45,15 +45,21 @@ function renderColumn(column, state, filterState, helpers) {
     : filterState.status === "abandoned"
       ? "tasks.empty.abandoned"
       : filterState.status === "overdue" ? "tasks.empty.overdue" : "tasks.empty.default";
-  const body = column.tasks.length
-    ? column.tasks.map((task) => renderTaskCard(task, column.key, state, helpers)).join("")
+  const expanded = state.boardExpandedPriorities?.has(column.key) === true;
+  const visibleTasks = expanded ? column.tasks : column.tasks.slice(0, 5);
+  const hiddenCount = Math.max(0, column.tasks.length - visibleTasks.length);
+  const body = visibleTasks.length
+    ? visibleTasks.map((task) => renderTaskCard(task, column.key, state, helpers)).join("")
     : `<p class="team-kanban-empty">${escapeHtml(taskT(lang, emptyKey))}</p>`;
   const unreadCount = column.tasks.filter((task) => state.boardUnreadTaskIds?.has(task.id)).length;
   const unreadLabel = taskT(lang, "tasks.column.unreadChanges", { count: unreadCount });
   return `<section class="team-kanban-column team-kanban-column--${column.key}" data-task-column="${column.key}" data-column-count="${column.count}">
     <header class="team-kanban-column__head" data-task-column-read="${column.key}"><div class="team-kanban-column__title"><span title="${escapeHtml(title)}">${escapeHtml(title)}</span><span>${column.count}</span></div>${unreadCount > 0 ? `<span class="team-count-badge team-count-badge--unread" data-task-column-unread="${unreadCount}" aria-label="${escapeHtml(unreadLabel)}" title="${escapeHtml(unreadLabel)}">${unreadCount}</span>` : ""}</header>
     <div class="team-kanban-column__tasks">${body}</div>
-    ${column.key === "high" ? `<button type="button" class="team-column-expand" tabindex="-1" aria-label="expand">${icon("icon-arrow-down")}${icon("icon-arrow-down")}</button>` : `<button type="button" class="team-column-add" tabindex="-1" aria-label="add"${state.liveReadOnly ? " disabled aria-disabled=\"true\"" : ""}>${icon("icon-add-surface-add")}</button>`}
+    <div class="team-kanban-column__footer">
+      ${column.tasks.length > 5 ? `<button type="button" class="team-column-expand${expanded ? " team-column-expand--open" : ""}" data-task-column-expand="${column.key}" aria-expanded="${expanded}" aria-label="${escapeHtml(taskT(lang, expanded ? "tasks.column.collapse" : "tasks.column.expand", { count: hiddenCount }))}" title="${escapeHtml(taskT(lang, expanded ? "tasks.column.collapse" : "tasks.column.expand", { count: hiddenCount }))}">${icon("icon-arrow-down")}${icon("icon-arrow-down")}</button>` : ""}
+      ${state.permissions.canCreate ? `<button type="button" class="team-column-add" data-task-column-add="${column.key}" aria-label="${escapeHtml(taskT(lang, "tasks.column.add", { priority: title }))}" title="${escapeHtml(taskT(lang, "tasks.column.add", { priority: title }))}"${state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites) ? " disabled aria-disabled=\"true\"" : ""}>${icon("icon-add-surface-add")}</button>` : ""}
+    </div>
   </section>`;
 }
 
