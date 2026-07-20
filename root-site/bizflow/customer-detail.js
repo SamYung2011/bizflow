@@ -1,10 +1,15 @@
 // bizflow 客戶詳情桌面屏(Figma 676:96729 / 676:96829 / 676:96938)。
 // 视觉块复用 orders-detail 的订单/顾客卡片类与 customers 的弹窗/菜单类;本文件只做页面装配与交互。
 
-import { getCurrentUser, getCustomerDetailData, getOrdersPageData, getUnread } from "../data/provider.js";
+import { getCurrentUser, getCustomerDetailData, getCustomerMergeCandidates, getOrdersPageData, getUnread } from "../data/provider.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { renderManagementPager } from "../components/management-list.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
+import {
+  deleteLiveCustomerGroup,
+  mergeLiveCustomerGroup,
+  prepareLiveCustomerDeletion
+} from "../data/live-customer-writes.js";
 import { updateLiveOrderCustomer } from "../data/live-orders-writes.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { createPrintDialog } from "./print/print-dialog.js";
@@ -16,6 +21,20 @@ const dict = {
     "customer.moreActions": "更多動作",
     "customer.merge": "合併顧客",
     "customer.delete": "刪除顧客",
+    "customer.merge.title": "合併顧客",
+    "customer.merge.help": "選擇要保留的主顧客。這組顧客及其所有下層記錄會一併歸入主顧客。",
+    "customer.merge.search": "輸入顧客姓名 / 電話 / Email",
+    "customer.merge.loading": "正在載入顧客…",
+    "customer.merge.prompt": "輸入關鍵字搜尋要保留的顧客",
+    "customer.merge.empty": "找不到可合併的顧客",
+    "customer.merge.confirm": "確認合併",
+    "customer.merge.confirmText": "確定把「{source}」及其關聯記錄合併到「{target}」？合併後會統一由主顧客管理。",
+    "customer.merge.failed": "合併顧客失敗，請重新整理後再試",
+    "customer.merge.invalidTarget": "目標顧客已變更或會造成關係循環，請重新選擇",
+    "customer.delete.checking": "正在檢查顧客關聯…",
+    "customer.delete.blocked": "此顧客組仍有 {count} 張關聯發票，請先處理發票後再刪除",
+    "customer.delete.confirmText": "確定刪除「{name}」及同組的 {count} 條顧客記錄？此操作無法復原。",
+    "customer.delete.failed": "刪除顧客失敗，請重新整理後再試",
     "customer.spendTotal": "消費總金額",
     "customer.firstOrderTime": "首次下單時間",
     "customer.times": "次",
@@ -65,6 +84,20 @@ const dict = {
     "customer.moreActions": "More actions",
     "customer.merge": "Merge customer",
     "customer.delete": "Delete customer",
+    "customer.merge.title": "Merge customer",
+    "customer.merge.help": "Choose the customer to keep. This customer group and every descendant record will move under the keeper.",
+    "customer.merge.search": "Search name / phone / email",
+    "customer.merge.loading": "Loading customers…",
+    "customer.merge.prompt": "Search for the customer you want to keep",
+    "customer.merge.empty": "No eligible customer found",
+    "customer.merge.confirm": "Confirm merge",
+    "customer.merge.confirmText": "Merge “{source}” and its related records into “{target}”? The keeper will manage the combined group.",
+    "customer.merge.failed": "Could not merge the customer. Refresh and try again.",
+    "customer.merge.invalidTarget": "The target changed or would create a relationship cycle. Choose another customer.",
+    "customer.delete.checking": "Checking customer relationships…",
+    "customer.delete.blocked": "This customer group still has {count} related invoice(s). Deal with those invoices before deleting it.",
+    "customer.delete.confirmText": "Delete “{name}” and all {count} customer record(s) in this group? This cannot be undone.",
+    "customer.delete.failed": "Could not delete the customer. Refresh and try again.",
     "customer.spendTotal": "Total spend",
     "customer.firstOrderTime": "First order time",
     "customer.times": "orders",
@@ -114,6 +147,20 @@ const dict = {
     "customer.moreActions": "Plus d'actions",
     "customer.merge": "Fusionner client",
     "customer.delete": "Supprimer client",
+    "customer.merge.title": "Fusionner le client",
+    "customer.merge.help": "Choisissez le client principal à conserver. Ce groupe et tous ses descendants seront rattachés à ce client.",
+    "customer.merge.search": "Rechercher nom / téléphone / e-mail",
+    "customer.merge.loading": "Chargement des clients…",
+    "customer.merge.prompt": "Recherchez le client principal à conserver",
+    "customer.merge.empty": "Aucun client admissible trouvé",
+    "customer.merge.confirm": "Confirmer la fusion",
+    "customer.merge.confirmText": "Fusionner « {source} » et ses enregistrements liés dans « {target} » ? Le client principal gérera le groupe fusionné.",
+    "customer.merge.failed": "Impossible de fusionner le client. Actualisez et réessayez.",
+    "customer.merge.invalidTarget": "La cible a changé ou créerait une boucle. Choisissez un autre client.",
+    "customer.delete.checking": "Vérification des relations client…",
+    "customer.delete.blocked": "Ce groupe a encore {count} facture(s) liée(s). Traitez-les avant de supprimer le client.",
+    "customer.delete.confirmText": "Supprimer « {name} » et les {count} enregistrement(s) client de ce groupe ? Cette action est irréversible.",
+    "customer.delete.failed": "Impossible de supprimer le client. Actualisez et réessayez.",
     "customer.spendTotal": "Dépense totale",
     "customer.firstOrderTime": "Première commande",
     "customer.times": "fois",
@@ -168,12 +215,19 @@ let liveWritable = false;
 let liveReadOnly = false;
 let writeAttributes = "";
 let deferredActionAttributes = "";
+let activeNavigation = null;
 
 let state = {
   actionMenuOpen: false,
   editModalOpen: false,
   editDraft: {},
   editModelFallback: false,
+  mergeModalOpen: false,
+  mergeLoading: false,
+  mergeQuery: "",
+  mergeTargetId: "",
+  mergeCandidates: [],
+  mergeError: "",
   writeBusy: false,
   notice: "",
   noticeType: "error",
@@ -200,6 +254,13 @@ async function getFullOrderForPrint(orderNo) {
 
 function pageT(lang, key) {
   return dict[lang]?.[key] ?? dict.zh[key] ?? key;
+}
+
+function pageTf(lang, key, values = {}) {
+  return Object.entries(values).reduce(
+    (text, [name, value]) => text.replaceAll(`{${name}}`, String(value ?? "")),
+    pageT(lang, key)
+  );
 }
 
 function money(amount, lang) {
@@ -386,6 +447,67 @@ function renderEditModal(helpers) {
   </div>`;
 }
 
+function mergeCandidateSearchText(customer) {
+  return [customer?.name, customer?.phone, customer?.detail?.email]
+    .map((value) => String(value || "").trim().toLocaleLowerCase())
+    .filter(Boolean)
+    .join("\n");
+}
+
+function visibleMergeCandidates() {
+  const query = state.mergeQuery.trim().toLocaleLowerCase();
+  if (!query) return [];
+  const matches = state.mergeCandidates.filter((customer) => mergeCandidateSearchText(customer).includes(query));
+  const selected = state.mergeCandidates.find((customer) => customer.id === state.mergeTargetId);
+  if (selected && !matches.some((customer) => customer.id === selected.id)) matches.unshift(selected);
+  return matches.slice(0, 30);
+}
+
+function renderMergeResults(helpers) {
+  const { escapeHtml, lang } = helpers;
+  if (state.mergeLoading) {
+    return `<p class="customer-merge-status">${escapeHtml(pageT(lang, "customer.merge.loading"))}</p>`;
+  }
+  if (!state.mergeQuery.trim()) {
+    return `<p class="customer-merge-status">${escapeHtml(pageT(lang, "customer.merge.prompt"))}</p>`;
+  }
+  const candidates = visibleMergeCandidates();
+  if (!candidates.length) {
+    return `<p class="customer-merge-status">${escapeHtml(pageT(lang, "customer.merge.empty"))}</p>`;
+  }
+  return candidates.map((customer) => {
+    const selected = customer.id === state.mergeTargetId;
+    const secondary = [customer.phone, customer.detail?.email].filter(Boolean).join(" · ") || pageT(lang, "customer.empty");
+    return `<button type="button" class="customer-merge-option${selected ? " customer-merge-option--selected" : ""}" data-customer-merge-target="${escapeHtml(customer.id)}" aria-pressed="${selected}"${state.writeBusy ? ' disabled aria-disabled="true"' : ""}>
+      <strong title="${escapeHtml(customer.name)}">${escapeHtml(customer.name)}</strong>
+      <span title="${escapeHtml(secondary)}">${escapeHtml(secondary)}</span>
+    </button>`;
+  }).join("");
+}
+
+function renderMergeModal(helpers) {
+  const { escapeHtml, lang } = helpers;
+  const disabled = state.writeBusy || state.mergeLoading;
+  const disabledAttributes = disabled ? ' disabled aria-disabled="true"' : "";
+  return `<div class="customers-modal-overlay${state.mergeModalOpen ? " customers-modal-overlay--open" : ""}" data-customer-merge-overlay ${state.mergeModalOpen ? "" : 'hidden aria-hidden="true"'}>
+    <section class="tp-component form-new-customer customer-merge-modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(pageT(lang, "customer.merge.title"))}">
+      <button type="button" class="form-new-customer__close" data-customer-merge-close aria-label="${escapeHtml(pageT(lang, "customer.action.close"))}"${state.writeBusy ? ' disabled aria-disabled="true"' : ""}></button>
+      <h2 class="form-new-customer__title">${escapeHtml(pageT(lang, "customer.merge.title"))}</h2>
+      <p class="customer-merge-help">${escapeHtml(pageT(lang, "customer.merge.help"))}</p>
+      ${state.mergeError ? `<p class="customer-write-notice customer-write-notice--error" role="alert">${escapeHtml(state.mergeError)}</p>` : ""}
+      <label class="form-new-customer__field">
+        <span class="form-new-customer__label">${escapeHtml(pageT(lang, "customer.merge.search"))}</span>
+        <input class="form-new-customer__value customer-merge-search" type="search" autocomplete="off" data-customer-merge-query value="${escapeHtml(state.mergeQuery)}" placeholder="${escapeHtml(pageT(lang, "customer.merge.search"))}"${disabledAttributes}>
+      </label>
+      <div class="customer-merge-results" data-customer-merge-results>${renderMergeResults(helpers)}</div>
+      <div class="form-new-customer__footer">
+        <button type="button" class="btn--hug btn--hug--gray" data-customer-merge-close${state.writeBusy ? ' disabled aria-disabled="true"' : ""}>${escapeHtml(pageT(lang, "customer.action.cancel"))}</button>
+        <button type="button" class="btn--hug btn--hug--blue" data-customer-merge-submit data-customer-write${disabled || !state.mergeTargetId ? ' disabled aria-disabled="true"' : ""}>${escapeHtml(pageT(lang, state.writeBusy ? "customer.action.saving" : "customer.merge.confirm"))}</button>
+      </div>
+    </section>
+  </div>`;
+}
+
 function renderCustomerDetail(helpers) {
   currentHelpers = helpers;
   const { escapeHtml, lang } = helpers;
@@ -417,6 +539,7 @@ function renderCustomerDetail(helpers) {
     ${renderCustomerCard(helpers)}
     ${renderPurchaseHistory(helpers)}
     ${renderEditModal(helpers)}
+    ${renderMergeModal(helpers)}
   </div>`;
 }
 
@@ -475,6 +598,151 @@ function closeEditModal() {
   state.editModelFallback = false;
   setCustomerDetailNotice("");
   rerender();
+}
+
+function sourceCustomerIds() {
+  const ids = detailData?.customer?.groupCids;
+  return Array.isArray(ids) && ids.length ? ids.slice() : [detailData?.customer?.id].filter(Boolean);
+}
+
+function closeMergeModal() {
+  if (!state.mergeModalOpen || state.writeBusy) return;
+  state.mergeModalOpen = false;
+  state.mergeLoading = false;
+  state.mergeQuery = "";
+  state.mergeTargetId = "";
+  state.mergeCandidates = [];
+  state.mergeError = "";
+  rerender();
+}
+
+async function openMergeModal() {
+  const mountId = activeMountId;
+  const scope = activeScope;
+  state.actionMenuOpen = false;
+  state.mergeModalOpen = true;
+  state.mergeLoading = true;
+  state.mergeQuery = "";
+  state.mergeTargetId = "";
+  state.mergeCandidates = [];
+  state.mergeError = "";
+  setCustomerDetailNotice("");
+  rerender();
+  try {
+    const candidates = await getCustomerMergeCandidates();
+    if (!isCurrentCustomerDetailMount(mountId, scope) || !state.mergeModalOpen) return;
+    const sourceIds = new Set(sourceCustomerIds());
+    state.mergeCandidates = candidates.filter((customer) =>
+      !(Array.isArray(customer.groupCids) ? customer.groupCids : [customer.id]).some((id) => sourceIds.has(id)));
+  } catch (error) {
+    if (!isCurrentCustomerDetailMount(mountId, scope) || !state.mergeModalOpen) return;
+    console.error("[customer-detail] merge candidates failed", error);
+    state.mergeError = pageT(currentHelpers?.lang ?? "zh", "customer.merge.failed");
+  } finally {
+    if (!isCurrentCustomerDetailMount(mountId, scope) || !state.mergeModalOpen) return;
+    state.mergeLoading = false;
+    rerender();
+    document.querySelector("[data-customer-merge-query]")?.focus();
+  }
+}
+
+function friendlyCustomerMergeError(error) {
+  const lang = currentHelpers?.lang ?? "zh";
+  if (["CUSTOMER_KEEPER_STALE", "CUSTOMER_KEEPER_NOT_ROOT", "CUSTOMER_MERGE_CYCLE", "CUSTOMER_SOURCE_STALE"].includes(error?.code)) {
+    return pageT(lang, "customer.merge.invalidTarget");
+  }
+  return pageT(lang, "customer.merge.failed");
+}
+
+function deleteBlockedMessage(invoiceCount) {
+  return pageTf(currentHelpers?.lang ?? "zh", "customer.delete.blocked", { count: invoiceCount });
+}
+
+function navigateTo(relative) {
+  const url = new URL(relative, window.location.href);
+  if (typeof activeNavigation?.navigate === "function") void activeNavigation.navigate(url);
+  else if (typeof activeNavigation?.hardNavigate === "function") activeNavigation.hardNavigate(url);
+  else window.location.assign(url.href);
+}
+
+async function mergeCustomerFromModal() {
+  const target = state.mergeCandidates.find((customer) => customer.id === state.mergeTargetId);
+  if (!target || state.writeBusy) return;
+  const mountId = activeMountId;
+  const scope = activeScope;
+  const lang = currentHelpers?.lang ?? "zh";
+  const confirmed = await confirmInPage(pageTf(lang, "customer.merge.confirmText", {
+    source: detailData.customer.name,
+    target: target.name
+  }));
+  if (!confirmed || !isCurrentCustomerDetailMount(mountId, scope)) return;
+
+  state.writeBusy = true;
+  state.mergeError = "";
+  rerender();
+  let navigated = false;
+  try {
+    const result = await mergeLiveCustomerGroup({
+      sourceCustomerIds: sourceCustomerIds(),
+      keeperCustomerId: target.id
+    });
+    if (!isCurrentCustomerDetailMount(mountId, scope)) return;
+    state.writeBusy = false;
+    rerender();
+    navigateTo(`./customer-detail.html?id=${encodeURIComponent(result.keeperCustomerId)}`);
+    navigated = true;
+  } catch (error) {
+    if (!isCurrentCustomerDetailMount(mountId, scope)) return;
+    console.error("[customer-detail] customer merge failed", error);
+    state.mergeError = friendlyCustomerMergeError(error);
+  } finally {
+    if (!isCurrentCustomerDetailMount(mountId, scope) || navigated) return;
+    state.writeBusy = false;
+    rerender();
+  }
+}
+
+async function deleteCustomerFromAction() {
+  const mountId = activeMountId;
+  const scope = activeScope;
+  const lang = currentHelpers?.lang ?? "zh";
+  state.actionMenuOpen = false;
+  state.writeBusy = true;
+  setCustomerDetailNotice(pageT(lang, "customer.delete.checking"), "success");
+  rerender();
+  let navigated = false;
+  try {
+    const plan = await prepareLiveCustomerDeletion(sourceCustomerIds());
+    if (!isCurrentCustomerDetailMount(mountId, scope)) return;
+    if (plan.invoiceCount > 0) {
+      setCustomerDetailNotice(deleteBlockedMessage(plan.invoiceCount));
+      return;
+    }
+    const confirmed = await confirmInPage(pageTf(lang, "customer.delete.confirmText", {
+      name: detailData.customer.name,
+      count: plan.customerIds.length
+    }), { danger: true });
+    if (!confirmed || !isCurrentCustomerDetailMount(mountId, scope)) {
+      setCustomerDetailNotice("");
+      return;
+    }
+    await deleteLiveCustomerGroup(sourceCustomerIds());
+    if (!isCurrentCustomerDetailMount(mountId, scope)) return;
+    state.writeBusy = false;
+    rerender();
+    navigateTo("./customers.html");
+    navigated = true;
+  } catch (error) {
+    if (!isCurrentCustomerDetailMount(mountId, scope)) return;
+    console.error("[customer-detail] customer delete failed", error);
+    setCustomerDetailNotice(error?.code === "CUSTOMER_HAS_INVOICES"
+      ? deleteBlockedMessage(error.invoiceCount)
+      : pageT(lang, "customer.delete.failed"));
+  } finally {
+    if (!isCurrentCustomerDetailMount(mountId, scope) || navigated) return;
+    state.writeBusy = false;
+    rerender();
+  }
 }
 
 function friendlyCustomerDetailWriteError(error) {
@@ -539,9 +807,32 @@ async function onCustomerDetailClick(event) {
     return;
   }
 
-  if (event.target.closest("[data-customer-action]")) {
-    state.actionMenuOpen = false;
+  const customerAction = event.target.closest("[data-customer-action]");
+  if (customerAction) {
+    const action = customerAction.getAttribute("data-customer-action");
+    if (!liveMode) {
+      state.actionMenuOpen = false;
+      rerender();
+    } else if (liveWritable && action === "merge") await openMergeModal();
+    else if (liveWritable && action === "delete") await deleteCustomerFromAction();
+    return;
+  }
+
+  const mergeTarget = event.target.closest("[data-customer-merge-target]");
+  if (mergeTarget && state.mergeModalOpen && !state.writeBusy) {
+    state.mergeTargetId = mergeTarget.getAttribute("data-customer-merge-target") || "";
+    state.mergeError = "";
     rerender();
+    return;
+  }
+
+  if (event.target.closest("[data-customer-merge-submit]")) {
+    if (liveWritable && state.mergeTargetId && !state.writeBusy) await mergeCustomerFromModal();
+    return;
+  }
+
+  if (event.target.closest("[data-customer-merge-close]") || event.target.matches("[data-customer-merge-overlay]")) {
+    closeMergeModal();
     return;
   }
 
@@ -598,6 +889,20 @@ async function onCustomerDetailClick(event) {
 }
 
 function onCustomerDetailInput(event) {
+  const mergeQuery = event.target.closest("[data-customer-merge-query]");
+  if (mergeQuery && state.mergeModalOpen && !state.writeBusy) {
+    state.mergeQuery = mergeQuery.value;
+    state.mergeTargetId = "";
+    state.mergeError = "";
+    const results = document.querySelector("[data-customer-merge-results]");
+    if (results && currentHelpers) results.innerHTML = renderMergeResults(currentHelpers);
+    const submit = document.querySelector("[data-customer-merge-submit]");
+    if (submit) {
+      submit.disabled = true;
+      submit.setAttribute("aria-disabled", "true");
+    }
+    return;
+  }
   const field = event.target.closest("[data-customer-edit-field]");
   if (!field || !state.editModalOpen || state.writeBusy) return;
   state.editDraft[field.getAttribute("data-customer-edit-field")] = field.value;
@@ -605,7 +910,8 @@ function onCustomerDetailInput(event) {
 
 function onCustomerDetailKeydown(event) {
   if (event.key !== "Escape") return;
-  if (state.editModalOpen) closeEditModal();
+  if (state.mergeModalOpen) closeMergeModal();
+  else if (state.editModalOpen) closeEditModal();
   else closeActionMenu();
 }
 
@@ -616,6 +922,12 @@ function restoredState(value = null) {
     editModalOpen: false,
     editDraft: {},
     editModelFallback: false,
+    mergeModalOpen: false,
+    mergeLoading: false,
+    mergeQuery: "",
+    mergeTargetId: "",
+    mergeCandidates: [],
+    mergeError: "",
     writeBusy: false,
     notice: "",
     noticeType: "error",
@@ -623,9 +935,10 @@ function restoredState(value = null) {
   };
 }
 
-export async function mountPage({ scope, signal, url = new URL(window.location.href), historyState = null } = {}) {
+export async function mountPage({ scope, signal, url = new URL(window.location.href), historyState = null, navigation = null } = {}) {
   const mountId = ++activeMountId;
   activeScope = scope;
+  activeNavigation = navigation;
   const customerId = url.searchParams.get("id");
   const [nextDetailData, nextCurrentUser, nextUnread] = await Promise.all([
     getCustomerDetailData(customerId),
@@ -640,9 +953,7 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
   liveWritable = liveMode && currentUser?.bizflowMainAccess === true;
   liveReadOnly = liveMode && !liveWritable;
   writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
-  // Merge/delete are delivered in batch 3; keep their live shell disabled while
-  // this batch unlocks only the now-wired edit path. Demo behavior stays unchanged.
-  deferredActionAttributes = liveMode ? ' disabled aria-disabled="true"' : "";
+  deferredActionAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
   state = restoredState(historyState);
   printOrdersPromise = null;
   printDialog = createPrintDialog({ getLang: () => currentHelpers?.lang ?? "zh", scope });
@@ -674,6 +985,7 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
       currentUser = null;
       unread = null;
       currentHelpers = null;
+      activeNavigation = null;
       if (activeScope === scope) activeScope = null;
     }
   };

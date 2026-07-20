@@ -1099,6 +1099,17 @@ export async function getCustomersPageData() {
   return { customers, dashboardCustomerCount };
 }
 
+export async function getCustomerMergeCandidates() {
+  const grouped = await loadGroupedCustomers();
+  return grouped.map((customer) => ({
+    id: customer.id,
+    groupCids: Array.isArray(customer.groupCids) ? customer.groupCids.slice() : [customer.id],
+    name: customer.name,
+    phone: customer.phone,
+    detail: { email: customer.detail?.email || "" }
+  }));
+}
+
 const WARRANTY_SNAPSHOT_URL = new URL("./snapshots/warranty.json", import.meta.url);
 
 function loadWarrantySnapshot() {

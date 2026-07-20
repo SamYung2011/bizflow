@@ -612,6 +612,80 @@
   resize: none;
 }
 
+.customer-merge-modal {
+  width: 600px;
+  gap: var(--space-20);
+}
+
+.customer-merge-help,
+.customer-merge-status {
+  margin: 0;
+  color: var(--gray-40);
+  font-size: var(--font-body-size);
+  line-height: var(--lh-body);
+}
+
+.customer-merge-search {
+  min-height: 42px;
+}
+
+.customer-merge-results {
+  display: flex;
+  width: 100%;
+  min-height: 100px;
+  max-height: min(320px, 38vh);
+  flex-direction: column;
+  gap: var(--space-10);
+  overflow-y: auto;
+}
+
+.customer-merge-status {
+  display: flex;
+  min-height: 100px;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-20);
+  border-radius: var(--radius-10);
+  background: var(--gray-5);
+  text-align: center;
+}
+
+.customer-merge-option {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-10);
+  border: 1px solid var(--gray-15);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  color: var(--3a);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.customer-merge-option:hover,
+.customer-merge-option--selected {
+  border-color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 7%, var(--white));
+}
+
+.customer-merge-option strong,
+.customer-merge-option span {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.customer-merge-option span {
+  color: var(--gray-40);
+  font-size: var(--font-body-size);
+}
+
 /* ---------- 新增顾客弹窗(509:21612「新增顾客表单」560×646,真弹层) ---------- */
 .customers-modal-overlay {
   position: fixed;

@@ -45,8 +45,8 @@ assert.match(customerDetail, /hasUnsavedChanges: hasCustomerDetailUnsavedChanges
   "customer detail must expose dirty-state detection to the SPA lifecycle");
 assert.match(customerDetail, /return confirmInPage\(pageT\(currentHelpers\?\.lang \?\? "zh", "customer\.leaveUnsaved"\)\);/,
   "dirty customer edits must use the shared in-page leave confirmation");
-assert.match(customerDetail, /deferredActionAttributes = liveMode \? ' disabled aria-disabled="true"' : "";/,
-  "batch 1 must not unlock the deferred live merge/delete shell");
+assert.match(customerDetail, /deferredActionAttributes = liveReadOnly \? ' disabled aria-disabled="true"' : "";/,
+  "later merge/delete wiring must retain the batch-1 read-only authorization gate");
 assert.match(customerDetail, /state\.editModelFallback && values\.carModel === customerEditBaseline\(\)\.carModel/,
   "an untouched combined model from an old cache must be preserved rather than rewritten");
 
