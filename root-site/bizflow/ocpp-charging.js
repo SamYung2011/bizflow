@@ -4,9 +4,9 @@ import {
   getUnread,
 } from "../data/provider.js";
 import {
-  createDateFilter,
+  createDateRangeFilter,
   latestDateInput,
-} from "../components/date-filter.js";
+} from "../components/date-range-filter.js";
 import { renderMoneyText } from "../components/money-text.js";
 import {
   dateInputFromUnix,
@@ -273,7 +273,8 @@ function reset() {
   state.page = state.sharePage = state.orderPage = state.reportPage = 1;
 }
 function onChargingClick(event) {
-  const dateRoot = event.target.closest?.("[data-date-filter]");
+  if (event.target.closest?.("[data-date-range-panel]")) return;
+  const dateRoot = event.target.closest?.("[data-date-range-filter]");
   if (dateRoot) {
     if (orderDate.handleClick(event)) return;
   } else orderDate.close();
@@ -364,10 +365,6 @@ function onChargingChange(event) {
     state.reportPage = 1;
     rerender();
   }
-  orderDate.handleChange(event);
-}
-function onChargingFocus(event) {
-  orderDate.handleFocus(event);
 }
 function onChargingKeydown(event) {
   if (event.key === "Enter" && event.target.matches("[data-ocpp-query]")) {
@@ -427,7 +424,7 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
     { key: "reports", labelKey: "reportsTab" },
     { key: "operators", labelKey: "operatorsTab" },
   ];
-  orderDate = createDateFilter({
+  orderDate = createDateRangeFilter({
     id: "ocpp-order-date",
     initialDate: latestDateInput(data.orders.map((row) => dateInputFromUnix(row.createdAt))),
     onChange: () => {
@@ -443,7 +440,6 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
       scope.listen(document, "click", onChargingClick);
       scope.listen(document, "input", onChargingInput);
       scope.listen(document, "change", onChargingChange);
-      scope.listen(document, "focusin", onChargingFocus);
       scope.listen(document, "keydown", onChargingKeydown);
     },
     captureState: () => ({ ...state, orderDate: orderDate.captureState() }),

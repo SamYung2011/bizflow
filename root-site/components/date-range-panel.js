@@ -314,7 +314,7 @@ export function createDateRangePanel() {
     }
   }
 
-  function open({ anchor: nextAnchor, mode: nextMode = "range", date = "", start = "", end = "", presets: nextPresets = [], language = "zh", t = (key) => key, onCommit = async () => {} } = {}) {
+  function open({ anchor: nextAnchor, mode: nextMode = "range", date = "", start = "", end = "", viewDate = "", presets: nextPresets = [], language = "zh", t = (key) => key, onCommit = async () => {} } = {}) {
     if (!(nextAnchor instanceof HTMLElement)) return false;
     close({ restoreFocus: false });
     anchor = nextAnchor;
@@ -326,7 +326,7 @@ export function createDateRangePanel() {
     presets = (Array.isArray(nextPresets) ? nextPresets : []).filter((preset) => preset && typeof preset.label === "string");
     draft = singleMode() ? { start: normalizeDateInput(date), end: "" } : normalizeRange(start, end);
     activeSide = singleMode() ? "start" : draft.start && !draft.end ? "end" : "start";
-    viewMonth = monthStart(draft.start || draft.end);
+    viewMonth = monthStart(draft.start || draft.end || viewDate);
     jumpOpen = false;
     onComplete = onCommit;
     panel = document.createElement("section");

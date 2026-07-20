@@ -580,7 +580,7 @@ button.order-card__phone:focus-visible {
     left: auto;
   }
 
-  html[lang="en"] .orders-toolbar .date-filter__trigger {
+  html[lang="en"] .orders-toolbar .date-range-filter__trigger {
     width: 232px;
   }
 

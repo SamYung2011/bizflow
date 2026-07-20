@@ -101,6 +101,33 @@
   white-space: nowrap;
 }
 
+.date-range-filter {
+  display: inline-flex;
+  min-width: 0;
+  flex: none;
+}
+
+.date-range-filter__trigger {
+  width: 246px;
+  min-height: 36px;
+  height: 36px;
+  border: 0;
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-tight);
+  cursor: pointer;
+}
+
+.date-range-filter__trigger.is-active {
+  color: var(--blue);
+}
+
+.date-range-filter__chevron {
+  margin-left: auto;
+  color: currentColor !important;
+}
+
 .date-range-panel__date {
   height: var(--date-range-control-height);
   min-width: 0;
@@ -365,6 +392,11 @@
 }
 
 @media (max-width: 768px) {
+  .date-range-filter,
+  .date-range-filter__trigger {
+    max-width: 100%;
+  }
+
   .date-range-panel {
     width: min(var(--date-range-panel-width), calc(100vw - var(--space-20)));
   }

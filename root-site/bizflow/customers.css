@@ -308,7 +308,7 @@
     gap: var(--space-10);
   }
 
-  .customers-toolbar > .date-filter {
+  .customers-toolbar > .date-range-filter {
     flex: 0 0 246px;
   }
 

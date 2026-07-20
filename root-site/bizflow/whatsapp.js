@@ -1,6 +1,6 @@
 import { getCurrentUser, getUnread, getWhatsappData } from "../data/provider.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
-import { createDateFilter, latestDateInput } from "../components/date-filter.js";
+import { createDateRangeFilter, latestDateInput } from "../components/date-range-filter.js";
 import { renderSegment } from "../components/segment.js";
 import { renderWhatsappActivity } from "./whatsapp-activity.js";
 import { renderWhatsappConfig, renderWhatsappGuide } from "./whatsapp-config.js";
@@ -73,7 +73,7 @@ function initializeWhatsappState(historyState = null) {
     savedSection: ""
   };
 
-  conversationDateFilter = createDateFilter({
+  conversationDateFilter = createDateRangeFilter({
     id: "whatsapp-conversations",
     initialDate: latestDateInput(state.messages.map((row) => dateOnly(row.time))),
     onChange: ({ filterChanged }) => {
@@ -81,7 +81,7 @@ function initializeWhatsappState(historyState = null) {
       rerender();
     }
   });
-  logDateFilter = createDateFilter({
+  logDateFilter = createDateRangeFilter({
     id: "whatsapp-logs",
     initialDate: latestDateInput(state.logs.map((row) => dateOnly(row.time))),
     onChange: ({ filterChanged }) => {
@@ -206,13 +206,14 @@ function updatePromptValidation() {
 }
 
 function handleDateFilterClick(event) {
-  const root = event.target.closest?.("[data-date-filter]");
+  if (event.target.closest?.("[data-date-range-panel]")) return true;
+  const root = event.target.closest?.("[data-date-range-filter]");
   if (!root) {
     conversationDateFilter.close();
     logDateFilter.close();
     return false;
   }
-  const id = root.getAttribute("data-date-filter");
+  const id = root.getAttribute("data-date-range-filter");
   if (id === "whatsapp-conversations") {
     logDateFilter.close();
     return conversationDateFilter.handleClick(event);
@@ -458,12 +459,6 @@ async function onWhatsappChange(event) {
       row.active = toggle.checked;
     }
   }
-  if (conversationDateFilter.handleChange(event) || logDateFilter.handleChange(event)) return;
-}
-
-function onWhatsappFocus(event) {
-  conversationDateFilter.handleFocus(event);
-  logDateFilter.handleFocus(event);
 }
 
 function onWhatsappKeydown(event) {
@@ -538,7 +533,6 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       scope.listen(document, "click", onWhatsappClick);
       scope.listen(document, "input", onWhatsappInput);
       scope.listen(document, "change", onWhatsappChange);
-      scope.listen(document, "focusin", onWhatsappFocus);
       scope.listen(document, "focusout", flushWhatsappRefreshAfterFocus);
       scope.listen(document, "keydown", onWhatsappKeydown);
       const robotStatusInterval = setInterval(updateRobotStatus, WHATSAPP_CLIENT_HEARTBEAT_INTERVAL_MS);

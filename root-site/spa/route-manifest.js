@@ -41,7 +41,7 @@ function route(path, section, entry, styles, load = null) {
 const routes = [
   route("/bizflow/home.html", "bizflow", "../bizflow/home.js", ["../bizflow/home.css"], () => import("../bizflow/home.js")),
   route("/bizflow/orders.html", "bizflow", "../bizflow/orders.js", [
-    "../components/segment.css", "../components/date-filter.css", "../components/date-range-panel.css", "../components/management-list.css",
+    "../components/segment.css", "../components/date-range-panel.css", "../components/management-list.css",
     "../bizflow/orders.css", "../bizflow/orders-domain.css"
   ], () => import("../bizflow/orders.js")),
   route("/bizflow/orders-create.html", "bizflow", "../bizflow/orders-create.js", [
@@ -51,7 +51,7 @@ const routes = [
     "../bizflow/customers.css", "../bizflow/orders.css"
   ], () => import("../bizflow/orders-detail.js")),
   route("/bizflow/customers.html", "bizflow", "../bizflow/customers.js", [
-    "../components/segment.css", "../components/date-filter.css", "../components/date-range-panel.css", "../components/management-list.css",
+    "../components/segment.css", "../components/date-range-panel.css", "../components/management-list.css",
     "../bizflow/customers.css", "../bizflow/customers-warranty.css"
   ], () => import("../bizflow/customers.js")),
   route("/bizflow/customer-detail.html", "bizflow", "../bizflow/customer-detail.js", [
@@ -68,13 +68,13 @@ const routes = [
     "../components/segment.css", "../components/date-range-panel.css", "../bizflow/expense.css"
   ], () => import("../bizflow/expense.js")),
   route("/bizflow/whatsapp.html", "bizflow", "../bizflow/whatsapp.js", [
-    "../components/segment.css", "../components/date-filter.css", "../bizflow/whatsapp.css"
+    "../components/segment.css", "../components/date-range-panel.css", "../bizflow/whatsapp.css"
   ], () => import("../bizflow/whatsapp.js")),
   route("/bizflow/ocpp-monitor.html", "bizflow", "../bizflow/ocpp-monitor.js", [
-    "../components/segment.css", "../components/date-filter.css", "../bizflow/ocpp.css"
+    "../components/segment.css", "../components/date-range-panel.css", "../bizflow/ocpp.css"
   ], () => import("../bizflow/ocpp-monitor.js")),
   route("/bizflow/ocpp-charging.html", "bizflow", "../bizflow/ocpp-charging.js", [
-    "../components/segment.css", "../components/date-filter.css", "../bizflow/ocpp.css"
+    "../components/segment.css", "../components/date-range-panel.css", "../bizflow/ocpp.css"
   ], () => import("../bizflow/ocpp-charging.js")),
   route("/bizflow/ocpp-users.html", "bizflow", "../bizflow/ocpp-users.js", [
     "../components/segment.css", "../bizflow/ocpp.css"

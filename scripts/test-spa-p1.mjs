@@ -9,7 +9,7 @@ import { routeManifest, spaCrossSectionNavigation, spaNavigation, spaRouteAllowl
 import { createRouteFrame, createRouteMenu } from "../root-site/spa/route-menu.js";
 import { invalidateProviderSnapshotMemo, loadProviderSnapshot } from "../root-site/data/provider-snapshot-cache.js";
 import { snapshotsForTables } from "../root-site/data/live-snapshot-dependencies.js";
-import { createDateFilter } from "../root-site/components/date-filter.js";
+import { createDateRangeFilter } from "../root-site/components/date-range-filter.js";
 import { requireOcppRouteAccess } from "../root-site/bizflow/ocpp-shared.js";
 import { whatsappCopy } from "../root-site/bizflow/whatsapp-i18n.js";
 
@@ -215,9 +215,9 @@ async function verifyLifecycle() {
   aborted.abort();
   assert.throws(() => throwIfPageAborted(aborted.signal), { name: "AbortError" });
 
-  const sourceFilter = createDateFilter({ initialDate: "2026-07-16" });
+  const sourceFilter = createDateRangeFilter({ initialDate: "2026-07-16" });
   sourceFilter.restoreState({ from: "2026-07-01", to: "2026-07-16", focus: "to", endDateEnabled: true, calendarMonth: "2026-07-01" });
-  const restoredFilter = createDateFilter({ initialDate: "2026-07-16" });
+  const restoredFilter = createDateRangeFilter({ initialDate: "2026-07-16" });
   assert.equal(restoredFilter.restoreState(sourceFilter.captureState()), true);
   assert.deepEqual(restoredFilter.captureState(), sourceFilter.captureState(), "date filter history state must round-trip");
 }

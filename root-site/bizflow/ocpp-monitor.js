@@ -5,9 +5,9 @@ import {
   getUnread,
 } from "../data/provider.js";
 import {
-  createDateFilter,
+  createDateRangeFilter,
   latestDateInput,
-} from "../components/date-filter.js";
+} from "../components/date-range-filter.js";
 import { dateInputFromUnix, formatUnix, pileTypeKey } from "./ocpp-model.js";
 import {
   filterInput,
@@ -80,7 +80,7 @@ function renderLogs() {
       return `<tr class="ocpp-click-row" data-ocpp-log="${e(row.id)}"><td>${e(formatUnix(row.ts, h.lang))}</td><td>${statusChip(row.dir === "in" ? "normal" : "unknown", { helpers: h, t, labelKey: row.dir === "in" ? "inbound" : "outbound" })}</td><td class="ocpp-mono">${e(row.pileNo)}</td><td>${e(row.action)}</td><td class="ocpp-mono">${e(row.messageId)}</td><td class="ocpp-preview">${e(row.dataPreview)}</td></tr>${open ? `<tr class="ocpp-expanded"><td colspan="6"><pre>${e(row.dataPreview)}</pre></td></tr>` : ""}`;
     })
     .join("");
-  return `<div class="ocpp-toolbar"><div>${controls}</div><span>${e(t("last7days"))}</span><strong>${e(t("visible", { count: visible.length, total: filtered.length }))}</strong></div>${renderTable([t("time"), t("direction"), t("pileNo"), t("action"), t("messageId"), t("payload")], rows, { emptyText: t("noLogs"), helpers: h, minWidth: "xwide", attrs: `data-ocpp-log-total="${filtered.length}" data-ocpp-log-visible="${visible.length}"` })}${visible.length < filtered.length ? `<button type="button" class="ocpp-primary" data-ocpp-log-more>${e(t("loadMore"))}</button>` : ""}`;
+  return `<div class="ocpp-toolbar"><div>${controls}</div><strong>${e(t("visible", { count: visible.length, total: filtered.length }))}</strong></div>${renderTable([t("time"), t("direction"), t("pileNo"), t("action"), t("messageId"), t("payload")], rows, { emptyText: t("noLogs"), helpers: h, minWidth: "xwide", attrs: `data-ocpp-log-total="${filtered.length}" data-ocpp-log-visible="${visible.length}"` })}${visible.length < filtered.length ? `<button type="button" class="ocpp-primary" data-ocpp-log-more>${e(t("loadMore"))}</button>` : ""}`;
 }
 
 async function loadLiveLogs() {
@@ -146,9 +146,10 @@ function rerender() {
   if (page && context.helpers()) page.outerHTML = render(context.helpers());
 }
 function onMonitorClick(event) {
-  const root = event.target.closest?.("[data-date-filter]");
+  if (event.target.closest?.("[data-date-range-panel]")) return;
+  const root = event.target.closest?.("[data-date-range-filter]");
   if (root) {
-    const id = root.getAttribute("data-date-filter");
+    const id = root.getAttribute("data-date-range-filter");
     if (id === "ocpp-log-date") {
       alarmDate.close();
       if (logDate.handleClick(event)) return;
@@ -196,11 +197,6 @@ function onMonitorChange(event) {
     state.logLimit = 50;
     rerender();
   }
-  logDate.handleChange(event) || alarmDate.handleChange(event);
-}
-function onMonitorFocus(event) {
-  logDate.handleFocus(event);
-  alarmDate.handleFocus(event);
 }
 function onMonitorKeydown(event) {
   if (event.key === "Enter" && event.target.matches("[data-ocpp-pile-query]")) {
@@ -246,15 +242,16 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
     { key: "commands", labelKey: "commandLogsTab", badge: data.commandLogs.length || null },
     { key: "alarms", labelKey: "alarmsTab", badge: data.alarms.length || null },
   ];
-  logDate = createDateFilter({
+  logDate = createDateRangeFilter({
     id: "ocpp-log-date",
     initialDate: latestDateInput(data.logs.map((row) => dateInputFromUnix(row.ts))),
+    presets: ["all", "last7"],
     onChange: () => {
       state.logLimit = 50;
       rerender();
     },
   });
-  alarmDate = createDateFilter({
+  alarmDate = createDateRangeFilter({
     id: "ocpp-alarm-date",
     initialDate: latestDateInput(data.alarms.map((row) => dateInputFromUnix(row.createdAt))),
     onChange: () => rerender(),
@@ -268,7 +265,6 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
       scope.listen(document, "click", onMonitorClick);
       scope.listen(document, "input", onMonitorInput);
       scope.listen(document, "change", onMonitorChange);
-      scope.listen(document, "focusin", onMonitorFocus);
       scope.listen(document, "keydown", onMonitorKeydown);
       if (state.tab === "logs") void loadLiveLogs();
     },

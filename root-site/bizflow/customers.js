@@ -6,10 +6,10 @@
 //     当前已接 `customer-detail.html?id=...`。
 //   - 客户来源/IMEI码 两个筛选下拉本身未挂 reaction,按 docs/00-设计规范 §10.2.3 全站下拉规约
 //     (Frame784 浮层 + 弹窗按钮选项行)实装为真联动,写法参考 team/tasks.js 的 data-filter 委托模式(未 import)。
-//   - 日期区间与订单管理共用 date-filter 组件,按 joinedAt 真筛选。
+//   - 日期区间与订单管理共用蓝色 date-range-panel,按 joinedAt 真筛选。
 
 import { getCustomersPageData, getCurrentUser, getUnread } from "../data/provider.js";
-import { createDateFilter, latestDateInput } from "../components/date-filter.js";
+import { createDateRangeFilter, latestDateInput } from "../components/date-range-filter.js";
 import { managementPageSize, renderManagementList, renderManagementPager } from "../components/management-list.js";
 import { renderSegment } from "../components/segment.js";
 import { consumeNavigationPreset, navigationPresetKeys } from "../components/navigation-presets.js";
@@ -356,6 +356,7 @@ function rerenderCustomersPage() {
 }
 
 async function onCustomersClick(event) {
+  if (event.target.closest("[data-date-range-panel]")) return;
   if (liveReadOnly && event.target.closest("[data-customers-write]")) return;
   const customerTab = event.target.closest("[data-customers-tab]");
   if (customerTab) {
@@ -398,7 +399,7 @@ async function onCustomersClick(event) {
     return;
   }
 
-  if (event.target.closest("[data-date-filter]")) {
+  if (event.target.closest("[data-date-range-filter]")) {
     closeAllFilterMenus(null);
     if (dateFilter.handleClick(event)) return;
   }
@@ -460,7 +461,7 @@ async function onCustomersClick(event) {
   if (!event.target.closest("[data-customers-filter-popover]")) {
     closeAllFilterMenus(null);
   }
-  if (!event.target.closest("[data-date-filter]")) dateFilter.close();
+  if (!event.target.closest("[data-date-range-filter]")) dateFilter.close();
 }
 
 async function onCustomersContextMenu(event) {
@@ -496,14 +497,6 @@ function onCustomersInput(event) {
     nextSearch.focus();
     nextSearch.setSelectionRange(nextSearch.value.length, nextSearch.value.length);
   }
-}
-
-function onCustomersFocus(event) {
-  dateFilter.handleFocus(event);
-}
-
-function onCustomersChange(event) {
-  dateFilter.handleChange(event);
 }
 
 function onCustomersKeydown(event) {
@@ -557,7 +550,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
   customerSorter = createCustomerSorter();
   restoreWarrantyState(historyState?.warranty);
   if (!historyState && presetWarrantySearch) setWarrantySearch(presetWarrantySearch);
-  dateFilter = createDateFilter({
+  dateFilter = createDateRangeFilter({
     id: "customers",
     initialDate: latestDateInput(data.customers.map((customer) => customer.joinedAt)),
     onChange({ filterChanged }) {
@@ -582,8 +575,6 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       scope.listen(document, "click", onCustomersClick);
       scope.listen(document, "contextmenu", onCustomersContextMenu);
       scope.listen(document, "input", onCustomersInput);
-      scope.listen(document, "focusin", onCustomersFocus);
-      scope.listen(document, "change", onCustomersChange);
       scope.listen(document, "keydown", onCustomersKeydown);
       scope.listen(window, "resize", onCustomersResize);
     },

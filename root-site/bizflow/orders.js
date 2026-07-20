@@ -3,7 +3,7 @@
 
 import { getOrdersPageData, getUnread, getUnreadWatermarks, getCurrentUser } from "../data/provider.js";
 import { markRead } from "../data/read-state.js";
-import { createDateFilter, latestDateInput } from "../components/date-filter.js";
+import { createDateRangeFilter, latestDateInput } from "../components/date-range-filter.js";
 import { managementPageSize, renderManagementList, renderManagementPager } from "../components/management-list.js";
 import { renderSegment as renderSharedSegment } from "../components/segment.js";
 import { aggregateShippingCounts, matchesShippingFilter } from "../components/order-metrics.js";
@@ -360,6 +360,7 @@ function rerenderOrdersPage() {
 }
 
 async function onOrdersClick(event) {
+  if (event.target.closest("[data-date-range-panel]")) return;
   const domainTab = event.target.closest("[data-orders-domain-tab]");
   if (domainTab) {
     const scope = activeScope;
@@ -389,7 +390,7 @@ async function onOrdersClick(event) {
     return;
   }
 
-  if (event.target.closest("[data-date-filter]")) {
+  if (event.target.closest("[data-date-range-filter]")) {
     closeSourceMenu();
     if (dateFilter.handleClick(event)) return;
   }
@@ -463,7 +464,7 @@ async function onOrdersClick(event) {
   }
 
   if (!event.target.closest("[data-source-popover]")) closeSourceMenu();
-  if (!event.target.closest("[data-date-filter]")) dateFilter.close();
+  if (!event.target.closest("[data-date-range-filter]")) dateFilter.close();
 }
 
 async function onOrdersContextMenu(event) {
@@ -473,14 +474,6 @@ async function onOrdersContextMenu(event) {
   event.preventDefault();
   event.stopPropagation();
   await copyPhoneNumber(phone, currentHelpers.lang, { scope: activeScope });
-}
-
-function onOrdersFocus(event) {
-  dateFilter.handleFocus(event);
-}
-
-function onOrdersChange(event) {
-  dateFilter.handleChange(event);
 }
 
 function onOrdersInput(event) {
@@ -572,7 +565,7 @@ export async function mountPage({ scope, signal, historyState = null, navigation
   restoreNorthboundState(historyState?.northbound);
   restoreChargerLeadState(historyState?.chargerLeads);
   restoreRevenueState(historyState?.revenue);
-  dateFilter = createDateFilter({
+  dateFilter = createDateRangeFilter({
     id: "orders",
     initialDate: latestDateInput(data.orders.map((order) => order.date)),
     onChange({ filterChanged }) {
@@ -595,8 +588,6 @@ export async function mountPage({ scope, signal, historyState = null, navigation
       if (state.tab === "list") markRead("orders", unreadWatermarks.orders);
       scope.listen(document, "click", onOrdersClick);
       scope.listen(document, "contextmenu", onOrdersContextMenu);
-      scope.listen(document, "focusin", onOrdersFocus);
-      scope.listen(document, "change", onOrdersChange);
       scope.listen(document, "input", onOrdersInput);
       scope.listen(document, "keydown", onOrdersKeydown);
       scope.listen(window, "resize", onOrdersResize);
