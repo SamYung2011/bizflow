@@ -24,6 +24,83 @@
   margin-bottom: var(--space-10);
 }
 
+.date-range-panel__inputs--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.date-range-panel__presets {
+  display: flex;
+  gap: var(--space-4);
+  margin: 0 0 var(--space-10);
+  padding: 0 0 var(--space-10);
+  border-bottom: 1px solid var(--gray-10);
+  overflow-x: auto;
+}
+
+.date-range-panel__preset {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: var(--space-4) var(--space-10);
+  border: 1px solid color-mix(in srgb, var(--blue) 24%, var(--gray-10));
+  border-radius: var(--radius-10);
+  background: color-mix(in srgb, var(--blue) 7%, var(--white));
+  color: var(--blue);
+  font-size: var(--font-description-size);
+}
+
+.date-range-panel__preset:hover,
+.date-range-panel__preset:focus-visible {
+  border-color: var(--blue);
+  outline: 0;
+  background: var(--blue);
+  color: var(--white);
+}
+
+.date-panel-trigger {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-10);
+  padding: 0 var(--space-10);
+  border: 1px solid var(--gray-12);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  color: var(--gray-60);
+  font: inherit;
+  text-align: left;
+}
+
+.date-panel-trigger:hover,
+.date-panel-trigger:focus-visible,
+.date-panel-trigger[aria-expanded="true"] {
+  border-color: var(--blue);
+  outline: 0;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--blue) 18%, transparent);
+}
+
+.date-panel-trigger:disabled {
+  cursor: not-allowed;
+  background: var(--gray-5);
+  color: var(--gray-20);
+}
+
+.date-panel-trigger .icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  color: var(--blue);
+}
+
+.date-panel-trigger__value {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .date-range-panel__date {
   height: var(--date-range-control-height);
   min-width: 0;

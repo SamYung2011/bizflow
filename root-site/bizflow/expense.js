@@ -14,6 +14,8 @@ import {
 import { createLiveExpense } from "../data/live-expense-writes.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
+import { createDateRangePanel } from "../components/date-range-panel.js";
+import { displayDateInput } from "../components/date-value.js";
 
 const copy = {
   zh: {
@@ -69,7 +71,14 @@ const copy = {
     saveFailed: "提交失敗，請稍後重試",
     noDescription: "—",
     receiptCount: "{count} 張",
-    leaveUnsaved: "報銷草稿尚未提交，確定離開？"
+    leaveUnsaved: "報銷草稿尚未提交，確定離開？",
+    presets: "快捷日期",
+    today: "今天",
+    previousMonth: "上個月",
+    nextMonth: "下個月",
+    year: "年份",
+    chooseMonth: "選擇年月",
+    clear: "清除"
   },
   en: {
     title: "Finance",
@@ -124,7 +133,14 @@ const copy = {
     saveFailed: "Submission failed. Please try again.",
     noDescription: "—",
     receiptCount: "{count} images",
-    leaveUnsaved: "This reimbursement draft has not been submitted. Leave this page?"
+    leaveUnsaved: "This reimbursement draft has not been submitted. Leave this page?",
+    presets: "Quick dates",
+    today: "Today",
+    previousMonth: "Previous month",
+    nextMonth: "Next month",
+    year: "Year",
+    chooseMonth: "Choose year and month",
+    clear: "Clear"
   },
   fr: {
     title: "Finance",
@@ -179,7 +195,14 @@ const copy = {
     saveFailed: "Échec de l’envoi. Réessayez.",
     noDescription: "—",
     receiptCount: "{count} images",
-    leaveUnsaved: "Ce brouillon de remboursement n’est pas envoyé. Quitter cette page ?"
+    leaveUnsaved: "Ce brouillon de remboursement n’est pas envoyé. Quitter cette page ?",
+    presets: "Dates rapides",
+    today: "Aujourd’hui",
+    previousMonth: "Mois précédent",
+    nextMonth: "Mois suivant",
+    year: "Année",
+    chooseMonth: "Choisir l’année et le mois",
+    clear: "Effacer"
   }
 };
 
@@ -204,6 +227,7 @@ let state = {
 let currentHelpers = null;
 let activeScope = null;
 let activeMountId = 0;
+const expenseDatePanel = createDateRangePanel();
 
 function isCurrentExpenseMount(mountId, scope = activeScope) {
   return mountId === activeMountId && Boolean(scope?.isCurrent());
@@ -327,7 +351,7 @@ function renderModal(helpers) {
       <header><h2>${e(t(lang, "modalTitle"))}</h2><button type="button" data-expense-close data-expense-create-write aria-label="${e(t(lang, "close"))}"${createWriteAttributes}>×</button></header>
       <div class="expense-modal__body">
         <div class="expense-form-grid">
-          ${renderField("date", "date", `<input type="date" data-expense-field="date" data-expense-create-write value="${e(draft.date)}"${createWriteAttributes}>`, helpers)}
+          ${renderField("date", "date", `<button type="button" class="date-panel-trigger" data-expense-date-trigger data-expense-create-write aria-haspopup="dialog" aria-expanded="false"${createWriteAttributes}>${icon("icon-task-calendar", "icon")}<span class="date-panel-trigger__value">${e(displayDateInput(draft.date) || t(lang, "date"))}</span></button>`, helpers)}
           <div class="expense-amount-fields">
             ${renderField("currency", "currency", `<select data-expense-field="currency" data-expense-create-write${createWriteAttributes}>${options(currencies, draft.currency, (value) => value)}</select>`, helpers)}
             ${renderField("amount", "amount", `<input type="number" min="0" step="0.01" inputmode="decimal" data-expense-field="amount" data-expense-create-write value="${e(draft.amount)}" placeholder="0.00"${createWriteAttributes}>`, helpers)}
@@ -381,6 +405,7 @@ function revokeReceipts(receipts) {
 
 function closeModal() {
   if (state.writeBusy) return;
+  expenseDatePanel.close({ restoreFocus: false });
   if (state.draft) revokeReceipts(state.draft.receipts);
   state.draft = null;
   state.error = "";
@@ -405,6 +430,25 @@ async function onExpenseClick(event) {
     state.draft = blankDraft();
     state.error = "";
     rerender();
+    return;
+  }
+  const dateTrigger = event.target.closest("[data-expense-date-trigger]");
+  if (dateTrigger && state.draft) {
+    if (dateTrigger.disabled || state.writeBusy) return;
+    expenseDatePanel.open({
+      anchor: dateTrigger,
+      mode: "single",
+      date: state.draft.date,
+      language: currentHelpers?.lang ?? "zh",
+      t: (key) => t(currentHelpers?.lang ?? "zh", key),
+      onCommit: ({ date }) => {
+        if (!activeScope?.isCurrent() || !state.draft) return;
+        state.draft.date = date;
+        state.error = "";
+        rerender();
+        activeScope.animationFrame(() => document.querySelector("[data-expense-date-trigger]")?.focus());
+      }
+    });
     return;
   }
   if (event.target.closest("[data-expense-close]") || event.target.matches("[data-expense-overlay]")) {
@@ -616,6 +660,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       unread = null;
       currentHelpers = null;
       if (activeScope === scope) activeScope = null;
+      expenseDatePanel.close({ restoreFocus: false });
       state.draft = null;
     }
   };

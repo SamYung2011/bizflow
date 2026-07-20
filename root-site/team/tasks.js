@@ -14,6 +14,7 @@ import { getSessionValue, setSessionValue } from "../data/session-state.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { completeLiveTask, createLiveTask, createLiveTaskFeedback, deleteLiveTask, setLiveTaskParticipation, updateLiveTask } from "../data/live-task-writes.js";
+import { createDateRangePanel } from "../components/date-range-panel.js";
 
 let data = null;
 let currentUser = null;
@@ -27,6 +28,7 @@ let taskMobileViewport = null;
 let activeScope = null;
 let activeMountId = 0;
 let taskLiveRefresh = null;
+const taskDueDatePanel = createDateRangePanel();
 
 function isCurrentTaskMount(mountId, scope = activeScope) {
   return mountId === activeMountId && Boolean(scope?.isCurrent());
@@ -214,6 +216,7 @@ function closeAllFilterMenus(except) {
 }
 
 function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, focusFeedback = false, focusSubmit = false, restoreSubmitFocus = false, focusFilterGroup = "", focusActionMenu = false, restoreActionTaskId = "", focusBoard = false } = {}) {
+  taskDueDatePanel.close({ restoreFocus: false });
   const page = document.querySelector(".team-task-page");
   if (!page || !currentHelpers) return;
   page.outerHTML = renderTaskManagement(currentHelpers);
@@ -420,6 +423,7 @@ function openTaskEdit(taskId) {
 
 function closeTaskSubmit() {
   if (state.writeBusy) return;
+  taskDueDatePanel.close({ restoreFocus: false });
   state.submitOpen = false;
   state.submitOriginalDepartmentId = "";
   state.submitError = "";
@@ -702,6 +706,26 @@ async function onTaskClick(event) {
     return;
   }
 
+  const dueTrigger = event.target.closest("[data-task-due-trigger]");
+  if (dueTrigger) {
+    if (dueTrigger.disabled || state.writeBusy) return;
+    taskDueDatePanel.open({
+      anchor: dueTrigger,
+      mode: "single",
+      date: state.submitDraft.due,
+      language: currentHelpers?.lang ?? "zh",
+      t: (key) => pageT(currentHelpers?.lang ?? "zh", `tasks.date.${key}`),
+      onCommit: ({ date }) => {
+        if (!activeScope?.isCurrent() || !state.submitOpen) return;
+        state.submitDraft.due = date;
+        if (state.submitError === "tasks.submit.dueRequired") state.submitError = "";
+        rerenderTaskPage({ focusSubmit: false });
+        activeScope.animationFrame(() => document.querySelector("[data-task-due-trigger]")?.focus());
+      }
+    });
+    return;
+  }
+
   const detailCopy = event.target.closest("[data-task-copy]");
   if (detailCopy) {
     if (detailCopy.disabled) return;
@@ -938,6 +962,11 @@ async function onTaskSubmit(event) {
     const due = String(values.get("due") || "");
     const requiresReview = values.get("requiresReview") === "yes";
     const assignedMembers = assignedRows.map((member) => member.name);
+    if (!due) {
+      state.submitError = "tasks.submit.dueRequired";
+      rerenderTaskPage({ focusSubmit: true });
+      return;
+    }
     if (state.liveTaskWrites) {
       state.writeBusy = true;
       state.submitError = "";
@@ -1428,6 +1457,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
     dispose() {
       if (activeMountId === mountId) activeMountId += 1;
       closeAllFilterMenus(null);
+      taskDueDatePanel.close({ restoreFocus: false });
       data = null;
       currentUser = null;
       unread = null;

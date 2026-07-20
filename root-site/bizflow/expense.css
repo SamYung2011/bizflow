@@ -391,6 +391,11 @@
   border-color: var(--blue);
 }
 
+.expense-field .date-panel-trigger {
+  min-height: var(--space-40);
+  border-color: var(--gray-10);
+}
+
 .expense-field textarea {
   min-height: var(--expense-textarea-height);
   resize: vertical;

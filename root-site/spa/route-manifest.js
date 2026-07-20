@@ -65,7 +65,7 @@ const routes = [
     "../bizflow/customers.css", "../bizflow/inventory.css"
   ], () => import("../bizflow/inventory-detail.js")),
   route("/bizflow/expense.html", "bizflow", "../bizflow/expense.js", [
-    "../components/segment.css", "../bizflow/expense.css"
+    "../components/segment.css", "../components/date-range-panel.css", "../bizflow/expense.css"
   ], () => import("../bizflow/expense.js")),
   route("/bizflow/whatsapp.html", "bizflow", "../bizflow/whatsapp.js", [
     "../components/segment.css", "../components/date-filter.css", "../bizflow/whatsapp.css"
@@ -82,7 +82,7 @@ const routes = [
   route("/bizflow/ocpp-finance.html", "bizflow", "../bizflow/ocpp-finance.js", [
     "../components/segment.css", "../bizflow/ocpp.css"
   ], () => import("../bizflow/ocpp-finance.js")),
-  route("/team/index.html", "team", "../team/tasks.js", ["../team/tasks.css", "../team/tasks-domain.css"], () => import("../team/tasks.js")),
+  route("/team/index.html", "team", "../team/tasks.js", ["../components/date-range-panel.css", "../team/tasks.css", "../team/tasks-domain.css"], () => import("../team/tasks.js")),
   route("/team/members.html", "team", "../team/members.js", ["../team/members.css", "../team/members-domain.css"], () => import("../team/members.js"))
 ];
 

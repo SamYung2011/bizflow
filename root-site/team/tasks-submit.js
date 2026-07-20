@@ -1,4 +1,5 @@
 import { taskT } from "./tasks-i18n.js";
+import { displayDateInput } from "../components/date-value.js";
 
 export function availableTaskDepartments(state, data) {
   const departments = Array.isArray(data?.departments) ? data.departments : [];
@@ -136,7 +137,8 @@ export function renderTaskSubmitDialog({ state, data, helpers }) {
         </div>
         <label class="form-task-submit__field">
           <span>${escapeHtml(tt("tasks.submit.expectedAt"))}</span>
-          <input type="date" name="due" value="${escapeHtml(draft.due)}" required${busy}>
+          <button type="button" class="date-panel-trigger" data-task-due-trigger aria-haspopup="dialog" aria-expanded="false"${busy}>${helpers.icon("icon-task-calendar", "icon")}<span class="date-panel-trigger__value">${escapeHtml(displayDateInput(draft.due) || tt("tasks.submit.selectDue"))}</span></button>
+          <input type="hidden" name="due" value="${escapeHtml(draft.due)}">
         </label>
         <div class="form-task-submit__field">
           <span>${escapeHtml(tt("tasks.submit.attachments"))}</span>

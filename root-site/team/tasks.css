@@ -1486,6 +1486,12 @@
   box-shadow: 0 0 0 var(--task-submit-close-stroke) color-mix(in srgb, var(--blue) 12%, transparent);
 }
 
+.form-task-submit__field .date-panel-trigger {
+  min-height: var(--task-submit-control-height);
+  border: var(--task-submit-border-width) solid transparent;
+  background: var(--gray-5);
+}
+
 .form-task-submit__member-editor {
   position: relative;
   min-width: 0;
