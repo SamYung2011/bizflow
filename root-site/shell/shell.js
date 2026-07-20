@@ -2,7 +2,7 @@ import { dictionaries } from "./shell-i18n.js";
 import { mountIconSprite } from "../assets/icons/inline-sprite.js";
 import { renderLanguageMenu, renderUserPanel, attachMenuBehaviors } from "../components/menus.js";
 import { attachGlobalSearch, renderGlobalSearch } from "./shell-search.js";
-import { getRememberedUnreadWatermarks, markRead, READ_STATE_STORAGE_KEY } from "../data/read-state.js";
+import { READ_STATE_STORAGE_KEY } from "../data/read-state.js";
 import { createRouteMenu } from "../spa/route-menu.js";
 
 const iconsUrl = "../assets/icons/icons.svg";
@@ -48,7 +48,6 @@ let pageContext = {
 let menuSource = pageContext.menu ?? defaultMenu;
 // 红点=数据驱动(煊煊 2026-07-08:有未读才亮,禁照版面摆装饰红点)。
 let unread = pageContext.data.unread ?? {};
-let unreadWatermarks = getRememberedUnreadWatermarks();
 
 function buildMenuItems(user) {
   const authenticated = typeof user?.hasPermission === "function";
@@ -66,7 +65,7 @@ function buildMenuItems(user) {
 
 let menuItems = buildMenuItems(pageContext.data.user);
 
-let hasUnreadMessages = (unread.messages ?? 0) > 0;
+let hasUnreadMessages = false;
 
 mountIconSprite();
 
@@ -149,11 +148,17 @@ function renderLanguageSelect() {
 }
 
 function renderMessageButton() {
-  // 消息钮=快跳 team 未读入口(煊煊 2026-07-08 定):两站所有页统一跳 team 站主页。
-  return `<a href="../team/index.html" class="tp-component btn-messenger shell-icon-button ${hasUnreadMessages ? "btn-messenger--update" : ""}" data-shell-message aria-label="${escapeHtml(t("shell.message"))}">
+  const href = canAccessTeamActivity() ? "../bizflow/home.html#team-activity" : "../team/index.html";
+  return `<a href="${href}" class="tp-component btn-messenger shell-icon-button ${hasUnreadMessages ? "btn-messenger--update" : ""}" data-shell-message aria-label="${escapeHtml(t("shell.message"))}">
     ${icon("icon-nav-messenger")}
     ${hasUnreadMessages ? redDot() : ""}
   </a>`;
+}
+
+function canAccessTeamActivity() {
+  const user = state.profileUser ?? pageContext.data.user;
+  if (!state.authEnabled || typeof user?.hasPermission !== "function") return true;
+  return user.isBfAdmin === true || user.bizflowMainAccess === true;
 }
 
 function renderLanguageButton() {
@@ -384,7 +389,7 @@ function syncUnreadIndicators() {
       syncDirectDot(element, item.update);
     });
   }
-  hasUnreadMessages = (unread.messages ?? 0) > 0;
+  hasUnreadMessages = canAccessTeamActivity() && (unread.messages ?? 0) > 0;
   root.querySelectorAll("[data-shell-message]").forEach((element) => {
     element.classList.toggle("btn-messenger--update", hasUnreadMessages);
     syncDirectDot(element, hasUnreadMessages);
@@ -407,7 +412,6 @@ async function refreshUnreadIndicators(event) {
     unread = await getUnread();
   }
   pageContext = { ...pageContext, data: { ...pageContext.data, unread: { ...unread } } };
-  unreadWatermarks = getRememberedUnreadWatermarks();
   syncUnreadIndicators();
 }
 
@@ -430,10 +434,6 @@ function setViewportMode(isMobile) {
 }
 
 document.addEventListener("click", async (event) => {
-  if (event.target.closest("[data-shell-message]")) {
-    markRead("messages", unreadWatermarks.messages);
-  }
-
   const companyItem = event.target.closest("[data-company]");
   if (companyItem && !companyItem.disabled) {
     const nextCompany = companyItem.getAttribute("data-company");
@@ -627,6 +627,7 @@ async function guardAuthenticatedShell() {
   state.profileUser = { ...user, availableCompanies: user.availableCompanies.map((company) => ({ ...company })) };
   pageContext = { ...pageContext, data: { ...pageContext.data, user: state.profileUser } };
   menuItems = buildMenuItems(state.profileUser);
+  hasUnreadMessages = canAccessTeamActivity() && (unread.messages ?? 0) > 0;
   const switchable = user.switchableCompanies.map((company) => ({ key: company.id, label: company.name }));
   if (switchable.length) {
     companies = switchable;
@@ -665,8 +666,7 @@ export function setPage(nextPage = {}) {
   };
   menuSource = pageContext.menu ?? defaultMenu;
   unread = pageContext.data.unread ?? {};
-  unreadWatermarks = getRememberedUnreadWatermarks();
-  hasUnreadMessages = (unread.messages ?? 0) > 0;
+  hasUnreadMessages = canAccessTeamActivity() && (unread.messages ?? 0) > 0;
   if (pageContext.data.user) {
     state.profileUser = {
       ...pageContext.data.user,

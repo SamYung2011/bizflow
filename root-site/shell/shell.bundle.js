@@ -943,39 +943,6 @@
 
   // root-site/data/read-state.js
   var READ_STATE_STORAGE_KEY = "tp-read-state-v1";
-  var READ_KEYS = /* @__PURE__ */ new Set(["tasks", "orders", "messages", "inventory"]);
-  var memoryState = {};
-  var unreadWatermarks = {};
-  function normalizeState(value) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-    return Object.fromEntries(
-      Object.entries(value).filter(([key, watermark]) => READ_KEYS.has(key) && typeof watermark === "string")
-    );
-  }
-  function getReadState() {
-    try {
-      const stored = window.localStorage.getItem(READ_STATE_STORAGE_KEY);
-      if (stored !== null) memoryState = normalizeState(JSON.parse(stored));
-    } catch {
-    }
-    return { ...memoryState };
-  }
-  function markRead(key, watermark) {
-    if (!READ_KEYS.has(key) || typeof watermark !== "string" || watermark === "") return;
-    if (document.prerendering) {
-      document.addEventListener("prerenderingchange", () => markRead(key, watermark), { once: true });
-      return;
-    }
-    memoryState = { ...getReadState(), [key]: watermark };
-    try {
-      window.localStorage.setItem(READ_STATE_STORAGE_KEY, JSON.stringify(memoryState));
-    } catch {
-    }
-    window.dispatchEvent(new CustomEvent("tp:unread-change", { detail: { key, watermark } }));
-  }
-  function getRememberedUnreadWatermarks() {
-    return { ...unreadWatermarks };
-  }
 
   // root-site/spa/route-menu.js
   var skeleton = (kind, stats = 0) => Object.freeze({ kind, stats });
@@ -1059,7 +1026,6 @@
   };
   var menuSource = pageContext.menu ?? defaultMenu;
   var unread = pageContext.data.unread ?? {};
-  var unreadWatermarks2 = getRememberedUnreadWatermarks();
   function buildMenuItems(user) {
     const authenticated = typeof user?.hasPermission === "function";
     const canViewAdminItems = !authenticated || user.isBfAdmin === true;
@@ -1071,7 +1037,7 @@
     }));
   }
   var menuItems = buildMenuItems(pageContext.data.user);
-  var hasUnreadMessages = (unread.messages ?? 0) > 0;
+  var hasUnreadMessages = false;
   mountIconSprite();
   function escapeHtml2(value) {
     return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
@@ -1130,10 +1096,16 @@
   </span>`;
   }
   function renderMessageButton() {
-    return `<a href="../team/index.html" class="tp-component btn-messenger shell-icon-button ${hasUnreadMessages ? "btn-messenger--update" : ""}" data-shell-message aria-label="${escapeHtml2(t("shell.message"))}">
+    const href = canAccessTeamActivity() ? "../bizflow/home.html#team-activity" : "../team/index.html";
+    return `<a href="${href}" class="tp-component btn-messenger shell-icon-button ${hasUnreadMessages ? "btn-messenger--update" : ""}" data-shell-message aria-label="${escapeHtml2(t("shell.message"))}">
     ${icon2("icon-nav-messenger")}
     ${hasUnreadMessages ? redDot() : ""}
   </a>`;
+  }
+  function canAccessTeamActivity() {
+    const user = state2.profileUser ?? pageContext.data.user;
+    if (!state2.authEnabled || typeof user?.hasPermission !== "function") return true;
+    return user.isBfAdmin === true || user.bizflowMainAccess === true;
   }
   function renderLanguageButton() {
     return `<span class="shell-menu-anchor" data-menu>
@@ -1336,7 +1308,7 @@
         syncDirectDot(element, item.update);
       });
     }
-    hasUnreadMessages = (unread.messages ?? 0) > 0;
+    hasUnreadMessages = canAccessTeamActivity() && (unread.messages ?? 0) > 0;
     root.querySelectorAll("[data-shell-message]").forEach((element) => {
       element.classList.toggle("btn-messenger--update", hasUnreadMessages);
       syncDirectDot(element, hasUnreadMessages);
@@ -1357,7 +1329,6 @@
       unread = await getUnread();
     }
     pageContext = { ...pageContext, data: { ...pageContext.data, unread: { ...unread } } };
-    unreadWatermarks2 = getRememberedUnreadWatermarks();
     syncUnreadIndicators();
   }
   function closeTransientShellUi() {
@@ -1377,9 +1348,6 @@
     app?.classList.remove("is-viewport-switching");
   }
   document.addEventListener("click", async (event) => {
-    if (event.target.closest("[data-shell-message]")) {
-      markRead("messages", unreadWatermarks2.messages);
-    }
     const companyItem = event.target.closest("[data-company]");
     if (companyItem && !companyItem.disabled) {
       const nextCompany = companyItem.getAttribute("data-company");
@@ -1564,6 +1532,7 @@
     state2.profileUser = { ...user, availableCompanies: user.availableCompanies.map((company) => ({ ...company })) };
     pageContext = { ...pageContext, data: { ...pageContext.data, user: state2.profileUser } };
     menuItems = buildMenuItems(state2.profileUser);
+    hasUnreadMessages = canAccessTeamActivity() && (unread.messages ?? 0) > 0;
     const switchable = user.switchableCompanies.map((company) => ({ key: company.id, label: company.name }));
     if (switchable.length) {
       companies = switchable;
@@ -1600,8 +1569,7 @@
     };
     menuSource = pageContext.menu ?? defaultMenu;
     unread = pageContext.data.unread ?? {};
-    unreadWatermarks2 = getRememberedUnreadWatermarks();
-    hasUnreadMessages = (unread.messages ?? 0) > 0;
+    hasUnreadMessages = canAccessTeamActivity() && (unread.messages ?? 0) > 0;
     if (pageContext.data.user) {
       state2.profileUser = {
         ...pageContext.data.user,

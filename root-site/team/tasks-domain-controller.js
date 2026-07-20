@@ -14,6 +14,7 @@ export function attachTaskDomainController({
   adjustOpenTaskCounts,
   localTimestamp,
   toggleTaskParticipation,
+  toggleSubtaskCompletion,
   refreshLiveData,
   isLiveRefreshBlocked,
   scope
@@ -160,8 +161,13 @@ export function attachTaskDomainController({
 
     const subtaskToggle = event.target.closest("[data-task-subtask-toggle]");
     if (subtaskToggle) {
-      if (state.liveReadOnly || subtaskToggle.disabled) return;
+      if (subtaskToggle.disabled) return;
       const subtask = taskById(subtaskToggle.getAttribute("data-task-subtask-toggle"));
+      if (state.liveTaskWrites) {
+        if (subtask) await toggleSubtaskCompletion(subtask);
+        return;
+      }
+      if (state.liveReadOnly) return;
       if (subtask) {
         const completed = subtask.status === "completed";
         subtask.status = completed ? "inProgress" : "completed";

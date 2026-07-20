@@ -263,6 +263,51 @@ export async function completeLiveTask({ taskId, targetEmployeeId, wholeTask, ne
   return { completedAt, wholeTask: allDone && !needsApproval };
 }
 
+export async function setLiveSubtaskCompletion({ taskId, completed }) {
+  const { client, currentUser } = await writeContext();
+  const taskResult = await client.from("employee_tasks")
+    .select("id,parent_task_id,needs_approval")
+    .eq("id", taskId)
+    .single();
+  throwIfError(taskResult.error);
+  if (!taskResult.data?.parent_task_id) throw new Error("Subtask completion requires a child task");
+
+  // Never accept a target employee from the UI: the authenticated employee can
+  // only update their own existing assignee row, matching migration 082 RLS.
+  const ownResult = await client.from("task_assignees")
+    .select("employee_id,completed_at,abandoned_at")
+    .eq("task_id", taskId)
+    .eq("employee_id", currentUser.employeeId)
+    .single();
+  throwIfError(ownResult.error);
+
+  const completedAt = completed ? new Date().toISOString() : null;
+  const assigneeResult = await client.from("task_assignees")
+    .update({ completed_at: completedAt, abandoned_at: null })
+    .eq("task_id", taskId)
+    .eq("employee_id", currentUser.employeeId)
+    .select("employee_id")
+    .single();
+  throwIfError(assigneeResult.error);
+
+  const rowsResult = await client.from("task_assignees")
+    .select("employee_id,completed_at,abandoned_at")
+    .eq("task_id", taskId);
+  throwIfError(rowsResult.error);
+  const activeRows = (rowsResult.data ?? []).filter((row) => row.abandoned_at == null);
+  const allDone = activeRows.length > 0 && activeRows.every((row) => row.completed_at != null);
+  const taskDone = allDone && taskResult.data.needs_approval !== true;
+  const rowResult = await client.from("employee_tasks")
+    .update({ status: taskDone ? "done" : "open", completed_at: taskDone ? completedAt : null })
+    .eq("id", taskId)
+    .select("id")
+    .single();
+  throwIfError(rowResult.error);
+
+  await invalidateTaskReads("employee_tasks", "task_assignees");
+  return { completedAt, allDone, taskDone };
+}
+
 export async function setLiveTaskParticipation({ taskId, employeeId, abandoned, singleAssignee }) {
   const { client } = await writeContext();
   const changedAt = abandoned ? new Date().toISOString() : null;

@@ -1,5 +1,5 @@
 import { taskT } from "./tasks-i18n.js";
-import { canDeleteTaskForUser, isWaitingApproval } from "./tasks-model.js";
+import { canDeleteTaskForUser, isWaitingApproval, taskAssignee } from "./tasks-model.js";
 
 function initials(name) {
   return String(name || "?").trim().slice(0, 1).toUpperCase();
@@ -72,10 +72,15 @@ function renderSubtasks(task, state, helpers) {
   const members = state.members.filter((member) => member.dept !== "all");
   const rows = (task.subtasks ?? []).map((subtask) => {
     const assigneeNames = (subtask.assignees ?? []).map((assignee) => assignee.name).join(", ") || "—";
-    const completed = subtask.done === true || subtask.status === "completed";
+    const aggregateCompleted = subtask.done === true || subtask.status === "completed";
+    const ownAssignee = taskAssignee(subtask, state.currentUser);
+    const completed = state.liveTaskWrites && ownAssignee ? ownAssignee.completedAt != null : aggregateCompleted;
+    const canToggle = state.liveTaskWrites ? Boolean(ownAssignee) : !state.liveReadOnly;
+    const disabled = !canToggle || state.writeBusy;
+    const toggleTitle = canToggle ? subtask.title : tt("tasks.detail.subtaskOnlyAssignee");
     return `<div class="task-detail__subtask" data-task-subtask="${escapeHtml(subtask.id)}">
-      <input type="checkbox" data-task-subtask-toggle="${escapeHtml(subtask.id)}"${completed ? " checked" : ""} aria-label="${escapeHtml(subtask.title)}"${state.liveReadOnly ? " disabled" : ""}>
-      <span class="${completed ? "is-completed" : ""}" title="${escapeHtml(subtask.title)}">${escapeHtml(subtask.title)}</span>
+      <input type="checkbox" data-task-subtask-toggle="${escapeHtml(subtask.id)}"${completed ? " checked" : ""} aria-label="${escapeHtml(toggleTitle)}" title="${escapeHtml(toggleTitle)}"${disabled ? " disabled" : ""}>
+      <span class="${aggregateCompleted ? "is-completed" : ""}" title="${escapeHtml(subtask.title)}">${escapeHtml(subtask.title)}</span>
       <small title="${escapeHtml(assigneeNames)}">${escapeHtml(assigneeNames)}</small>
       <button type="button" data-task-subtask-delete="${escapeHtml(subtask.id)}" aria-label="${escapeHtml(tt("tasks.detail.deleteSubtask"))}" title="${escapeHtml(tt("tasks.detail.deleteSubtask"))}"${state.liveReadOnly ? " disabled" : ""}>×</button>
     </div>`;

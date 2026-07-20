@@ -13,8 +13,9 @@ import { renderTaskBoardGrid, renderTaskToolbar } from "./tasks-board.js";
 import { getSessionValue, setSessionValue } from "../data/session-state.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
-import { completeLiveTask, createLiveTask, createLiveTaskFeedback, deleteLiveTask, setLiveTaskParticipation, updateLiveTask } from "../data/live-task-writes.js";
+import { completeLiveTask, createLiveTask, createLiveTaskFeedback, deleteLiveTask, setLiveSubtaskCompletion, setLiveTaskParticipation, updateLiveTask } from "../data/live-task-writes.js";
 import { createDateRangePanel } from "../components/date-range-panel.js";
+import { createTaskBoardReadTracker } from "./task-board-read-state.js";
 
 let data = null;
 let currentUser = null;
@@ -28,6 +29,9 @@ let taskMobileViewport = null;
 let activeScope = null;
 let activeMountId = 0;
 let taskLiveRefresh = null;
+let taskBoardReadTracker = null;
+let taskBoardColumnObserver = null;
+const taskBoardColumnTimers = new Map();
 const taskDueDatePanel = createDateRangePanel();
 
 function isCurrentTaskMount(mountId, scope = activeScope) {
@@ -88,7 +92,8 @@ function createTaskState(nextData, historyState = null) {
     writeBusy: false,
     writeError: "",
     writeNotice: "",
-    actionTaskId: null
+    actionTaskId: null,
+    boardUnreadTaskIds: new Set()
   };
   const nextFilterState = {
     status: ["inProgress", "completed", "overdue"].includes(restored.status) ? restored.status : nextData.filters?.status ?? "inProgress",
@@ -215,7 +220,7 @@ function closeAllFilterMenus(except) {
   });
 }
 
-function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, focusFeedback = false, focusSubmit = false, restoreSubmitFocus = false, focusFilterGroup = "", focusActionMenu = false, restoreActionTaskId = "", focusBoard = false } = {}) {
+function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, focusFeedback = false, focusSubmit = false, restoreSubmitFocus = false, focusFilterGroup = "", focusActionMenu = false, restoreActionTaskId = "", focusBoard = false, focusSubtaskId = "" } = {}) {
   taskDueDatePanel.close({ restoreFocus: false });
   const page = document.querySelector(".team-task-page");
   if (!page || !currentHelpers) return;
@@ -231,7 +236,52 @@ function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, foc
   if (focusActionMenu) document.querySelector("[data-task-action-popover]")?.focus();
   if (restoreActionTaskId) document.querySelector(`[data-task-action-open="${CSS.escape(restoreActionTaskId)}"]`)?.focus();
   if (focusBoard) document.querySelector("[data-task-submit-open]")?.focus();
+  if (focusSubtaskId) document.querySelector(`[data-task-subtask-toggle="${CSS.escape(focusSubtaskId)}"]`)?.focus();
+  activeScope?.animationFrame(observeTaskBoardUnreadColumns);
   if (taskLiveRefresh?.pending) queueMicrotask(() => void taskLiveRefresh.flush());
+}
+
+function clearTaskBoardColumnObservers() {
+  taskBoardColumnObserver?.disconnect();
+  taskBoardColumnObserver = null;
+  taskBoardColumnTimers.forEach((timer) => clearTimeout(timer));
+  taskBoardColumnTimers.clear();
+}
+
+function observeTaskBoardUnreadColumns() {
+  clearTaskBoardColumnObservers();
+  if (!state || !taskBoardReadTracker || state.detailOpen || state.mode !== "board" || filterState?.view !== "board") return;
+  const headers = [...document.querySelectorAll("[data-task-column-read]")]
+    .filter((header) => header.closest("[data-task-column]")?.querySelector("[data-task-column-unread]"));
+  if (!headers.length) return;
+
+  const markColumnSeen = (header) => {
+    if (!header.isConnected || document.visibilityState === "hidden") return;
+    const taskIds = [...(header.closest("[data-task-column]")?.querySelectorAll("[data-task-card]") ?? [])]
+      .map((card) => card.getAttribute("data-task-card"))
+      .filter(Boolean);
+    taskBoardReadTracker.markSeen(taskIds);
+  };
+
+  if (typeof IntersectionObserver !== "function") {
+    headers.forEach(markColumnSeen);
+    return;
+  }
+  taskBoardColumnObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      const header = entry.target;
+      const existing = taskBoardColumnTimers.get(header);
+      if (existing) clearTimeout(existing);
+      taskBoardColumnTimers.delete(header);
+      if (!entry.isIntersecting || entry.intersectionRatio < 0.75 || document.visibilityState === "hidden") return;
+      const timer = setTimeout(() => {
+        taskBoardColumnTimers.delete(header);
+        markColumnSeen(header);
+      }, 500);
+      taskBoardColumnTimers.set(header, timer);
+    });
+  }, { threshold: [0, 0.75] });
+  headers.forEach((header) => taskBoardColumnObserver.observe(header));
 }
 
 const onTaskViewportChange = () => rerenderTaskPage({ focusActionMenu: Boolean(state.actionTaskId) });
@@ -648,6 +698,46 @@ async function toggleTaskParticipation(task) {
   }
   if (!isCurrentTaskMount(mountId, scope)) return;
   rerenderTaskPage({ focusDetail: state.detailOpen, focusBoard: !state.detailOpen });
+}
+
+async function toggleSubtaskCompletion(subtask) {
+  if (!state.liveTaskWrites || state.writeBusy || !subtask?.parentId) return;
+  const ownAssignee = taskAssignee(subtask, state.currentUser);
+  if (!ownAssignee) return;
+  const mountId = activeMountId;
+  const scope = activeScope;
+  const nextCompleted = ownAssignee.completedAt == null;
+  const wasDone = subtask.done === true || subtask.status === "completed";
+  state.writeBusy = true;
+  state.writeError = "";
+  rerenderTaskPage({ focusSubtaskId: subtask.id });
+  try {
+    const result = await setLiveSubtaskCompletion({ taskId: subtask.id, completed: nextCompleted });
+    if (!isCurrentTaskMount(mountId, scope)) return;
+    ownAssignee.completedAt = result.completedAt;
+    ownAssignee.abandonedAt = null;
+    subtask.done = result.taskDone;
+    subtask.status = result.taskDone ? "completed" : "inProgress";
+    subtask.completedAt = result.taskDone ? result.completedAt : "";
+    if (result.taskDone && !wasDone) {
+      state.summary.completed += 1;
+      state.summary.inProgress = Math.max(0, state.summary.inProgress - 1);
+      adjustOpenTaskCounts(subtask, -1);
+    } else if (!result.taskDone && wasDone) {
+      state.summary.completed = Math.max(0, state.summary.completed - 1);
+      state.summary.inProgress += 1;
+      adjustOpenTaskCounts(subtask, 1);
+    }
+    taskBoardReadTracker?.refresh(state.tasks);
+  } catch (error) {
+    if (!isCurrentTaskMount(mountId, scope)) return;
+    console.warn("Subtask completion update failed", error);
+    state.writeError = "tasks.write.failed";
+  } finally {
+    if (isCurrentTaskMount(mountId, scope)) state.writeBusy = false;
+  }
+  if (!isCurrentTaskMount(mountId, scope)) return;
+  rerenderTaskPage({ focusSubtaskId: subtask.id });
 }
 
 async function onTaskClick(event) {
@@ -1347,7 +1437,8 @@ function applyRealtimeTaskData(nextData) {
     attachmentPreview: keepDetail ? currentState.attachmentPreview : null,
     writeError: currentState.writeError,
     writeNotice: currentState.writeNotice,
-    actionTaskId: nextTaskIds.has(actionTaskId) ? actionTaskId : null
+    actionTaskId: nextTaskIds.has(actionTaskId) ? actionTaskId : null,
+    boardUnreadTaskIds: currentState.boardUnreadTaskIds
   });
   data = nextData;
   Object.assign(currentState, next.state);
@@ -1355,6 +1446,7 @@ function applyRealtimeTaskData(nextData) {
   state = currentState;
   filterState = currentFilters;
   rerenderTaskPage({ focusDetail: keepDetail });
+  taskBoardReadTracker?.refresh(state.tasks);
 }
 
 async function refreshLiveTaskSnapshot({ defer, isCurrent }) {
@@ -1426,10 +1518,28 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
         adjustOpenTaskCounts,
         localTimestamp,
         toggleTaskParticipation,
+        toggleSubtaskCompletion,
         refreshLiveData: refreshLiveTaskSnapshot,
         isLiveRefreshBlocked: hasTaskRealtimeRefreshBlock,
         scope
       });
+      const readScopeKey = `${currentUser.activeCompanyId || "demo"}:${state.currentUser.id || "anonymous"}`;
+      const readTracker = createTaskBoardReadTracker({
+        scopeKey: readScopeKey,
+        onUnreadChange(nextUnreadIds) {
+          if (!scope.isCurrent() || !state) return;
+          const previous = state.boardUnreadTaskIds;
+          const unchanged = previous.size === nextUnreadIds.size && [...previous].every((id) => nextUnreadIds.has(id));
+          if (unchanged) return;
+          state.boardUnreadTaskIds = nextUnreadIds;
+          if (!state.detailOpen && state.mode === "board" && filterState.view === "board") rerenderTaskPage();
+        }
+      });
+      taskBoardReadTracker = readTracker;
+      scope.onCleanup(() => readTracker.dispose());
+      scope.onCleanup(clearTaskBoardColumnObservers);
+      scope.listen(document, "visibilitychange", observeTaskBoardUnreadColumns);
+      taskBoardReadTracker.refresh(state.tasks);
     },
     hasUnsavedChanges: hasTaskUnsavedChanges,
     async canLeave() {
@@ -1462,6 +1572,8 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       taskMobileViewport = null;
       if (activeScope === scope) activeScope = null;
       taskLiveRefresh = null;
+      taskBoardReadTracker = null;
+      clearTaskBoardColumnObservers();
       state = null;
       filterState = null;
     }

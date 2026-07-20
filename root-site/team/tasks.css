@@ -442,16 +442,9 @@
   color: var(--green);
 }
 
-.team-kanban-column--high > .team-kanban-column__head .team-count-badge {
-  background: var(--team-high-fg); /* #E01010 与列标题同红,消色差 */
-}
-
-.team-kanban-column--medium > .team-kanban-column__head .team-count-badge {
-  background: var(--blue);
-}
-
-.team-kanban-column--low > .team-kanban-column__head .team-count-badge {
-  background: var(--green);
+.team-kanban-column__head .team-count-badge--unread {
+  background: var(--red);
+  color: var(--white);
 }
 
 .team-kanban-column__tasks {

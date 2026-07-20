@@ -112,7 +112,8 @@ const dict = {
   }
 };
 
-import { getCustomersPageData, getHomeData, getCurrentUser, getHomeOrderMetricRows, getInventoryMetricProducts, getUnread, getWarrantyData } from "../data/provider.js";
+import { getCustomersPageData, getHomeData, getCurrentUser, getHomeOrderMetricRows, getInventoryMetricProducts, getUnread, getUnreadWatermarks, getWarrantyData } from "../data/provider.js";
+import { markRead } from "../data/read-state.js";
 import { renderBarChart } from "../components/bar-chart.js";
 import { aggregateInventoryStock, aggregateRevenue, aggregateShippingCounts } from "../components/order-metrics.js";
 import { navigationPresetKeys, setNavigationPreset } from "../components/navigation-presets.js";
@@ -240,7 +241,7 @@ export function renderHome({ icon, escapeHtml, lang }) {
         <div class="home-card__list">${data.tasks.length ? data.tasks.map(taskItem).join("") : `<div class="tp-muted">${e(th("home.tasks.empty"))}</div>`}</div>
       </section>
 
-      <section class="home-card">
+      <section class="home-card" id="team-activity" data-home-team-activity>
         <div class="home-card__head">
           <h2 class="home-card__title">${e(th("home.teamFeed"))}</h2>
           ${data.unread.messages > 0 ? `<span class="home-badge">${data.unread.messages}</span>` : ""}
@@ -328,18 +329,20 @@ function onHomeKeydown(event) {
 
 export async function mountPage({ scope, signal }) {
   // 数据全走接口层(煊煊 2026-07-08:不写死样板,留好数据接口)
-  const [homeData, orderMetricRows, inventoryMetricProducts, warrantyData, customerData, currentUser, unread] = await Promise.all([
+  const [homeData, orderMetricRows, inventoryMetricProducts, warrantyData, customerData, currentUser, unread, unreadWatermarks] = await Promise.all([
     getHomeData(),
     getHomeOrderMetricRows(),
     getInventoryMetricProducts(),
     getWarrantyData(),
     getCustomersPageData(),
     getCurrentUser(),
-    getUnread()
+    getUnread(),
+    getUnreadWatermarks()
   ]);
   throwIfPageAborted(signal, scope);
   data = {
     ...homeData,
+    unread: { ...(homeData.unread ?? {}), ...unread },
     stats: homeData.stats.map((stat) => {
       if (stat.key === "warranty") return { ...stat, value: warrantyData.items.length, alert: warrantyData.items.length > 0 };
       if (stat.key === "customers") return { ...stat, value: customerData.dashboardCustomerCount };
@@ -377,6 +380,39 @@ export async function mountPage({ scope, signal }) {
     activate() {
       scope.listen(document, "click", onHomeClick);
       scope.listen(document, "keydown", onHomeKeydown);
+      let cardVisible = false;
+      let marked = false;
+      let observer = null;
+      const syncMessageRead = () => {
+        if (marked || !cardVisible || document.visibilityState === "hidden" || (data?.unread?.messages ?? 0) <= 0) return;
+        marked = true;
+        markRead("messages", unreadWatermarks.messages);
+        if (data?.unread) data.unread.messages = 0;
+        document.querySelector("[data-home-team-activity] .home-badge")?.remove();
+        observer?.disconnect();
+      };
+      scope.animationFrame(() => {
+        const card = document.querySelector("[data-home-team-activity]");
+        if (!card) return;
+        // Router restores its scroll position after activate(); one extra frame
+        // keeps the hash target authoritative for this explicit notification jump.
+        if (window.location.hash === "#team-activity") {
+          scope.animationFrame(() => card.scrollIntoView({ block: "center" }));
+        }
+        if ((data?.unread?.messages ?? 0) <= 0) return;
+        if (typeof IntersectionObserver !== "function") {
+          cardVisible = true;
+          syncMessageRead();
+          return;
+        }
+        observer = scope.track(new IntersectionObserver((entries) => {
+          const entry = entries.find((item) => item.target === card);
+          cardVisible = Boolean(entry?.isIntersecting && entry.intersectionRatio >= 0.5);
+          syncMessageRead();
+        }, { threshold: [0, 0.5] }));
+        observer.observe(card);
+      });
+      scope.listen(document, "visibilitychange", syncMessageRead);
     },
     captureState: () => null,
     dispose() {

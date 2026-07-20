@@ -48,8 +48,10 @@ function renderColumn(column, state, filterState, helpers) {
   const body = column.tasks.length
     ? column.tasks.map((task) => renderTaskCard(task, column.key, state, helpers)).join("")
     : `<p class="team-kanban-empty">${escapeHtml(taskT(lang, emptyKey))}</p>`;
+  const unreadCount = column.tasks.filter((task) => state.boardUnreadTaskIds?.has(task.id)).length;
+  const unreadLabel = taskT(lang, "tasks.column.unreadChanges", { count: unreadCount });
   return `<section class="team-kanban-column team-kanban-column--${column.key}" data-task-column="${column.key}" data-column-count="${column.count}">
-    <header class="team-kanban-column__head"><div class="team-kanban-column__title"><span title="${escapeHtml(title)}">${escapeHtml(title)}</span><span>${column.count}</span></div><span class="team-count-badge">${column.count}</span></header>
+    <header class="team-kanban-column__head" data-task-column-read="${column.key}"><div class="team-kanban-column__title"><span title="${escapeHtml(title)}">${escapeHtml(title)}</span><span>${column.count}</span></div>${unreadCount > 0 ? `<span class="team-count-badge team-count-badge--unread" data-task-column-unread="${unreadCount}" aria-label="${escapeHtml(unreadLabel)}" title="${escapeHtml(unreadLabel)}">${unreadCount}</span>` : ""}</header>
     <div class="team-kanban-column__tasks">${body}</div>
     ${column.key === "high" ? `<button type="button" class="team-column-expand" tabindex="-1" aria-label="expand">${icon("icon-arrow-down")}${icon("icon-arrow-down")}</button>` : `<button type="button" class="team-column-add" tabindex="-1" aria-label="add"${state.liveReadOnly ? " disabled aria-disabled=\"true\"" : ""}>${icon("icon-add-surface-add")}</button>`}
   </section>`;
