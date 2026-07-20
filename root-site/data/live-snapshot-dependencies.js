@@ -27,7 +27,9 @@ const SNAPSHOT_TABLES = Object.freeze({
   "warranty.json": ["customers", "invoices", "customer_devices", "products"],
   "orders.json": ["invoices", "customers", "employees", "shipment_events"],
   "home-order-metrics.json": ["invoices", "customers", "employees", "shipment_events"],
-  "inventory.json": ["products", "warehouses", "inventory_stock"],
+  "inventory.json": [
+    "products", "warehouses", "inventory_stock", "shopify_catalog_bindings", "shopify_variant_links"
+  ],
   "northbound.json": ["northbound_records", "northbound_statuses"],
   "charger-leads.json": ["charger_leads"],
   "aliases.json": ["line_item_aliases", "products"],

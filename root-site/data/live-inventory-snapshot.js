@@ -18,10 +18,12 @@ function inferredInventoryBucket(product, productById) {
 }
 
 export async function buildInventorySnapshot() {
-  const [rawProducts, warehouses, stocks] = await Promise.all([
+  const [rawProducts, warehouses, stocks, bindings, shopifyLinks] = await Promise.all([
     allRows("products", "name"),
     allRows("warehouses", "sort_order"),
-    allRows("inventory_stock", null)
+    allRows("inventory_stock", null),
+    allRows("shopify_catalog_bindings", null),
+    allRows("shopify_variant_links", null)
   ]);
   const products = rawProducts.filter((product) => product.is_virtual !== true && asText(product.category) !== "_archived");
   const productById = new Map(products.map((product) => [product.id, product]));
@@ -40,6 +42,16 @@ export async function buildInventorySnapshot() {
     stocksByProduct.set(stock.product_id, list);
   }
   const ownStock = (id) => (stocksByProduct.get(id) ?? []).reduce((sum, stock) => sum + asNumber(stock.qty), 0);
+  const ownWarehouses = (id) => (stocksByProduct.get(id) ?? []).map((stock) => {
+    const warehouse = warehouseById.get(stock.warehouse_id);
+    return {
+      id: asText(stock.warehouse_id),
+      key: asText(warehouse?.code).toLowerCase(),
+      name: asText(warehouse?.name),
+      quantity: asNumber(stock.qty),
+      updatedAt: formatDateTime(stock.updated_at)
+    };
+  }).filter((row) => row.id).sort((a, b) => a.key.localeCompare(b.key));
   const groupIds = (product) => [product.id, ...(childrenByParent.get(product.id) ?? []).map((child) => child.id)];
   const groupedWarehouses = (product) => {
     const quantities = new Map();
@@ -52,13 +64,19 @@ export async function buildInventorySnapshot() {
       }
     }
     return [...quantities].map(([warehouseId, value]) => ({
+      id: asText(warehouseId),
       key: asText(warehouseById.get(warehouseId)?.code).toLowerCase(),
+      name: asText(warehouseById.get(warehouseId)?.name),
       quantity: value.quantity,
       updatedAt: formatDateTime(value.updatedAt)
     })).filter((row) => row.key === "hk" || row.key === "zh").sort((a, b) => a.key.localeCompare(b.key));
   };
+  const bindingByParent = new Map(bindings.map((binding) => [binding.bizflow_parent_product_id, binding]));
+  const directLinkFor = (productId, shopifyProductId) => shopifyLinks.find((link) =>
+    link.bizflow_product_id === productId && (!shopifyProductId || link.shopify_product_id === shopifyProductId));
   const rows = products.map((product) => {
     const variants = childrenByParent.get(product.id) ?? [];
+    const binding = product.parent_product_id ? null : bindingByParent.get(product.id);
     const stock = variants.length > 0
       ? groupIds(product).reduce((sum, id) => sum + ownStock(id), 0)
       : ownStock(product.id);
@@ -80,17 +98,32 @@ export async function buildInventorySnapshot() {
         productId: asText(product.internal_code || product.code || product.shopify_sku),
         warrantyMonths: product.warranty_months == null ? null : asNumber(product.warranty_months),
         specs: asText(product.specs),
+        productType: asText(product.product_type),
         collections: asArray(product.collections).map(String),
         tags: asArray(product.tags).map(String),
         images: product.image_url ? [String(product.image_url)] : [],
-        warehouses: groupedWarehouses(product),
+        warehouses: ownWarehouses(product.id),
+        groupedWarehouses: groupedWarehouses(product),
+        shopifyBinding: binding ? {
+          shopifyProductId: asText(binding.shopify_product_id),
+          updatedAt: asText(binding.shopify_updated_at),
+          status: asText(binding.status)
+        } : null,
         variants: variants.map((variant) => ({
+          ...(directLinkFor(variant.id, binding?.shopify_product_id) ? {
+            shopifyVariantId: asText(directLinkFor(variant.id, binding?.shopify_product_id).shopify_variant_id)
+          } : {}),
           id: variant.id,
           name: asText(variant.name),
+          internalCode: asText(variant.internal_code || variant.code || variant.shopify_sku),
           price: asNumber(variant.price),
           stock: ownStock(variant.id),
           status: asText(variant.status, "active") || "active",
-          shopifySku: asText(variant.shopify_sku)
+          shopifySku: asText(variant.shopify_sku),
+          imageUrl: asText(variant.image_url),
+          warrantyMonths: variant.warranty_months == null ? 0 : asNumber(variant.warranty_months),
+          specs: asText(variant.specs),
+          warehouses: ownWarehouses(variant.id)
         })).sort((a, b) => a.name.localeCompare(b.name))
       }
     };
@@ -102,7 +135,9 @@ export async function buildInventorySnapshot() {
     generated_at: new Date().toISOString(),
     scope: "RLS-visible production inventory",
     pageSize: 18,
-    warehouses: warehouses.map((warehouse) => ({ key: asText(warehouse.code).toLowerCase(), name: asText(warehouse.name) })),
+    warehouses: warehouses.map((warehouse) => ({
+      id: asText(warehouse.id), key: asText(warehouse.code).toLowerCase(), name: asText(warehouse.name)
+    })),
     buckets: INVENTORY_BUCKETS.slice(),
     categoriesRaw,
     products: rows

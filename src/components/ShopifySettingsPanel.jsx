@@ -3,15 +3,18 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useAppContext } from '../context/AppContext.jsx'
 import { useT } from '../i18n.jsx'
 import { toastError } from '../lib/toast.js'
+import { supabase } from '../lib/supabaseClient.js'
 
 // Shopify 集成設置面板（產品 tab → Shopify API 子 tab）
-// access_token 由 Edge Function `shopify-settings` 加密讀寫；migration 059 column-level lock 攔 anon/authenticated 直拉
-// 解鎖密碼複用 wa_settings.admin_password（同一個 admin 密碼、UI 體驗一致）
+// Credentials are server-managed. Edge Functions return health metadata only and
+// authenticate with the signed-in administrator session, never the anon key.
 
 async function callEdge(fnName, payload) {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session?.access_token) throw new Error('Authentication required')
   const r = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/${fnName}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', apikey: import.meta.env.VITE_SUPABASE_ANON_KEY, Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
+    headers: { 'Content-Type': 'application/json', apikey: import.meta.env.VITE_SUPABASE_ANON_KEY, Authorization: `Bearer ${session.access_token}` },
     body: JSON.stringify(payload),
   })
   const d = await r.json().catch(() => ({}))
@@ -19,82 +22,44 @@ async function callEdge(fnName, payload) {
   return d
 }
 
-function normalizeDomain(s) {
-  return (s || '').trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '').toLowerCase()
-}
-
 export default function ShopifySettingsPanel() {
   const { t } = useT()
-  const { shopifySettings, setShopifySettings, isBfAdmin, products, shopifyVariantLinks, setShopifyVariantLinks } = useAppContext()
+  const { isBfAdmin, products, shopifyVariantLinks, setShopifyVariantLinks } = useAppContext()
   const queryClient = useQueryClient()
 
-  const [unlocked, setUnlocked] = useState(false)
-  const [pwd, setPwd] = useState('')
-  const [showPwdInput, setShowPwdInput] = useState(false)
-  const [domainDraft, setDomainDraft] = useState('')
-  const [tokenDraft, setTokenDraft] = useState('')
   const [busy, setBusy] = useState(false)
-  const [testResult, setTestResult] = useState(null)
+  const [credentialHealth, setCredentialHealth] = useState(null)
+  const [healthError, setHealthError] = useState('')
 
   useEffect(() => {
-    if (shopifySettings && !unlocked) setDomainDraft(shopifySettings.shop_domain || '')
-  }, [shopifySettings, unlocked])
-
-  async function handleUnlock() {
-    if (!pwd) { alert(t('請輸入密碼')); return }
-    setBusy(true)
-    try {
-      const d = await callEdge('shopify-settings', { action: 'unlock', pwd })
-      setDomainDraft(d.shop_domain || '')
-      setTokenDraft(d.access_token || '')
-      setUnlocked(true)
-      setShowPwdInput(false)
-    } catch (e) {
-      toastError(t("解鎖失敗"), { detail: e })
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function handleSave() {
-    if (!unlocked) { alert(t('請先解鎖')); return }
-    if (!domainDraft.trim()) { alert(t('請填寫 Shop Domain')); return }
-    setBusy(true)
-    try {
-      await callEdge('shopify-settings', { action: 'save', pwd, shop_domain: domainDraft.trim(), access_token: tokenDraft.trim() })
-      const next = { ...(shopifySettings || { id: 1 }), shop_domain: normalizeDomain(domainDraft), updated_at: new Date().toISOString() }
-      setShopifySettings(next)
-      queryClient.setQueryData(['bf', 'shopify_settings'], next)
-      alert(t('已儲存'))
-    } catch (e) {
-      toastError(t("保存失敗"), { detail: e })
-    } finally {
-      setBusy(false)
-    }
-  }
+    if (!isBfAdmin) return undefined
+    let cancelled = false
+    callEdge('shopify-settings', { action: 'status' })
+      .then((result) => {
+        if (cancelled) return
+        setCredentialHealth(result.health || null)
+        setHealthError('')
+      })
+      .catch((error) => {
+        if (cancelled) return
+        setCredentialHealth(null)
+        setHealthError(error.message)
+      })
+    return () => { cancelled = true }
+  }, [isBfAdmin])
 
   async function handleTest() {
-    if (!unlocked && !pwd) { alert(t('請先解鎖')); return }
-    if (!domainDraft.trim()) { alert(t('請填寫 Shop Domain')); return }
     setBusy(true)
-    setTestResult(null)
+    setHealthError('')
     try {
-      const d = await callEdge('shopify-settings', { action: 'test-connection', pwd, shop_domain: domainDraft.trim(), access_token: tokenDraft.trim() })
-      setTestResult(d)
+      const result = await callEdge('shopify-settings', { action: 'test-connection' })
+      setCredentialHealth(result.health || null)
     } catch (e) {
-      setTestResult({ ok: false, error: e.message })
+      setCredentialHealth(null)
+      setHealthError(e.message)
     } finally {
       setBusy(false)
     }
-  }
-
-  function handleLockAgain() {
-    setUnlocked(false)
-    setTokenDraft('')
-    setPwd('')
-    setTestResult(null)
-    setProductList(null)
-    setListError('')
   }
 
   // 拉商品列表（read-only）
@@ -118,27 +83,6 @@ export default function ShopifySettingsPanel() {
     }
   }
 
-  // 同步到 bizflow（先 dry-run、点确认才实际写）
-  const [syncPreview, setSyncPreview] = useState(null) // { stats, plan }
-  const [syncResult, setSyncResult] = useState(null)   // { stats, results }
-  const [syncing, setSyncing] = useState(false)
-  const [syncError, setSyncError] = useState('')
-  async function handleSyncDryRun() {
-    if (!unlocked || !pwd) { alert(t('請先解鎖')); return }
-    setSyncing(true)
-    setSyncError('')
-    setSyncResult(null)
-    try {
-      const d = await callEdge('shopify-products', { action: 'sync', pwd, confirm: false })
-      if (!d.ok) throw new Error(d.error || 'unknown')
-      setSyncPreview(d)
-    } catch (e) {
-      setSyncError(e.message)
-      setSyncPreview(null)
-    } finally {
-      setSyncing(false)
-    }
-  }
   // 手动 link：把 Shopify variant 关联到 bizflow 现有 product
   const [linkModal, setLinkModal] = useState(null) // { variant, product } variant 来自 productList
   const [linkSearch, setLinkSearch] = useState('')
@@ -170,13 +114,12 @@ export default function ShopifySettingsPanel() {
     return m
   }, [shopifyVariantLinks])
   async function handleLink(bizflow_product_id, qty = 1) {
-    if (!linkModal || !pwd) return
+    if (!linkModal) return
     setLinking(true)
     try {
       const { variant, product } = linkModal
       await callEdge('shopify-products', {
         action: 'link',
-        pwd,
         bizflow_product_id,
         shopify_product_id: product.id,
         shopify_variant_id: variant.id,
@@ -212,10 +155,9 @@ export default function ShopifySettingsPanel() {
     }
   }
   async function handleUnlink(bizflow_product_id, shopify_variant_id) {
-    if (!pwd) { alert(t('請先解鎖')); return }
     if (!window.confirm(t('確定解除關聯？'))) return
     try {
-      await callEdge('shopify-products', { action: 'unlink', pwd, bizflow_product_id, shopify_variant_id })
+      await callEdge('shopify-products', { action: 'unlink', bizflow_product_id, shopify_variant_id })
       const newLinks = (shopifyVariantLinks || []).filter(l => !(l.bizflow_product_id === bizflow_product_id && l.shopify_variant_id === shopify_variant_id))
       setShopifyVariantLinks(newLinks)
       queryClient.setQueryData(['bf', 'shopify_variant_links'], newLinks)
@@ -230,12 +172,11 @@ export default function ShopifySettingsPanel() {
   const [aliasLinking, setAliasLinking] = useState(false)
   const [aliasLinkError, setAliasLinkError] = useState('')
   async function handleAliasDryRun() {
-    if (!unlocked || !pwd) { alert(t('請先解鎖')); return }
     setAliasLinking(true)
     setAliasLinkError('')
     setAliasLinkResult(null)
     try {
-      const d = await callEdge('shopify-products', { action: 'link-from-aliases', pwd, confirm: false })
+      const d = await callEdge('shopify-products', { action: 'link-from-aliases', confirm: false })
       if (!d.ok) throw new Error(d.error || 'unknown')
       setAliasLinkPreview(d)
     } catch (e) {
@@ -246,11 +187,10 @@ export default function ShopifySettingsPanel() {
     }
   }
   async function handleAliasConfirm() {
-    if (!unlocked || !pwd) return
     if (!window.confirm(t('確定批量 link？將寫入 bizflow products 表'))) return
     setAliasLinking(true)
     try {
-      const d = await callEdge('shopify-products', { action: 'link-from-aliases', pwd, confirm: true })
+      const d = await callEdge('shopify-products', { action: 'link-from-aliases', confirm: true })
       if (!d.ok) throw new Error(d.error || 'unknown')
       setAliasLinkResult(d)
       setAliasLinkPreview(null)
@@ -263,93 +203,47 @@ export default function ShopifySettingsPanel() {
     }
   }
 
-  async function handleSyncConfirm() {
-    if (!unlocked || !pwd) { alert(t('請先解鎖')); return }
-    if (!window.confirm(t('確定執行同步？將寫入 bizflow products 表'))) return
-    setSyncing(true)
-    setSyncError('')
-    try {
-      const d = await callEdge('shopify-products', { action: 'sync', pwd, confirm: true })
-      if (!d.ok) throw new Error(d.error || 'unknown')
-      setSyncResult(d)
-      setSyncPreview(null)
-    } catch (e) {
-      setSyncError(e.message)
-    } finally {
-      setSyncing(false)
-    }
-  }
-
   return (
     <div>
       <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #f0f0f0", padding: 20, marginBottom: 16 }}>
         <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 6 }}>{t("Shopify 集成設置")}</div>
         <div style={{ fontSize: 12, color: "#888", marginBottom: 14 }}>
-          {t("貼入 Shopify Admin → Settings → Apps and sales channels → Develop apps 建立的 custom app 憑證。Access token 由 Edge Function 加密讀寫，不存進前端 cache。")}
+          {t("Shopify 憑證由伺服器安全管理，前端不顯示或儲存 token。")}
         </div>
         {!isBfAdmin ? (
           <div style={{ padding: 12, background: "#fef3c7", color: "#92400e", borderRadius: 8, fontSize: 12 }}>
-            {t("僅 admin 可查看/修改 Shopify 憑證")}
+            {t("僅 admin 可查看 Shopify 連接狀態")}
           </div>
         ) : (
-          <>
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ fontSize: 12, fontWeight: 700, color: "#555", display: "block", marginBottom: 6 }}>Shop Domain <span style={{ fontWeight: 400, color: "#888" }}>· {t("例：xxx.myshopify.com")}</span></label>
-              <input value={domainDraft} onChange={e => setDomainDraft(e.target.value)} placeholder="xxx.myshopify.com" style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 14, outline: "none", boxSizing: "border-box", fontFamily: "monospace" }} />
-            </div>
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ fontSize: 12, fontWeight: 700, color: "#555", display: "block", marginBottom: 6 }}>Access Token <span style={{ fontWeight: 400, color: "#888" }}>· shpat_xxx</span></label>
-              {unlocked ? (
-                <input type="text" value={tokenDraft} onChange={e => setTokenDraft(e.target.value)} placeholder="shpat_..." style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #d1fae5", background: "#f0fdf4", fontSize: 13, outline: "none", boxSizing: "border-box", fontFamily: "monospace" }} />
-              ) : (
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <input type="password" value="************************" disabled style={{ flex: 1, padding: "9px 12px", borderRadius: 8, border: "1px solid #e0e0e0", background: "#f5f5f5", fontSize: 14, outline: "none", boxSizing: "border-box", fontFamily: "monospace", color: "#888" }} />
-                  <button onClick={() => setShowPwdInput(v => !v)} style={{ padding: "9px 14px", background: "#eef2ff", color: "#3b58d4", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>{t("解鎖")}</button>
-                </div>
-              )}
-              {!unlocked && showPwdInput && (
-                <div style={{ marginTop: 10, padding: 12, background: "#fafbff", border: "1px solid #e0e6ff", borderRadius: 8 }}>
-                  <div style={{ fontSize: 11, color: "#666", marginBottom: 6 }}>{t("輸入管理員密碼（與 WhatsApp 設置共用）")}</div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <input type="password" autoFocus value={pwd} onChange={e => setPwd(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleUnlock() }} style={{ flex: 1, padding: "8px 12px", borderRadius: 8, border: "1px solid #c6d3ff", fontSize: 13, outline: "none" }} />
-                    <button onClick={handleUnlock} disabled={busy} style={{ padding: "8px 16px", background: busy ? "#a8b8e8" : "#6382ff", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: busy ? "not-allowed" : "pointer" }}>{busy ? t("處理中...") : t("確認")}</button>
-                    <button onClick={() => { setShowPwdInput(false); setPwd('') }} style={{ padding: "8px 14px", background: "#f5f5f5", color: "#666", border: "none", borderRadius: 8, fontSize: 13, cursor: "pointer" }}>{t("取消")}</button>
+          <div>
+            {credentialHealth && (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10, marginBottom: 12 }}>
+                  <div style={{ padding: 12, borderRadius: 8, background: credentialHealth.readReady ? "#f0fdf4" : "#fef2f2", color: credentialHealth.readReady ? "#047857" : "#991b1b", fontSize: 12, fontWeight: 700 }}>
+                    {t("讀取就緒")}：{credentialHealth.readReady ? "✓" : "×"}
+                  </div>
+                  <div style={{ padding: 12, borderRadius: 8, background: credentialHealth.writeReady ? "#f0fdf4" : "#fef3c7", color: credentialHealth.writeReady ? "#047857" : "#92400e", fontSize: 12, fontWeight: 700 }}>
+                    {t("寫入就緒")}：{credentialHealth.writeReady ? "✓" : "×"}
                   </div>
                 </div>
-              )}
-            </div>
-            <div style={{ display: "flex", gap: 10, marginTop: 18, flexWrap: "wrap" }}>
-              <button onClick={handleTest} disabled={busy || !unlocked} style={{ padding: "10px 18px", background: busy || !unlocked ? "#f5f5f5" : "#fff", color: busy || !unlocked ? "#aaa" : "#3b58d4", border: "1px solid " + (busy || !unlocked ? "#e0e0e0" : "#c6d3ff"), borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: busy || !unlocked ? "not-allowed" : "pointer" }}>
-                {busy ? t("處理中...") : t("測試連接")}
-              </button>
-              <button onClick={handleSave} disabled={busy || !unlocked} style={{ padding: "10px 22px", background: busy || !unlocked ? "#a8b8e8" : "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: busy || !unlocked ? "not-allowed" : "pointer" }}>
-                {busy ? t("保存中...") : t("儲存")}
-              </button>
-              {unlocked && (
-                <button onClick={handleLockAgain} style={{ padding: "10px 14px", background: "transparent", color: "#888", border: "1px solid #e0e0e0", borderRadius: 10, fontSize: 12, cursor: "pointer" }}>{t("重新鎖定")}</button>
-              )}
-            </div>
-            {testResult && (
-              <div style={{ marginTop: 14, padding: 12, borderRadius: 8, background: testResult.ok ? "#f0fdf4" : "#fef2f2", border: "1px solid " + (testResult.ok ? "#bbf7d0" : "#fecaca"), fontSize: 12 }}>
-                {testResult.ok ? (
-                  <div>
-                    <div style={{ fontWeight: 700, color: "#047857", marginBottom: 4 }}>✓ {t("連接成功")}</div>
-                    <div style={{ color: "#555" }}>
-                      {t("店舖")}：<b>{testResult.shop?.name || "—"}</b> · {testResult.shop?.myshopifyDomain || ""} · {t("貨幣")} {testResult.shop?.currencyCode || "—"}
-                    </div>
-                  </div>
-                ) : (
-                  <div>
-                    <div style={{ fontWeight: 700, color: "#991b1b", marginBottom: 4 }}>× {t("連接失敗")}</div>
-                    <div style={{ color: "#555", fontFamily: "monospace", fontSize: 11, wordBreak: "break-all" }}>{testResult.error || testResult.body || JSON.stringify(testResult.errors || {})}</div>
+                <div style={{ fontSize: 12, color: "#555", lineHeight: 1.7 }}>
+                  {t("店舖")}：<b>{credentialHealth.shopName || "—"}</b> · {credentialHealth.domain || "—"} · API {credentialHealth.apiVersion || "—"}
+                </div>
+                {!credentialHealth.writeReady && (
+                  <div style={{ marginTop: 12, padding: 12, borderRadius: 8, background: "#fef3c7", color: "#92400e", fontSize: 12 }}>
+                    <div style={{ fontWeight: 800 }}>{t("Shopify 寫入憑證未就緒")}</div>
+                    <div style={{ marginTop: 4 }}>{t("缺少權限")}：{(credentialHealth.missingWriteScopes || []).join(", ") || "—"}</div>
                   </div>
                 )}
-              </div>
+              </>
             )}
-            {shopifySettings?.last_synced_at && (
-              <div style={{ marginTop: 14, fontSize: 11, color: "#888" }}>{t("最近同步")}：{new Date(shopifySettings.last_synced_at).toLocaleString()}</div>
+            {healthError && (
+              <div style={{ padding: 12, background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, fontSize: 11, color: "#991b1b" }}>{t("連接失敗")}：{healthError}</div>
             )}
-          </>
+            <button onClick={handleTest} disabled={busy} style={{ marginTop: 14, padding: "10px 18px", background: busy ? "#f5f5f5" : "#fff", color: busy ? "#aaa" : "#3b58d4", border: "1px solid " + (busy ? "#e0e0e0" : "#c6d3ff"), borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: busy ? "not-allowed" : "pointer" }}>
+              {busy ? t("處理中...") : t("重新檢查")}
+            </button>
+          </div>
         )}
       </div>
       {isBfAdmin && (
@@ -357,7 +251,7 @@ export default function ShopifySettingsPanel() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, gap: 12, flexWrap: "wrap" }}>
             <div>
               <div style={{ fontSize: 15, fontWeight: 800 }}>{t("Shopify 商品列表")}</div>
-              <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>{t("從 Shopify 拉全量 active 商品。同步時按 SKU 匹配 bizflow 現有商品 → 用 Shopify name/price 覆蓋；沒匹配的自動建 + needs_review。庫存不動。")}</div>
+              <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>{t("BizFlow 管理商品目錄與庫存；此處只讀 Shopify 商品，用於核對 variant 與維護組件關聯。")}</div>
             </div>
             <button onClick={handleListProducts} disabled={listing} style={{ padding: "10px 22px", background: listing ? "#a8b8e8" : "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: listing ? "not-allowed" : "pointer" }}>
               {listing ? t("拉取中...") : t("拉商品列表")}
@@ -418,7 +312,7 @@ export default function ShopifySettingsPanel() {
                                   <button onClick={() => handleUnlink(lp.id, lp._linkVariantId)} title={t("解除關聯")} style={{ padding: "1px 5px", background: "#fef2f2", color: "#991b1b", border: "none", borderRadius: 4, fontSize: 10, cursor: "pointer" }}>×</button>
                                 </div>
                               ))}
-                              <button onClick={() => { if (!unlocked || !pwd) { alert(t('請先解鎖')); return } setLinkModal({ variant: v, product: p }); setLinkQty(1) }} disabled={!unlocked} style={{ padding: "3px 8px", background: unlocked ? (linked.length > 0 ? "transparent" : "#eef2ff") : "#f5f5f5", color: unlocked ? "#3b58d4" : "#aaa", border: linked.length > 0 ? "1px dashed #c6d3ff" : "none", borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: unlocked ? "pointer" : "not-allowed", alignSelf: "flex-start" }}>+ {linked.length > 0 ? t("加多一個") : t("關聯")}</button>
+                              <button onClick={() => { setLinkModal({ variant: v, product: p }); setLinkQty(1) }} style={{ padding: "3px 8px", background: linked.length > 0 ? "transparent" : "#eef2ff", color: "#3b58d4", border: linked.length > 0 ? "1px dashed #c6d3ff" : "none", borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: "pointer", alignSelf: "flex-start" }}>+ {linked.length > 0 ? t("加多一個") : t("關聯")}</button>
                             </div>
                           </div>
                         )
@@ -520,98 +414,6 @@ export default function ShopifySettingsPanel() {
             </div>
           )}
 
-          {/* 同步區（M:N 模型下 sync 字段覆盖逻辑要重新设计、暂时停用） */}
-          {false && productList && (
-            <div style={{ marginTop: 18, paddingTop: 18, borderTop: "1px dashed #e0e6ff" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 12, flexWrap: "wrap" }}>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 800 }}>{t("同步到 bizflow")}</div>
-                  <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>{t("先預覽會做什麼、確認後才寫入")}</div>
-                </div>
-                {!syncPreview && !syncResult && (
-                  <button onClick={handleSyncDryRun} disabled={syncing} style={{ padding: "10px 18px", background: syncing ? "#a8b8e8" : "#fff", color: syncing ? "#fff" : "#3b58d4", border: "1px solid " + (syncing ? "#a8b8e8" : "#c6d3ff"), borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: syncing ? "not-allowed" : "pointer" }}>
-                    {syncing ? t("計算中...") : t("預覽同步計劃")}
-                  </button>
-                )}
-              </div>
-              {syncError && (
-                <div style={{ marginTop: 8, padding: 10, background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, fontSize: 11, color: "#991b1b", fontFamily: "monospace", wordBreak: "break-all" }}>{syncError}</div>
-              )}
-              {syncPreview && (
-                <div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 12 }}>
-                    <div style={{ padding: 12, background: "#eef2ff", borderRadius: 8, textAlign: "center" }}>
-                      <div style={{ fontSize: 20, fontWeight: 800, color: "#3b58d4" }}>{syncPreview.stats.update}</div>
-                      <div style={{ fontSize: 11, color: "#666" }}>{t("匹配更新")}</div>
-                    </div>
-                    <div style={{ padding: 12, background: "#fef3c7", borderRadius: 8, textAlign: "center" }}>
-                      <div style={{ fontSize: 20, fontWeight: 800, color: "#92400e" }}>{syncPreview.stats.unlinked}</div>
-                      <div style={{ fontSize: 11, color: "#666" }}>{t("未關聯（請手動 link）")}</div>
-                    </div>
-                    <div style={{ padding: 12, background: "#fee2e2", borderRadius: 8, textAlign: "center" }}>
-                      <div style={{ fontSize: 20, fontWeight: 800, color: "#991b1b" }}>{syncPreview.stats.skip}</div>
-                      <div style={{ fontSize: 11, color: "#666" }}>{t("跳過")}</div>
-                    </div>
-                    <div style={{ padding: 12, background: "#f5f5f5", borderRadius: 8, textAlign: "center" }}>
-                      <div style={{ fontSize: 20, fontWeight: 800, color: "#555" }}>{syncPreview.stats.total}</div>
-                      <div style={{ fontSize: 11, color: "#666" }}>{t("總計")}</div>
-                    </div>
-                  </div>
-                  <div style={{ border: "1px solid #f0f0f0", borderRadius: 8, overflow: "hidden", maxHeight: 360, overflowY: "auto", marginBottom: 12 }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "70px 1fr 1.2fr 130px", gap: 8, padding: "8px 12px", background: "#fafbfc", borderBottom: "1px solid #f0f0f0", fontSize: 11, color: "#666", fontWeight: 700, position: "sticky", top: 0 }}>
-                      <div>{t("動作")}</div>
-                      <div>SKU</div>
-                      <div>{t("商品名")}</div>
-                      <div>{t("價格")}</div>
-                    </div>
-                    {syncPreview.plan.map((row, idx) => {
-                      const bg = row.action === "update" ? "#eef2ff" : row.action === "unlinked" ? "#fef3c7" : "#fee2e2";
-                      const fg = row.action === "update" ? "#3b58d4" : row.action === "unlinked" ? "#92400e" : "#991b1b";
-                      const label = row.action === "update" ? t("更新") : row.action === "unlinked" ? t("未關聯") : t("跳過");
-                      return (
-                        <div key={idx} style={{ display: "grid", gridTemplateColumns: "70px 1fr 1.2fr 130px", gap: 8, padding: "8px 12px", borderBottom: "1px solid #f5f5f5", alignItems: "center", fontSize: 12 }}>
-                          <div><span style={{ padding: "2px 8px", background: bg, color: fg, borderRadius: 4, fontSize: 10, fontWeight: 700 }}>{label}</span></div>
-                          <div style={{ fontFamily: "monospace", fontSize: 11, color: row.shopify_sku ? "#3b58d4" : "#bbb" }}>{row.shopify_sku || (row.reason || "—")}</div>
-                          <div>
-                            <div>{row.title}</div>
-                            {row.bizflow_current_name && row.bizflow_current_name !== row.title && (
-                              <div style={{ fontSize: 10, color: "#888" }}>{t("原")}：{row.bizflow_current_name}</div>
-                            )}
-                          </div>
-                          <div style={{ fontFamily: "monospace", fontSize: 11 }}>{row.price ? `HK$${row.price}` : "—"}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div style={{ display: "flex", gap: 10 }}>
-                    <button onClick={() => setSyncPreview(null)} style={{ padding: "10px 18px", background: "#f5f5f5", color: "#666", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>{t("取消")}</button>
-                    <button onClick={handleSyncConfirm} disabled={syncing} style={{ padding: "10px 22px", background: syncing ? "#a8b8e8" : "#6382ff", color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 800, cursor: syncing ? "not-allowed" : "pointer" }}>
-                      {syncing ? t("執行中...") : t("確認執行同步")}
-                    </button>
-                  </div>
-                </div>
-              )}
-              {syncResult && (
-                <div style={{ padding: 14, background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10 }}>
-                  <div style={{ fontWeight: 800, color: "#047857", marginBottom: 8 }}>✓ {t("同步完成")}</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 8 }}>
-                    <div style={{ fontSize: 12 }}>{t("更新")}：<b>{syncResult.results.updated}</b></div>
-                    <div style={{ fontSize: 12 }}>{t("未關聯")}：<b>{syncResult.results.unlinked}</b></div>
-                    <div style={{ fontSize: 12 }}>{t("跳過")}：<b>{syncResult.results.skipped}</b></div>
-                  </div>
-                  {syncResult.results.errors && syncResult.results.errors.length > 0 && (
-                    <div style={{ marginTop: 8, padding: 8, background: "#fef2f2", borderRadius: 6 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 4 }}>{syncResult.results.errors.length} {t("條錯誤")}</div>
-                      {syncResult.results.errors.slice(0, 10).map((err, i) => (
-                        <div key={i} style={{ fontSize: 10, color: "#991b1b", fontFamily: "monospace", wordBreak: "break-all" }}>{err}</div>
-                      ))}
-                    </div>
-                  )}
-                  <button onClick={() => setSyncResult(null)} style={{ marginTop: 10, padding: "6px 14px", background: "#fff", color: "#3b58d4", border: "1px solid #c6d3ff", borderRadius: 8, fontSize: 12, cursor: "pointer" }}>{t("關閉")}</button>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       )}
       {linkModal && (() => {
@@ -717,12 +519,11 @@ export default function ShopifySettingsPanel() {
         )
       })()}
       <div style={{ background: "#fafbff", borderRadius: 12, border: "1px dashed #c6d3ff", padding: 16 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "#3b58d4", marginBottom: 8 }}>{t("如何取得 Access Token")}</div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#3b58d4", marginBottom: 8 }}>{t("Shopify 憑證切換流程")}</div>
         <ol style={{ fontSize: 12, color: "#555", margin: 0, paddingLeft: 20, lineHeight: 1.7 }}>
-          <li>{t("登入 Shopify admin → Settings → Apps and sales channels")}</li>
-          <li>{t("頂部「Develop apps」→ Create an app（命名 BizFlow Sync）")}</li>
-          <li>{t("Configure Admin API scopes：勾 read_products / read_inventory / read_locations / read_orders / read_customers")}</li>
-          <li>{t("Install app → 複製 Admin API access token（shpat_xxx 開頭）貼回此處")}</li>
+          <li>{t("在 Shopify Dev Dashboard 補齊 read_products / read_inventory / read_locations / read_orders / write_products / write_inventory 後重新授權")}</li>
+          <li>{t("新 offline token 只配置到 Edge secrets，不貼入前端")}</li>
+          <li>{t("健康檢查顯示讀寫就緒後，再清理資料庫舊 token")}</li>
         </ol>
       </div>
     </div>

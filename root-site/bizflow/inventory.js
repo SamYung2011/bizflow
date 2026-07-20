@@ -10,6 +10,11 @@ import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import {
+  createLiveInventoryProduct,
+  getShopifyCredentialHealth,
+  shopifyWriteReady
+} from "../data/live-inventory-writes.js";
+import {
   attachItemMapBehaviors, captureItemMapState, disposeItemMapState, ensureItemMapData,
   hasItemMapUnsavedChanges, renderItemMap, restoreItemMapState
 } from "./inventory-item-map.js";
@@ -63,10 +68,22 @@ const dict = {
     "inventory.addModal.price": "價格",
     "inventory.addModal.specs": "規格",
     "inventory.addModal.warranty": "保修月數",
+    "inventory.addModal.code": "商品 SKU",
+    "inventory.addModal.productType": "Shopify 商品類型",
+    "inventory.addModal.tags": "標籤（逗號分隔）",
+    "inventory.addModal.collections": "集合（逗號分隔）",
+    "inventory.addModal.imageUrl": "商品圖片 URL",
     "inventory.addModal.cancel": "取消",
     "inventory.addModal.confirm": "確認新增",
     "inventory.addModal.close": "關閉",
-    "inventory.leaveUnsaved": "尚有未保存的庫存資料，確定離開？"
+    "inventory.leaveUnsaved": "尚有未保存的庫存資料，確定離開？",
+    "inventory.shopifyWriteNotReady": "Shopify 寫入憑證未就緒",
+    "inventory.shopifyWriteHint": "目前只讀連接正常；補齊 write_products、write_inventory 後即可保存。",
+    "inventory.adminOnly": "商品目錄與庫存只限管理員修改",
+    "inventory.writeReady": "Shopify 寫入連接已就緒",
+    "inventory.saving": "正在同步 Shopify 與 BizFlow…",
+    "inventory.created": "商品已同步建立",
+    "inventory.createFailed": "建立商品失敗"
   },
   en: {
     "inventory.title": "Product inventory",
@@ -100,10 +117,22 @@ const dict = {
     "inventory.addModal.price": "Price",
     "inventory.addModal.specs": "Specification",
     "inventory.addModal.warranty": "Warranty months",
+    "inventory.addModal.code": "Product SKU",
+    "inventory.addModal.productType": "Shopify product type",
+    "inventory.addModal.tags": "Tags (comma separated)",
+    "inventory.addModal.collections": "Collections (comma separated)",
+    "inventory.addModal.imageUrl": "Product image URL",
     "inventory.addModal.cancel": "Cancel",
     "inventory.addModal.confirm": "Add product",
     "inventory.addModal.close": "Close",
-    "inventory.leaveUnsaved": "There are unsaved inventory changes. Leave this page?"
+    "inventory.leaveUnsaved": "There are unsaved inventory changes. Leave this page?",
+    "inventory.shopifyWriteNotReady": "Shopify write credential is not ready",
+    "inventory.shopifyWriteHint": "The read connection works. Add write_products and write_inventory to enable saving.",
+    "inventory.adminOnly": "Only administrators can modify the catalogue and inventory",
+    "inventory.writeReady": "Shopify write connection is ready",
+    "inventory.saving": "Syncing Shopify and BizFlow…",
+    "inventory.created": "Product created and synchronized",
+    "inventory.createFailed": "Could not create product"
   },
   fr: {
     "inventory.title": "Stock produits",
@@ -137,10 +166,22 @@ const dict = {
     "inventory.addModal.price": "Prix",
     "inventory.addModal.specs": "Spécification",
     "inventory.addModal.warranty": "Garantie en mois",
+    "inventory.addModal.code": "SKU produit",
+    "inventory.addModal.productType": "Type de produit Shopify",
+    "inventory.addModal.tags": "Étiquettes (séparées par des virgules)",
+    "inventory.addModal.collections": "Collections (séparées par des virgules)",
+    "inventory.addModal.imageUrl": "URL de l'image produit",
     "inventory.addModal.cancel": "Annuler",
     "inventory.addModal.confirm": "Ajouter",
     "inventory.addModal.close": "Fermer",
-    "inventory.leaveUnsaved": "Des modifications de stock ne sont pas enregistrées. Quitter cette page ?"
+    "inventory.leaveUnsaved": "Des modifications de stock ne sont pas enregistrées. Quitter cette page ?",
+    "inventory.shopifyWriteNotReady": "Les identifiants d'écriture Shopify ne sont pas prêts",
+    "inventory.shopifyWriteHint": "La connexion en lecture fonctionne. Ajoutez write_products et write_inventory pour enregistrer.",
+    "inventory.adminOnly": "Seuls les administrateurs peuvent modifier le catalogue et le stock",
+    "inventory.writeReady": "La connexion d'écriture Shopify est prête",
+    "inventory.saving": "Synchronisation de Shopify et BizFlow…",
+    "inventory.created": "Produit créé et synchronisé",
+    "inventory.createFailed": "Impossible de créer le produit"
   }
 };
 
@@ -148,6 +189,8 @@ let data = null;
 let unreadWatermarks = null;
 let unread = null;
 let currentUser = null;
+let shopifyHealth = null;
+let authenticated = false;
 let liveReadOnly = false;
 let writeAttributes = "";
 const tabs = ["products", "itemMap", "shopify", "suppliers", "pending"];
@@ -166,7 +209,10 @@ let state = {
   addModalOpen: false,
   search: "",
   page: 1,
-  addDraftDirty: false
+  addDraftDirty: false,
+  writeBusy: false,
+  feedback: "",
+  error: ""
 };
 
 let currentHelpers = null;
@@ -315,8 +361,28 @@ function renderAddProductModal(helpers) {
             <input class="inventory-modal-input" name="name" data-inventory-add-name data-inventory-write required${writeAttributes}>
           </label>
           <label class="inventory-modal-field">
+            <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.code"))}</span>
+            <input class="inventory-modal-input" name="internalCode" data-inventory-write required${writeAttributes}>
+          </label>
+          <label class="inventory-modal-field">
             <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.category"))}</span>
             <select class="inventory-modal-input" name="category" data-inventory-write required${writeAttributes}>${categoryOptionsHtml}</select>
+          </label>
+          <label class="inventory-modal-field">
+            <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.productType"))}</span>
+            <input class="inventory-modal-input" name="productType" data-inventory-write${writeAttributes}>
+          </label>
+          <label class="inventory-modal-field inventory-modal-field--wide">
+            <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.tags"))}</span>
+            <input class="inventory-modal-input" name="tags" data-inventory-write${writeAttributes}>
+          </label>
+          <label class="inventory-modal-field inventory-modal-field--wide">
+            <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.collections"))}</span>
+            <input class="inventory-modal-input" name="collections" data-inventory-write${writeAttributes}>
+          </label>
+          <label class="inventory-modal-field inventory-modal-field--wide">
+            <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.imageUrl"))}</span>
+            <input class="inventory-modal-input" name="imageUrl" type="url" data-inventory-write${writeAttributes}>
           </label>
           <label class="inventory-modal-field">
             <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.price"))}</span>
@@ -334,10 +400,25 @@ function renderAddProductModal(helpers) {
       </div>
       <div class="inventory-subitem-modal__footer">
         <button type="button" class="inventory-modal-cancel" data-inventory-add-close>${escapeHtml(pageT(lang, "inventory.addModal.cancel"))}</button>
-        <button type="submit" class="inventory-modal-confirm" data-inventory-write${writeAttributes}>${escapeHtml(pageT(lang, "inventory.addModal.confirm"))}</button>
+        <button type="submit" class="inventory-modal-confirm" data-inventory-write${writeAttributes}>${escapeHtml(state.writeBusy ? pageT(lang, "inventory.saving") : pageT(lang, "inventory.addModal.confirm"))}</button>
       </div>
     </form>
   </div>`;
+}
+
+function renderWriteStatus(helpers) {
+  if (!authenticated) return "";
+  const { escapeHtml, lang } = helpers;
+  const admin = currentUser?.isBfAdmin === true;
+  const ready = admin && shopifyWriteReady(shopifyHealth);
+  const title = !admin ? pageT(lang, "inventory.adminOnly")
+    : ready ? pageT(lang, "inventory.writeReady") : pageT(lang, "inventory.shopifyWriteNotReady");
+  const hint = admin && !ready ? pageT(lang, "inventory.shopifyWriteHint") : "";
+  const message = state.error || state.feedback;
+  return `<section class="inventory-write-status${ready ? " is-ready" : " is-blocked"}" data-shopify-write-ready="${ready}">
+    <strong>${escapeHtml(title)}</strong>${hint ? `<span>${escapeHtml(hint)}</span>` : ""}
+    ${message ? `<span class="${state.error ? "inventory-domain-error" : "inventory-domain-hint"}">${escapeHtml(message)}</span>` : ""}
+  </section>`;
 }
 
 function renderEmpty(helpers, key = "inventory.empty.products") {
@@ -370,10 +451,14 @@ function renderProductsPanel(helpers) {
 
 function renderPanel(helpers) {
   const domainHelpers = { ...helpers, liveReadOnly };
-  if (state.tab === "itemMap") return renderItemMap(domainHelpers, data.mappingProducts);
+  // Batch 5 opens only the Shopify-owned catalogue path. The older alias,
+  // supplier and pending panels keep their pre-existing production read-only
+  // boundary instead of becoming writable merely because Shopify scopes exist.
+  const legacyDomainHelpers = { ...helpers, liveReadOnly: authenticated };
+  if (state.tab === "itemMap") return renderItemMap(legacyDomainHelpers, data.mappingProducts);
   if (state.tab === "shopify") return renderShopify(domainHelpers, data.mappingProducts);
-  if (state.tab === "suppliers") return renderSuppliers(domainHelpers);
-  if (state.tab === "pending") return renderPendingDeduction(domainHelpers);
+  if (state.tab === "suppliers") return renderSuppliers(legacyDomainHelpers);
+  if (state.tab === "pending") return renderPendingDeduction(legacyDomainHelpers);
   return renderProductsPanel(helpers);
 }
 
@@ -391,6 +476,7 @@ export function renderInventory(helpers) {
       </button>` : ""}
     </header>
     ${renderSegment(helpers)}
+    ${state.tab === "products" || state.tab === "shopify" ? renderWriteStatus(helpers) : ""}
     ${state.tab === "products" ? renderToolbar(helpers) : ""}
     ${renderPanel(helpers)}
     ${renderAddProductModal(helpers)}
@@ -527,7 +613,7 @@ function onInventoryKeydown(event) {
   closeCategoryMenu();
 }
 
-function onInventorySubmit(event) {
+async function onInventorySubmit(event) {
   const form = event.target.closest("[data-inventory-add-form]");
   if (!form) return;
   event.preventDefault();
@@ -538,7 +624,43 @@ function onInventorySubmit(event) {
   const price = Number(values.get("price"));
   const specs = String(values.get("specs") || "").trim();
   const warrantyMonths = Number(values.get("warrantyMonths"));
-  if (!name || !data.categories.includes(category) || !Number.isFinite(price) || !Number.isFinite(warrantyMonths)) return;
+  const internalCode = String(values.get("internalCode") || "").trim();
+  if (!name || (authenticated && !internalCode) || !data.categories.includes(category) || !Number.isFinite(price) || !Number.isFinite(warrantyMonths)) return;
+  if (authenticated) {
+    state.writeBusy = true;
+    state.error = "";
+    state.feedback = "";
+    rerenderInventoryPage();
+    try {
+      await createLiveInventoryProduct({
+        id: globalThis.crypto.randomUUID(),
+        name,
+        internalCode,
+        category,
+        productType: String(values.get("productType") || "").trim(),
+        price,
+        warrantyMonths,
+        specs,
+        tags: String(values.get("tags") || "").split(",").map((value) => value.trim()).filter(Boolean),
+        collections: String(values.get("collections") || "").split(",").map((value) => value.trim()).filter(Boolean),
+        imageUrl: String(values.get("imageUrl") || "").trim(),
+        status: "draft",
+        stocks: [],
+        variants: []
+      });
+      data = await getInventoryPageData();
+      state.addModalOpen = false;
+      state.addDraftDirty = false;
+      state.feedback = pageT(currentHelpers?.lang ?? "zh", "inventory.created");
+      state.page = 1;
+    } catch (error) {
+      state.error = `${pageT(currentHelpers?.lang ?? "zh", "inventory.createFailed")}: ${error.message}`;
+    } finally {
+      state.writeBusy = false;
+      rerenderInventoryPage();
+    }
+    return;
+  }
   const id = `local-product-${Date.now()}`;
   data.products.unshift({
     id,
@@ -591,7 +713,10 @@ function restoredState(value = null, presetSearch = "") {
     addModalOpen: false,
     search: typeof next.search === "string" ? next.search : presetSearch,
     page: Number.isInteger(next.page) && next.page > 0 ? next.page : 1,
-    addDraftDirty: false
+    addDraftDirty: false,
+    writeBusy: false,
+    feedback: "",
+    error: ""
   };
 }
 
@@ -607,7 +732,12 @@ export async function mountPage({ scope, signal, historyState = null, navigation
   unreadWatermarks = nextUnreadWatermarks;
   currentUser = nextCurrentUser;
   unread = nextUnread;
-  liveReadOnly = typeof currentUser?.hasPermission === "function";
+  authenticated = typeof currentUser?.hasPermission === "function";
+  shopifyHealth = currentUser?.isBfAdmin === true
+    ? await getShopifyCredentialHealth({ refresh: true })
+    : null;
+  throwIfPageAborted(signal, scope);
+  liveReadOnly = authenticated && (currentUser?.isBfAdmin !== true || !shopifyWriteReady(shopifyHealth));
   writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
   state = restoredState(historyState, presetSearch);
   restoreItemMapState(historyState?.itemMap);
@@ -667,6 +797,8 @@ export async function mountPage({ scope, signal, historyState = null, navigation
       unreadWatermarks = null;
       unread = null;
       currentUser = null;
+      shopifyHealth = null;
+      authenticated = false;
       currentHelpers = null;
       if (activeScope === scope) activeScope = null;
       if (activeNavigation === navigation) activeNavigation = null;

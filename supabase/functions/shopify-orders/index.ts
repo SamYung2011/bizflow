@@ -5,11 +5,12 @@
 // - Do not request customer name/email/phone or billing/shipping addresses.
 // - Inventory deduction is handled by shopify_sync_order_api() using shopify_variant_links.
 
-import { createClient } from "jsr:@supabase/supabase-js@2";
-
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const DEFAULT_API_VERSION = "2025-01";
+import {
+  SHOPIFY_API_VERSION,
+  loadShopifyCredentials,
+  serviceClient,
+} from "../_shared/shopify-admin.ts";
+const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const PAGE_SIZE = 50;
 const MAX_PAGES = 5;
 const OVERLAP_MINUTES = 10;
@@ -219,19 +220,12 @@ Deno.serve(async (req) => {
     ? null
     : clampInt(body.backfillMinutes, 0, 1, 60 * 24 * 30);
 
-  const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
-
-  const { data: settings, error: setErr } = await supabase
-    .from("shopify_settings")
-    .select("shop_domain, access_token, api_version")
-    .eq("id", 1)
-    .maybeSingle();
-  if (setErr) return json({ error: `Read shopify_settings failed: ${setErr.message}` }, 500);
-
-  const domain = settings?.shop_domain || "";
-  const token = settings?.access_token || "";
-  const apiVersion = settings?.api_version || DEFAULT_API_VERSION;
-  if (!domain || !token) return json({ error: "Shopify not configured" }, 400);
+  const supabase = serviceClient();
+  const credentials = await loadShopifyCredentials(supabase);
+  if (!credentials) return json({ error: "Shopify not configured" }, 400);
+  const domain = credentials.domain;
+  const token = credentials.token;
+  const apiVersion = credentials.apiVersion || SHOPIFY_API_VERSION;
 
   const runStartedAt = new Date();
 
@@ -263,7 +257,18 @@ Deno.serve(async (req) => {
       new Date(state?.last_polled_at || runStartedAt.toISOString()).getTime() - OVERLAP_MINUTES * 60_000,
     ).toISOString();
 
-  const processed: Array<{ shopify_order_id: string; invoice_number: string; result?: unknown; dryRun?: boolean }> = [];
+  const processed: Array<{
+    shopify_order_id: string;
+    invoice_number: string;
+    result?: unknown;
+    dryRun?: boolean;
+    customer_id_present?: boolean;
+    line_items_count?: number;
+    line_items_with_variant_id_count?: number;
+    total?: number;
+    currency?: string | null;
+    first_variant_id_sample?: string | null;
+  }> = [];
   const failed: Array<{ shopify_order_id: string; invoice_number: string; error: string }> = [];
   const warnings: Array<{ shopify_order_id: string; invoice_number: string; warning: string }> = [];
 

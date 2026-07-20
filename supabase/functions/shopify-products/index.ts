@@ -1,16 +1,17 @@
-// shopify-products: 从 Shopify Admin API 拉商品 + 后续 sync 到 bizflow
-// 密码模式同 shopify-settings（复用 wa_settings.admin_password）
+// shopify-products: Shopify catalogue read + component link maintenance.
 // Action 列表：
 //   list   - 分页拉全量 active products + variants，返回数组（read-only，不改 DB）
 //   sync   - 预留：按 shopify_variant_id / SKU 匹配 bizflow products、写回字段、新品自动建 + needs_review
 //
-// 单向：Shopify → bizflow（source of truth）。日后做反向写回时这里加 action 即可。
+// Catalogue source of truth is BizFlow. This legacy endpoint is limited to Shopify
+// reads and M:N component-link maintenance; catalogue writes use shopify-catalog-write.
 
-import { createClient } from "jsr:@supabase/supabase-js@2";
-
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const API_VERSION = "2025-01";
+import {
+  SHOPIFY_API_VERSION,
+  SHOPIFY_EXPECTED_DOMAIN,
+  loadShopifyCredentials,
+  requireBizflowAdmin,
+} from "../_shared/shopify-admin.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -65,7 +66,7 @@ function json(body: unknown, status = 200) {
 }
 
 async function shopifyGraphQL(domain: string, token: string, query: string, variables: Record<string, unknown>): Promise<{ data?: unknown; errors?: unknown }> {
-  const url = `https://${domain}/admin/api/${API_VERSION}/graphql.json`;
+  const url = `https://${domain}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
   const r = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": token },
@@ -159,32 +160,14 @@ Deno.serve(async (req) => {
   let body: Payload;
   try { body = await req.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
 
-  const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
-
-  // list 是只读、不动 DB → 不需要 pwd
-  // 其他 action（link/unlink/sync/link-from-aliases）动 products 表 → 走密码验
-  if (body.action !== "list") {
-    const { data: wa, error: waErr } = await supabase
-      .from("wa_settings")
-      .select("admin_password")
-      .eq("id", 1)
-      .maybeSingle();
-    if (waErr) return json({ error: `Read wa_settings failed: ${waErr.message}` }, 500);
-    const currentPwd = wa?.admin_password || "";
-    if (!currentPwd) return json({ error: "Admin password not set" }, 401);
-    if (!body.pwd || body.pwd !== currentPwd) return json({ error: "Wrong password" }, 401);
-  }
-
-  // 拿 Shopify 凭证
-  const { data: settings, error: setErr } = await supabase
-    .from("shopify_settings")
-    .select("shop_domain, access_token")
-    .eq("id", 1)
-    .maybeSingle();
-  if (setErr) return json({ error: `Read shopify_settings failed: ${setErr.message}` }, 500);
-  const domain = settings?.shop_domain || "";
-  const token = settings?.access_token || "";
-  if (!domain || !token) return json({ error: "Shopify not configured" }, 400);
+  const auth = await requireBizflowAdmin(req);
+  if (!auth.ok) return json({ error: auth.error }, auth.status);
+  const supabase = auth.admin;
+  const credentials = await loadShopifyCredentials(supabase);
+  if (!credentials) return json({ error: "Shopify not configured" }, 400);
+  const domain = credentials.domain;
+  const token = credentials.token;
+  if (domain !== SHOPIFY_EXPECTED_DOMAIN) return json({ error: "Unexpected Shopify shop domain" }, 400);
 
   // ── action: list ─────────────────────────────────────────────────────────
   if (body.action === "list") {

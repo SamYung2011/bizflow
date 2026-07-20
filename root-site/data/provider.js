@@ -1446,7 +1446,7 @@ function isInventoryDetail(detail) {
   return !!detail && typeof detail === "object" && !Array.isArray(detail) &&
     Array.isArray(detail.variants) && detail.variants.every(isInventoryProduct) &&
     Array.isArray(detail.warehouses) && detail.warehouses.every((row) =>
-      row && (row.key === "hk" || row.key === "zh") && typeof row.quantity === "number") &&
+      row && typeof row.key === "string" && typeof row.quantity === "number") &&
     Array.isArray(detail.collections) && detail.collections.every((name) => typeof name === "string");
 }
 
@@ -1469,7 +1469,14 @@ function cloneInventoryProduct(product) {
       tags: Array.isArray(product.detail.tags) ? product.detail.tags.slice() : [],
       images: Array.isArray(product.detail.images) ? product.detail.images.slice() : [],
       warehouses: product.detail.warehouses.map((row) => ({ ...row })),
-      variants: product.detail.variants.map((variant) => ({ ...variant }))
+      groupedWarehouses: Array.isArray(product.detail.groupedWarehouses)
+        ? product.detail.groupedWarehouses.map((row) => ({ ...row }))
+        : [],
+      shopifyBinding: product.detail.shopifyBinding ? { ...product.detail.shopifyBinding } : null,
+      variants: product.detail.variants.map((variant) => ({
+        ...variant,
+        warehouses: Array.isArray(variant.warehouses) ? variant.warehouses.map((row) => ({ ...row })) : []
+      }))
     }
   };
 }
@@ -1488,8 +1495,10 @@ export async function getInventoryPageData() {
         id: product.id,
         name: product.name,
         parentId: product.parentId,
-        category: product.category
-      }))
+        category: product.category,
+        internalCode: product.internalCode || ""
+      })),
+      warehouses: Array.isArray(snapshot.warehouses) ? snapshot.warehouses.map((row) => ({ ...row })) : []
     };
   }
   if (snapshot) warnProviderFallback("inventory.json", "inventory page mock");
@@ -1504,8 +1513,10 @@ export async function getInventoryPageData() {
       id: product.id,
       name: product.name,
       parentId: null,
-      category: product.category
-    }))
+      category: product.category,
+      internalCode: product.internalCode || ""
+    })),
+    warehouses: []
   };
 }
 
@@ -1524,11 +1535,17 @@ export async function getInventoryDetailData(id) {
     : new Map();
   const listProduct = page.products.find((product) => product.id === id && isInventoryProduct(product));
   if (listProduct?.detail && isInventoryDetail(listProduct.detail)) {
-    const warehouses = listProduct.detail.warehouses.map((row) => ({
-      key: row.key,
-      quantity: row.quantity,
-      updatedAt: row.updatedAt ?? ""
-    }));
+    const completeWarehouses = (stockRows = []) => page.warehouses.map((warehouse) => {
+      const stock = stockRows.find((row) => row.id === warehouse.id || (!row.id && row.key === warehouse.key));
+      return {
+        id: warehouse.id || stock?.id || "",
+        key: warehouse.key || stock?.key || "",
+        name: warehouse.name || stock?.name || "",
+        quantity: stock?.quantity ?? 0,
+        updatedAt: stock?.updatedAt ?? ""
+      };
+    });
+    const warehouses = completeWarehouses(listProduct.detail.warehouses);
     return {
       requestedId: id || listProduct.id,
       product: {
@@ -1540,27 +1557,36 @@ export async function getInventoryDetailData(id) {
         stock: listProduct.stock,
         status: listProduct.status,
         imageUrl: listProduct.imageUrl,
-        warrantyMonths: listProduct.detail.warrantyMonths
+        warrantyMonths: listProduct.detail.warrantyMonths,
+        price: listProduct.price,
+        specs: listProduct.detail.specs || "",
+        productType: listProduct.detail.productType || "",
+        tags: listProduct.detail.tags.slice(),
+        collections: listProduct.detail.collections.slice(),
+        shopifyBinding: listProduct.detail.shopifyBinding ? { ...listProduct.detail.shopifyBinding } : null
       },
       subitems: listProduct.detail.variants.map((variant) => {
         const variantDetail = snapshotProductsById.get(variant.id)?.detail;
         const variantWarehouses = isInventoryDetail(variantDetail) ? variantDetail.warehouses : [];
-        const warehouseByKey = new Map(variantWarehouses.map((row) => [row.key, row]));
         return {
           id: variant.id,
           name: variant.name,
+          internalCode: variant.internalCode || variant.shopifySku || variant.id,
           quantity: variant.stock,
           price: variant.price,
           editPrice: variant.price,
-          warrantyYears: Number.isFinite(variantDetail?.warrantyMonths) ? variantDetail.warrantyMonths / 12 : "—",
-          warehouses: ["hk", "zh"].map((key) => ({
-            key,
-            quantity: warehouseByKey.get(key)?.quantity ?? 0,
-            updatedAt: warehouseByKey.get(key)?.updatedAt ?? ""
-          }))
+          warrantyMonths: Number.isFinite(variant.warrantyMonths)
+            ? variant.warrantyMonths
+            : Number.isFinite(variantDetail?.warrantyMonths) ? variantDetail.warrantyMonths : 0,
+          status: variant.status || "active",
+          imageUrl: variant.imageUrl || "",
+          specs: variant.specs || "",
+          shopifyVariantId: variant.shopifyVariantId || "",
+          warehouses: completeWarehouses(Array.isArray(variant.warehouses) ? variant.warehouses : variantWarehouses)
         };
       }),
       warehouses,
+      availableWarehouses: page.warehouses.map((row) => ({ ...row })),
       series: listProduct.detail.collections.map((name, index) => ({ id: `collection-${index + 1}`, name }))
     };
   }
