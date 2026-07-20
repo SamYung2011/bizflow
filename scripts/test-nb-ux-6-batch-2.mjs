@@ -57,13 +57,19 @@ const [filterSource, panelSource, manifestSource, ...pageSources] = await Promis
 
 for (const [index, source] of pageSources.entries()) {
   assert.match(source, /components\/date-range-filter\.js/, `${pagePaths[index]} must use the shared blue range filter`);
-  assert.match(source, /data-date-range-panel/, `${pagePaths[index]} must leave portal clicks to the shared panel`);
+  assert.doesNotMatch(source, /event\.target\.closest\??\.?\("\[data-date-range-panel\]"\)/, `${pagePaths[index]} must not infer portal containment after panel rerenders`);
   assert.doesNotMatch(source, /components\/date-filter\.js/, `${pagePaths[index]} must not load the retired calendar`);
 }
+assert.doesNotMatch(pageSources[0], /if \(!event\.target\.closest\("\[data-date-range-filter\]"\)\) dateFilter\.close\(\)/, "orders must leave outside-close to the portal");
+assert.doesNotMatch(pageSources[1], /if \(!event\.target\.closest\("\[data-date-range-filter\]"\)\) dateFilter\.close\(\)/, "customers must leave outside-close to the portal");
+assert.doesNotMatch(pageSources[2], /if \(!root\) \{[\s\S]*?DateFilter\.close\(\)/, "WhatsApp must not close portal filters from page-level outside clicks");
+assert.doesNotMatch(pageSources[3], /else orderDate\.close\(\)/, "OCPP charging must leave outside-close to the portal");
+assert.doesNotMatch(pageSources[4], /else \{\s*logDate\.close\(\);\s*alarmDate\.close\(\)/, "OCPP monitor must leave outside-close to the portal");
 assert.match(filterSource, /zh:[\s\S]*en:[\s\S]*fr:/, "range trigger and panel copy must cover all three languages");
 assert.match(filterSource, /presets = \["all"\]/, "all-time must be the common top shortcut");
 assert.match(pageSources[4], /presets: \["all", "last7"\]/, "OCPP logs must retain the last-7-days shortcut inside the panel");
 assert.match(panelSource, /draft\.start \|\| draft\.end \|\| viewDate/, "empty filters must open on the latest available data month");
+assert.match(panelSource, /panel\?\.contains\(event\.target\) \|\| anchor\?\.contains\(event\.target\)/, "the shared portal must remain the sole outside-click owner");
 
 for (const route of ["orders", "customers", "whatsapp", "ocpp-monitor", "ocpp-charging"]) {
   assert.match(manifestSource, new RegExp(`${route}\\.html[\\s\\S]*?date-range-panel\\.css`), `${route} SPA route must load the blue panel styles`);

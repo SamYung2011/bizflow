@@ -206,13 +206,8 @@ function updatePromptValidation() {
 }
 
 function handleDateFilterClick(event) {
-  if (event.target.closest?.("[data-date-range-panel]")) return true;
   const root = event.target.closest?.("[data-date-range-filter]");
-  if (!root) {
-    conversationDateFilter.close();
-    logDateFilter.close();
-    return false;
-  }
+  if (!root) return false;
   const id = root.getAttribute("data-date-range-filter");
   if (id === "whatsapp-conversations") {
     logDateFilter.close();

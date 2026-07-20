@@ -273,11 +273,10 @@ function reset() {
   state.page = state.sharePage = state.orderPage = state.reportPage = 1;
 }
 function onChargingClick(event) {
-  if (event.target.closest?.("[data-date-range-panel]")) return;
   const dateRoot = event.target.closest?.("[data-date-range-filter]");
   if (dateRoot) {
     if (orderDate.handleClick(event)) return;
-  } else orderDate.close();
+  }
   const tab = event.target.closest("[data-ocpp-charging-tab]");
   if (tab) {
     state.tab = tab.getAttribute("data-ocpp-charging-tab");

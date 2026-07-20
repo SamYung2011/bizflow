@@ -146,7 +146,6 @@ function rerender() {
   if (page && context.helpers()) page.outerHTML = render(context.helpers());
 }
 function onMonitorClick(event) {
-  if (event.target.closest?.("[data-date-range-panel]")) return;
   const root = event.target.closest?.("[data-date-range-filter]");
   if (root) {
     const id = root.getAttribute("data-date-range-filter");
@@ -158,9 +157,6 @@ function onMonitorClick(event) {
       logDate.close();
       if (alarmDate.handleClick(event)) return;
     }
-  } else {
-    logDate.close();
-    alarmDate.close();
   }
   const tab = event.target.closest("[data-ocpp-monitor-tab]");
   if (tab) {

@@ -356,7 +356,6 @@ function rerenderCustomersPage() {
 }
 
 async function onCustomersClick(event) {
-  if (event.target.closest("[data-date-range-panel]")) return;
   if (liveReadOnly && event.target.closest("[data-customers-write]")) return;
   const customerTab = event.target.closest("[data-customers-tab]");
   if (customerTab) {
@@ -461,7 +460,6 @@ async function onCustomersClick(event) {
   if (!event.target.closest("[data-customers-filter-popover]")) {
     closeAllFilterMenus(null);
   }
-  if (!event.target.closest("[data-date-range-filter]")) dateFilter.close();
 }
 
 async function onCustomersContextMenu(event) {

@@ -360,7 +360,6 @@ function rerenderOrdersPage() {
 }
 
 async function onOrdersClick(event) {
-  if (event.target.closest("[data-date-range-panel]")) return;
   const domainTab = event.target.closest("[data-orders-domain-tab]");
   if (domainTab) {
     const scope = activeScope;
@@ -464,7 +463,6 @@ async function onOrdersClick(event) {
   }
 
   if (!event.target.closest("[data-source-popover]")) closeSourceMenu();
-  if (!event.target.closest("[data-date-range-filter]")) dateFilter.close();
 }
 
 async function onOrdersContextMenu(event) {
