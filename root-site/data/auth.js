@@ -13,6 +13,7 @@ import {
 
 const CONFIG_URL = new URL("../config.local.js", import.meta.url);
 const ADMIN_EMAIL = "samyung2011@gmail.com";
+const WA_ADMIN_EMAILS = Object.freeze([ADMIN_EMAIL, "a1017339632@gmail.com"]);
 const PAGE_SIZE = 1000;
 export const TRANSIENT_AUTH_RESET_EVENT = "tp:auth-transient-reset";
 
@@ -323,6 +324,7 @@ export function deriveAuthContext({ session, employee, bindings, companies, role
   const isAdminOfActive = isSuperAdmin || activeBinding?.is_company_admin === true;
   const isAdminOfAny = isSuperAdmin || ownBindings.some((binding) => binding.is_company_admin === true);
   const isBfAdmin = employee.is_admin === true || String(session.user.email || "").toLowerCase() === ADMIN_EMAIL;
+  const isWaAdmin = isBfAdmin || WA_ADMIN_EMAILS.includes(String(session.user.email || "").toLowerCase());
   const pending = new Set(pendingCompanyIds);
   const bound = new Set(ownBindings.map((binding) => binding.company_id));
   const context = {
@@ -349,6 +351,7 @@ export function deriveAuthContext({ session, employee, bindings, companies, role
     isAdminOfActive,
     isAdminOfAny,
     isBfAdmin,
+    isWaAdmin,
     isAdmin: isBfAdmin,
     bizflowMainAccess: employee.bizflow_main_access === true,
     mustChangePassword: employee.must_change_password === true,

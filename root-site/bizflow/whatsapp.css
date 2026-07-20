@@ -91,6 +91,21 @@
   font-size: var(--font-body-size);
 }
 
+.wa-write-notice {
+  padding: var(--space-10) var(--space-20);
+  border: var(--wa-line-width) solid color-mix(in srgb, var(--blue) 30%, var(--white));
+  border-radius: var(--radius-10);
+  background: color-mix(in srgb, var(--blue) 8%, var(--white));
+  color: var(--gray-60);
+  font-size: var(--font-description-size);
+}
+
+.wa-write-notice.is-error {
+  border-color: color-mix(in srgb, var(--red) 30%, var(--white));
+  background: color-mix(in srgb, var(--red) 8%, var(--white));
+  color: var(--red);
+}
+
 .wa-stats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

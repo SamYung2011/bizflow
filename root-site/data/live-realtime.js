@@ -1,5 +1,6 @@
 import { getCurrentUser, getSession, getSupabaseClient } from "./auth.js";
 import { invalidateLiveTableData, refreshLiveTables } from "./live-snapshot-utils.js";
+import { WHATSAPP_REALTIME_TABLES } from "./live-whatsapp-contract.js";
 
 const TASK_TABLES = Object.freeze([
   "employee_tasks",
@@ -9,7 +10,8 @@ const TASK_TABLES = Object.freeze([
 const BIZFLOW_TABLES = Object.freeze([
   "invoices",
   "northbound_records",
-  "northbound_statuses"
+  "northbound_statuses",
+  ...WHATSAPP_REALTIME_TABLES
 ]);
 const INVALIDATION_DELAY_MS = 250;
 

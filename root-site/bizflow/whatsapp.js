@@ -8,12 +8,21 @@ import { translateWhatsapp } from "./whatsapp-i18n.js";
 import { channelOf, dateOnly, nextLocalId, promptPlaceholdersValid, whatsappTabs, whitelistKinds } from "./whatsapp-model.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
+import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
+import { WHATSAPP_REALTIME_TABLES, WHATSAPP_SNAPSHOT } from "../data/live-whatsapp-contract.js";
+import {
+  addLiveWhatsappWhitelist,
+  removeLiveWhatsappWhitelist,
+  setLiveWhatsappWhitelistActive,
+  updateLiveWhatsappSettings
+} from "../data/live-whatsapp-writes.js";
 
 let snapshot = null;
 let currentUser = null;
 let unread = null;
-let liveReadOnly = false;
-// P1 接真写时按现网 isWaAdmin 门控（bizflow_samyung/src/views/Whatsapp.jsx:53-55,130-132）；当前 live 一律只读。
+let liveMode = false;
+let settingsReadOnly = false;
+let whatsappLiveRefresh = null;
 
 const blankWhitelistDrafts = () => Object.fromEntries(whitelistKinds.map((kind) => [kind, { value: "", note: "" }]));
 let state = null;
@@ -25,7 +34,12 @@ function initializeWhatsappState(historyState = null) {
   const restored = historyState && typeof historyState === "object" ? historyState : {};
   const settings = { ...snapshot.settings };
   state = {
-    liveReadOnly,
+    liveMode,
+    liveReadOnly: settingsReadOnly,
+    activityReadOnly: liveMode,
+    writeBlocked: settingsReadOnly,
+    savingSection: "",
+    writeError: "",
     tab: whatsappTabs.includes(restored.tab) ? restored.tab : "settings",
     settings,
     savedSettings: { ...settings },
@@ -114,11 +128,12 @@ function renderHeader(helpers) {
     : Date.now() - heartbeatAt >= 120000
       ? "offline"
       : state.heartbeat.status || t("unknown");
-  return `<header class="wa-head"><div><h1>${e(t("title"))}</h1><p>${e(t("subtitle"))}</p></div><div class="wa-status" title="${e(state.heartbeat.errorMessage || "")}"><span class="wa-status__dot"></span><div><strong>${e(t("snapshotStatus"))}: ${e(heartbeatStatus)}</strong><small>${e(t("snapshotAt"))}: ${e(state.heartbeat.lastHeartbeatAt || state.generatedAt || t("empty"))}</small></div></div></header><div class="wa-stats" data-wa-mode="${e(state.settings.claudeMode || "")}" data-wa-customers="${customerCount}" data-wa-messages="${state.messages.length}" data-wa-unresolved="${openUnresolved}"><span>${e(t("mode"))}<strong>${e(state.settings.claudeMode || t("unknown"))}</strong></span><span>${e(t("customers"))}<strong>${customerCount}</strong></span><span>${e(t("messages"))}<strong>${state.messages.length}</strong></span><span>${e(t("unresolved"))}<strong>${openUnresolved}</strong></span></div>`;
+  return `<header class="wa-head"><div><h1>${e(t("title"))}</h1><p>${e(t("subtitle"))}</p></div><div class="wa-status" title="${e(state.heartbeat.errorMessage || "")}"><span class="wa-status__dot"></span><div><strong>${e(t("robotStatus"))}: ${e(heartbeatStatus)}</strong><small>${e(t("lastHeartbeat"))}: ${e(state.heartbeat.lastHeartbeatAt || t("empty"))}</small></div></div></header><div class="wa-stats" data-wa-mode="${e(state.settings.claudeMode || "")}" data-wa-customers="${customerCount}" data-wa-messages="${state.messages.length}" data-wa-unresolved="${openUnresolved}"><span>${e(t("mode"))}<strong>${e(state.settings.claudeMode || t("unknown"))}</strong></span><span>${e(t("customers"))}<strong>${customerCount}</strong></span><span>${e(t("messages"))}<strong>${state.messages.length}</strong></span><span>${e(t("unresolved"))}<strong>${openUnresolved}</strong></span></div>`;
 }
 
 export function renderWhatsapp(helpers) {
   currentHelpers = helpers;
+  state.writeBlocked = state.liveReadOnly || Boolean(state.savingSection);
   const segment = renderSegment({
     items: tabItems(),
     active: state.tab,
@@ -130,7 +145,12 @@ export function renderWhatsapp(helpers) {
     conversations: conversationDateFilter,
     logs: logDateFilter
   });
-  return `<main class="wa-page" data-wa-page data-live-read-only="${liveReadOnly}" data-wa-active-tab="${helpers.escapeHtml(state.tab)}" data-wa-admin="true">${renderHeader(helpers)}<div class="wa-segment">${segment}</div><div class="wa-content">${body}</div>${renderWhatsappGuide(state, helpers, t)}</main>`;
+  const writeNotice = state.writeError
+    ? `<div class="wa-write-notice is-error" role="alert">${helpers.escapeHtml(t(state.writeError))}</div>`
+    : state.savingSection
+      ? `<div class="wa-write-notice" role="status">${helpers.escapeHtml(t("savingLive"))}</div>`
+      : "";
+  return `<main class="wa-page" data-wa-page data-live-mode="${liveMode}" data-live-read-only="${settingsReadOnly}" data-wa-active-tab="${helpers.escapeHtml(state.tab)}" data-wa-admin="${currentUser?.isWaAdmin === true}">${renderHeader(helpers)}${writeNotice}<div class="wa-segment">${segment}</div><div class="wa-content">${body}</div>${renderWhatsappGuide(state, helpers, t)}</main>`;
 }
 
 function rerender() {
@@ -155,8 +175,8 @@ function updateKnowledgeMeta() {
     status.classList.toggle("is-dirty", dirty);
   }
   if (count) count.textContent = t("chars", { count: String(state.settings.knowledge || "").length });
-  if (cancel) cancel.disabled = liveReadOnly || !dirty;
-  if (save) save.disabled = liveReadOnly || !dirty;
+  if (cancel) cancel.disabled = state.writeBlocked || !dirty;
+  if (save) save.disabled = state.writeBlocked || !dirty;
 }
 
 function updatePromptValidation() {
@@ -168,7 +188,7 @@ function updatePromptValidation() {
     validation.classList.toggle("is-valid", valid);
     validation.classList.toggle("is-invalid", !valid);
   }
-  if (save) save.disabled = liveReadOnly || !valid;
+  if (save) save.disabled = state.writeBlocked || !valid;
 }
 
 function handleDateFilterClick(event) {
@@ -190,9 +210,62 @@ function handleDateFilterClick(event) {
   return false;
 }
 
-function onWhatsappClick(event) {
+const SETTINGS_SECTION_KEYS = Object.freeze({
+  runtime: ["botName", "botPhone", "bossChatName", "replyDelayBase", "cooldownMinutes", "maxRepliesPerMin", "dailyReportHour"],
+  meta: ["metaGraphVersion", "metaPhoneNumberId", "metaWabaId"],
+  tts: ["metaTtsEnabled", "metaTtsRelayUrl", "metaTtsVoiceId", "metaTtsLanguageBoost", "metaTtsPrompt"],
+  knowledge: ["knowledge"],
+  prompts: ["chargersPrompt", "locationHintPrompt"]
+});
+
+function settingsPatch(section) {
+  return Object.fromEntries((SETTINGS_SECTION_KEYS[section] ?? [])
+    .map((key) => [key, state.settings[key]]));
+}
+
+function markSettingsSaved(target, patch) {
+  target.savedSettings = { ...target.savedSettings, ...patch };
+  if (Object.hasOwn(patch, "knowledge")) target.savedKnowledge = patch.knowledge;
+  if (Object.hasOwn(patch, "chargersPrompt") || Object.hasOwn(patch, "locationHintPrompt")) {
+    target.savedPrompts = {
+      chargersPrompt: Object.hasOwn(patch, "chargersPrompt") ? patch.chargersPrompt : target.savedPrompts.chargersPrompt,
+      locationHintPrompt: Object.hasOwn(patch, "locationHintPrompt") ? patch.locationHintPrompt : target.savedPrompts.locationHintPrompt
+    };
+  }
+}
+
+async function runLiveWrite(section, operation, commit) {
+  if (!state || state.writeBlocked) return false;
+  const target = state;
+  target.savingSection = section;
+  target.writeError = "";
+  rerender();
+  let succeeded = false;
+  try {
+    const result = await operation();
+    if (state !== target) return false;
+    commit?.(result, target);
+    target.savedSection = section;
+    target.generatedAt = new Date().toISOString();
+    succeeded = true;
+  } catch (error) {
+    if (state !== target) return false;
+    console.error("[live-whatsapp] write failed", error);
+    target.writeError = "writeFailed";
+  } finally {
+    if (state === target) {
+      target.savingSection = "";
+      rerender();
+      await whatsappLiveRefresh?.flush();
+    }
+  }
+  return succeeded;
+}
+
+async function onWhatsappClick(event) {
   if (handleDateFilterClick(event)) return;
-  if (liveReadOnly && event.target.closest("[data-wa-write]")) return;
+  const writeControl = event.target.closest("[data-wa-write]");
+  if (writeControl?.disabled || (state.writeBlocked && writeControl)) return;
 
   const tab = event.target.closest("[data-wa-tab]");
   if (tab) {
@@ -213,20 +286,29 @@ function onWhatsappClick(event) {
   }
   const mode = event.target.closest("[data-wa-mode]");
   if (mode && mode.tagName === "BUTTON") {
-    state.settings.claudeMode = mode.getAttribute("data-wa-mode");
+    const previous = state.settings.claudeMode;
+    const next = mode.getAttribute("data-wa-mode");
+    state.settings.claudeMode = next;
+    state.savedSection = "";
+    if (state.liveMode) {
+      const saved = await runLiveWrite("mode", () => updateLiveWhatsappSettings({ claudeMode: next }), (_result, target) => {
+        markSettingsSaved(target, { claudeMode: next });
+      });
+      if (!saved && state) state.settings.claudeMode = previous;
+    }
     rerender();
     return;
   }
   const save = event.target.closest("[data-wa-save]");
   if (save && !save.disabled) {
     const section = save.getAttribute("data-wa-save");
-    if (section === "knowledge") state.savedKnowledge = state.settings.knowledge;
-    if (section === "prompts") state.savedPrompts = {
-      chargersPrompt: state.settings.chargersPrompt,
-      locationHintPrompt: state.settings.locationHintPrompt
-    };
-    state.savedSettings = { ...state.settings };
-    state.savedSection = section;
+    const patch = settingsPatch(section);
+    if (state.liveMode) {
+      await runLiveWrite(section, () => updateLiveWhatsappSettings(patch), (_result, target) => markSettingsSaved(target, patch));
+    } else {
+      markSettingsSaved(state, patch);
+      state.savedSection = section;
+    }
     rerender();
     return;
   }
@@ -238,7 +320,15 @@ function onWhatsappClick(event) {
   const remove = event.target.closest("[data-wa-whitelist-remove]");
   if (remove) {
     const id = remove.getAttribute("data-wa-whitelist-remove");
-    state.whitelist = state.whitelist.filter((row) => String(row.id) !== id);
+    if (state.liveMode) {
+      if (!await confirmInPage(t("removeLiveConfirm"), { danger: true })) return;
+      await runLiveWrite("whitelist", () => removeLiveWhatsappWhitelist(id), (_result, target) => {
+        target.whitelist = target.whitelist.filter((row) => String(row.id) !== id);
+        target.initialWhitelist = target.whitelist.map((row) => ({ ...row }));
+      });
+    } else {
+      state.whitelist = state.whitelist.filter((row) => String(row.id) !== id);
+    }
     rerender();
     return;
   }
@@ -246,8 +336,22 @@ function onWhatsappClick(event) {
   if (add && !add.disabled) {
     const kind = add.getAttribute("data-wa-whitelist-add");
     const draft = state.whitelistDrafts[kind];
-    state.whitelist.push({ id: nextLocalId("wa-allow"), kind, value: draft.value.trim(), note: draft.note.trim(), active: true });
-    state.whitelistDrafts[kind] = { value: "", note: "" };
+    if (state.liveMode) {
+      await runLiveWrite("whitelist", () => addLiveWhatsappWhitelist({ kind, ...draft }), (row, target) => {
+        target.whitelist.unshift({
+          id: row.id,
+          kind: row.kind,
+          value: row.value,
+          note: row.note || "",
+          active: row.active === true
+        });
+        target.initialWhitelist = target.whitelist.map((item) => ({ ...item }));
+        target.whitelistDrafts[kind] = { value: "", note: "" };
+      });
+    } else {
+      state.whitelist.push({ id: nextLocalId("wa-allow"), kind, value: draft.value.trim(), note: draft.note.trim(), active: true });
+      state.whitelistDrafts[kind] = { value: "", note: "" };
+    }
     rerender();
     return;
   }
@@ -266,12 +370,14 @@ function onWhatsappClick(event) {
   }
   const replySkip = event.target.closest("[data-wa-reply-skip]");
   if (replySkip) {
+    if (state.activityReadOnly) return;
     state.skippedReplyIds.add(replySkip.getAttribute("data-wa-reply-skip"));
     rerender();
     return;
   }
   const resolve = event.target.closest("[data-wa-resolve]");
   if (resolve) {
+    if (state.activityReadOnly) return;
     state.resolvedIds.add(resolve.getAttribute("data-wa-resolve"));
     rerender();
     return;
@@ -297,12 +403,13 @@ function onWhatsappClick(event) {
 }
 
 function onWhatsappInput(event) {
-  if (liveReadOnly && event.target.closest("[data-wa-write]")) return;
+  if (state.writeBlocked && event.target.closest("[data-wa-write]")) return;
   const setting = event.target.closest("[data-wa-setting]");
   if (setting && setting.type !== "checkbox") {
     const key = setting.getAttribute("data-wa-setting");
     state.settings[key] = setting.value;
     state.savedSection = "";
+    state.writeError = "";
     if (key === "knowledge") updateKnowledgeMeta();
     if (key === "locationHintPrompt") updatePromptValidation();
   }
@@ -312,21 +419,30 @@ function onWhatsappInput(event) {
     const key = draft.getAttribute("data-wa-whitelist-draft");
     state.whitelistDrafts[kind][key] = draft.value;
     const button = document.querySelector(`[data-wa-whitelist-add="${kind}"]`);
-    if (button) button.disabled = liveReadOnly || !state.whitelistDrafts[kind].value.trim();
+    if (button) button.disabled = state.writeBlocked || !state.whitelistDrafts[kind].value.trim();
   }
 }
 
-function onWhatsappChange(event) {
-  if (liveReadOnly && event.target.closest("[data-wa-write]")) return;
+async function onWhatsappChange(event) {
+  if (state.writeBlocked && event.target.closest("[data-wa-write]")) return;
   const setting = event.target.closest("[data-wa-setting]");
   if (setting?.type === "checkbox") {
     state.settings[setting.getAttribute("data-wa-setting")] = setting.checked;
     state.savedSection = "";
+    state.writeError = "";
   }
   const toggle = event.target.closest("[data-wa-whitelist-toggle]");
   if (toggle) {
     const row = state.whitelist.find((item) => String(item.id) === toggle.getAttribute("data-wa-whitelist-toggle"));
-    if (row) row.active = toggle.checked;
+    if (row && state.liveMode) {
+      await runLiveWrite("whitelist", () => setLiveWhatsappWhitelistActive(row.id, toggle.checked), (_result, target) => {
+        const saved = target.whitelist.find((item) => String(item.id) === String(row.id));
+        if (saved) saved.active = toggle.checked;
+        target.initialWhitelist = target.whitelist.map((item) => ({ ...item }));
+      });
+    } else if (row) {
+      row.active = toggle.checked;
+    }
   }
   if (conversationDateFilter.handleChange(event) || logDateFilter.handleChange(event)) return;
 }
@@ -344,11 +460,48 @@ function onWhatsappKeydown(event) {
 }
 
 function hasWhatsappUnsavedChanges() {
-  if (liveReadOnly || !state) return false;
+  if (!state || state.liveReadOnly) return false;
+  if (state.savingSection) return true;
   const draftDirty = Object.values(state.whitelistDrafts).some((draft) => draft.value.trim() || draft.note.trim());
   return JSON.stringify(state.settings) !== JSON.stringify(state.savedSettings)
     || JSON.stringify(state.whitelist) !== JSON.stringify(state.initialWhitelist)
     || draftDirty;
+}
+
+function hasWhatsappRefreshBlock() {
+  if (!state) return false;
+  const focusedWrite = typeof document !== "undefined" && document.activeElement?.closest?.("[data-wa-write]");
+  return Boolean(state.savingSection || focusedWrite || hasWhatsappUnsavedChanges());
+}
+
+function applyWhatsappSnapshot(nextSnapshot) {
+  snapshot = nextSnapshot;
+  state.settings = { ...nextSnapshot.settings };
+  state.savedSettings = { ...nextSnapshot.settings };
+  state.savedKnowledge = nextSnapshot.settings.knowledge || "";
+  state.savedPrompts = {
+    chargersPrompt: nextSnapshot.settings.chargersPrompt || "",
+    locationHintPrompt: nextSnapshot.settings.locationHintPrompt || ""
+  };
+  state.clients = nextSnapshot.clients;
+  state.heartbeat = nextSnapshot.heartbeat;
+  state.generatedAt = nextSnapshot.generatedAt;
+  state.whitelist = nextSnapshot.whitelist.map((row) => ({ ...row }));
+  state.initialWhitelist = nextSnapshot.whitelist.map((row) => ({ ...row }));
+  state.whitelistDrafts = blankWhitelistDrafts();
+  state.messages = nextSnapshot.messages;
+  state.replies = nextSnapshot.replies;
+  state.unresolved = nextSnapshot.unresolved;
+  state.dailyReports = nextSnapshot.dailyReports;
+  state.logs = nextSnapshot.logs;
+  state.savedSection = "";
+  state.writeError = "";
+}
+
+function flushWhatsappRefreshAfterFocus() {
+  queueMicrotask(() => {
+    if (!hasWhatsappRefreshBlock()) void whatsappLiveRefresh?.flush();
+  });
 }
 
 export async function mountPage({ scope, signal, historyState = null } = {}) {
@@ -357,7 +510,8 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
   snapshot = nextSnapshot;
   currentUser = nextCurrentUser;
   unread = nextUnread;
-  liveReadOnly = typeof currentUser?.hasPermission === "function";
+  liveMode = nextSnapshot?.__live === true || typeof currentUser?.hasPermission === "function";
+  settingsReadOnly = liveMode && currentUser?.isWaAdmin !== true;
   initializeWhatsappState(historyState);
 
   return {
@@ -372,7 +526,24 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       scope.listen(document, "input", onWhatsappInput);
       scope.listen(document, "change", onWhatsappChange);
       scope.listen(document, "focusin", onWhatsappFocus);
+      scope.listen(document, "focusout", flushWhatsappRefreshAfterFocus);
       scope.listen(document, "keydown", onWhatsappKeydown);
+      whatsappLiveRefresh = attachLiveSnapshotRefresh({
+        scope,
+        snapshots: [WHATSAPP_SNAPSHOT],
+        tables: WHATSAPP_REALTIME_TABLES,
+        isBlocked: hasWhatsappRefreshBlock,
+        async refresh({ defer, isCurrent }) {
+          const nextData = await getWhatsappData();
+          if (!isCurrent()) return;
+          if (hasWhatsappRefreshBlock()) {
+            defer();
+            return;
+          }
+          applyWhatsappSnapshot(nextData);
+          rerender();
+        }
+      });
     },
     hasUnsavedChanges: hasWhatsappUnsavedChanges,
     async canLeave() {
@@ -401,6 +572,9 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       currentHelpers = null;
       conversationDateFilter = null;
       logDateFilter = null;
+      liveMode = false;
+      settingsReadOnly = false;
+      whatsappLiveRefresh = null;
     }
   };
 }

@@ -1,3 +1,5 @@
+import { WHATSAPP_SNAPSHOT, WHATSAPP_SNAPSHOT_TABLES } from "./live-whatsapp-contract.js";
+
 export const LIVE_SNAPSHOT_INVALIDATED_EVENT = "tp:live-snapshot-invalidated";
 export const LIVE_SNAPSHOT_UPDATED_EVENT = "tp:live-snapshot-updated";
 
@@ -32,10 +34,7 @@ const SNAPSHOT_TABLES = Object.freeze({
   "shopify-links.json": ["shopify_variant_links", "products"],
   "suppliers.json": ["suppliers"],
   "expense.json": ["expense_reimbursements"],
-  "whatsapp.json": [
-    "wa_settings", "wa_whitelist", "wa_clients", "wa_heartbeat", "wa_messages", "wa_replies",
-    "wa_unresolved", "wa_daily_reports", "wa_logs"
-  ],
+  [WHATSAPP_SNAPSHOT]: WHATSAPP_SNAPSHOT_TABLES,
   "pending-deduction.json": ["invoices", "customers", "inventory_movements"]
 });
 

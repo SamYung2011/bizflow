@@ -97,15 +97,18 @@ target.dispatchEvent(event({ tables: ["invoices"] }));
 await settle();
 assert.equal(stateValue, 3, "disposed page scopes must ignore realtime events");
 
-const [ordersSource, northboundSource, tasksControllerSource, tableSource] = await Promise.all([
+const [ordersSource, northboundSource, tasksControllerSource, whatsappSource, tableSource] = await Promise.all([
   readFile(new URL("../root-site/bizflow/orders.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/bizflow/orders-northbound.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/team/tasks-domain-controller.js", import.meta.url), "utf8"),
+  readFile(new URL("../root-site/bizflow/whatsapp.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/live-snapshot-utils.js", import.meta.url), "utf8")
 ]);
 assert.match(ordersSource, /snapshots:\s*\["orders\.json"\]/);
 assert.match(northboundSource, /snapshots:\s*\["northbound\.json"\]/);
 assert.match(tasksControllerSource, /snapshots:\s*\["tasks\.json"\]/);
+assert.match(whatsappSource, /snapshots:\s*\[WHATSAPP_SNAPSHOT\]/);
+assert.match(whatsappSource, /tables:\s*WHATSAPP_REALTIME_TABLES/);
 assert.match(tableSource, /detail:\s*\{\s*tables:\s*refreshedTables\s*\}/);
 
 console.log("Live snapshot page refresh contracts: PASS (match, rerender, edit deferral, disposal)");

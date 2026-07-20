@@ -4,6 +4,7 @@ import {
   createLiveRealtimeManager,
   visibleRealtimeTables
 } from "../root-site/data/live-realtime.js";
+import { WHATSAPP_REALTIME_TABLES } from "../root-site/data/live-whatsapp-contract.js";
 
 function scheduler() {
   let nextId = 1;
@@ -78,7 +79,8 @@ assert.deepEqual(visibleRealtimeTables({ ...teamUser, bizflowMainAccess: true })
   "employee_task_feedbacks",
   "invoices",
   "northbound_records",
-  "northbound_statuses"
+  "northbound_statuses",
+  ...WHATSAPP_REALTIME_TABLES
 ]);
 assert.deepEqual(visibleRealtimeTables(null), []);
 
