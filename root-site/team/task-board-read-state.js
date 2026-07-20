@@ -13,6 +13,19 @@ function stableRows(rows, project) {
     .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
 }
 
+function stableAttachmentUrl(value) {
+  const raw = asText(value).trim();
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw, "https://task-attachment.invalid");
+    return parsed.origin === "https://task-attachment.invalid"
+      ? parsed.pathname
+      : `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return raw.split(/[?#]/, 1)[0];
+  }
+}
+
 function taskFingerprintValue(task, ancestors = new Set()) {
   const id = asText(task?.id);
   if (!id || ancestors.has(id)) return [id, "cycle"];
@@ -27,34 +40,31 @@ function taskFingerprintValue(task, ancestors = new Set()) {
     asText(task?.due),
     asText(task?.startDate),
     asText(task?.completedAt),
-    asText(task?.owner),
-    asText(task?.creator),
     asText(task?.creatorId),
     asText(task?.departmentId),
     asText(task?.visibility),
-    asText(task?.visibilityDepartment),
     task?.requiresReview === true,
     asText(task?.approvedAt),
-    asText(task?.approvedBy),
     stableRows(task?.assignees, (assignee) => [
       asText(assignee?.employeeId),
       asText(assignee?.completedAt),
       asText(assignee?.abandonedAt)
     ]),
     stableRows(task?.attachments, (attachment) => [
-      asText(attachment?.url),
+      stableAttachmentUrl(attachment?.url),
       asText(attachment?.name),
       asText(attachment?.type),
       Number(attachment?.size) || 0
     ]),
     stableRows(task?.feedback, (entry) => [
       asText(entry?.id),
-      asText(entry?.author),
+      asText(entry?.authorUserId),
       asText(entry?.timestamp ?? entry?.time),
       asText(entry?.message ?? entry?.body),
+      asText(entry?.parentId),
       stableRows(entry?.mentionedUserIds, (employeeId) => asText(employeeId)),
       stableRows(entry?.attachments, (attachment) => [
-        asText(attachment?.url),
+        stableAttachmentUrl(attachment?.url),
         asText(attachment?.name),
         asText(attachment?.type),
         Number(attachment?.size) || 0
@@ -91,13 +101,16 @@ function readBaseline(storage, scopeKey) {
   if (!scope || typeof scope !== "object" || Array.isArray(scope)) return null;
   const signatures = scope.signatures;
   if (!signatures || typeof signatures !== "object" || Array.isArray(signatures)) return null;
-  return Object.fromEntries(Object.entries(signatures).filter(([id, signature]) => id && typeof signature === "string"));
+  return {
+    complete: scope.complete === true,
+    signatures: Object.fromEntries(Object.entries(signatures).filter(([id, signature]) => id && typeof signature === "string"))
+  };
 }
 
 function writeBaseline(storage, scopeKey, signatures) {
   if (!storage) return;
   const root = readStoredRoot(storage);
-  root.scopes[scopeKey] = { signatures: { ...signatures } };
+  root.scopes[scopeKey] = { complete: true, signatures: { ...signatures } };
   try {
     storage.setItem(TASK_BOARD_READ_STATE_STORAGE_KEY, JSON.stringify(root));
   } catch {
@@ -136,7 +149,9 @@ export function createTaskBoardReadTracker({
   cancel = defaultCancel,
   onUnreadChange = () => {}
 }) {
-  let baseline = readBaseline(storage, scopeKey);
+  const storedBaseline = readBaseline(storage, scopeKey);
+  let baseline = storedBaseline?.signatures ?? null;
+  let baselineComplete = storedBaseline?.complete === true;
   let currentSignatures = {};
   let unreadIds = new Set();
   let generation = 0;
@@ -172,8 +187,9 @@ export function createTaskBoardReadTracker({
       }
 
       currentSignatures = nextSignatures;
-      if (baseline === null) {
+      if (baseline === null || !baselineComplete) {
         baseline = { ...currentSignatures };
+        baselineComplete = true;
         unreadIds = new Set();
         writeBaseline(storage, scopeKey, baseline);
         emit();
@@ -217,4 +233,62 @@ export function createTaskBoardReadTracker({
   }
 
   return Object.freeze({ refresh, markSeen, dispose });
+}
+
+export function createTaskBoardColumnReadObserver({
+  tracker,
+  documentRef = typeof document === "undefined" ? null : document,
+  Observer = typeof IntersectionObserver === "undefined" ? null : IntersectionObserver,
+  schedule = (callback, delay) => setTimeout(callback, delay),
+  cancel = (timer) => clearTimeout(timer),
+  settleMs = 500,
+  visibilityThreshold = 0.75
+}) {
+  let observer = null;
+  const timers = new Map();
+
+  function clear() {
+    observer?.disconnect();
+    observer = null;
+    timers.forEach((timer) => cancel(timer));
+    timers.clear();
+  }
+
+  function markColumnSeen(header) {
+    if (!header?.isConnected || documentRef?.visibilityState === "hidden") return false;
+    const taskIds = [...(header.closest?.("[data-task-column]")?.querySelectorAll?.("[data-task-card]") ?? [])]
+      .map((card) => card.getAttribute?.("data-task-card"))
+      .filter(Boolean);
+    return tracker.markSeen(taskIds);
+  }
+
+  function observe() {
+    clear();
+    if (!documentRef || !tracker) return;
+    const headers = [...documentRef.querySelectorAll("[data-task-column-read]")]
+      .filter((header) => header.closest?.("[data-task-column]")?.querySelector?.("[data-task-column-unread]"));
+    if (!headers.length) return;
+    if (typeof Observer !== "function") {
+      headers.forEach(markColumnSeen);
+      return;
+    }
+    observer = new Observer((entries) => {
+      entries.forEach((entry) => {
+        const header = entry.target;
+        const existing = timers.get(header);
+        if (existing !== undefined) cancel(existing);
+        timers.delete(header);
+        if (!entry.isIntersecting || entry.intersectionRatio < visibilityThreshold ||
+          documentRef.visibilityState === "hidden") return;
+        const timer = schedule(() => {
+          timers.delete(header);
+          markColumnSeen(header);
+        }, settleMs);
+        timers.set(header, timer);
+      });
+    }, { threshold: [0, visibilityThreshold] });
+    headers.forEach((header) => observer.observe(header));
+  }
+
+  return Object.freeze({ observe, clear, dispose: clear });
 }

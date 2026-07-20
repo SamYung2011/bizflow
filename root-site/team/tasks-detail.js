@@ -1,5 +1,5 @@
 import { taskT } from "./tasks-i18n.js";
-import { canDeleteTaskForUser, isWaitingApproval, taskAssignee } from "./tasks-model.js";
+import { canDeleteTaskForUser, isWaitingApproval, taskAssignee, taskSubtaskProgress } from "./tasks-model.js";
 
 function initials(name) {
   return String(name || "?").trim().slice(0, 1).toUpperCase();
@@ -70,6 +70,7 @@ function renderSubtasks(task, state, helpers) {
   const { escapeHtml, lang } = helpers;
   const tt = (key) => taskT(lang, key);
   const members = state.members.filter((member) => member.dept !== "all");
+  const progress = taskSubtaskProgress(task);
   const rows = (task.subtasks ?? []).map((subtask) => {
     const assigneeNames = (subtask.assignees ?? []).map((assignee) => assignee.name).join(", ") || "—";
     const aggregateCompleted = subtask.done === true || subtask.status === "completed";
@@ -85,7 +86,7 @@ function renderSubtasks(task, state, helpers) {
       <button type="button" data-task-subtask-delete="${escapeHtml(subtask.id)}" aria-label="${escapeHtml(tt("tasks.detail.deleteSubtask"))}" title="${escapeHtml(tt("tasks.detail.deleteSubtask"))}"${state.liveReadOnly ? " disabled" : ""}>×</button>
     </div>`;
   }).join("");
-  return `<section class="task-detail__subtasks"><h3>${escapeHtml(tt("tasks.detail.subtasks"))}<span>${task.subtasks?.length ?? 0}</span></h3>
+  return `<section class="task-detail__subtasks"><h3>${escapeHtml(tt("tasks.detail.subtasks"))}<span>${progress.done}/${progress.total}</span></h3>
     <div>${rows}</div>
     <form data-task-subtask-form data-parent-task-id="${escapeHtml(task.id)}">
       <input name="title" required placeholder="${escapeHtml(tt("tasks.detail.subtaskTitle"))}" aria-label="${escapeHtml(tt("tasks.detail.subtaskTitle"))}">

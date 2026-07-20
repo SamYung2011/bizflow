@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { createTaskBoardReadTracker, taskBoardFingerprint, TASK_BOARD_READ_STATE_STORAGE_KEY } from "../root-site/team/task-board-read-state.js";
+import { createTaskBoardColumnReadObserver, createTaskBoardReadTracker, taskBoardFingerprint, TASK_BOARD_READ_STATE_STORAGE_KEY } from "../root-site/team/task-board-read-state.js";
 import { renderTaskBoardGrid } from "../root-site/team/tasks-board.js";
 import { renderTaskDetail } from "../root-site/team/tasks-detail.js";
 import { taskDictionaries } from "../root-site/team/tasks-i18n.js";
@@ -82,6 +82,27 @@ assert.notEqual(taskBoardFingerprint(fingerprintBase), taskBoardFingerprint({
   ...fingerprintBase,
   subtasks: [makeTask("child", { parentId: "one", status: "completed", done: true })]
 }), "subtask progress must change its top-level task fingerprint");
+const volatileTask = makeTask("volatile", {
+  owner: "Helen、Sam",
+  creator: "Helen",
+  attachments: [{
+    url: "https://project.supabase.co/storage/v1/object/sign/task-attachments/a.png?token=first&expires=1",
+    name: "a.png",
+    type: "image/png",
+    size: 12
+  }],
+  assignees: [
+    { employeeId: "employee-helen", name: "Helen", completedAt: null, abandonedAt: null },
+    { employeeId: "employee-sam", name: "Sam", completedAt: null, abandonedAt: null }
+  ]
+});
+assert.equal(taskBoardFingerprint(volatileTask), taskBoardFingerprint({
+  ...volatileTask,
+  owner: "Sam、Helen",
+  creator: "Helen renamed",
+  attachments: [{ ...volatileTask.attachments[0], url: "https://project.supabase.co/storage/v1/object/sign/task-attachments/a.png?token=second&expires=2" }],
+  assignees: [...volatileTask.assignees].reverse()
+}), "derived assignee order and rotating signed-URL query params must not create false unread");
 
 const storage = memoryStorage();
 const queue = idleQueue();
@@ -112,7 +133,78 @@ queue.runAll();
 assert.deepEqual([...unreadIds].sort(), ["task-1", "task-2"]);
 assert.equal(tracker.markSeen(["task-1"]), true);
 assert.deepEqual([...unreadIds], ["task-2"], "seeing one rendered column/task must not clear hidden changes");
+
+let intersectionCallback = null;
+let settledCallback = null;
+let settledDelay = null;
+const cards = [{ getAttribute: () => "task-2" }];
+const column = {
+  querySelector: (selector) => selector === "[data-task-column-unread]" ? {} : null,
+  querySelectorAll: (selector) => selector === "[data-task-card]" ? cards : []
+};
+const header = { isConnected: true, closest: () => column };
+class TestIntersectionObserver {
+  constructor(callback) { intersectionCallback = callback; }
+  observe() {}
+  disconnect() {}
+}
+const visibleDocument = { visibilityState: "visible", querySelectorAll: () => [header] };
+const columnObserver = createTaskBoardColumnReadObserver({
+  tracker,
+  documentRef: visibleDocument,
+  Observer: TestIntersectionObserver,
+  schedule(callback, delay) {
+    settledCallback = callback;
+    settledDelay = delay;
+    return 1;
+  },
+  cancel() {}
+});
+columnObserver.observe();
+intersectionCallback([{ target: header, isIntersecting: true, intersectionRatio: 0.8 }]);
+assert.equal(settledDelay, 500);
+assert.deepEqual([...unreadIds], ["task-2"], "intersection alone must wait for stable visibility");
+settledCallback();
+assert.deepEqual([...unreadIds], [], "visible + intersecting column must persist its rendered task signatures as read");
+columnObserver.dispose();
+
+const reloadQueue = idleQueue();
+let reloadUnread = new Set(["unexpected"]);
+const reloadTracker = createTaskBoardReadTracker({
+  scopeKey: "company:employee",
+  storage,
+  schedule: reloadQueue.schedule.bind(reloadQueue),
+  cancel: reloadQueue.cancel,
+  onUnreadChange: (next) => { reloadUnread = next; }
+});
+reloadTracker.refresh(changedTasks);
+reloadQueue.runAll();
+assert.deepEqual([...reloadUnread], [], "a reload must retain the visible-column clear");
+reloadTracker.dispose();
 tracker.dispose();
+
+const legacyStorage = memoryStorage();
+legacyStorage.setItem(TASK_BOARD_READ_STATE_STORAGE_KEY, JSON.stringify({
+  version: 1,
+  scopes: { legacy: { signatures: { "task-0": taskBoardFingerprint(initialTasks[0]) } } }
+}));
+const legacyQueue = idleQueue();
+let legacyUnread = new Set(["unexpected"]);
+const legacyTracker = createTaskBoardReadTracker({
+  scopeKey: "legacy",
+  storage: legacyStorage,
+  schedule: legacyQueue.schedule.bind(legacyQueue),
+  cancel: legacyQueue.cancel,
+  onUnreadChange: (next) => { legacyUnread = next; }
+});
+legacyTracker.refresh(initialTasks.slice(0, 2));
+legacyQueue.runAll();
+assert.deepEqual([...legacyUnread], [], "an incomplete/legacy baseline must absorb missing task fingerprints as first-seen");
+assert.equal(JSON.parse(legacyStorage.value(TASK_BOARD_READ_STATE_STORAGE_KEY)).scopes.legacy.complete, true);
+legacyTracker.refresh(initialTasks.slice(0, 3));
+legacyQueue.runAll();
+assert.deepEqual([...legacyUnread], ["task-2"], "a task missing from a completed baseline is a real new unread task");
+legacyTracker.dispose();
 
 const boardTasks = [makeTask("high-unread"), makeTask("high-read"), makeTask("medium-read", { priority: "medium" })];
 const boardHtml = renderTaskBoardGrid({
@@ -166,12 +258,42 @@ const assigneeDetail = renderTaskDetail({
 });
 assert.match(assigneeDetail, /data-task-subtask-toggle="subtask"(?![^>]* disabled)/,
   "the direct subtask assignee gets an enabled checkbox");
+assert.match(assigneeDetail, /<h3>子任務<span>0\/1<\/span><\/h3>/,
+  "detail subtask header must start at zero completed");
 const creatorDetail = renderTaskDetail({
   state: detailState({ id: "employee-creator", name: "Creator", isSuperAdmin: true, isAdminOfActive: true }), helpers
 });
 assert.match(creatorDetail, /data-task-subtask-toggle="subtask"[^>]* disabled/,
   "creator/admin powers must not allow proxy completion");
 assert.match(creatorDetail, /只有此子任務的直接負責人可以勾選/);
+parent.subtasks[0].done = true;
+parent.subtasks[0].status = "completed";
+parent.subtasks[0].assignees[0].completedAt = "2026/07/20 20:00";
+const completedDetail = renderTaskDetail({
+  state: detailState({ id: "employee-assignee", name: "Assignee" }), helpers
+});
+assert.match(completedDetail, /<h3>子任務<span>1\/1<\/span><\/h3>/,
+  "detail subtask header must show completed/total progress");
+const completedBoard = renderTaskBoardGrid({
+  state: {
+    tasks: [parent, ...parent.subtasks],
+    board: [
+      { key: "high", tasks: [parent] },
+      { key: "medium", tasks: [] },
+      { key: "low", tasks: [] }
+    ],
+    members: [],
+    onlyMine: false,
+    currentUser: { id: "employee-assignee", name: "Assignee" },
+    permissions: { canCreate: false, canEditOthers: false, canDeleteOthers: false },
+    liveReadOnly: true,
+    actionTaskId: null,
+    boardUnreadTaskIds: new Set()
+  },
+  filterState: { member: "all", status: "inProgress", priority: "all", view: "board" },
+  helpers
+});
+assert.match(completedBoard, /☑ 1\/1/, "board card must consume the same live subtask progress");
 
 const [shellSource, homeSource, tasksSource, controllerSource, writesSource] = await Promise.all([
   readFile(new URL("../root-site/shell/shell.js", import.meta.url), "utf8"),
@@ -193,8 +315,7 @@ assert.match(homeSource, /unread: \{ \.\.\.\(homeData\.unread \?\? \{\}\), \.\.\
   "the home card must render the same computed message unread value as the shell");
 
 assert.match(tasksSource, /createTaskBoardReadTracker/);
-assert.match(tasksSource, /entry\.intersectionRatio < 0\.75/);
-assert.match(tasksSource, /\}, 500\)/, "column visibility must be stable before clearing");
+assert.match(tasksSource, /createTaskBoardColumnReadObserver\(\{ tracker: readTracker \}\)/);
 assert.match(controllerSource, /if \(state\.liveTaskWrites\)[^]*?await toggleSubtaskCompletion\(subtask\)/);
 assert.match(writesSource, /export async function setLiveSubtaskCompletion\(\{ taskId, completed \}\)/);
 const subtaskWriteFlow = writesSource.slice(

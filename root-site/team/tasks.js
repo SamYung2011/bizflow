@@ -15,7 +15,7 @@ import { confirmInPage } from "../components/confirm-dialog.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { completeLiveTask, createLiveTask, createLiveTaskFeedback, deleteLiveTask, setLiveSubtaskCompletion, setLiveTaskParticipation, updateLiveTask } from "../data/live-task-writes.js";
 import { createDateRangePanel } from "../components/date-range-panel.js";
-import { createTaskBoardReadTracker } from "./task-board-read-state.js";
+import { createTaskBoardColumnReadObserver, createTaskBoardReadTracker } from "./task-board-read-state.js";
 
 let data = null;
 let currentUser = null;
@@ -30,8 +30,7 @@ let activeScope = null;
 let activeMountId = 0;
 let taskLiveRefresh = null;
 let taskBoardReadTracker = null;
-let taskBoardColumnObserver = null;
-const taskBoardColumnTimers = new Map();
+let taskBoardColumnReadObserver = null;
 const taskDueDatePanel = createDateRangePanel();
 
 function isCurrentTaskMount(mountId, scope = activeScope) {
@@ -242,46 +241,13 @@ function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, foc
 }
 
 function clearTaskBoardColumnObservers() {
-  taskBoardColumnObserver?.disconnect();
-  taskBoardColumnObserver = null;
-  taskBoardColumnTimers.forEach((timer) => clearTimeout(timer));
-  taskBoardColumnTimers.clear();
+  taskBoardColumnReadObserver?.clear();
 }
 
 function observeTaskBoardUnreadColumns() {
   clearTaskBoardColumnObservers();
   if (!state || !taskBoardReadTracker || state.detailOpen || state.mode !== "board" || filterState?.view !== "board") return;
-  const headers = [...document.querySelectorAll("[data-task-column-read]")]
-    .filter((header) => header.closest("[data-task-column]")?.querySelector("[data-task-column-unread]"));
-  if (!headers.length) return;
-
-  const markColumnSeen = (header) => {
-    if (!header.isConnected || document.visibilityState === "hidden") return;
-    const taskIds = [...(header.closest("[data-task-column]")?.querySelectorAll("[data-task-card]") ?? [])]
-      .map((card) => card.getAttribute("data-task-card"))
-      .filter(Boolean);
-    taskBoardReadTracker.markSeen(taskIds);
-  };
-
-  if (typeof IntersectionObserver !== "function") {
-    headers.forEach(markColumnSeen);
-    return;
-  }
-  taskBoardColumnObserver = new IntersectionObserver((entries) => {
-    entries.forEach((entry) => {
-      const header = entry.target;
-      const existing = taskBoardColumnTimers.get(header);
-      if (existing) clearTimeout(existing);
-      taskBoardColumnTimers.delete(header);
-      if (!entry.isIntersecting || entry.intersectionRatio < 0.75 || document.visibilityState === "hidden") return;
-      const timer = setTimeout(() => {
-        taskBoardColumnTimers.delete(header);
-        markColumnSeen(header);
-      }, 500);
-      taskBoardColumnTimers.set(header, timer);
-    });
-  }, { threshold: [0, 0.75] });
-  headers.forEach((header) => taskBoardColumnObserver.observe(header));
+  taskBoardColumnReadObserver?.observe();
 }
 
 const onTaskViewportChange = () => rerenderTaskPage({ focusActionMenu: Boolean(state.actionTaskId) });
@@ -1536,8 +1502,10 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
         }
       });
       taskBoardReadTracker = readTracker;
+      const columnReadObserver = createTaskBoardColumnReadObserver({ tracker: readTracker });
+      taskBoardColumnReadObserver = columnReadObserver;
       scope.onCleanup(() => readTracker.dispose());
-      scope.onCleanup(clearTaskBoardColumnObservers);
+      scope.onCleanup(() => columnReadObserver.dispose());
       scope.listen(document, "visibilitychange", observeTaskBoardUnreadColumns);
       taskBoardReadTracker.refresh(state.tasks);
     },
@@ -1574,6 +1542,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       taskLiveRefresh = null;
       taskBoardReadTracker = null;
       clearTaskBoardColumnObservers();
+      taskBoardColumnReadObserver = null;
       state = null;
       filterState = null;
     }
