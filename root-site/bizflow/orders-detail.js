@@ -8,6 +8,7 @@ import { createShippingFeePanel } from "../components/shipping-fee-panel.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import {
   getLiveOrderWriteOptions,
+  markLiveOrderPaid,
   updateLiveOrder,
   updateLiveOrderCustomer,
   updateLiveOrderShipping
@@ -26,6 +27,7 @@ const dict = {
     "orders.logistics": "物流單號",
     "orders.paid": "已付款",
     "orders.unpaid": "未付款",
+    "orders.markPaid": "標記為已付款",
     "orders.unshipped": "未發貨",
     "orders.source.framer": "Framer 表單",
     "orders.source.shopify": "Shopify",
@@ -79,6 +81,7 @@ const dict = {
     "orders.emptyValue": "—",
     "orders.salesperson.none": "（無）",
     "orders.write.saving": "正在保存…",
+    "orders.write.paying": "正在付款…",
     "orders.write.failed": "訂單保存失敗，請重試",
     "orders.write.saved": "訂單修改已保存",
     "orders.write.deviceFailed": "訂單修改已保存，但 IMEI 未能同步到顧客資料",
@@ -93,6 +96,16 @@ const dict = {
     "orders.customer.failed": "顧客資料保存失敗，請重試",
     "orders.customer.imeiConflict": "顧客資料已保存，但 IMEI 已屬於其他顧客",
     "orders.customer.deviceFailed": "顧客資料已保存，但 IMEI 未能保存",
+    "orders.payment.confirmTitle": "確認付款",
+    "orders.payment.confirm": "標記為已付款後會立即扣減庫存，確定繼續？",
+    "orders.payment.confirmAction": "確認付款",
+    "orders.payment.saved": "訂單已標記為已付款，庫存已扣減",
+    "orders.payment.deviceConflict": "訂單已付款，但部分 IMEI 已屬於其他顧客",
+    "orders.payment.failed": "付款失敗，訂單仍為未付款，請重試",
+    "orders.payment.inventoryConflict": "庫存剛被其他操作更改，付款未完成，請刷新後重試",
+    "orders.payment.concurrent": "付款狀態已由其他操作更新，請刷新查看最新結果",
+    "orders.payment.recoveryFailed": "付款失敗且自動還原未完成，請立即核對訂單與庫存",
+    "orders.payment.saveFirst": "請先保存訂單修改，再標記為已付款",
     "orders.field.name": "姓名",
     "orders.field.phone": "聯絡電話",
     "orders.field.email": "Email",
@@ -113,6 +126,7 @@ const dict = {
     "orders.logistics": "Tracking number",
     "orders.paid": "Paid",
     "orders.unpaid": "Unpaid",
+    "orders.markPaid": "Mark as paid",
     "orders.unshipped": "Unshipped",
     "orders.source.framer": "Framer form",
     "orders.source.shopify": "Shopify",
@@ -166,6 +180,7 @@ const dict = {
     "orders.emptyValue": "—",
     "orders.salesperson.none": "(None)",
     "orders.write.saving": "Saving…",
+    "orders.write.paying": "Processing payment…",
     "orders.write.failed": "Could not save the order. Try again.",
     "orders.write.saved": "Order changes saved",
     "orders.write.deviceFailed": "Order changes saved, but the IMEI could not be synced to the customer",
@@ -180,6 +195,16 @@ const dict = {
     "orders.customer.failed": "Could not save customer details. Try again.",
     "orders.customer.imeiConflict": "Customer details saved, but the IMEI belongs to another customer",
     "orders.customer.deviceFailed": "Customer details saved, but the IMEI could not be saved",
+    "orders.payment.confirmTitle": "Confirm payment",
+    "orders.payment.confirm": "Marking this order as paid will deduct inventory immediately. Continue?",
+    "orders.payment.confirmAction": "Confirm payment",
+    "orders.payment.saved": "Order marked as paid and inventory deducted",
+    "orders.payment.deviceConflict": "Order paid, but some IMEIs belong to another customer",
+    "orders.payment.failed": "Payment failed. The order remains unpaid. Try again.",
+    "orders.payment.inventoryConflict": "Inventory changed in another operation. Payment was not completed; refresh and try again.",
+    "orders.payment.concurrent": "The payment status changed in another operation. Refresh to see the latest result.",
+    "orders.payment.recoveryFailed": "Payment failed and automatic recovery was incomplete. Check the order and inventory now.",
+    "orders.payment.saveFirst": "Save the order changes before marking it as paid",
     "orders.field.name": "Name",
     "orders.field.phone": "Phone",
     "orders.field.email": "Email",
@@ -200,6 +225,7 @@ const dict = {
     "orders.logistics": "Numéro de suivi",
     "orders.paid": "Payé",
     "orders.unpaid": "Non payé",
+    "orders.markPaid": "Marquer payé",
     "orders.unshipped": "Non expédié",
     "orders.source.framer": "Formulaire Framer",
     "orders.source.shopify": "Shopify",
@@ -253,6 +279,7 @@ const dict = {
     "orders.emptyValue": "—",
     "orders.salesperson.none": "(Aucun)",
     "orders.write.saving": "Enregistrement…",
+    "orders.write.paying": "Paiement en cours…",
     "orders.write.failed": "Impossible d’enregistrer la commande. Réessayez.",
     "orders.write.saved": "Modifications enregistrées",
     "orders.write.deviceFailed": "Commande enregistrée, mais l’IMEI n’a pas pu être synchronisé avec le client",
@@ -267,6 +294,16 @@ const dict = {
     "orders.customer.failed": "Impossible d’enregistrer le client. Réessayez.",
     "orders.customer.imeiConflict": "Client enregistré, mais l’IMEI appartient à un autre client",
     "orders.customer.deviceFailed": "Client enregistré, mais l’IMEI n’a pas pu être enregistré",
+    "orders.payment.confirmTitle": "Confirmer le paiement",
+    "orders.payment.confirm": "Marquer cette commande comme payée déduira immédiatement le stock. Continuer ?",
+    "orders.payment.confirmAction": "Confirmer le paiement",
+    "orders.payment.saved": "Commande marquée payée et stock déduit",
+    "orders.payment.deviceConflict": "Commande payée, mais certains IMEI appartiennent à un autre client",
+    "orders.payment.failed": "Échec du paiement. La commande reste non payée. Réessayez.",
+    "orders.payment.inventoryConflict": "Le stock a été modifié par une autre opération. Paiement non effectué ; actualisez et réessayez.",
+    "orders.payment.concurrent": "Le statut du paiement a été modifié ailleurs. Actualisez pour voir le dernier résultat.",
+    "orders.payment.recoveryFailed": "Échec du paiement et restauration automatique incomplète. Vérifiez immédiatement la commande et le stock.",
+    "orders.payment.saveFirst": "Enregistrez les modifications avant de marquer la commande payée",
     "orders.field.name": "Nom",
     "orders.field.phone": "Téléphone",
     "orders.field.email": "Email",
@@ -448,10 +485,11 @@ function renderCheckControl(key, value, helpers) {
   </div>`;
 }
 
-function renderPaymentBox(helpers, subtotal, totalAmount) {
+function renderPaymentBox(helpers, subtotal, totalAmount, paid) {
   const { escapeHtml, icon, lang } = helpers;
   const shippingFee = Number(state.fees.shipping || 0);
   const totalText = moneyValue(totalAmount);
+  const paidText = paid ? totalText : "0";
   return `<div class="orders-payment-detail-box">
     <div class="orders-payment-line">
       <span>${escapeHtml(pageT(lang, "orders.subtotal"))}</span>
@@ -479,7 +517,7 @@ function renderPaymentBox(helpers, subtotal, totalAmount) {
     <div class="orders-payment-line orders-payment-line--paid">
       <span>${escapeHtml(pageT(lang, "orders.paidAmount"))}</span>
       <span></span>
-      <strong><span>HKD$</span><output data-detail-total>${escapeHtml(totalText)}</output></strong>
+      <strong><span>HKD$</span><output data-detail-paid-total>${escapeHtml(paidText)}</output></strong>
     </div>
   </div>`;
 }
@@ -689,16 +727,17 @@ function renderDetail(helpers) {
       <div class="orders-card-head">
         <span class="orders-chip ${paid ? "orders-chip--blue" : "orders-chip--yellow"}">${escapeHtml(pageT(lang, paid ? "orders.paid" : "orders.unpaid"))}</span>
       </div>
-      ${renderPaymentBox(helpers, subtotal, paymentTotal)}
+      ${renderPaymentBox(helpers, subtotal, paymentTotal, paid)}
       <div class="orders-card-actions orders-card-actions--end">
         <button type="button" class="orders-secondary" data-order-changes-cancel data-orders-write${state.busy ? ' disabled aria-disabled="true"' : writeAttributes}>${escapeHtml(pageT(lang, "orders.cancelChange"))}</button>
         <button type="button" class="orders-primary" data-order-changes-save data-orders-write${state.busy ? ' disabled aria-disabled="true"' : writeAttributes}>${escapeHtml(pageT(lang, state.busy === "order" ? "orders.write.saving" : "orders.saveChange"))}</button>
+        ${paid ? "" : `<button type="button" class="orders-dark" data-order-mark-paid data-orders-write${state.busy ? ' disabled aria-disabled="true"' : writeAttributes}>${escapeHtml(pageT(lang, state.busy === "payment" ? "orders.write.paying" : "orders.markPaid"))}</button>`}
       </div>
     </section>
 
     <section class="orders-print-grid">
       ${renderPrintCard("orders.invoice", "orders.invoiceSub", "orders.printInvoice", "invoice", false, helpers)}
-      ${renderPrintCard("orders.receipt", "orders.receiptSub", "orders.printReceipt", "receipt", false, helpers)}
+      ${renderPrintCard("orders.receipt", "orders.receiptSub", "orders.printReceipt", "receipt", !paid, helpers)}
     </section>
 
     ${renderSalespersonCard(helpers)}
@@ -742,6 +781,15 @@ function friendlyWriteError(error, fallbackKey) {
   if (message.includes("total must be greater")) return pageT(lang, "orders.validation.total");
   if (message.includes("Tracking number") || message.includes("tracking number") || message.includes("Invalid tracking")) {
     return pageT(lang, "orders.validation.tracking");
+  }
+  if (message.includes("Inventory changed while the order was being paid")) {
+    return pageT(lang, "orders.payment.inventoryConflict");
+  }
+  if (message.includes("payment status changed")) {
+    return pageT(lang, "orders.payment.concurrent");
+  }
+  if (message.includes("automatic recovery was incomplete")) {
+    return pageT(lang, "orders.payment.recoveryFailed");
   }
   return pageT(lang, fallbackKey);
 }
@@ -812,6 +860,9 @@ function refreshLiveTotals() {
   document.querySelectorAll("[data-detail-total]").forEach((node) => {
     node.textContent = moneyValue(paymentTotal);
   });
+  document.querySelectorAll("[data-detail-paid-total]").forEach((node) => {
+    node.textContent = detailData?.order.status === "completed" ? moneyValue(paymentTotal) : "0";
+  });
 }
 
 function resetOrderChanges() {
@@ -876,6 +927,46 @@ async function saveOrderChanges() {
     if (!isCurrentOrderDetailMount(mountId, scope)) return;
     console.error("[orders-detail] order write failed", error);
     setNotice(friendlyWriteError(error, "orders.write.failed"));
+  } finally {
+    if (!isCurrentOrderDetailMount(mountId, scope)) return;
+    state.busy = "";
+    rerender();
+  }
+}
+
+async function markOrderPaid() {
+  const mountId = activeMountId;
+  const scope = activeScope;
+  const lang = currentHelpers?.lang ?? "zh";
+  syncLiveFormInputs();
+  if (orderFinancialDraftChanged()) {
+    setNotice(pageT(lang, "orders.payment.saveFirst"));
+    rerender();
+    return;
+  }
+  const confirmed = await confirmInPage(pageT(lang, "orders.payment.confirm"), {
+    title: pageT(lang, "orders.payment.confirmTitle"),
+    confirmLabel: pageT(lang, "orders.payment.confirmAction")
+  });
+  if (!confirmed || !isCurrentOrderDetailMount(mountId, scope)) return;
+  state.busy = "payment";
+  setNotice("");
+  rerender();
+  try {
+    const result = await markLiveOrderPaid(detailData.order.id);
+    if (!isCurrentOrderDetailMount(mountId, scope)) return;
+    detailData.order.status = "completed";
+    detailData.detail.paymentTotal = Number(result.invoice.total) || 0;
+    writeOptions.invoice = result.invoice;
+    if (result.deviceConflicts.length) console.warn("[orders-detail] payment IMEI conflicts", result.deviceConflicts);
+    const noticeKey = result.deviceConflicts.length
+      ? "orders.payment.deviceConflict"
+      : "orders.payment.saved";
+    setNotice(pageT(lang, noticeKey), "success");
+  } catch (error) {
+    if (!isCurrentOrderDetailMount(mountId, scope)) return;
+    console.error("[orders-detail] payment write failed", error);
+    setNotice(friendlyWriteError(error, "orders.payment.failed"));
   } finally {
     if (!isCurrentOrderDetailMount(mountId, scope)) return;
     state.busy = "";
@@ -997,6 +1088,10 @@ async function onOrderDetailClick(event) {
         rerender();
       }
     });
+    return;
+  }
+  if (event.target.closest("[data-order-mark-paid]")) {
+    if (liveWritable && detailData?.order.status !== "completed" && !state.busy) await markOrderPaid();
     return;
   }
   if (event.target.closest("[data-order-changes-cancel]")) {
@@ -1145,6 +1240,13 @@ function sameRecord(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function orderFinancialDraftChanged() {
+  return !sameRecord(comparableItems(state.items), comparableItems(state.savedItems))
+    || !sameRecord(state.feesEnabled, state.savedFeesEnabled)
+    || !sameRecord(state.fees, state.savedFees)
+    || state.salespersonId !== state.savedSalespersonId;
+}
+
 function customerDraftChanged() {
   if (!state.customerModalOpen) return false;
   const baseline = {
@@ -1159,10 +1261,7 @@ function customerDraftChanged() {
 }
 
 function hasOrderDetailUnsavedChanges() {
-  return !sameRecord(comparableItems(state.items), comparableItems(state.savedItems))
-    || !sameRecord(state.feesEnabled, state.savedFeesEnabled)
-    || !sameRecord(state.fees, state.savedFees)
-    || state.salespersonId !== state.savedSalespersonId
+  return orderFinancialDraftChanged()
     || state.shippingMode !== state.savedShippingMode
     || state.trackingNumber !== state.savedTrackingNumber
     || customerDraftChanged();

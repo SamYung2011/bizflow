@@ -37,7 +37,7 @@ const dict = {
     "orders.source.framer": "Framer 表單",
     "orders.source.shopify": "Shopify",
     "orders.status.completed": "已完成",
-    "orders.status.inProgress": "進行中",
+    "orders.status.unpaid": "未付款",
     "orders.status.cancelled": "已取消",
     "orders.print": "列印",
     "orders.prevPage": "上一頁",
@@ -63,7 +63,7 @@ const dict = {
     "orders.source.framer": "Framer form",
     "orders.source.shopify": "Shopify",
     "orders.status.completed": "Completed",
-    "orders.status.inProgress": "In progress",
+    "orders.status.unpaid": "Unpaid",
     "orders.status.cancelled": "Cancelled",
     "orders.print": "Print",
     "orders.prevPage": "Previous page",
@@ -89,7 +89,7 @@ const dict = {
     "orders.source.framer": "Formulaire Framer",
     "orders.source.shopify": "Shopify",
     "orders.status.completed": "Terminée",
-    "orders.status.inProgress": "En cours",
+    "orders.status.unpaid": "Non payée",
     "orders.status.cancelled": "Annulée",
     "orders.print": "Imprimer",
     "orders.prevPage": "Page précédente",
@@ -163,7 +163,7 @@ function statusMark(status) {
 
 const STATUS_KEY = {
   "completed": "orders.status.completed",
-  "in-progress": "orders.status.inProgress",
+  "in-progress": "orders.status.unpaid",
   "cancelled": "orders.status.cancelled"
 };
 const STATUS_CLASS = {
@@ -224,6 +224,7 @@ function renderOrderCard(order, helpers) {
       </div>
     </div>
     <div class="order-card__tail">
+      ${order.status === "in-progress" ? `<span class="order-chip order-chip--unpaid" title="${e(statusLabel)}">${e(statusLabel)}</span>` : ""}
       <span class="order-chip" title="${e(order.date)}">${e(order.date)}</span>
       <span class="order-chip order-chip--amount" title="${e(order.amount)}">${e(order.amount)}</span>
       <button type="button" class="order-print${cancelled ? " order-print--disabled" : ""}" data-order-print aria-label="${e(pageT(lang, "orders.print"))}"${cancelled ? " disabled" : ""}>

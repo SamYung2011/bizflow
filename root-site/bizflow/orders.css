@@ -379,6 +379,11 @@ button.order-card__phone:focus-visible {
   color: var(--blue); /* 金额 chip 文字 Figma #0468EA */
 }
 
+.order-chip--unpaid {
+  color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 16%, var(--white));
+}
+
 .order-print {
   display: flex;
   width: 40px;
@@ -620,6 +625,10 @@ button.order-card__phone:focus-visible {
   .order-card__channel,
   .order-chip {
     display: none;
+  }
+
+  .order-chip--unpaid {
+    display: flex;
   }
 
   .order-card__product {
@@ -1039,6 +1048,24 @@ button.order-card__phone:focus-visible {
   border: 1px solid var(--orders-border);
   border-radius: var(--radius-10);
   background: var(--white);
+}
+
+.orders-payment-status-row {
+  display: flex;
+  min-width: 0;
+  min-height: 45px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-20);
+  color: var(--3a);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-tight);
+}
+
+.orders-payment-status-segment {
+  width: min(280px, 60%);
+  flex: none;
 }
 
 .orders-payment-line,
@@ -2092,6 +2119,17 @@ button.order-card__phone:focus-visible {
   .orders-workspace[data-orders-create-page] .orders-payment-check-row {
     grid-template-columns: minmax(0, 1fr) minmax(var(--orders-create-mobile-select-column), auto) var(--orders-create-mobile-price-column);
     gap: var(--space-10);
+  }
+
+  .orders-workspace[data-orders-create-page] .orders-payment-status-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: var(--space-10);
+    padding: var(--space-10) 0;
+  }
+
+  .orders-workspace[data-orders-create-page] .orders-payment-status-segment {
+    width: 100%;
   }
 
   .orders-workspace[data-orders-create-page] .orders-payment-check-row .orders-money-input {

@@ -7,7 +7,7 @@ import { renderNewCustomerFields } from "../components/new-customer-fields.js";
 import { createShippingFeePanel } from "../components/shipping-fee-panel.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import {
-  createAndPayLiveOrder,
+  createLiveOrder,
   createLiveOrderCustomer,
   getLiveOrderWriteOptions
 } from "../data/live-orders-writes.js";
@@ -38,7 +38,11 @@ const dict = {
     "orders.shippingFee.confirm": "確定",
     "orders.shippingFee.close": "關閉運費面板",
     "orders.total": "總計",
-    "orders.markPaid": "標記為已付款",
+    "orders.paymentStatus": "付款狀態",
+    "orders.paid": "已付款",
+    "orders.unpaid": "未付款",
+    "orders.createPaid": "建立並標記已付款",
+    "orders.createUnpaid": "建立未付款訂單",
     "orders.deposit": "押金",
     "orders.discount": "優惠折扣",
     "orders.service": "手續費",
@@ -93,7 +97,7 @@ const dict = {
     "orders.customer.failed": "新增顧客失敗，請重試",
     "orders.customer.imeiConflict": "顧客已新增，但 IMEI 已屬於其他顧客",
     "orders.customer.deviceFailed": "顧客已新增，但 IMEI 未能保存",
-    "orders.tracking.ready": "物流資料會在付款時一併保存",
+    "orders.tracking.ready": "物流資料會隨訂單一併保存",
     "orders.leaveUnsaved": "訂單草稿尚未保存，確定離開？"
   },
   en: {
@@ -121,7 +125,11 @@ const dict = {
     "orders.shippingFee.confirm": "Confirm",
     "orders.shippingFee.close": "Close shipping fee panel",
     "orders.total": "Total",
-    "orders.markPaid": "Mark as paid",
+    "orders.paymentStatus": "Payment status",
+    "orders.paid": "Paid",
+    "orders.unpaid": "Unpaid",
+    "orders.createPaid": "Create and mark paid",
+    "orders.createUnpaid": "Create unpaid order",
     "orders.deposit": "Deposit",
     "orders.discount": "Discount",
     "orders.service": "Service fee",
@@ -176,7 +184,7 @@ const dict = {
     "orders.customer.failed": "Could not add the customer. Try again.",
     "orders.customer.imeiConflict": "Customer added, but the IMEI belongs to another customer",
     "orders.customer.deviceFailed": "Customer added, but the IMEI could not be saved",
-    "orders.tracking.ready": "Shipping details will be saved with the payment",
+    "orders.tracking.ready": "Shipping details will be saved with the order",
     "orders.leaveUnsaved": "This order draft has not been saved. Leave this page?"
   },
   fr: {
@@ -204,7 +212,11 @@ const dict = {
     "orders.shippingFee.confirm": "Confirmer",
     "orders.shippingFee.close": "Fermer les frais de livraison",
     "orders.total": "Total",
-    "orders.markPaid": "Marquer payé",
+    "orders.paymentStatus": "Statut du paiement",
+    "orders.paid": "Payé",
+    "orders.unpaid": "Non payé",
+    "orders.createPaid": "Créer et marquer payée",
+    "orders.createUnpaid": "Créer une commande non payée",
     "orders.deposit": "Dépôt",
     "orders.discount": "Remise",
     "orders.service": "Frais",
@@ -259,7 +271,7 @@ const dict = {
     "orders.customer.failed": "Impossible d’ajouter le client. Réessayez.",
     "orders.customer.imeiConflict": "Client ajouté, mais l’IMEI appartient à un autre client",
     "orders.customer.deviceFailed": "Client ajouté, mais l’IMEI n’a pas pu être enregistré",
-    "orders.tracking.ready": "Les données d’expédition seront enregistrées avec le paiement",
+    "orders.tracking.ready": "Les données d’expédition seront enregistrées avec la commande",
     "orders.leaveUnsaved": "Ce brouillon de commande n’est pas enregistré. Quitter cette page ?"
   }
 };
@@ -301,6 +313,7 @@ function initialState() {
     customerDraft: {},
     shippingMode: "delivery",
     trackingNumber: "",
+    paymentStatus: "paid",
     salespersonId: "",
     feesEnabled: { deposit: true, discount: false, service: false },
     fees: { shipping: 0, deposit: 0, discount: 0, service: 0 },
@@ -466,7 +479,15 @@ function renderCreatePaymentBox(helpers, subtotalAmount, totalAmount) {
   const { escapeHtml, icon, lang } = helpers;
   const subtotalText = formatMoney(subtotalAmount).replace("HKD$ ", "");
   const totalText = formatMoney(totalAmount).replace("HKD$ ", "");
+  const paidText = state.paymentStatus === "paid" ? totalText : "0.00";
   return `<div class="orders-payment-detail-box">
+    <div class="orders-payment-status-row">
+      <span>${escapeHtml(pageT(lang, "orders.paymentStatus"))}</span>
+      <div class="orders-logistics-segment orders-payment-status-segment" role="group" aria-label="${escapeHtml(pageT(lang, "orders.paymentStatus"))}">
+        ${["paid", "unpaid"].map((status) => `<button type="button" class="${state.paymentStatus === status ? "is-active" : ""}" data-payment-status="${status}" data-orders-write aria-pressed="${state.paymentStatus === status}"${writeAttributes}>${escapeHtml(pageT(lang, `orders.${status}`))}</button>`).join("")}
+      </div>
+    </div>
+    <div class="orders-payment-divider"></div>
     <div class="orders-payment-line">
       <span>${escapeHtml(pageT(lang, "orders.subtotal"))}</span>
       <span></span>
@@ -493,7 +514,7 @@ function renderCreatePaymentBox(helpers, subtotalAmount, totalAmount) {
     <div class="orders-payment-line orders-payment-line--paid">
       <span>${escapeHtml(pageT(lang, "orders.paidAmount"))}</span>
       <span></span>
-      <strong><span>HKD$</span><output data-create-total>${escapeHtml(totalText)}</output></strong>
+      <strong><span>HKD$</span><output data-create-paid-total>${escapeHtml(paidText)}</output></strong>
     </div>
   </div>`;
 }
@@ -581,7 +602,7 @@ function renderCreate(helpers) {
     <section class="orders-detail-card">
       ${renderCreatePaymentBox(helpers, subtotalAmount, sum)}
       <div class="orders-card-actions orders-card-actions--end">
-        <button type="button" class="orders-primary" data-order-submit data-orders-write${state.busy ? " disabled aria-disabled=\"true\"" : writeAttributes}>${escapeHtml(pageT(lang, state.busy ? "orders.write.saving" : "orders.markPaid"))}</button>
+        <button type="button" class="orders-primary" data-order-submit data-orders-write${state.busy ? " disabled aria-disabled=\"true\"" : writeAttributes}>${escapeHtml(pageT(lang, state.busy ? "orders.write.saving" : state.paymentStatus === "paid" ? "orders.createPaid" : "orders.createUnpaid"))}</button>
       </div>
     </section>
 
@@ -723,6 +744,9 @@ function refreshLiveTotals() {
     node.textContent = Number(state.fees.shipping || 0).toFixed(2);
   });
   document.querySelectorAll("[data-create-total]").forEach((node) => { node.textContent = totalText; });
+  document.querySelectorAll("[data-create-paid-total]").forEach((node) => {
+    node.textContent = state.paymentStatus === "paid" ? totalText : "0.00";
+  });
 }
 
 async function submitLiveCustomer() {
@@ -791,7 +815,7 @@ async function submitLiveOrder() {
   setNotice("");
   rerender();
   try {
-    const result = await createAndPayLiveOrder({
+    const result = await createLiveOrder({
       customerId: state.selectedCustomerId,
       salespersonId: state.salespersonId,
       items: state.lineItems.map((item) => ({ ...item })),
@@ -803,7 +827,8 @@ async function submitLiveOrder() {
       },
       shipping: currentUser?.canShip === true
         ? { mode: state.shippingMode, trackingNumber: state.trackingNumber }
-        : null
+        : null,
+      paymentStatus: state.paymentStatus === "paid" ? "Paid" : "Unpaid"
     });
     if (!isCurrentOrderCreateMount(mountId, scope)) return;
     if (result.deviceConflicts.length) console.warn("[orders-create] item IMEI conflicts", result.deviceConflicts);
@@ -821,6 +846,12 @@ async function submitLiveOrder() {
 async function onOrderCreateClick(event) {
   if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
   if (state.busy && event.target.closest("[data-orders-write]")) return;
+  const paymentStatus = event.target.closest("[data-payment-status]");
+  if (paymentStatus) {
+    state.paymentStatus = paymentStatus.getAttribute("data-payment-status") === "unpaid" ? "unpaid" : "paid";
+    rerender();
+    return;
+  }
   const shippingFeeTrigger = event.target.closest("[data-shipping-fee-trigger]");
   if (shippingFeeTrigger) {
     shippingFeePanel.open({
@@ -1022,6 +1053,7 @@ function hasOrderCreateUnsavedChanges() {
   if (submissionComplete) return false;
   return state.lineItems.length > 0
     || Boolean(state.selectedCustomerId || state.trackingNumber || state.salespersonId)
+    || state.paymentStatus !== "paid"
     || state.shippingMode !== "delivery"
     || Object.values(state.fees).some((value) => Number(value) !== 0)
     || state.feesEnabled.deposit !== true

@@ -267,6 +267,65 @@ function shippingPayload(shipping, canShip) {
   };
 }
 
+async function buildOrderPaymentPlan(client, invoiceItems) {
+  const productItems = invoiceItems.filter((item) => !EXTRA_ITEM_NAMES.has(item.name));
+  if (!productItems.length) throw new Error("Order requires at least one product");
+  if (productItems.some((item) => !item.product_id)) {
+    throw new Error("Order product selection is incomplete");
+  }
+  const productIds = [...new Set(productItems.map((item) => String(item.product_id)))];
+  const [productsResult, warehousesResult] = await Promise.all([
+    client.from("products").select("*").in("id", productIds),
+    client.from("warehouses").select("*").order("sort_order", { ascending: true })
+  ]);
+  throwIfError(productsResult.error);
+  throwIfError(warehousesResult.error);
+  const products = productsResult.data ?? [];
+  const productById = new Map(products.map((product) => [String(product.id), product]));
+  if (productById.size !== productIds.length) throw new Error("One or more selected products no longer exist");
+  const defaultWarehouseId = warehousesResult.data?.[0]?.id ?? null;
+  if (!defaultWarehouseId) throw new Error("Order inventory warehouse is unavailable");
+
+  const deductionsByKey = new Map();
+  for (const item of productItems) {
+    const product = productById.get(String(item.product_id));
+    if (product?.is_virtual === true || product?.category === "_archived") continue;
+    const warehouseId = item.warehouse_id || defaultWarehouseId;
+    item.warehouse_id = warehouseId;
+    if (item.warranty_months == null && product?.warranty_months != null) {
+      item.warranty_months = Number(product.warranty_months);
+    }
+    const key = `${product.id}|${warehouseId}`;
+    const row = deductionsByKey.get(key) ?? { product, warehouseId, qty: 0, itemRows: [] };
+    row.qty += positiveNumber(item.qty);
+    row.itemRows.push({ name: item.name, qty: positiveNumber(item.qty) });
+    deductionsByKey.set(key, row);
+  }
+  return { products, deductions: [...deductionsByKey.values()] };
+}
+
+async function insertUnpaidLiveOrder(context, { customerId, salespersonId, items, fees, shipping }) {
+  const { client, currentUser } = context;
+  if (!customerId) throw new Error("Order customer is required");
+  const invoiceItems = finalInvoiceItems(items, fees);
+  const total = invoiceTotal(invoiceItems);
+  if (total <= 0) throw new Error("Order total must be greater than zero");
+  const paymentPlan = await buildOrderPaymentPlan(client, invoiceItems);
+  const invoice = await insertInvoiceWithRetry(client, (invoiceNumber) => ({
+    invoice_number: invoiceNumber,
+    customer_id: customerId,
+    salesperson_id: salespersonId || null,
+    date: hongKongDate(),
+    items: invoiceItems,
+    total,
+    status: "Unpaid",
+    notes: null,
+    legacy_skip_deduct: false,
+    ...shippingPayload(shipping, currentUser.canShip === true)
+  }));
+  return { invoice, paymentPlan };
+}
+
 async function restoreAfterPaidFailure(client, recovery) {
   const failures = [];
   const attempt = async (operation) => {
@@ -277,7 +336,7 @@ async function restoreAfterPaidFailure(client, recovery) {
       failures.push(error);
     }
   };
-  if (recovery.invoiceId) {
+  if (recovery.claimed && recovery.invoiceId) {
     await attempt(() => client.from("stock_deduction_audit").delete().eq("invoice_id", recovery.invoiceId));
     await attempt(() => client.from("inventory_movements").delete().eq("invoice_id", recovery.invoiceId));
   }
@@ -312,69 +371,62 @@ async function restoreAfterPaidFailure(client, recovery) {
   for (const item of [...recovery.inventory].reverse()) {
     await attempt(() => client.from("inventory").update(item.before).eq("id", item.id));
   }
-  if (recovery.invoiceId) await attempt(() => client.from("invoices").delete().eq("id", recovery.invoiceId));
+  if (recovery.deleteInvoiceOnFailure && recovery.invoiceId) {
+    await attempt(() => client.from("invoices").delete().eq("id", recovery.invoiceId));
+  } else if (recovery.claimed && recovery.invoiceId) {
+    await attempt(async () => {
+      const result = await client.from("invoices")
+        .update({
+          status: recovery.invoiceStatus,
+          commission_amount: recovery.commissionAmount
+        })
+        .eq("id", recovery.invoiceId)
+        .eq("status", "Paid")
+        .select("id")
+        .maybeSingle();
+      throwIfError(result.error);
+      if (!result.data) throw new Error("Order payment status changed before recovery completed");
+      return result;
+    });
+  }
   return failures;
 }
 
-export async function createAndPayLiveOrder({ customerId, salespersonId, items, fees, shipping }) {
-  const { client, currentUser } = await writeContext();
-  if (!customerId) throw new Error("Order customer is required");
-  const invoiceItems = finalInvoiceItems(items, fees);
-  const productItems = invoiceItems.filter((item) => !EXTRA_ITEM_NAMES.has(item.name));
-  if (!productItems.length) throw new Error("Order requires at least one product");
-  const total = invoiceTotal(invoiceItems);
-  if (total <= 0) throw new Error("Order total must be greater than zero");
-
-  if (productItems.some((item) => !item.product_id)) {
-    throw new Error("Order product selection is incomplete");
+async function payLiveOrderRecord(context, invoice, { deleteInvoiceOnFailure = false, paymentPlan = null } = {}) {
+  const { client, currentUser } = context;
+  if (String(invoice?.status || "").trim().toLowerCase() === "paid") {
+    return { invoice, deviceConflicts: [], alreadyPaid: true };
   }
-  const productIds = [...new Set(productItems.map((item) => String(item.product_id)))];
-  const [productsResult, warehousesResult] = await Promise.all([
-    client.from("products").select("*").in("id", productIds),
-    client.from("warehouses").select("*").order("sort_order", { ascending: true })
-  ]);
-  throwIfError(productsResult.error);
-  throwIfError(warehousesResult.error);
-  const products = productsResult.data ?? [];
-  const productById = new Map(products.map((product) => [String(product.id), product]));
-  if (productById.size !== productIds.length) throw new Error("One or more selected products no longer exist");
-  const defaultWarehouseId = warehousesResult.data?.[0]?.id ?? null;
-  if (!defaultWarehouseId) throw new Error("Order inventory warehouse is unavailable");
-
-  const deductionsByKey = new Map();
-  for (const item of productItems) {
-    const product = productById.get(String(item.product_id));
-    if (product?.is_virtual === true || product?.category === "_archived") continue;
-    const warehouseId = item.warehouse_id || defaultWarehouseId;
-    item.warehouse_id = warehouseId;
-    if (item.warranty_months == null && product?.warranty_months != null) {
-      item.warranty_months = Number(product.warranty_months);
-    }
-    const key = `${product.id}|${warehouseId}`;
-    const row = deductionsByKey.get(key) ?? { product, warehouseId, qty: 0, itemRows: [] };
-    row.qty += positiveNumber(item.qty);
-    row.itemRows.push({ name: item.name, qty: positiveNumber(item.qty) });
-    deductionsByKey.set(key, row);
-  }
-
-  const recovery = { invoiceId: "", stocks: [], inventory: [] };
-  let invoice = null;
+  const recovery = {
+    invoiceId: invoice?.id || "",
+    invoiceStatus: invoice?.status || "Unpaid",
+    commissionAmount: invoice?.commission_amount ?? null,
+    deleteInvoiceOnFailure,
+    claimed: false,
+    stocks: [],
+    inventory: []
+  };
   try {
-    invoice = await insertInvoiceWithRetry(client, (invoiceNumber) => ({
-      invoice_number: invoiceNumber,
-      customer_id: customerId,
-      salesperson_id: salespersonId || null,
-      date: hongKongDate(),
-      items: invoiceItems,
-      total,
-      status: "Unpaid",
-      notes: null,
-      legacy_skip_deduct: false,
-      ...shippingPayload(shipping, currentUser.canShip === true)
-    }));
-    recovery.invoiceId = invoice.id;
+    if (!invoice?.id) throw new Error("Order invoice is required");
+    const invoiceItems = normalizedItems(invoice.items);
+    if (invoiceTotal(invoiceItems) <= 0 || Number(invoice.total) <= 0) {
+      throw new Error("Order total must be greater than zero");
+    }
+    const { products, deductions } = paymentPlan ?? await buildOrderPaymentPlan(client, invoiceItems);
+    const aliases = await allRows("line_item_aliases", "created_at");
+    const commission = commissionAmount({ ...invoice, items: invoiceItems }, products, aliases);
+    const claimResult = await client.from("invoices")
+      .update({ status: "Paid", commission_amount: commission })
+      .eq("id", invoice.id)
+      .eq("status", recovery.invoiceStatus)
+      .select("*")
+      .maybeSingle();
+    throwIfError(claimResult.error);
+    if (!claimResult.data) {
+      throw new Error("Order payment status changed while payment was starting");
+    }
+    recovery.claimed = true;
 
-    const deductions = [...deductionsByKey.values()];
     for (const deduction of deductions) {
       const stockResult = await client.from("inventory_stock")
         .select("*")
@@ -475,7 +527,7 @@ export async function createAndPayLiveOrder({ customerId, salespersonId, items, 
           });
           const legacyUpdate = await client.from("inventory").update({
             status: "Sold",
-            customer_id: customerId,
+            customer_id: invoice.customer_id,
             sold_date: hongKongDate(),
             warranty_end: warrantyEnd.toISOString().slice(0, 10),
             invoice_id: invoice.id
@@ -485,16 +537,7 @@ export async function createAndPayLiveOrder({ customerId, salespersonId, items, 
       }
     }
 
-    const aliases = await allRows("line_item_aliases", "created_at");
-    const commission = commissionAmount({ ...invoice, items: invoiceItems }, products, aliases);
-    const paidResult = await client.from("invoices")
-      .update({ status: "Paid", commission_amount: commission })
-      .eq("id", invoice.id)
-      .select("*")
-      .single();
-    throwIfError(paidResult.error);
-
-    const imeiResult = await appendCustomerDevices(client, customerId, itemImeis(invoiceItems));
+    const imeiResult = await appendCustomerDevices(client, invoice.customer_id, itemImeis(invoiceItems));
     await invalidateOrderReads(
       "invoices",
       "inventory_stock",
@@ -503,7 +546,7 @@ export async function createAndPayLiveOrder({ customerId, salespersonId, items, 
       "inventory",
       "customer_devices"
     );
-    return { invoice: paidResult.data, deviceConflicts: imeiResult.conflicts };
+    return { invoice: claimResult.data, deviceConflicts: imeiResult.conflicts, alreadyPaid: false };
   } catch (error) {
     const recoveryFailures = await restoreAfterPaidFailure(client, recovery);
     await invalidateOrderReads(
@@ -511,7 +554,8 @@ export async function createAndPayLiveOrder({ customerId, salespersonId, items, 
       "inventory_stock",
       "inventory_movements",
       "stock_deduction_audit",
-      "inventory"
+      "inventory",
+      "customer_devices"
     );
     if (recoveryFailures.length) {
       console.error("[orders] paid-order recovery failed", recoveryFailures);
@@ -521,6 +565,35 @@ export async function createAndPayLiveOrder({ customerId, salespersonId, items, 
     }
     throw error;
   }
+}
+
+export async function createLiveOrder({ customerId, salespersonId, items, fees, shipping, paymentStatus = "Paid" }) {
+  const normalizedStatus = String(paymentStatus || "Paid").trim().toLowerCase();
+  if (!new Set(["paid", "unpaid"]).has(normalizedStatus)) throw new Error("Unsupported order payment status");
+  const context = await writeContext();
+  const { invoice, paymentPlan } = await insertUnpaidLiveOrder(context, {
+    customerId,
+    salespersonId,
+    items,
+    fees,
+    shipping
+  });
+  if (normalizedStatus === "unpaid") {
+    await invalidateOrderReads("invoices");
+    return { invoice, deviceConflicts: [], alreadyPaid: false };
+  }
+  return payLiveOrderRecord(context, invoice, { deleteInvoiceOnFailure: true, paymentPlan });
+}
+
+export async function createAndPayLiveOrder(values) {
+  return createLiveOrder({ ...values, paymentStatus: "Paid" });
+}
+
+export async function markLiveOrderPaid(invoiceId) {
+  const context = await writeContext();
+  const invoiceResult = await context.client.from("invoices").select("*").eq("id", invoiceId).single();
+  throwIfError(invoiceResult.error);
+  return payLiveOrderRecord(context, invoiceResult.data);
 }
 
 export async function updateLiveOrder(invoiceId, { items, fees, salespersonId, totalOverride }) {
