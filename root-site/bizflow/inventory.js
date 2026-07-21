@@ -10,9 +10,12 @@ import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import {
+  cleanupLiveInventoryImage,
   createLiveInventoryProduct,
   getShopifyCredentialHealth,
-  shopifyWriteReady
+  SHOPIFY_PRODUCT_IMAGE_ACCEPT,
+  shopifyWriteReady,
+  uploadLiveInventoryImage
 } from "../data/live-inventory-writes.js";
 import {
   attachItemMapBehaviors, captureItemMapState, disposeItemMapState, ensureItemMapData,
@@ -72,7 +75,17 @@ const dict = {
     "inventory.addModal.productType": "Shopify 商品類型",
     "inventory.addModal.tags": "標籤（逗號分隔）",
     "inventory.addModal.collections": "集合（逗號分隔）",
-    "inventory.addModal.imageUrl": "商品圖片 URL",
+    "inventory.image.choose": "選擇圖片",
+    "inventory.image.replace": "更換圖片",
+    "inventory.image.remove": "移除圖片",
+    "inventory.image.uploading": "正在驗證並上傳…",
+    "inventory.image.hint": "JPG、PNG、WebP 或 GIF；最大 20MB、4472×4472。",
+    "inventory.image.error.type": "只支援 JPG、PNG、WebP 或 GIF 圖片。",
+    "inventory.image.error.size": "圖片不可超過 20MB。",
+    "inventory.image.error.dimensions": "圖片尺寸不可超過 4472×4472（20MP）。",
+    "inventory.image.error.content": "圖片內容無法驗證，請改選另一張圖片。",
+    "inventory.image.error.upload": "商品圖片上傳失敗，請重試。",
+    "inventory.image.error.cleanup": "未能清理尚未保存的圖片，請重試。",
     "inventory.addModal.cancel": "取消",
     "inventory.addModal.confirm": "確認新增",
     "inventory.addModal.close": "關閉",
@@ -121,7 +134,17 @@ const dict = {
     "inventory.addModal.productType": "Shopify product type",
     "inventory.addModal.tags": "Tags (comma separated)",
     "inventory.addModal.collections": "Collections (comma separated)",
-    "inventory.addModal.imageUrl": "Product image URL",
+    "inventory.image.choose": "Choose image",
+    "inventory.image.replace": "Replace image",
+    "inventory.image.remove": "Remove image",
+    "inventory.image.uploading": "Validating and uploading…",
+    "inventory.image.hint": "JPG, PNG, WebP, or GIF; max 20 MB and 4472×4472.",
+    "inventory.image.error.type": "Use a JPG, PNG, WebP, or GIF image.",
+    "inventory.image.error.size": "The image must not exceed 20 MB.",
+    "inventory.image.error.dimensions": "The image must not exceed 4472×4472 (20 MP).",
+    "inventory.image.error.content": "The image could not be verified. Choose another file.",
+    "inventory.image.error.upload": "The product image could not be uploaded. Try again.",
+    "inventory.image.error.cleanup": "The unsaved image could not be removed. Try again.",
     "inventory.addModal.cancel": "Cancel",
     "inventory.addModal.confirm": "Add product",
     "inventory.addModal.close": "Close",
@@ -170,7 +193,17 @@ const dict = {
     "inventory.addModal.productType": "Type de produit Shopify",
     "inventory.addModal.tags": "Étiquettes (séparées par des virgules)",
     "inventory.addModal.collections": "Collections (séparées par des virgules)",
-    "inventory.addModal.imageUrl": "URL de l'image produit",
+    "inventory.image.choose": "Choisir une image",
+    "inventory.image.replace": "Remplacer l'image",
+    "inventory.image.remove": "Supprimer l'image",
+    "inventory.image.uploading": "Validation et téléversement…",
+    "inventory.image.hint": "JPG, PNG, WebP ou GIF ; 20 Mo et 4472×4472 maximum.",
+    "inventory.image.error.type": "Utilisez une image JPG, PNG, WebP ou GIF.",
+    "inventory.image.error.size": "L'image ne doit pas dépasser 20 Mo.",
+    "inventory.image.error.dimensions": "L'image ne doit pas dépasser 4472×4472 (20 MP).",
+    "inventory.image.error.content": "L'image n'a pas pu être vérifiée. Choisissez un autre fichier.",
+    "inventory.image.error.upload": "Échec du téléversement de l'image. Réessayez.",
+    "inventory.image.error.cleanup": "L'image non enregistrée n'a pas pu être supprimée. Réessayez.",
     "inventory.addModal.cancel": "Annuler",
     "inventory.addModal.confirm": "Ajouter",
     "inventory.addModal.close": "Fermer",
@@ -207,6 +240,10 @@ let state = {
   category: "all",
   categoryOpen: false,
   addModalOpen: false,
+  addDraft: {},
+  addImage: null,
+  addImageBusy: false,
+  addImageError: "",
   search: "",
   page: 1,
   addDraftDirty: false,
@@ -229,6 +266,15 @@ function isCurrentInventoryScope(scope = activeScope) {
 
 function pageT(lang, key) {
   return dict[lang]?.[key] ?? dict.zh[key] ?? key;
+}
+
+function imageErrorText(lang, error) {
+  const code = String(error?.code || "");
+  if (code === "SHOPIFY_IMAGE_TYPE_UNSUPPORTED") return pageT(lang, "inventory.image.error.type");
+  if (code === "SHOPIFY_IMAGE_SIZE_INVALID") return pageT(lang, "inventory.image.error.size");
+  if (code === "SHOPIFY_IMAGE_DIMENSIONS_INVALID") return pageT(lang, "inventory.image.error.dimensions");
+  if (code.includes("CONTENT") || code.includes("DIGEST")) return pageT(lang, "inventory.image.error.content");
+  return pageT(lang, "inventory.image.error.upload");
 }
 
 function formatHkd(value) {
@@ -342,12 +388,42 @@ function renderProductCard(product, helpers) {
   </${tag}>`;
 }
 
+function addDraftValue(name) {
+  return String(state.addDraft?.[name] ?? "");
+}
+
+function renderAddImageUpload(helpers) {
+  const { escapeHtml, icon, lang } = helpers;
+  const imageUrl = state.addImage?.publicUrl || "";
+  const disabled = !authenticated || liveReadOnly || state.writeBusy || state.addImageBusy;
+  const disabledAttributes = disabled ? ' disabled aria-disabled="true"' : "";
+  const preview = imageUrl
+    ? `<img class="inventory-image-upload__preview" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(pageT(lang, "inventory.addModal.image"))}">`
+    : `<span class="inventory-image-upload__empty" aria-hidden="true">${icon("icon-nav-inventory", "icon")}</span>`;
+  const chooseLabel = imageUrl ? pageT(lang, "inventory.image.replace") : pageT(lang, "inventory.image.choose");
+  return `<div class="inventory-image-upload" data-inventory-image-upload aria-label="${escapeHtml(pageT(lang, "inventory.addModal.image"))}">
+    ${preview}
+    <div class="inventory-image-upload__body">
+      <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.image"))}</span>
+      <span class="inventory-image-upload__hint">${escapeHtml(pageT(lang, "inventory.image.hint"))}</span>
+      <div class="inventory-image-upload__actions">
+        <label class="inventory-image-upload__choose${disabled ? " is-disabled" : ""}">
+          <input type="file" accept="${escapeHtml(SHOPIFY_PRODUCT_IMAGE_ACCEPT)}" data-inventory-add-image-input data-inventory-write${disabledAttributes}>
+          <span>${escapeHtml(state.addImageBusy ? pageT(lang, "inventory.image.uploading") : chooseLabel)}</span>
+        </label>
+        ${imageUrl ? `<button type="button" class="inventory-image-upload__remove" data-inventory-add-image-remove data-inventory-write${disabledAttributes}>${escapeHtml(pageT(lang, "inventory.image.remove"))}</button>` : ""}
+      </div>
+      <span class="inventory-image-upload__error" role="status" aria-live="polite">${escapeHtml(state.addImageError || "")}</span>
+    </div>
+  </div>`;
+}
+
 function renderAddProductModal(helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const requiredLabel = (key) => `${escapeHtml(pageT(lang, key))}<span class="inventory-required-mark" aria-hidden="true">*</span>`;
   const categoryOptionsHtml = data.categories.map((key) => {
     const label = categoryLabelKeys[key] ? pageT(lang, categoryLabelKeys[key]) : key;
-    return `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`;
+    return `<option value="${escapeHtml(key)}"${addDraftValue("category") === key ? " selected" : ""}>${escapeHtml(label)}</option>`;
   }).join("");
   return `<div class="inventory-add-overlay${state.addModalOpen ? " inventory-add-overlay--open" : ""}" data-inventory-add-overlay ${state.addModalOpen ? "" : 'aria-hidden="true"'}>
     <form class="inventory-subitem-modal inventory-add-modal" data-inventory-add-form role="dialog" aria-modal="true" aria-label="${escapeHtml(pageT(lang, "inventory.addModal.title"))}">
@@ -356,18 +432,15 @@ function renderAddProductModal(helpers) {
       </div>
       <button type="button" class="inventory-subitem-modal__close" data-inventory-add-close aria-label="${escapeHtml(pageT(lang, "inventory.addModal.close"))}"></button>
       <div class="inventory-subitem-modal__body inventory-add-modal__body">
-        <div class="inventory-add-image-placeholder" aria-label="${escapeHtml(pageT(lang, "inventory.addModal.image"))}">
-          ${icon("icon-nav-inventory", "icon")}
-          <span>${escapeHtml(pageT(lang, "inventory.addModal.image"))}</span>
-        </div>
+        ${renderAddImageUpload(helpers)}
         <div class="inventory-modal-grid">
           <label class="inventory-modal-field inventory-modal-field--wide">
             <span class="inventory-modal-label">${requiredLabel("inventory.addModal.name")}</span>
-            <input class="inventory-modal-input" name="name" data-inventory-add-name data-inventory-write required${writeAttributes}>
+            <input class="inventory-modal-input" name="name" data-inventory-add-name data-inventory-write required value="${escapeHtml(addDraftValue("name"))}"${writeAttributes}>
           </label>
           <label class="inventory-modal-field">
             <span class="inventory-modal-label">${requiredLabel("inventory.addModal.code")}</span>
-            <input class="inventory-modal-input" name="internalCode" data-inventory-write required${writeAttributes}>
+            <input class="inventory-modal-input" name="internalCode" data-inventory-write required value="${escapeHtml(addDraftValue("internalCode"))}"${writeAttributes}>
           </label>
           <label class="inventory-modal-field">
             <span class="inventory-modal-label">${requiredLabel("inventory.addModal.category")}</span>
@@ -375,31 +448,27 @@ function renderAddProductModal(helpers) {
           </label>
           <label class="inventory-modal-field">
             <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.productType"))}</span>
-            <input class="inventory-modal-input" name="productType" data-inventory-write${writeAttributes}>
+            <input class="inventory-modal-input" name="productType" data-inventory-write value="${escapeHtml(addDraftValue("productType"))}"${writeAttributes}>
           </label>
           <label class="inventory-modal-field inventory-modal-field--wide">
             <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.tags"))}</span>
-            <input class="inventory-modal-input" name="tags" data-inventory-write${writeAttributes}>
+            <input class="inventory-modal-input" name="tags" data-inventory-write value="${escapeHtml(addDraftValue("tags"))}"${writeAttributes}>
           </label>
           <label class="inventory-modal-field inventory-modal-field--wide">
             <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.collections"))}</span>
-            <input class="inventory-modal-input" name="collections" data-inventory-write${writeAttributes}>
-          </label>
-          <label class="inventory-modal-field inventory-modal-field--wide">
-            <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.imageUrl"))}</span>
-            <input class="inventory-modal-input" name="imageUrl" type="url" data-inventory-write${writeAttributes}>
+            <input class="inventory-modal-input" name="collections" data-inventory-write value="${escapeHtml(addDraftValue("collections"))}"${writeAttributes}>
           </label>
           <label class="inventory-modal-field">
             <span class="inventory-modal-label">${requiredLabel("inventory.addModal.price")}</span>
-            <input class="inventory-modal-input" name="price" type="number" min="0" step="0.01" data-inventory-write required${writeAttributes}>
+            <input class="inventory-modal-input" name="price" type="number" min="0" step="0.01" data-inventory-write required value="${escapeHtml(addDraftValue("price"))}"${writeAttributes}>
           </label>
           <label class="inventory-modal-field">
             <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.specs"))}</span>
-            <input class="inventory-modal-input" name="specs" data-inventory-write${writeAttributes}>
+            <input class="inventory-modal-input" name="specs" data-inventory-write value="${escapeHtml(addDraftValue("specs"))}"${writeAttributes}>
           </label>
           <label class="inventory-modal-field">
             <span class="inventory-modal-label">${requiredLabel("inventory.addModal.warranty")}</span>
-            <input class="inventory-modal-input" name="warrantyMonths" type="number" min="0" step="1" data-inventory-write required${writeAttributes}>
+            <input class="inventory-modal-input" name="warrantyMonths" type="number" min="0" step="1" data-inventory-write required value="${escapeHtml(addDraftValue("warrantyMonths"))}"${writeAttributes}>
           </label>
         </div>
       </div>
@@ -542,19 +611,70 @@ function closeCategoryMenu() {
   if (popover) popover.classList.remove("menu-popover--open");
 }
 
+function resetAddProductDraft() {
+  state.addModalOpen = false;
+  state.addDraft = {};
+  state.addImage = null;
+  state.addImageBusy = false;
+  state.addImageError = "";
+  state.addDraftDirty = false;
+}
+
+async function cleanupAddProductImage() {
+  const imageUrl = state.addImage?.publicUrl || "";
+  if (!imageUrl) return true;
+  if (state.addImage?.uploadedByThisDraft !== true) {
+    state.addImage = null;
+    return true;
+  }
+  try {
+    await cleanupLiveInventoryImage(imageUrl);
+    state.addImage = null;
+    return true;
+  } catch {
+    state.addImageError = pageT(currentHelpers?.lang ?? "zh", "inventory.image.error.cleanup");
+    return false;
+  }
+}
+
+async function closeAddProductModal() {
+  if (state.addImageBusy || state.writeBusy) return false;
+  if (!await cleanupAddProductImage()) {
+    rerenderInventoryPage();
+    return false;
+  }
+  resetAddProductDraft();
+  rerenderInventoryPage();
+  return true;
+}
+
 async function onInventoryClick(event) {
   if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
   if (event.target.closest("[data-inventory-add]")) {
     state.addModalOpen = true;
     state.categoryOpen = false;
+    state.addDraft = { category: data.categories[0] || "" };
+    state.addImage = null;
+    state.addImageBusy = false;
+    state.addImageError = "";
     state.addDraftDirty = false;
     rerenderInventoryPage({ focusAddName: true });
     return;
   }
 
   if (event.target.closest("[data-inventory-add-close]") || event.target.matches("[data-inventory-add-overlay]")) {
-    state.addModalOpen = false;
-    state.addDraftDirty = false;
+    await closeAddProductModal();
+    return;
+  }
+
+  if (event.target.closest("[data-inventory-add-image-remove]")) {
+    if (state.addImageBusy || state.writeBusy) return;
+    state.addImageBusy = true;
+    state.addImageError = "";
+    rerenderInventoryPage();
+    const removed = await cleanupAddProductImage();
+    state.addImageBusy = false;
+    if (removed) state.addDraftDirty = true;
     rerenderInventoryPage();
     return;
   }
@@ -568,7 +688,7 @@ async function onInventoryClick(event) {
         const leave = await confirmInPage(pageT(currentHelpers?.lang ?? "zh", "inventory.leaveUnsaved"));
         if (!leave) return;
         if (!isCurrentInventoryScope(scope)) return;
-        discardTransientDrafts();
+        if (!await discardTransientDrafts()) return;
       }
       state.tab = nextTab;
       state.page = 1;
@@ -617,8 +737,37 @@ async function onInventoryClick(event) {
   if (!event.target.closest("[data-inventory-category-menu]")) closeCategoryMenu();
 }
 
-function onInventoryInput(event) {
-  if (event.target.closest("[data-inventory-add-form]")) state.addDraftDirty = true;
+async function onInventoryInput(event) {
+  if (event.target.closest("[data-inventory-add-form]")) {
+    state.addDraftDirty = true;
+    if (event.target.name) state.addDraft[event.target.name] = event.target.value;
+  }
+  const imageInput = event.target.closest("[data-inventory-add-image-input]");
+  if (imageInput?.files?.[0]) {
+    if (!authenticated || liveReadOnly || state.addImageBusy || state.writeBusy) return;
+    const previousImage = state.addImage;
+    const previousImageUrl = previousImage?.publicUrl || "";
+    state.addImageBusy = true;
+    state.addImageError = "";
+    rerenderInventoryPage();
+    try {
+      const image = await uploadLiveInventoryImage(imageInput.files[0]);
+      state.addImage = image;
+      if (previousImage?.uploadedByThisDraft === true && previousImageUrl && previousImageUrl !== image.publicUrl) {
+        try {
+          await cleanupLiveInventoryImage(previousImageUrl);
+        } catch {
+          state.addImageError = pageT(currentHelpers?.lang ?? "zh", "inventory.image.error.cleanup");
+        }
+      }
+    } catch (error) {
+      state.addImageError = imageErrorText(currentHelpers?.lang ?? "zh", error);
+    } finally {
+      state.addImageBusy = false;
+      rerenderInventoryPage();
+    }
+    return;
+  }
   const search = event.target.closest("[data-inventory-search]");
   if (!search) return;
   state.search = search.value;
@@ -627,12 +776,10 @@ function onInventoryInput(event) {
   rerenderInventoryPage({ focusSearch: true });
 }
 
-function onInventoryKeydown(event) {
+async function onInventoryKeydown(event) {
   if (event.key !== "Escape") return;
   if (state.addModalOpen) {
-    state.addModalOpen = false;
-    state.addDraftDirty = false;
-    rerenderInventoryPage();
+    await closeAddProductModal();
     return;
   }
   closeCategoryMenu();
@@ -642,7 +789,7 @@ async function onInventorySubmit(event) {
   const form = event.target.closest("[data-inventory-add-form]");
   if (!form) return;
   event.preventDefault();
-  if (liveReadOnly) return;
+  if (liveReadOnly || state.addImageBusy || state.writeBusy) return;
   const values = new FormData(form);
   const name = String(values.get("name") || "").trim();
   const category = String(values.get("category") || "");
@@ -668,14 +815,13 @@ async function onInventorySubmit(event) {
         specs,
         tags: String(values.get("tags") || "").split(",").map((value) => value.trim()).filter(Boolean),
         collections: String(values.get("collections") || "").split(",").map((value) => value.trim()).filter(Boolean),
-        imageUrl: String(values.get("imageUrl") || "").trim(),
+        imageUrl: String(state.addImage?.publicUrl || "").trim(),
         status: "draft",
         stocks: [],
         variants: []
       });
       data = await getInventoryPageData();
-      state.addModalOpen = false;
-      state.addDraftDirty = false;
+      resetAddProductDraft();
       state.feedback = pageT(currentHelpers?.lang ?? "zh", "inventory.created");
       state.page = 1;
     } catch (error) {
@@ -700,6 +846,9 @@ async function onInventorySubmit(event) {
     detail: { productId: id, warrantyMonths, specs, collections: [], tags: [], images: [], warehouses: [], variants: [] }
   });
   state.addModalOpen = false;
+  state.addDraft = {};
+  state.addImage = null;
+  state.addImageError = "";
   state.addDraftDirty = false;
   state.category = "all";
   state.search = "";
@@ -721,12 +870,13 @@ function hasInventoryUnsavedChanges() {
     || hasSupplierUnsavedChanges();
 }
 
-function discardTransientDrafts() {
-  state.addModalOpen = false;
-  state.addDraftDirty = false;
+async function discardTransientDrafts() {
+  if (!await cleanupAddProductImage()) return false;
+  resetAddProductDraft();
   restoreItemMapState(captureItemMapState());
   restoreShopifyState(captureShopifyState());
   restoreSupplierState(captureSupplierState());
+  return true;
 }
 
 function restoredState(value = null, presetSearch = "") {
@@ -736,6 +886,10 @@ function restoredState(value = null, presetSearch = "") {
     category: typeof next.category === "string" ? next.category : "all",
     categoryOpen: false,
     addModalOpen: false,
+    addDraft: {},
+    addImage: null,
+    addImageBusy: false,
+    addImageError: "",
     search: typeof next.search === "string" ? next.search : presetSearch,
     page: Number.isInteger(next.page) && next.page > 0 ? next.page : 1,
     addDraftDirty: false,
@@ -799,7 +953,9 @@ export async function mountPage({ scope, signal, historyState = null, navigation
     hasUnsavedChanges: hasInventoryUnsavedChanges,
     async canLeave() {
       if (!hasInventoryUnsavedChanges()) return true;
-      return confirmInPage(pageT(currentHelpers?.lang ?? "zh", "inventory.leaveUnsaved"));
+      const leave = await confirmInPage(pageT(currentHelpers?.lang ?? "zh", "inventory.leaveUnsaved"));
+      if (!leave) return false;
+      return discardTransientDrafts();
     },
     captureState() {
       return {

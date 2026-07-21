@@ -14,10 +14,17 @@ import {
   mutateComponentLink,
   saveResourceMapping,
 } from "./catalog.ts";
+import {
+  cleanupCatalogImage,
+  ensureCatalogImageForWrite,
+  prepareCatalogImageUpload,
+  verifyCatalogImage,
+} from "./image.ts";
 
 type Payload = Record<string, unknown> & {
   action?: "health" | "alignment-plan" | "create" | "update" | "delete" |
-    "confirm-binding" | "link-component" | "unlink-component" | "save-resource-mapping";
+    "confirm-binding" | "link-component" | "unlink-component" | "save-resource-mapping" |
+    "prepare-image-upload" | "verify-image-upload" | "cleanup-image-upload";
 };
 
 Deno.serve(async (req) => {
@@ -69,10 +76,25 @@ Deno.serve(async (req) => {
       const result = await saveResourceMapping(auth.admin, auth.userId, body);
       return jsonResponse(req, { ...result, health });
     }
+    if (body.action === "prepare-image-upload" || body.action === "verify-image-upload" ||
+      body.action === "cleanup-image-upload") {
+      // Image writes share the exact catalogue readiness gate: a user cannot
+      // stockpile signed URLs while the Shopify write chain is unavailable.
+      requireShopifyWriteReady(health);
+      const result = body.action === "prepare-image-upload"
+        ? await prepareCatalogImageUpload(auth.admin, body)
+        : body.action === "verify-image-upload"
+        ? { ok: true, image: await verifyCatalogImage(auth.admin, body.path || body.publicUrl) }
+        : await cleanupCatalogImage(auth.admin, body.path || body.publicUrl);
+      return jsonResponse(req, { ...result, health });
+    }
     if (body.action === "create" || body.action === "update" || body.action === "delete") {
       // Credential readiness is a precondition, not a failed catalogue job. With the
       // current read-only token the UI stays explicitly disabled and no local data moves.
       requireShopifyWriteReady(health);
+      if (body.action !== "delete") {
+        await ensureCatalogImageForWrite(auth.admin, body.action, body);
+      }
       const result = await executeCatalogWrite(auth.admin, credentials, auth.userId, body.action, body);
       return jsonResponse(req, { ...result, health }, result.ok === false ? 409 : 200);
     }
