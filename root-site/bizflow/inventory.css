@@ -765,6 +765,12 @@ button.inventory-series-icon {
   white-space: nowrap;
 }
 
+.inventory-required-mark {
+  margin-left: 3px;
+  color: var(--danger-text, #dc2626);
+  font-weight: 700;
+}
+
 .inventory-modal-input {
   font-size: var(--font-title-3-size);
   font-weight: var(--font-body-weight);

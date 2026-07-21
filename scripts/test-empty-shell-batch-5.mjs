@@ -82,6 +82,18 @@ assert.match(edge, /SHOPIFY_WRITE_CREDENTIAL_NOT_READY[\s\S]*status = code[^\n]*
   "missing write scopes are an explicit readiness state, not a fake save or server error");
 
 assert.match(catalogue, /productSet\(synchronous: true/);
+assert.match(catalogue, /metafieldDefinition\(identifier:[^]*ownerType: PRODUCT[^]*namespace: "bizflow"[^]*key: "parent_product_id"[^]*type \{ name \}/,
+  "custom-id preparation must inspect the existing definition type");
+assert.match(catalogue, /definitionType === "id"/,
+  "an existing id definition must be accepted without mutation");
+assert.match(catalogue, /metafieldDefinitionDelete\(id: \$id, deleteAllAssociatedMetafields: false\)/,
+  "an incompatible definition must be replaced without deleting existing values");
+assert.match(catalogue, /type: "id", ownerType: "PRODUCT"/,
+  "Shopify 2026-07 custom IDs require a dedicated id metafield definition");
+assert.doesNotMatch(catalogue, /key: "parent_product_id", type: "single_line_text_field"/,
+  "the custom ID must never be recreated or explicitly set as a text metafield");
+assert.doesNotMatch(catalogue, /ownerId: shopifyProduct\.id, namespace: "bizflow", key: "parent_product_id"/,
+  "productSet customId owns the identifier value; warranty writes must not duplicate it");
 assert.match(catalogue, /customId: \{ namespace: "bizflow", key: "parent_product_id"/,
   "new products need a stable idempotent Shopify custom identifier");
 assert.match(catalogue, /existing\?\.collectionIds[\s\S]*!mappings\.managedCollectionIds\.has/,
@@ -140,6 +152,14 @@ assert.match(inventory, /legacyDomainHelpers = \{ \.\.\.helpers, liveReadOnly: a
 assert.match(inventory, /Shopify 寫入憑證未就緒/);
 assert.match(inventory, /Shopify write credential is not ready/);
 assert.match(inventory, /Les identifiants d'écriture Shopify ne sont pas prêts/);
+assert.match(inventory, /inventory-required-mark[^]*inventory\.addModal\.code/,
+  "the live product form must visibly mark SKU as required");
+assert.match(inventory, /inventory\.addModal\.warranty[^]*inventory-required-mark/,
+  "the live product form must visibly mark warranty months as required");
+assert.doesNotMatch(inventory, /page\.outerHTML\s*=/,
+  "inventory rerenders must not use the detached-node outerHTML race path");
+assert.match(inventory, /page\.replaceWith\(nextPage\)/,
+  "inventory rerenders must atomically replace the still-current page node");
 assert.match(detail, /await updateLiveInventoryProduct\(/);
 assert.match(detail, /await deleteLiveInventoryProduct\(/);
 assert.match(detail, /data-parent-warehouse-qty[\s\S]*detail\.warehouses\.find/,

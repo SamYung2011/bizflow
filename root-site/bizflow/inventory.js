@@ -340,6 +340,7 @@ function renderProductCard(product, helpers) {
 
 function renderAddProductModal(helpers) {
   const { escapeHtml, icon, lang } = helpers;
+  const requiredLabel = (key) => `${escapeHtml(pageT(lang, key))}<span class="inventory-required-mark" aria-hidden="true">*</span>`;
   const categoryOptionsHtml = data.categories.map((key) => {
     const label = categoryLabelKeys[key] ? pageT(lang, categoryLabelKeys[key]) : key;
     return `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`;
@@ -357,15 +358,15 @@ function renderAddProductModal(helpers) {
         </div>
         <div class="inventory-modal-grid">
           <label class="inventory-modal-field inventory-modal-field--wide">
-            <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.name"))}</span>
+            <span class="inventory-modal-label">${requiredLabel("inventory.addModal.name")}</span>
             <input class="inventory-modal-input" name="name" data-inventory-add-name data-inventory-write required${writeAttributes}>
           </label>
           <label class="inventory-modal-field">
-            <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.code"))}</span>
+            <span class="inventory-modal-label">${requiredLabel("inventory.addModal.code")}</span>
             <input class="inventory-modal-input" name="internalCode" data-inventory-write required${writeAttributes}>
           </label>
           <label class="inventory-modal-field">
-            <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.category"))}</span>
+            <span class="inventory-modal-label">${requiredLabel("inventory.addModal.category")}</span>
             <select class="inventory-modal-input" name="category" data-inventory-write required${writeAttributes}>${categoryOptionsHtml}</select>
           </label>
           <label class="inventory-modal-field">
@@ -385,7 +386,7 @@ function renderAddProductModal(helpers) {
             <input class="inventory-modal-input" name="imageUrl" type="url" data-inventory-write${writeAttributes}>
           </label>
           <label class="inventory-modal-field">
-            <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.price"))}</span>
+            <span class="inventory-modal-label">${requiredLabel("inventory.addModal.price")}</span>
             <input class="inventory-modal-input" name="price" type="number" min="0" step="0.01" data-inventory-write required${writeAttributes}>
           </label>
           <label class="inventory-modal-field">
@@ -393,7 +394,7 @@ function renderAddProductModal(helpers) {
             <input class="inventory-modal-input" name="specs" data-inventory-write${writeAttributes}>
           </label>
           <label class="inventory-modal-field">
-            <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.addModal.warranty"))}</span>
+            <span class="inventory-modal-label">${requiredLabel("inventory.addModal.warranty")}</span>
             <input class="inventory-modal-input" name="warrantyMonths" type="number" min="0" step="1" data-inventory-write required${writeAttributes}>
           </label>
         </div>
@@ -496,7 +497,13 @@ async function ensureTabData(tab, { scope = activeScope, signal = scope?.signal 
 function rerenderInventoryPage({ focusSearch = false, focusAddName = false } = {}) {
   const page = document.querySelector("[data-inventory-page]");
   if (!page || !currentHelpers) return;
-  page.outerHTML = renderInventory(currentHelpers);
+  const template = document.createElement("template");
+  template.innerHTML = renderInventory(currentHelpers).trim();
+  const nextPage = template.content.firstElementChild;
+  if (!nextPage || !page.isConnected) return;
+  // replaceWith is safe if an overlapping SPA refresh has already detached the
+  // old page; outerHTML can throw NotFoundError in that same lifecycle race.
+  page.replaceWith(nextPage);
   if (focusSearch) {
     const input = document.querySelector("[data-inventory-search]");
     if (input) {

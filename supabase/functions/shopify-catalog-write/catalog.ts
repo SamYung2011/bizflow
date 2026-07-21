@@ -459,36 +459,75 @@ async function ensureDeleteDoesNotBreakExternalComponents(
 async function ensureBizflowIdDefinition(credentials: ShopifyCredentials) {
   const query = `
     query BizFlowIdDefinition {
-      metafieldDefinitions(first: 1, ownerType: PRODUCT, query: "namespace:bizflow key:parent_product_id") {
-        nodes { id namespace key capabilities { uniqueValues { enabled } } }
+      metafieldDefinition(identifier: {
+        ownerType: PRODUCT
+        namespace: "bizflow"
+        key: "parent_product_id"
+      }) {
+        id
+        namespace
+        key
+        metafieldsCount
+        type { name }
       }
     }
   `;
-  const current = await shopifyGraphQL<{ metafieldDefinitions?: { nodes?: JsonRecord[] } }>(credentials, query);
-  const definition = current.metafieldDefinitions?.nodes?.[0];
-  if (definition && (definition.capabilities as JsonRecord | undefined)?.uniqueValues &&
-      ((definition.capabilities as JsonRecord).uniqueValues as JsonRecord).enabled === true) return;
-  const mutation = definition ? `
-    mutation UpdateBizFlowId($definition: MetafieldDefinitionUpdateInput!) {
-      metafieldDefinitionUpdate(definition: $definition) { updatedDefinition { id } userErrors { field message code } }
+  const loadDefinition = async () => {
+    const result = await shopifyGraphQL<{ metafieldDefinition?: JsonRecord | null }>(credentials, query);
+    return result.metafieldDefinition || null;
+  };
+  const definition = await loadDefinition();
+  const definitionType = text((definition?.type as JsonRecord | undefined)?.name).toLowerCase();
+  if (definitionType === "id") return;
+
+  if (definition?.id) {
+    // Definition types are immutable. Preserve any existing values as
+    // unstructured metafields while replacing the incompatible schema; a new
+    // id definition will validate and adopt compatible values.
+    const deleteMutation = `
+      mutation DeleteWrongBizFlowIdDefinition($id: ID!) {
+        metafieldDefinitionDelete(id: $id, deleteAllAssociatedMetafields: false) {
+          deletedDefinitionId
+          userErrors { field message code }
+        }
+      }
+    `;
+    try {
+      const deleted = await shopifyGraphQL<{ metafieldDefinitionDelete?: JsonRecord }>(credentials, deleteMutation, {
+        id: definition.id,
+      });
+      assertNoMutationErrors(deleted.metafieldDefinitionDelete, "Replace incompatible BizFlow product identifier");
+    } catch (error) {
+      const concurrent = await loadDefinition();
+      const concurrentType = text((concurrent?.type as JsonRecord | undefined)?.name).toLowerCase();
+      if (concurrentType === "id") return;
+      // A concurrent request can have deleted the same incompatible definition
+      // and not recreated it yet. Continue to the id create only in that case.
+      if (concurrent) throw error;
     }
-  ` : `
+  }
+
+  const createMutation = `
     mutation CreateBizFlowId($definition: MetafieldDefinitionInput!) {
       metafieldDefinitionCreate(definition: $definition) { createdDefinition { id } userErrors { field message code } }
     }
   `;
-  const variables = definition ? {
-    definition: { id: definition.id, capabilities: { uniqueValues: { enabled: true } } },
-  } : {
+  const variables = {
     definition: {
       name: "BizFlow parent product ID", namespace: "bizflow", key: "parent_product_id",
-      description: "Stable BizFlow catalogue identifier", type: "single_line_text_field", ownerType: "PRODUCT",
-      capabilities: { uniqueValues: { enabled: true } },
+      description: "Stable BizFlow catalogue identifier", type: "id", ownerType: "PRODUCT",
     },
   };
-  const result = await shopifyGraphQL<JsonRecord>(credentials, mutation, variables);
-  const payload = definition ? result.metafieldDefinitionUpdate : result.metafieldDefinitionCreate;
-  assertNoMutationErrors(payload, "Prepare BizFlow product identifier");
+  try {
+    const result = await shopifyGraphQL<{ metafieldDefinitionCreate?: JsonRecord }>(credentials, createMutation, variables);
+    assertNoMutationErrors(result.metafieldDefinitionCreate, "Prepare BizFlow product identifier");
+  } catch (error) {
+    // A concurrent create can win after our read/delete. Treat it as success
+    // only when the exact definition now exists with the required id type.
+    const concurrent = await loadDefinition();
+    const concurrentType = text((concurrent?.type as JsonRecord | undefined)?.name).toLowerCase();
+    if (concurrentType !== "id") throw error;
+  }
 }
 
 function variantSetInput(product: NormalizedProduct, existing: ShopifyProductNode | null, collectionIds: string[]) {
@@ -525,10 +564,9 @@ function variantSetInput(product: NormalizedProduct, existing: ShopifyProductNod
   return input;
 }
 
-async function setMetafields(credentials: ShopifyCredentials, product: NormalizedProduct, shopifyProduct: ShopifyProductNode) {
+async function setWarrantyMetafields(credentials: ShopifyCredentials, product: NormalizedProduct, shopifyProduct: ShopifyProductNode) {
   const variantBySku = new Map(shopifyProduct.variants.map((variant) => [variant.sku.toLowerCase(), variant]));
   const metafields: JsonRecord[] = [
-    { ownerId: shopifyProduct.id, namespace: "bizflow", key: "parent_product_id", type: "single_line_text_field", value: product.id },
     { ownerId: shopifyProduct.id, namespace: "bizflow", key: "warranty_months", type: "number_integer", value: String(product.warrantyMonths) },
   ];
   product.variants.forEach((variant) => {
@@ -662,7 +700,7 @@ async function createOrUpdateShopifyProduct(
   await updateDefaultVariant(credentials, product, updated);
   updated = await fetchShopifyProduct(credentials, productId);
   if (!updated) throw new Error("Shopify product disappeared after variant update");
-  await setMetafields(credentials, product, updated);
+  await setWarrantyMetafields(credentials, product, updated);
   await syncInventory(credentials, product, updated, mappings.locations, jobId);
   const finalProduct = await fetchShopifyProduct(credentials, productId);
   if (!finalProduct) throw new Error("Shopify product disappeared after inventory write");
