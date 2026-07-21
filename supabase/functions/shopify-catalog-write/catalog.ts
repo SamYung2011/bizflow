@@ -409,10 +409,7 @@ async function catalogueMappings(admin: SupabaseClient, product: NormalizedProdu
   const rows = result.data || [];
   const locations = new Map(rows.filter((row) => row.kind === "location").map((row) => [row.bizflow_key, row.shopify_resource_id]));
   const collections = new Map(rows.filter((row) => row.kind === "collection").map((row) => [row.bizflow_key, row.shopify_resource_id]));
-  const stockRows = [product, ...product.variants].flatMap((item) => item.stocks);
-  const missingLocations = [...new Set(stockRows.map((stock) => stock.warehouseId).filter((id) => !locations.has(id)))];
   const missingCollections = product.collections.filter((name) => !collections.has(name));
-  if (missingLocations.length) throw new Error(`Missing Shopify location mappings: ${missingLocations.join(",")}`);
   if (missingCollections.length) throw new Error(`Missing Shopify collection mappings: ${missingCollections.join(",")}`);
   return {
     locations,
@@ -671,7 +668,10 @@ async function syncInventory(
     const variant = variantBySku.get(item.internalCode.toLowerCase()) || (sourceItems.length === 1 ? shopifyProduct.variants[0] : null);
     if (!variant?.inventoryItemId) throw new Error(`Shopify inventory item missing for ${item.internalCode}`);
     for (const stock of item.stocks) {
-      const locationId = locations.get(stock.warehouseId)!;
+      const locationId = locations.get(stock.warehouseId);
+      // An unmapped warehouse remains authoritative in BizFlow but is outside
+      // Shopify inventory ownership. Skip it without blocking catalogue saves.
+      if (!locationId) continue;
       let current = variant.inventoryLevels.find((level) => level.locationId === locationId)?.quantity;
       if (current == null) {
         const mutation = `

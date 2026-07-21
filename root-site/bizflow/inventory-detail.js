@@ -49,6 +49,8 @@ const dict = {
     "inventory.warehouse.hk": "香港",
     "inventory.warehouse.zh": "珠海",
     "inventory.warehouse.zhuhai": "珠海",
+    "inventory.warehouse.bizflowOnly": "僅 BizFlow",
+    "inventory.warehouse.bizflowOnlyHint": "此倉庫庫存只保留在 BizFlow，不會推送至 Shopify。",
     "inventory.empty.subitems": "暫無子類",
     "inventory.empty.series": "暫無商品系列",
     "inventory.empty.warehouses": "暫無倉存資料",
@@ -105,6 +107,8 @@ const dict = {
     "inventory.warehouse.hk": "Hong Kong",
     "inventory.warehouse.zh": "Zhuhai",
     "inventory.warehouse.zhuhai": "Zhuhai",
+    "inventory.warehouse.bizflowOnly": "BizFlow only",
+    "inventory.warehouse.bizflowOnlyHint": "This warehouse remains in BizFlow and is not sent to Shopify.",
     "inventory.empty.subitems": "No subitems",
     "inventory.empty.series": "No product series",
     "inventory.empty.warehouses": "No warehouse stock",
@@ -161,6 +165,8 @@ const dict = {
     "inventory.warehouse.hk": "Hong Kong",
     "inventory.warehouse.zh": "Zhuhai",
     "inventory.warehouse.zhuhai": "Zhuhai",
+    "inventory.warehouse.bizflowOnly": "BizFlow uniquement",
+    "inventory.warehouse.bizflowOnlyHint": "Cet entrepôt reste dans BizFlow et n'est pas envoyé à Shopify.",
     "inventory.empty.subitems": "Aucune sous-catégorie",
     "inventory.empty.series": "Aucune série produit",
     "inventory.empty.warehouses": "Aucun stock d'entrepôt",
@@ -299,11 +305,22 @@ function renderStatusCard(helpers) {
   </section>`;
 }
 
+function renderWarehouseScopeBadge(warehouse, helpers) {
+  if (warehouse?.shopifyMapped !== false) return "";
+  const { escapeHtml, lang } = helpers;
+  const label = pageT(lang, "inventory.warehouse.bizflowOnly");
+  const hint = pageT(lang, "inventory.warehouse.bizflowOnlyHint");
+  return `<span class="inventory-warehouse-scope-badge" title="${escapeHtml(hint)}">${escapeHtml(label)}</span>`;
+}
+
 function renderParentStocksCard(helpers) {
   if (detail.subitems.length) return "";
   const { escapeHtml, lang } = helpers;
   const rows = (detail.warehouses || []).map((warehouse) => `<label class="inventory-warehouse-row">
-    <span>${escapeHtml(warehouse.name || pageT(lang, `inventory.warehouse.${warehouse.key}`))}</span>
+    <span class="inventory-warehouse-label">
+      <span>${escapeHtml(warehouse.name || pageT(lang, `inventory.warehouse.${warehouse.key}`))}</span>
+      ${renderWarehouseScopeBadge(warehouse, helpers)}
+    </span>
     <input class="inventory-quantity-input" type="number" min="0" step="1" data-parent-warehouse-qty="${escapeHtml(warehouse.id)}" data-inventory-write value="${escapeHtml(warehouse.quantity)}"${writeAttributes}>
   </label>`).join("");
   return `<section class="inventory-detail-card">
@@ -377,6 +394,7 @@ function renderWarehouseSelect(row, index, helpers) {
   return `<span class="inventory-select-anchor" data-modal-warehouse-menu>
     <button type="button" class="inventory-select-trigger" data-modal-warehouse-trigger data-inventory-write data-warehouse-index="${index}" aria-haspopup="listbox" aria-expanded="${open}" title="${escapeHtml(label)}"${writeAttributes}>
       <span>${escapeHtml(label)}</span>
+      ${renderWarehouseScopeBadge(row, helpers)}
       ${icon("icon-arrow-down", "icon")}
     </button>
     <div class="tp-component menu-popover inventory-select-menu${open ? " menu-popover--open" : ""}" role="listbox" data-modal-warehouse-popover>${options}</div>

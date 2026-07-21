@@ -18,12 +18,13 @@ function inferredInventoryBucket(product, productById) {
 }
 
 export async function buildInventorySnapshot() {
-  const [rawProducts, warehouses, stocks, bindings, shopifyLinks] = await Promise.all([
+  const [rawProducts, warehouses, stocks, bindings, shopifyLinks, resourceMappings] = await Promise.all([
     allRows("products", "name"),
     allRows("warehouses", "sort_order"),
     allRows("inventory_stock", null),
     allRows("shopify_catalog_bindings", null),
-    allRows("shopify_variant_links", null)
+    allRows("shopify_variant_links", null),
+    allRows("shopify_resource_mappings", null)
   ]);
   const products = rawProducts.filter((product) => product.is_virtual !== true && asText(product.category) !== "_archived");
   const productById = new Map(products.map((product) => [product.id, product]));
@@ -35,6 +36,11 @@ export async function buildInventorySnapshot() {
     childrenByParent.set(product.parent_product_id, children);
   }
   const warehouseById = new Map(warehouses.map((warehouse) => [warehouse.id, warehouse]));
+  const activeLocationMappings = resourceMappings.filter((mapping) =>
+    mapping.kind === "location" && mapping.active !== false);
+  const mappedWarehouseIds = new Set(activeLocationMappings.map((mapping) => asText(mapping.bizflow_key)).filter(Boolean));
+  const warehouseMappingKnown = activeLocationMappings.length > 0;
+  const warehouseMappingState = (warehouseId) => warehouseMappingKnown ? mappedWarehouseIds.has(warehouseId) : null;
   const stocksByProduct = new Map();
   for (const stock of stocks) {
     const list = stocksByProduct.get(stock.product_id) ?? [];
@@ -49,7 +55,8 @@ export async function buildInventorySnapshot() {
       key: asText(warehouse?.code).toLowerCase(),
       name: asText(warehouse?.name),
       quantity: asNumber(stock.qty),
-      updatedAt: formatDateTime(stock.updated_at)
+      updatedAt: formatDateTime(stock.updated_at),
+      shopifyMapped: warehouseMappingState(asText(stock.warehouse_id))
     };
   }).filter((row) => row.id).sort((a, b) => a.key.localeCompare(b.key));
   const groupIds = (product) => [product.id, ...(childrenByParent.get(product.id) ?? []).map((child) => child.id)];
@@ -68,7 +75,8 @@ export async function buildInventorySnapshot() {
       key: asText(warehouseById.get(warehouseId)?.code).toLowerCase(),
       name: asText(warehouseById.get(warehouseId)?.name),
       quantity: value.quantity,
-      updatedAt: formatDateTime(value.updatedAt)
+      updatedAt: formatDateTime(value.updatedAt),
+      shopifyMapped: warehouseMappingState(asText(warehouseId))
     })).filter((row) => row.key === "hk" || row.key === "zh").sort((a, b) => a.key.localeCompare(b.key));
   };
   const bindingByParent = new Map(bindings.map((binding) => [binding.bizflow_parent_product_id, binding]));
@@ -137,7 +145,10 @@ export async function buildInventorySnapshot() {
     scope: "RLS-visible production inventory",
     pageSize: 18,
     warehouses: warehouses.map((warehouse) => ({
-      id: asText(warehouse.id), key: asText(warehouse.code).toLowerCase(), name: asText(warehouse.name)
+      id: asText(warehouse.id),
+      key: asText(warehouse.code).toLowerCase(),
+      name: asText(warehouse.name),
+      shopifyMapped: warehouseMappingState(asText(warehouse.id))
     })),
     buckets: INVENTORY_BUCKETS.slice(),
     categoriesRaw,

@@ -112,6 +112,10 @@ assert.match(catalogue, /existing\?\.collectionIds[\s\S]*!mappings\.managedColle
   "Shopify-only collections must survive BizFlow catalogue updates");
 assert.match(catalogue, /changeFromQuantity: current/,
   "inventory absolute writes must carry compare-and-set state");
+assert.doesNotMatch(catalogue, /Missing Shopify location mappings/,
+  "unmapped BizFlow warehouses must not block the whole catalogue save or expose raw UUIDs");
+assert.match(catalogue, /const locationId = locations\.get\(stock\.warehouseId\)[\s\S]*if \(!locationId\) continue/,
+  "unmapped warehouse quantities must stay BizFlow-only and skip Shopify inventory writes");
 assert.match(catalogue, /inventorySetQuantities\(input: \$input\) @idempotent\(key: \$key\)/);
 assert.match(catalogue, /inventoryActivate[^]*@idempotent\(key: \$key\)/);
 assert.match(catalogue, /reconcileShopifyCas[\s\S]*sameTimestamp\(current\.updatedAt, expectedUpdatedAt\)/,
@@ -216,8 +220,15 @@ assert.doesNotMatch(shopify, /local-shopify-link-/,
 
 assert.match(snapshot, /allRows\("shopify_catalog_bindings"/);
 assert.match(snapshot, /allRows\("shopify_variant_links"/);
-assert.match(dependencies, /"inventory\.json": \[[\s\S]*"shopify_catalog_bindings"[\s\S]*"shopify_variant_links"/);
+assert.match(snapshot, /allRows\("shopify_resource_mappings"[\s\S]*shopifyMapped: warehouseMappingState/,
+  "warehouse rows must expose whether Shopify owns that location");
+assert.match(dependencies, /"inventory\.json": \[[\s\S]*"shopify_catalog_bindings"[\s\S]*"shopify_variant_links"[\s\S]*"shopify_resource_mappings"/);
 assert.match(provider, /shopifyBinding: listProduct\.detail\.shopifyBinding/,
   "detail state must receive the binding and Shopify updatedAt used by its gates and CAS");
+for (const label of ["僅 BizFlow", "BizFlow only", "BizFlow uniquement"]) {
+  assert.match(detail, new RegExp(label), `missing warehouse scope translation: ${label}`);
+}
+assert.match(detail, /shopifyMapped !== false[\s\S]*inventory-warehouse-scope-badge/,
+  "only explicitly unmapped warehouse rows receive the BizFlow-only badge");
 
 console.log("Empty-shell batch 5 contracts: PASS (Shopify health, ownership, durable jobs, CAS, true catalogue writes)");
