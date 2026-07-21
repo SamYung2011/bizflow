@@ -9,6 +9,7 @@ import {
   shopifyCasDecision,
   shopifyStructureHash,
 } from "./structure.ts";
+import { catalogMediaChanged } from "./image.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -582,7 +583,12 @@ async function ensureBizflowIdDefinition(credentials: ShopifyCredentials) {
   }
 }
 
-function variantSetInput(product: NormalizedProduct, existing: ShopifyProductNode | null, collectionIds: string[]) {
+function variantSetInput(
+  product: NormalizedProduct,
+  existing: ShopifyProductNode | null,
+  collectionIds: string[],
+  includeFiles: boolean,
+) {
   const input: JsonRecord = {
     title: product.name,
     descriptionHtml: escapeHtml(product.specs),
@@ -591,8 +597,15 @@ function variantSetInput(product: NormalizedProduct, existing: ShopifyProductNod
     tags: product.tags,
     collections: collectionIds,
   };
-  if (product.imageUrl !== (existing?.featuredImageUrl || "")) {
-    input.files = product.imageUrl ? [{ originalSource: product.imageUrl, alt: product.name, contentType: "IMAGE" }] : [];
+  if (includeFiles) {
+    const filename = product.imageUrl ? decodeURIComponent(new URL(product.imageUrl).pathname.split("/").pop() || "") : "";
+    input.files = product.imageUrl ? [{
+      originalSource: product.imageUrl,
+      alt: product.name,
+      contentType: "IMAGE",
+      filename,
+      duplicateResolutionMode: "REPLACE",
+    }] : [];
   }
   if (product.variants.length) {
     const existingBySku = new Map((existing?.variants || []).map((variant) => [variant.sku.toLowerCase(), variant]));
@@ -725,6 +738,7 @@ async function createOrUpdateShopifyProduct(
   product: NormalizedProduct,
   existing: ShopifyProductNode | null,
   jobId: string,
+  includeFiles: boolean,
 ) {
   const mappings = await catalogueMappings(admin, product);
   if (!existing) await ensureBizflowIdDefinition(credentials);
@@ -742,7 +756,7 @@ async function createOrUpdateShopifyProduct(
     ...(existing?.collectionIds || []).filter((id) => !mappings.managedCollectionIds.has(id)),
     ...mappings.collectionIds,
   ];
-  const input = variantSetInput(product, existing, [...new Set(collectionIds)]);
+  const input = variantSetInput(product, existing, [...new Set(collectionIds)], includeFiles);
   const identifier = existing
     ? { id: existing.id }
     : { customId: { namespace: "bizflow", key: "parent_product_id", value: product.id } };
@@ -932,7 +946,8 @@ export async function executeCatalogWrite(
       // timed-out/retried delete safely resumable without a second mutation.
       result = { shopifyProductId: binding.shopify_product_id, deleted: true, alreadyMissing: !current };
     } else {
-      result = await createOrUpdateShopifyProduct(admin, credentials, product!, current, job.id);
+      const includeFiles = await catalogMediaChanged(admin, action, product!.id, product!.imageUrl);
+      result = await createOrUpdateShopifyProduct(admin, credentials, product!, current, job.id, includeFiles);
     }
 
     await admin.from("shopify_catalog_jobs").update({

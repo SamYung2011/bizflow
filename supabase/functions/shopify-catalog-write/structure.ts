@@ -86,8 +86,8 @@ export async function shopifyStructureHash(
   // updatedAt and inventory quantities are deliberately absent: Shopify itself
   // advances Product.updatedAt for tracked-inventory adjustments. Inventory has
   // its own changeFromQuantity CAS. Media stays outside v1 because productSet
-  // attaches/processes files asynchronously; INV-img-1 will give it an explicit
-  // content-addressed baseline instead of hashing transient CDN state.
+  // attaches/processes files asynchronously; INV-img-1 compares the immutable
+  // content-addressed BizFlow source URL instead of hashing transient CDN state.
   const encoded = new TextEncoder().encode(JSON.stringify(stable(
     shopifyStructureSnapshot(product, managedCollectionIds),
   )));

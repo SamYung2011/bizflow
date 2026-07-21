@@ -6,10 +6,13 @@ import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import {
+  cleanupLiveInventoryImage,
   deleteLiveInventoryProduct,
   getShopifyCredentialHealth,
+  SHOPIFY_PRODUCT_IMAGE_ACCEPT,
   shopifyWriteReady,
-  updateLiveInventoryProduct
+  updateLiveInventoryProduct,
+  uploadLiveInventoryImage
 } from "../data/live-inventory-writes.js";
 
 const dict = {
@@ -23,7 +26,18 @@ const dict = {
     "inventory.field.price": "價格 HKD$",
     "inventory.field.warranty": "保修月數",
     "inventory.field.productType": "Shopify 商品類型",
-    "inventory.field.imageUrl": "商品圖片 URL",
+    "inventory.image.title": "商品圖片",
+    "inventory.image.choose": "選擇圖片",
+    "inventory.image.replace": "更換圖片",
+    "inventory.image.remove": "移除圖片",
+    "inventory.image.uploading": "正在驗證並上傳…",
+    "inventory.image.hint": "JPG、PNG、WebP 或 GIF；最大 20MB、4472×4472。",
+    "inventory.image.error.type": "只支援 JPG、PNG、WebP 或 GIF 圖片。",
+    "inventory.image.error.size": "圖片不可超過 20MB。",
+    "inventory.image.error.dimensions": "圖片尺寸不可超過 4472×4472（20MP）。",
+    "inventory.image.error.content": "圖片內容無法驗證，請改選另一張圖片。",
+    "inventory.image.error.upload": "商品圖片上傳失敗，請重試。",
+    "inventory.image.error.cleanup": "未能清理尚未保存的圖片，請重試。",
     "inventory.field.specs": "規格",
     "inventory.field.tags": "標籤（逗號分隔）",
     "inventory.field.variantSku": "子類 SKU",
@@ -85,7 +99,18 @@ const dict = {
     "inventory.field.price": "Price HKD$",
     "inventory.field.warranty": "Warranty months",
     "inventory.field.productType": "Shopify product type",
-    "inventory.field.imageUrl": "Product image URL",
+    "inventory.image.title": "Product image",
+    "inventory.image.choose": "Choose image",
+    "inventory.image.replace": "Replace image",
+    "inventory.image.remove": "Remove image",
+    "inventory.image.uploading": "Validating and uploading…",
+    "inventory.image.hint": "JPG, PNG, WebP, or GIF; max 20 MB and 4472×4472.",
+    "inventory.image.error.type": "Use a JPG, PNG, WebP, or GIF image.",
+    "inventory.image.error.size": "The image must not exceed 20 MB.",
+    "inventory.image.error.dimensions": "The image must not exceed 4472×4472 (20 MP).",
+    "inventory.image.error.content": "The image could not be verified. Choose another file.",
+    "inventory.image.error.upload": "The product image could not be uploaded. Try again.",
+    "inventory.image.error.cleanup": "The unsaved image could not be removed. Try again.",
     "inventory.field.specs": "Specification",
     "inventory.field.tags": "Tags (comma separated)",
     "inventory.field.variantSku": "Variant SKU",
@@ -147,7 +172,18 @@ const dict = {
     "inventory.field.price": "Prix HKD$",
     "inventory.field.warranty": "Garantie en mois",
     "inventory.field.productType": "Type de produit Shopify",
-    "inventory.field.imageUrl": "URL de l'image produit",
+    "inventory.image.title": "Image du produit",
+    "inventory.image.choose": "Choisir une image",
+    "inventory.image.replace": "Remplacer l'image",
+    "inventory.image.remove": "Supprimer l'image",
+    "inventory.image.uploading": "Validation et téléversement…",
+    "inventory.image.hint": "JPG, PNG, WebP ou GIF ; 20 Mo et 4472×4472 maximum.",
+    "inventory.image.error.type": "Utilisez une image JPG, PNG, WebP ou GIF.",
+    "inventory.image.error.size": "L'image ne doit pas dépasser 20 Mo.",
+    "inventory.image.error.dimensions": "L'image ne doit pas dépasser 4472×4472 (20 MP).",
+    "inventory.image.error.content": "L'image n'a pas pu être vérifiée. Choisissez un autre fichier.",
+    "inventory.image.error.upload": "Échec du téléversement de l'image. Réessayez.",
+    "inventory.image.error.cleanup": "L'image non enregistrée n'a pas pu être supprimée. Réessayez.",
     "inventory.field.specs": "Spécification",
     "inventory.field.tags": "Étiquettes (séparées par des virgules)",
     "inventory.field.variantSku": "SKU de variante",
@@ -220,6 +256,12 @@ let state = {
   basicDirty: false,
   seriesCount: 0,
   busy: false,
+  imageBusy: false,
+  imageDirty: false,
+  imageError: "",
+  originalImageUrl: "",
+  uploadedImageUrl: "",
+  uploadedImageOwned: false,
   error: "",
   feedback: ""
 };
@@ -230,6 +272,15 @@ let detailCommitted = false;
 
 function pageT(lang, key) {
   return dict[lang]?.[key] ?? dict.zh[key] ?? key;
+}
+
+function imageErrorText(lang, error) {
+  const code = String(error?.code || "");
+  if (code === "SHOPIFY_IMAGE_TYPE_UNSUPPORTED") return pageT(lang, "inventory.image.error.type");
+  if (code === "SHOPIFY_IMAGE_SIZE_INVALID") return pageT(lang, "inventory.image.error.size");
+  if (code === "SHOPIFY_IMAGE_DIMENSIONS_INVALID") return pageT(lang, "inventory.image.error.dimensions");
+  if (code.includes("CONTENT") || code.includes("DIGEST")) return pageT(lang, "inventory.image.error.content");
+  return pageT(lang, "inventory.image.error.upload");
 }
 
 function formatHkd(value) {
@@ -285,14 +336,32 @@ function renderStatusSelect(helpers) {
   </span>`;
 }
 
+function renderProductImageEditor(helpers) {
+  const { escapeHtml, icon, lang } = helpers;
+  const imageUrl = String(detail.product.imageUrl || "");
+  const disabled = liveReadOnly || state.busy || state.imageBusy;
+  const disabledAttributes = disabled ? ' disabled aria-disabled="true"' : "";
+  const preview = imageUrl
+    ? `<img class="inventory-detail-image" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(detail.product.name || pageT(lang, "inventory.image.title"))}">`
+    : `<span class="inventory-detail-image inventory-image-upload__empty" aria-hidden="true">${icon("icon-nav-inventory", "icon")}</span>`;
+  return `<div class="inventory-detail-image-editor" data-inventory-detail-image-upload>
+    ${preview}
+    <span class="inventory-image-upload__hint">${escapeHtml(pageT(lang, "inventory.image.hint"))}</span>
+    <div class="inventory-image-upload__actions">
+      <label class="inventory-image-upload__choose${disabled ? " is-disabled" : ""}">
+        <input type="file" accept="${escapeHtml(SHOPIFY_PRODUCT_IMAGE_ACCEPT)}" data-detail-image-input data-inventory-write${disabledAttributes}>
+        <span>${escapeHtml(state.imageBusy ? pageT(lang, "inventory.image.uploading") : pageT(lang, imageUrl ? "inventory.image.replace" : "inventory.image.choose"))}</span>
+      </label>
+      ${imageUrl ? `<button type="button" class="inventory-image-upload__remove" data-detail-image-remove data-inventory-write${disabledAttributes}>${escapeHtml(pageT(lang, "inventory.image.remove"))}</button>` : ""}
+    </div>
+    <span class="inventory-image-upload__error" role="status" aria-live="polite">${escapeHtml(state.imageError || "")}</span>
+  </div>`;
+}
+
 function renderBasicCard(helpers) {
-  const { escapeHtml } = helpers;
-  const image = detail.product.imageUrl
-    ? `<img class="inventory-detail-image" src="${escapeHtml(detail.product.imageUrl)}" alt="" loading="lazy">`
-    : `<span class="inventory-detail-image" aria-hidden="true"></span>`;
   return `<section class="inventory-detail-card">
     <div class="inventory-basic">
-      ${image}
+      ${renderProductImageEditor(helpers)}
       <div class="inventory-basic-fields">
         ${renderField({ labelKey: "inventory.field.name", value: detail.product.name, field: "name", wide: true }, helpers)}
         ${renderField({ labelKey: "inventory.field.productId", value: detail.product.productId, field: "productId" }, helpers)}
@@ -301,7 +370,6 @@ function renderBasicCard(helpers) {
         ${renderField({ labelKey: "inventory.field.price", value: detail.product.price, field: "price", type: "number" }, helpers)}
         ${renderField({ labelKey: "inventory.field.warranty", value: detail.product.warrantyMonths, field: "warrantyMonths", type: "number" }, helpers)}
         ${renderField({ labelKey: "inventory.field.productType", value: detail.product.productType, field: "productType" }, helpers)}
-        ${renderField({ labelKey: "inventory.field.imageUrl", value: detail.product.imageUrl, field: "imageUrl", wide: true, type: "url" }, helpers)}
         ${renderField({ labelKey: "inventory.field.specs", value: detail.product.specs, field: "specs", wide: true }, helpers)}
         ${renderField({ labelKey: "inventory.field.tags", value: (detail.product.tags || []).join(", "), field: "tags", wide: true }, helpers)}
       </div>
@@ -571,8 +639,30 @@ function catalogPayload() {
   };
 }
 
+async function cleanupUnsavedDetailImage() {
+  const imageUrl = state.uploadedImageUrl;
+  if (!imageUrl) return true;
+  if (!state.uploadedImageOwned) {
+    state.uploadedImageUrl = "";
+    return true;
+  }
+  try {
+    await cleanupLiveInventoryImage(imageUrl);
+    state.uploadedImageUrl = "";
+    state.uploadedImageOwned = false;
+    return true;
+  } catch {
+    state.imageError = pageT(currentHelpers?.lang ?? "zh", "inventory.image.error.cleanup");
+    return false;
+  }
+}
+
+async function cleanupCommittedDetailImages(urls) {
+  await Promise.allSettled([...new Set(urls.filter(Boolean))].map((url) => cleanupLiveInventoryImage(url)));
+}
+
 async function saveInventoryDetail() {
-  if (liveReadOnly || state.busy) return;
+  if (liveReadOnly || state.busy || state.imageBusy) return;
   if (!authenticated) {
     detailCommitted = true;
     navigateTo("./inventory.html");
@@ -621,6 +711,12 @@ async function saveInventoryDetail() {
       }
     }
     detailCommitted = true;
+    const committedImageUrl = String(detail.product.imageUrl || "");
+    if (state.originalImageUrl && state.originalImageUrl !== committedImageUrl) {
+      await cleanupCommittedDetailImages([state.originalImageUrl]);
+    }
+    state.uploadedImageUrl = "";
+    state.uploadedImageOwned = false;
     state.feedback = pageT(currentHelpers?.lang ?? "zh", "inventory.saved");
     navigateTo("./inventory.html");
   } catch (error) {
@@ -641,6 +737,26 @@ async function onInventoryDetailClick(event) {
     return;
   }
 
+  if (event.target.closest("[data-detail-image-remove]")) {
+    if (state.busy || state.imageBusy) return;
+    const currentImageUrl = String(detail.product.imageUrl || "");
+    state.imageBusy = true;
+    state.imageError = "";
+    rerenderDetailPage();
+    if (currentImageUrl && currentImageUrl === state.uploadedImageUrl) {
+      if (!await cleanupUnsavedDetailImage()) {
+        state.imageBusy = false;
+        rerenderDetailPage();
+        return;
+      }
+    }
+    detail.product.imageUrl = "";
+    state.imageDirty = state.originalImageUrl !== "";
+    state.imageBusy = false;
+    rerenderDetailPage();
+    return;
+  }
+
   if (event.target.closest("[data-detail-delete]")) {
     if (!authenticated || state.busy) return;
     const first = await confirmInPage(pageT(currentHelpers?.lang ?? "zh", "inventory.deleteConfirm"), { danger: true });
@@ -652,6 +768,9 @@ async function onInventoryDetailClick(event) {
     try {
       await deleteLiveInventoryProduct(detail.product.id);
       detailCommitted = true;
+      await cleanupCommittedDetailImages([state.originalImageUrl, state.uploadedImageUrl]);
+      state.uploadedImageUrl = "";
+      state.uploadedImageOwned = false;
       navigateTo("./inventory.html");
     } catch (error) {
       state.error = `${pageT(currentHelpers?.lang ?? "zh", "inventory.deleteFailed")}: ${error.message}`;
@@ -763,8 +882,37 @@ async function onInventoryDetailClick(event) {
   if (!event.target.closest("[data-modal-warehouse-menu]")) closeWarehouseMenus();
 }
 
-function onInventoryDetailInput(event) {
+async function onInventoryDetailInput(event) {
   if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
+  const imageInput = event.target.closest("[data-detail-image-input]");
+  if (imageInput?.files?.[0]) {
+    if (state.busy || state.imageBusy) return;
+    const previousDraftUrl = state.uploadedImageUrl;
+    const previousDraftOwned = state.uploadedImageOwned;
+    state.imageBusy = true;
+    state.imageError = "";
+    rerenderDetailPage();
+    try {
+      const image = await uploadLiveInventoryImage(imageInput.files[0]);
+      detail.product.imageUrl = image.publicUrl;
+      state.uploadedImageUrl = image.publicUrl === state.originalImageUrl ? "" : image.publicUrl;
+      state.uploadedImageOwned = Boolean(state.uploadedImageUrl && image.uploadedByThisDraft === true);
+      state.imageDirty = image.publicUrl !== state.originalImageUrl;
+      if (previousDraftOwned && previousDraftUrl && previousDraftUrl !== image.publicUrl) {
+        try {
+          await cleanupLiveInventoryImage(previousDraftUrl);
+        } catch {
+          state.imageError = pageT(currentHelpers?.lang ?? "zh", "inventory.image.error.cleanup");
+        }
+      }
+    } catch (error) {
+      state.imageError = imageErrorText(currentHelpers?.lang ?? "zh", error);
+    } finally {
+      state.imageBusy = false;
+      rerenderDetailPage();
+    }
+    return;
+  }
   const field = event.target.closest("[data-detail-field]");
   if (field && field.dataset.detailField) {
     const key = field.dataset.detailField;
@@ -822,6 +970,7 @@ function hasInventoryDetailUnsavedChanges() {
   if (detailCommitted) return false;
   return state.status !== detail?.product.status
     || state.basicDirty
+    || state.imageDirty
     || detail?.series.length !== state.seriesCount
     || state.modalItem !== null;
 }
@@ -857,6 +1006,12 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
     modalItem: null,
     warehouseOpen: null,
     basicDirty: false,
+    imageBusy: false,
+    imageDirty: false,
+    imageError: "",
+    originalImageUrl: String(detail.product.imageUrl || ""),
+    uploadedImageUrl: "",
+    uploadedImageOwned: false,
     seriesCount: detail.series.length,
     busy: false,
     error: "",
@@ -873,12 +1028,17 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
     activate() {
       scope.listen(document, "click", onInventoryDetailClick);
       scope.listen(document, "input", onInventoryDetailInput);
+      scope.listen(document, "change", onInventoryDetailInput);
       scope.listen(document, "keydown", onInventoryDetailKeydown);
     },
     hasUnsavedChanges: hasInventoryDetailUnsavedChanges,
     async canLeave() {
       if (!hasInventoryDetailUnsavedChanges()) return true;
-      return confirmInPage(pageT(currentHelpers?.lang ?? "zh", "inventory.leaveUnsaved"));
+      const leave = await confirmInPage(pageT(currentHelpers?.lang ?? "zh", "inventory.leaveUnsaved"));
+      if (!leave) return false;
+      const cleaned = await cleanupUnsavedDetailImage();
+      if (!cleaned) rerenderDetailPage();
+      return cleaned;
     },
     captureState: () => null,
     dispose() {
