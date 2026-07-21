@@ -8,7 +8,7 @@ const SNAPSHOT_TABLES = Object.freeze({
     "invoices", "customers", "employees", "shipment_events", "customer_devices", "products",
     "employee_tasks", "task_assignees", "employee_task_feedbacks", "departments",
     "employee_departments", "employee_companies", "roles", "task_pending",
-    "company_join_pending", "warehouses", "inventory_stock"
+    "company_join_pending", "warehouses", "inventory_stock", "warranty_renewals"
   ],
   "tasks.json": [
     "employee_tasks", "employees", "task_assignees", "employee_task_feedbacks",
@@ -24,7 +24,7 @@ const SNAPSHOT_TABLES = Object.freeze({
     "employee_tasks", "task_assignees", "task_pending", "company_join_pending"
   ],
   "customers.json": ["customers", "invoices", "customer_devices"],
-  "warranty.json": ["customers", "invoices", "customer_devices", "products"],
+  "warranty.json": ["customers", "invoices", "customer_devices", "products", "warranty_renewals"],
   "orders.json": ["invoices", "customers", "employees", "shipment_events"],
   "home-order-metrics.json": ["invoices", "customers", "employees", "shipment_events"],
   "inventory.json": [

@@ -1122,6 +1122,13 @@ function isValidWarrantyItem(item) {
   return !!item &&
     ["no", "product", "customer", "phone", "purchaseDate", "expiry"].every((key) => typeof item[key] === "string") &&
     (item.customerId === null || typeof item.customerId === "string") &&
+    (item.invoiceId == null || typeof item.invoiceId === "string") &&
+    (item.productId == null || typeof item.productId === "string") &&
+    (item.latestRenewal == null || (
+      typeof item.latestRenewal === "object" &&
+      ["paidAt", "previousEnd", "newEnd"].every((key) => typeof item.latestRenewal[key] === "string") &&
+      [12, 24].includes(item.latestRenewal.months)
+    )) &&
     typeof item.warrantyMonths === "number";
 }
 

@@ -2,6 +2,7 @@ import { getWarrantyData } from "../data/provider.js";
 import { managementPageSize, renderManagementList, renderManagementPager } from "../components/management-list.js";
 import { createDateRangePanel } from "../components/date-range-panel.js";
 import { clearPhoneCopyNotice, phoneCopyLabel } from "../components/phone-copy.js";
+import { renewLiveWarranty } from "../data/live-warranty-writes.js";
 
 const copy = {
   zh: {
@@ -20,7 +21,7 @@ const copy = {
     today: "今天",
     previousMonth: "上個月",
     nextMonth: "下個月",
-    year: "年份",
+    calendarYear: "年份",
     chooseMonth: "選擇年月",
     clear: "清除",
     cancel: "取消",
@@ -32,7 +33,23 @@ const copy = {
     empty: "暫無符合條件的保修記錄",
     loading: "正在載入保修記錄",
     previous: "上一頁",
-    next: "下一頁"
+    next: "下一頁",
+    renew: "續保",
+    renewed: "已續保",
+    renewalBadge: "{months} 個月 · 繳費 {date}",
+    renewalTitle: "保修續保",
+    renewalTerm: "續保期限",
+    oneYear: "一年",
+    twoYears: "兩年",
+    renewalPaidAt: "保修繳費日期",
+    renewalSelectDate: "選擇日期",
+    renewalSubmit: "確認續保",
+    renewalSaving: "續保中…",
+    renewalSuccess: "保修已續期至 {date}",
+    renewalFailed: "續保失敗，請稍後再試",
+    renewalDateRequired: "請選擇有效的保修繳費日期",
+    renewalDateBeforeSale: "保修繳費日期不可早於購買日期",
+    close: "關閉"
   },
   en: {
     title: "Warranty reminders",
@@ -50,7 +67,7 @@ const copy = {
     today: "Today",
     previousMonth: "Previous month",
     nextMonth: "Next month",
-    year: "Year",
+    calendarYear: "Year",
     chooseMonth: "Choose year and month",
     clear: "Clear",
     cancel: "Cancel",
@@ -62,7 +79,23 @@ const copy = {
     empty: "No warranty records match the filters",
     loading: "Loading warranty records",
     previous: "Previous page",
-    next: "Next page"
+    next: "Next page",
+    renew: "Renew",
+    renewed: "Renewed",
+    renewalBadge: "{months} months · paid {date}",
+    renewalTitle: "Renew warranty",
+    renewalTerm: "Renewal term",
+    oneYear: "One year",
+    twoYears: "Two years",
+    renewalPaidAt: "Warranty payment date",
+    renewalSelectDate: "Choose date",
+    renewalSubmit: "Confirm renewal",
+    renewalSaving: "Renewing…",
+    renewalSuccess: "Warranty renewed through {date}",
+    renewalFailed: "Could not renew the warranty. Please try again.",
+    renewalDateRequired: "Choose a valid warranty payment date",
+    renewalDateBeforeSale: "The warranty payment date cannot be before the purchase date",
+    close: "Close"
   },
   fr: {
     title: "Rappels de garantie",
@@ -80,7 +113,7 @@ const copy = {
     today: "Aujourd'hui",
     previousMonth: "Mois précédent",
     nextMonth: "Mois suivant",
-    year: "Année",
+    calendarYear: "Année",
     chooseMonth: "Choisir l’année et le mois",
     clear: "Effacer",
     cancel: "Annuler",
@@ -92,7 +125,23 @@ const copy = {
     empty: "Aucune garantie ne correspond aux filtres",
     loading: "Chargement des garanties",
     previous: "Page précédente",
-    next: "Page suivante"
+    next: "Page suivante",
+    renew: "Renouveler",
+    renewed: "Renouvelée",
+    renewalBadge: "{months} mois · payé le {date}",
+    renewalTitle: "Renouveler la garantie",
+    renewalTerm: "Durée du renouvellement",
+    oneYear: "Un an",
+    twoYears: "Deux ans",
+    renewalPaidAt: "Date de paiement de la garantie",
+    renewalSelectDate: "Choisir une date",
+    renewalSubmit: "Confirmer le renouvellement",
+    renewalSaving: "Renouvellement…",
+    renewalSuccess: "Garantie renouvelée jusqu’au {date}",
+    renewalFailed: "Impossible de renouveler la garantie. Réessayez.",
+    renewalDateRequired: "Choisissez une date de paiement valide",
+    renewalDateBeforeSale: "La date de paiement ne peut pas précéder la date d’achat",
+    close: "Fermer"
   }
 };
 
@@ -101,10 +150,15 @@ const state = {
   search: "",
   dateFrom: "",
   dateTo: "",
-  page: 1
+  page: 1,
+  renewal: null,
+  renewalBusy: false,
+  renewalError: "",
+  renewalNotice: null
 };
 let validCustomerIds = new Set();
 const dateRangePanel = createDateRangePanel();
+const renewalDatePanel = createDateRangePanel();
 let dataLoadVersion = 0;
 
 function t(lang, key, values = {}) {
@@ -119,6 +173,47 @@ function dateValue(value) {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
     ? date.getTime()
     : NaN;
+}
+
+function inputDate(value) {
+  const timestamp = dateValue(value);
+  if (!Number.isFinite(timestamp)) return "";
+  const date = new Date(timestamp);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+}
+
+function displayDate(value) {
+  return inputDate(value).replaceAll("-", "/");
+}
+
+function hongKongTodayInput() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Hong_Kong",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(new Date()).reduce((out, part) => {
+    if (part.type !== "literal") out[part.type] = part.value;
+    return out;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function warrantyRenewalTarget(item) {
+  if (!item?.invoiceId || !item?.productId) return "";
+  return `${encodeURIComponent(item.invoiceId)}|${encodeURIComponent(item.productId)}`;
+}
+
+function renewalItem() {
+  const target = state.renewal?.target;
+  return target ? state.items?.find((item) => warrantyRenewalTarget(item) === target) ?? null : null;
+}
+
+function renewalErrorKey(error) {
+  const message = String(error?.message || "");
+  if (message.includes("earlier than sold date")) return "renewalDateBeforeSale";
+  if (message.includes("payment date")) return "renewalDateRequired";
+  return "renewalFailed";
 }
 
 export function warrantyDaysLeft(expiry, today = new Date()) {
@@ -185,16 +280,22 @@ function renderDateRangeFilter(helpers) {
 }
 
 function renderWarrantyRow(item, helpers) {
-  const { escapeHtml, lang } = helpers;
+  const { escapeHtml, lang, liveWritable = false, writeBusy = false } = helpers;
   const e = escapeHtml;
   const hasCustomer = Boolean(item.customerId && validCustomerIds.has(String(item.customerId)));
+  const renewalTarget = warrantyRenewalTarget(item);
+  const canRenew = Boolean(renewalTarget);
+  const renewalDisabled = !liveWritable || writeBusy || state.renewalBusy;
   const detailLink = hasCustomer
     ? `<a class="warranty-row__link" href="./customer-detail.html?id=${encodeURIComponent(item.customerId)}" aria-label="${e(item.customer)}"></a>`
     : "";
   const timing = item.daysLeft < 0
     ? t(lang, "overdue", { days: Math.abs(item.daysLeft) })
     : t(lang, "remaining", { days: item.daysLeft });
-  return `<article class="management-list__row warranty-row warranty-row--${item.bucket}${hasCustomer ? "" : " warranty-row--disabled"}"${hasCustomer ? "" : ' aria-disabled="true"'} data-warranty-row${item.customerId ? ` data-customer-id="${e(item.customerId)}"` : ""}>
+  const renewed = item.latestRenewal
+    ? t(lang, "renewalBadge", { months: item.latestRenewal.months, date: item.latestRenewal.paidAt })
+    : "";
+  return `<article class="management-list__row warranty-row warranty-row--${item.bucket}${hasCustomer ? "" : " warranty-row--disabled"}"${hasCustomer ? "" : ' aria-disabled="true"'} data-warranty-row${item.customerId ? ` data-customer-id="${e(item.customerId)}"` : ""}${item.invoiceId ? ` data-invoice-id="${e(item.invoiceId)}"` : ""}${item.productId ? ` data-product-id="${e(item.productId)}"` : ""}>
     ${detailLink}
     <span class="warranty-row__bar" aria-hidden="true"></span>
     <span class="warranty-row__customer">
@@ -210,8 +311,44 @@ function renderWarrantyRow(item, helpers) {
     <span class="warranty-row__expiry">
       <span>${e(t(lang, "expiry"))} ${e(item.expiry)}</span>
       <strong>${e(timing)}</strong>
+      ${renewed ? `<span class="warranty-row__renewed" title="${e(renewed)}">${e(t(lang, "renewed"))} · ${e(renewed)}</span>` : ""}
+      ${canRenew ? `<button type="button" class="warranty-row__renew" data-warranty-renew="${e(renewalTarget)}" data-customers-write${renewalDisabled ? ' disabled aria-disabled="true"' : ""}>${e(t(lang, "renew"))}</button>` : ""}
     </span>
   </article>`;
+}
+
+function renderRenewalModal(helpers) {
+  const { escapeHtml, lang } = helpers;
+  const item = renewalItem();
+  if (!state.renewal || !item) return "";
+  const e = escapeHtml;
+  const disabledAttributes = state.renewalBusy ? ' disabled aria-disabled="true"' : "";
+  return `<div class="customers-modal-overlay customers-modal-overlay--open warranty-renewal-overlay" data-warranty-renewal-overlay>
+    <section class="tp-component form-new-customer warranty-renewal-modal" role="dialog" aria-modal="true" aria-label="${e(t(lang, "renewalTitle"))}">
+      <button type="button" class="form-new-customer__close" data-warranty-renewal-close aria-label="${e(t(lang, "close"))}"${disabledAttributes}></button>
+      <h2 class="form-new-customer__title">${e(t(lang, "renewalTitle"))}</h2>
+      <div class="warranty-renewal-modal__summary">
+        <strong>${e(item.customer)}</strong>
+        <span>${e(item.product)} · ${e(item.no)}</span>
+        <span>${e(t(lang, "purchase"))} ${e(item.purchaseDate)} · ${e(t(lang, "expiry"))} ${e(item.expiry)}</span>
+      </div>
+      <div class="warranty-renewal-term">
+        <span class="warranty-renewal-modal__label">${e(t(lang, "renewalTerm"))}</span>
+        <div class="warranty-renewal-options" role="group" aria-label="${e(t(lang, "renewalTerm"))}">
+          ${[12, 24].map((months) => `<button type="button" class="${state.renewal.months === months ? "is-active" : ""}" data-warranty-renewal-months="${months}" data-customers-write aria-pressed="${state.renewal.months === months}"${disabledAttributes}>${e(t(lang, months === 12 ? "oneYear" : "twoYears"))}</button>`).join("")}
+        </div>
+      </div>
+      <div class="warranty-renewal-date">
+        <span class="warranty-renewal-modal__label">${e(t(lang, "renewalPaidAt"))}</span>
+        <button type="button" class="warranty-renewal-date__trigger${state.renewal.paidAt ? " has-value" : ""}" data-warranty-renewal-date-trigger data-customers-write aria-haspopup="dialog" aria-expanded="${renewalDatePanel.isOpen()}"${disabledAttributes}>${e(displayDate(state.renewal.paidAt) || t(lang, "renewalSelectDate"))}</button>
+      </div>
+      ${state.renewalError ? `<p class="warranty-renewal-modal__error" role="alert">${e(t(lang, state.renewalError))}</p>` : ""}
+      <div class="form-new-customer__footer">
+        <button type="button" class="btn--hug btn--hug--gray" data-warranty-renewal-close${disabledAttributes}>${e(t(lang, "cancel"))}</button>
+        <button type="button" class="btn--hug btn--hug--blue" data-warranty-renewal-submit data-customers-write${disabledAttributes}>${e(t(lang, state.renewalBusy ? "renewalSaving" : "renewalSubmit"))}</button>
+      </div>
+    </section>
+  </div>`;
 }
 
 export function renderWarranty(helpers) {
@@ -238,6 +375,7 @@ export function renderWarranty(helpers) {
     nextLabel: t(lang, "next")
   });
   return `<section class="warranty-panel" data-warranty-panel data-warranty-total="${state.items.length}" data-warranty-filtered="${filtered.length}">
+    ${state.renewalNotice ? `<p class="customer-write-notice customer-write-notice--success" role="status">${escapeHtml(t(lang, state.renewalNotice.key, state.renewalNotice.values))}</p>` : ""}
     <div class="warranty-toolbar">
       <div class="warranty-toolbar__filters">
         ${renderDateRangeFilter(helpers)}
@@ -248,7 +386,7 @@ export function renderWarranty(helpers) {
       </div>
     </div>
     ${renderManagementList({ content, pager, paged: filtered.length > pageSize })}
-  </section>`;
+  </section>${renderRenewalModal(helpers)}`;
 }
 
 export function setWarrantySearch(value) {
@@ -292,6 +430,112 @@ export function closeWarrantyDateRange() {
   return dateRangePanel.close({ restoreFocus: false });
 }
 
+export function openWarrantyRenewal(target) {
+  const item = state.items?.find((row) => warrantyRenewalTarget(row) === String(target));
+  if (!item?.invoiceId || !item?.productId || state.renewalBusy) return false;
+  renewalDatePanel.close({ restoreFocus: false });
+  state.renewal = { target: warrantyRenewalTarget(item), months: 12, paidAt: hongKongTodayInput() };
+  state.renewalError = "";
+  state.renewalNotice = null;
+  return true;
+}
+
+export function closeWarrantyRenewal() {
+  if (!state.renewal || state.renewalBusy) return "";
+  const target = state.renewal.target;
+  renewalDatePanel.close({ restoreFocus: false });
+  state.renewal = null;
+  state.renewalError = "";
+  return target;
+}
+
+export function isWarrantyRenewalOpen() {
+  return Boolean(state.renewal);
+}
+
+export function setWarrantyRenewalMonths(value) {
+  const months = Number(value);
+  if (!state.renewal || state.renewalBusy || ![12, 24].includes(months) || state.renewal.months === months) return false;
+  state.renewal.months = months;
+  state.renewalError = "";
+  return true;
+}
+
+export function openWarrantyRenewalDate(anchor, helpers, onChange) {
+  if (!state.renewal || state.renewalBusy) return false;
+  const { lang } = helpers;
+  return renewalDatePanel.open({
+    anchor,
+    mode: "single",
+    date: state.renewal.paidAt,
+    language: lang,
+    t: (key) => t(lang, key === "year" ? "calendarYear" : key === "date" ? "renewalPaidAt" : key),
+    onCommit({ date }) {
+      if (!state.renewal) return;
+      state.renewal.paidAt = date;
+      state.renewalError = "";
+      onChange?.();
+    }
+  });
+}
+
+export function closeWarrantyRenewalDate() {
+  return renewalDatePanel.close({ restoreFocus: false });
+}
+
+export async function submitWarrantyRenewal({ scope = null, onChange = null } = {}) {
+  const item = renewalItem();
+  if (!state.renewal || !item || state.renewalBusy) return { ok: false };
+  const target = warrantyRenewalTarget(item);
+  const paidAt = inputDate(state.renewal.paidAt);
+  if (!paidAt) {
+    state.renewalError = "renewalDateRequired";
+    onChange?.();
+    return { ok: false };
+  }
+  if (dateValue(paidAt) < dateValue(item.purchaseDate)) {
+    state.renewalError = "renewalDateBeforeSale";
+    onChange?.();
+    return { ok: false };
+  }
+
+  state.renewalBusy = true;
+  state.renewalError = "";
+  onChange?.();
+  try {
+    const result = await renewLiveWarranty({
+      invoiceId: item.invoiceId,
+      productId: item.productId,
+      months: state.renewal.months,
+      paidAt
+    });
+    if (scope?.signal?.aborted || (scope?.isCurrent && !scope.isCurrent())) return { ok: false };
+    item.expiry = displayDate(result.new_end);
+    item.daysLeft = warrantyDaysLeft(item.expiry);
+    item.bucket = warrantyBucket(item.expiry) ?? "year";
+    item.latestRenewal = {
+      months: Number(result.months),
+      paidAt: displayDate(result.paid_at),
+      previousEnd: displayDate(result.previous_end),
+      newEnd: displayDate(result.new_end)
+    };
+    state.renewalNotice = { key: "renewalSuccess", values: { date: item.expiry } };
+    state.renewal = null;
+    renewalDatePanel.close({ restoreFocus: false });
+    return { ok: true, result, target };
+  } catch (error) {
+    if (scope?.signal?.aborted || (scope?.isCurrent && !scope.isCurrent())) return { ok: false };
+    console.error("[warranty] renewal failed", error);
+    state.renewalError = renewalErrorKey(error);
+    return { ok: false, error };
+  } finally {
+    if (!(scope?.signal?.aborted || (scope?.isCurrent && !scope.isCurrent()))) {
+      state.renewalBusy = false;
+      onChange?.();
+    }
+  }
+}
+
 export function moveWarrantyPage(direction) {
   state.page += direction === "next" ? 1 : -1;
 }
@@ -312,12 +556,22 @@ export function restoreWarrantyState(value = null) {
   state.dateTo = typeof next.dateTo === "string" ? next.dateTo : "";
   state.page = Number.isInteger(next.page) && next.page > 0 ? next.page : 1;
   dateRangePanel.close({ restoreFocus: false });
+  renewalDatePanel.close({ restoreFocus: false });
+  state.renewal = null;
+  state.renewalBusy = false;
+  state.renewalError = "";
+  state.renewalNotice = null;
 }
 
 export function disposeWarrantyState() {
   dataLoadVersion += 1;
   dateRangePanel.close({ restoreFocus: false });
+  renewalDatePanel.close({ restoreFocus: false });
   clearPhoneCopyNotice();
   state.items = null;
+  state.renewal = null;
+  state.renewalBusy = false;
+  state.renewalError = "";
+  state.renewalNotice = null;
   validCustomerIds = new Set();
 }
