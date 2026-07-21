@@ -5,9 +5,10 @@ import { useAppContext } from '../context/AppContext.jsx'
 import { useT } from '../i18n.jsx'
 import { Icon } from '../components/Icon.jsx'
 import InvoiceEditModal from '../components/InvoiceEditModal.jsx'
+import { copyTextWithFallback } from '../lib/clipboard.js'
 import { fmtInvNum, invoiceSource, formatNotes, insertInvoiceWithRetry } from '../lib/invoiceHelpers.js'
 import { deriveShippingStatus, isShippingTrackable, isProblematicShipping } from '../lib/shippingHelpers.js'
-import { toastError, toastWarn } from '../lib/toast.js'
+import { toastError, toastSuccess, toastWarn } from '../lib/toast.js'
 import { appendCustomerImeiCodes, collectImeiCodesFromItems, collectInvalidImeiCodesFromItems, isDcAdaptorProLineItem } from '../lib/imei.js'
 import { makeInvoiceItem as mkItem, attachWarrantySnapshot } from '../lib/invoiceItems.js'
 
@@ -62,6 +63,12 @@ export default function InvoicesView({
   const [visibleInvoices, setVisibleInvoices] = useState(30)
 
   const [editingInvoice, setEditingInvoice] = useState(null)
+
+  const copyTrackingNumber = async trackingNumber => {
+    const copied = await copyTextWithFallback(trackingNumber)
+    if (copied) toastSuccess(t("複製成功"))
+    else toastError(t("複製失敗"))
+  }
 
   // 新建發票 modal
   const [newInvoice, setNewInvoice] = useState({
@@ -949,7 +956,7 @@ export default function InvoicesView({
                 </div>
                 <div style={{ fontSize: 14, fontWeight: 700, fontFamily: "monospace", letterSpacing: 1, display: "flex", alignItems: "center", gap: 8 }}>
                   {trackingInvoice.tracking_number}
-                  <button onClick={() => navigator.clipboard.writeText(trackingInvoice.tracking_number)} style={{ background: "none", border: "1px solid #d0d0d0", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontSize: 11, color: "#666" }}>{t("複製")}</button>
+                  <button onClick={() => copyTrackingNumber(trackingInvoice.tracking_number)} style={{ background: "none", border: "1px solid #d0d0d0", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontSize: 11, color: "#666" }}>{t("複製")}</button>
                   <a href={`https://htm.sf-express.com/hk/tc/dynamic_function/waybill/#search/bill-number/${trackingInvoice.tracking_number}`} target="_blank" rel="noopener noreferrer" style={{ background: "none", border: "1px solid #d0d0d0", borderRadius: 6, padding: "2px 8px", textDecoration: "none", fontSize: 11, color: "#666" }}>{t("順豐網站")}</a>
                 </div>
                 <div style={{ marginTop: 8, fontSize: 13, fontWeight: 700 }}>{t("狀態")}：{t(deriveShippingStatus(trackingInvoice))}</div>
