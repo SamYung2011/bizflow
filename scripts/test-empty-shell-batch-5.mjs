@@ -141,8 +141,10 @@ assert.doesNotMatch(structure, /shopifyStructureSnapshot[\s\S]*inventoryLevels:/
   "inventory quantities keep their dedicated changeFromQuantity CAS instead of product 409s");
 assert.match(catalogue, /shopify_applied_pending_db[\s\S]*Resume DB apply failed/,
   "a Shopify-successful job must resume DB finalization instead of repeating the remote write");
-assert.match(catalogue, /productDelete\(input: \$input, synchronous: true\)/,
-  "approved true delete must call Shopify productDelete");
+assert.match(catalogue, /productDelete\(input: \$input, synchronous: true\)[\s\S]*?userErrors \{ field message \}/,
+  "approved true delete must call Shopify productDelete with its supported UserError fields");
+assert.doesNotMatch(catalogue, /productDelete\(input: \$input, synchronous: true\)[\s\S]*?userErrors \{ field message code \}/,
+  "productDelete returns the base UserError type, which has no code field");
 assert.match(catalogue, /SHOPIFY_MN_EXTERNAL_COMPONENT_BLOCK/);
 assert.match(catalogue, /SHOPIFY_MN_COMPLEX_COMPONENT_BLOCK/,
   "catalogue writes must not flatten bundle quantities or many-to-many component maps");

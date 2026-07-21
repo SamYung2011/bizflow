@@ -921,7 +921,7 @@ export async function executeCatalogWrite(
           mutation DeleteBizFlowProduct($input: ProductDeleteInput!) {
             productDelete(input: $input, synchronous: true) {
               deletedProductId
-              userErrors { field message code }
+              userErrors { field message }
             }
           }
         `;
