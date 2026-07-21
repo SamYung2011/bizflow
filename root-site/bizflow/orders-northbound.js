@@ -464,7 +464,7 @@ export function renderNorthbound(helpers) {
     <div class="northbound-counts"><span>${escapeHtml(`${t(lang, "total")} ${state.records.length} ${t(lang, "records")}`)}</span><span>${escapeHtml(`${t(lang, "visible")} ${filtered.length} ${t(lang, "records")}`)}</span></div>
     ${state.error ? `<p class="northbound-form-error" role="alert">${escapeHtml(state.error)}</p>` : ""}
     <div class="northbound-table-shell">
-      <div class="northbound-table-scroll">
+      <div class="northbound-table-scroll" data-scroll-restore="orders.northbound.table">
         <table class="northbound-table">
           <thead><tr>${["status", "submitted", "name", "plateNo", "hkid", "phoneHk", "phoneMainland", "address", "hrpNo", "remarks", "createdAt", "action"].map((key) => `<th>${escapeHtml(t(lang, key))}</th>`).join("")}</tr></thead>
           <tbody>

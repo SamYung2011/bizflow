@@ -11,6 +11,7 @@ export const SPA_HISTORY_KEY = "tpSpa";
 export const SPA_HISTORY_VERSION = 1;
 const DEFAULT_NAVIGATION_TIMEOUT_MS = 15_000;
 const DEFAULT_MOUNT_WARNING_MS = 60_000;
+const SCROLL_RESTORE_MAX_FRAMES = 10;
 
 function abortError() {
   return new DOMException("SPA navigation aborted", "AbortError");
@@ -60,6 +61,55 @@ function nextHistoryState(base, details) {
     ...(base && typeof base === "object" ? base : {}),
     [SPA_HISTORY_KEY]: { version: SPA_HISTORY_VERSION, ...details }
   };
+}
+
+function scrollRestoreKey(element) {
+  return String(element?.dataset?.scrollRestore ?? element?.getAttribute?.("data-scroll-restore") ?? "").trim();
+}
+
+function captureScroll(windowRef, documentRef) {
+  const entries = [];
+  const seen = new Set();
+  const elements = documentRef.querySelectorAll?.("[data-scroll-restore]") ?? [];
+  for (const element of elements) {
+    const key = scrollRestoreKey(element);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    entries.push([key, {
+      top: Number.isFinite(element.scrollTop) ? Math.max(0, element.scrollTop) : 0,
+      left: Number.isFinite(element.scrollLeft) ? Math.max(0, element.scrollLeft) : 0
+    }]);
+  }
+  return {
+    x: windowRef.scrollX || 0,
+    y: windowRef.scrollY || 0,
+    containers: Object.fromEntries(entries)
+  };
+}
+
+function scrollContainerPositions(scroll) {
+  if (!scroll?.containers || typeof scroll.containers !== "object") return new Map();
+  return new Map(Object.entries(scroll.containers).flatMap(([key, position]) => {
+    const top = Number.isFinite(position?.top) ? Math.max(0, position.top) : 0;
+    const left = Number.isFinite(position?.left) ? Math.max(0, position.left) : 0;
+    return key ? [[key, { top, left }]] : [];
+  }));
+}
+
+function indexedScrollContainers(documentRef) {
+  const indexed = new Map();
+  const elements = documentRef.querySelectorAll?.("[data-scroll-restore]") ?? [];
+  for (const element of elements) {
+    const key = scrollRestoreKey(element);
+    if (key && !indexed.has(key)) indexed.set(key, element);
+  }
+  return indexed;
+}
+
+function canRestoreContainer(element, { top, left }) {
+  const verticalReady = top === 0 || Number(element.scrollHeight) > Number(element.clientHeight);
+  const horizontalReady = left === 0 || Number(element.scrollWidth) > Number(element.clientWidth);
+  return verticalReady && horizontalReady;
 }
 
 function withTimeout(promise, timeoutMs, signal) {
@@ -136,6 +186,9 @@ export function createAppRouter({
   let disposed = false;
   let suppressPopstate = false;
   let scrollFrame = 0;
+  let restoreFrame = 0;
+  const requestFrame = windowRef.requestAnimationFrame ?? ((callback) => windowRef.setTimeout(callback, 0));
+  const cancelFrame = windowRef.cancelAnimationFrame ?? windowRef.clearTimeout ?? clearTimeout;
 
   function routeForUrl(url) {
     const route = manifest[url.pathname] ?? null;
@@ -152,7 +205,7 @@ export function createAppRouter({
       path: currentUrl.pathname,
       previous,
       pageState: safeHistoryValue(pageState),
-      scroll: { x: windowRef.scrollX || 0, y: windowRef.scrollY || 0 }
+      scroll: captureScroll(windowRef, documentRef)
     };
     windowRef.history.replaceState(nextHistoryState(windowRef.history.state, details), "", currentUrl.href);
   }
@@ -222,8 +275,27 @@ export function createAppRouter({
     const scroll = historyDetails(historyState)?.scroll;
     const x = Number.isFinite(scroll?.x) ? scroll.x : 0;
     const y = Number.isFinite(scroll?.y) ? scroll.y : 0;
-    const requestFrame = windowRef.requestAnimationFrame ?? ((callback) => windowRef.setTimeout(callback, 0));
-    requestFrame(() => windowRef.scrollTo(x, y));
+    const pendingContainers = scrollContainerPositions(scroll);
+    let attempts = 0;
+    if (restoreFrame) cancelFrame(restoreFrame);
+    const restore = () => {
+      restoreFrame = 0;
+      if (disposed || signal?.aborted || currentController !== controller) return;
+      if (attempts === 0) windowRef.scrollTo(x, y);
+      attempts += 1;
+      const indexed = indexedScrollContainers(documentRef);
+      for (const [key, position] of pendingContainers) {
+        const element = indexed.get(key);
+        if (!element || !canRestoreContainer(element, position)) continue;
+        element.scrollTop = position.top;
+        element.scrollLeft = position.left;
+        pendingContainers.delete(key);
+      }
+      if (pendingContainers.size && attempts < SCROLL_RESTORE_MAX_FRAMES) {
+        restoreFrame = requestFrame(restore);
+      }
+    };
+    restoreFrame = requestFrame(restore);
   }
 
   async function navigate(rawUrl, { replace = false, fromPopstate = false, historyState = null } = {}) {
@@ -279,7 +351,7 @@ export function createAppRouter({
           : currentRoute ? { index: currentIndex, path: currentUrl.pathname } : null;
         replaceCurrentHistory();
         targetIndex = replace ? currentIndex : currentIndex + 1;
-        const details = { index: targetIndex, path: route.path, previous, pageState: null, scroll: { x: 0, y: 0 } };
+        const details = { index: targetIndex, path: route.path, previous, pageState: null, scroll: { x: 0, y: 0, containers: {} } };
         const nextState = nextHistoryState(replace ? windowRef.history.state : null, details);
         if (replace) windowRef.history.replaceState(nextState, "", url.href);
         else windowRef.history.pushState(nextState, "", url.href);
@@ -329,7 +401,7 @@ export function createAppRouter({
     const existing = historyDetails(windowRef.history.state);
     currentIndex = existing?.index ?? 0;
     if (!existing) {
-      const details = { index: currentIndex, path: route.path, previous: null, pageState: null, scroll: { x: 0, y: 0 } };
+      const details = { index: currentIndex, path: route.path, previous: null, pageState: null, scroll: { x: 0, y: 0, containers: {} } };
       windowRef.history.replaceState(nextHistoryState(windowRef.history.state, details), "", currentUrl.href);
     }
     return navigate(currentUrl, { replace: true, historyState: windowRef.history.state });
@@ -386,6 +458,7 @@ export function createAppRouter({
     routeGeneration += 1;
     pendingAbortController?.abort();
     if (scrollFrame) windowRef.cancelAnimationFrame(scrollFrame);
+    if (restoreFrame) cancelFrame(restoreFrame);
     if (active) {
       documentRef.removeEventListener("click", onDocumentClick);
       windowRef.removeEventListener("popstate", onPopstate);

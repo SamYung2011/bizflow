@@ -340,7 +340,7 @@ function renderRow(row, helpers) {
 function renderTable(rows, helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const headers = ["date", ...(isAdmin ? ["employee"] : []), "category", "amount", "description", "receipt", "status", "payment", "actions"];
-  return `<div class="expense-table-shell">
+  return `<div class="expense-table-shell" data-scroll-restore="bizflow.expense.table">
     <table class="expense-table">
       <thead><tr>${headers.map((key) => `<th>${escapeHtml(t(lang, key))}</th>`).join("")}</tr></thead>
       <tbody>${rows.length ? rows.map((row) => renderRow(row, helpers)).join("") : `<tr class="expense-empty-row"><td colspan="${headers.length}"><div class="expense-empty">${icon("icon-nav-sales", "icon")}<span>${escapeHtml(t(lang, "empty"))}</span></div></td></tr>`}</tbody>
