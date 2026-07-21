@@ -66,6 +66,10 @@ const dict = {
     "inventory.saving": "正在同步 Shopify 與 BizFlow…",
     "inventory.saved": "商品已同步保存",
     "inventory.saveFailed": "保存失敗",
+    "inventory.conflict.title": "Shopify 變更衝突",
+    "inventory.conflict.message": "Shopify 商品已在外部變更，現已取得最新版本。繼續會以目前 BizFlow 表單內容覆蓋外部改動。",
+    "inventory.conflict.confirm": "使用目前內容保存",
+    "inventory.conflict.cancelled": "已保留目前表單，尚未覆蓋 Shopify 的外部改動。",
     "inventory.deleteConfirm": "刪除會同時從 Shopify 與 BizFlow 真實刪除，是否繼續？",
     "inventory.deleteFinal": "最後確認：此操作不可還原。",
     "inventory.deleteFailed": "刪除失敗",
@@ -124,6 +128,10 @@ const dict = {
     "inventory.saving": "Syncing Shopify and BizFlow…",
     "inventory.saved": "Product synchronized and saved",
     "inventory.saveFailed": "Save failed",
+    "inventory.conflict.title": "Shopify change conflict",
+    "inventory.conflict.message": "This Shopify product changed outside BizFlow. The latest version is now loaded. Continuing will overwrite those external changes with the current BizFlow form.",
+    "inventory.conflict.confirm": "Save current form",
+    "inventory.conflict.cancelled": "The current form was kept and the external Shopify changes were not overwritten.",
     "inventory.deleteConfirm": "This permanently deletes the product from Shopify and BizFlow. Continue?",
     "inventory.deleteFinal": "Final confirmation: this cannot be undone.",
     "inventory.deleteFailed": "Delete failed",
@@ -182,6 +190,10 @@ const dict = {
     "inventory.saving": "Synchronisation de Shopify et BizFlow…",
     "inventory.saved": "Produit synchronisé et enregistré",
     "inventory.saveFailed": "Échec de l'enregistrement",
+    "inventory.conflict.title": "Conflit de modification Shopify",
+    "inventory.conflict.message": "Ce produit Shopify a été modifié hors de BizFlow. La dernière version est maintenant chargée. Continuer remplacera ces modifications externes par le formulaire BizFlow actuel.",
+    "inventory.conflict.confirm": "Enregistrer ce formulaire",
+    "inventory.conflict.cancelled": "Le formulaire actuel est conservé et les modifications Shopify externes n'ont pas été remplacées.",
     "inventory.deleteConfirm": "Cette action supprime définitivement le produit de Shopify et BizFlow. Continuer ?",
     "inventory.deleteFinal": "Confirmation finale : cette action est irréversible.",
     "inventory.deleteFailed": "Échec de la suppression",
@@ -573,11 +585,41 @@ async function saveInventoryDetail() {
   state.feedback = "";
   rerenderDetailPage();
   try {
-    await updateLiveInventoryProduct(
-      payload,
-      detail.product.shopifyBinding?.updatedAt || "",
-      detail.product.shopifyBinding?.structureHash || ""
-    );
+    let expectedUpdatedAt = detail.product.shopifyBinding?.updatedAt || "";
+    let expectedStructureHash = detail.product.shopifyBinding?.structureHash || "";
+    while (true) {
+      try {
+        await updateLiveInventoryProduct(payload, expectedUpdatedAt, expectedStructureHash);
+        break;
+      } catch (error) {
+        const conflict = error?.code === "SHOPIFY_UPDATED_AT_CONFLICT" ? error.detail : null;
+        const currentStructureHash = String(conflict?.currentStructureHash || "").trim();
+        const currentUpdatedAt = String(conflict?.currentUpdatedAt || "").trim();
+        if (!currentStructureHash) throw error;
+        const proceed = await confirmInPage(
+          pageT(currentHelpers?.lang ?? "zh", "inventory.conflict.message"),
+          {
+            title: pageT(currentHelpers?.lang ?? "zh", "inventory.conflict.title"),
+            cancelLabel: pageT(currentHelpers?.lang ?? "zh", "inventory.cancel"),
+            confirmLabel: pageT(currentHelpers?.lang ?? "zh", "inventory.conflict.confirm"),
+            danger: true
+          }
+        );
+        if (!proceed) {
+          state.error = pageT(currentHelpers?.lang ?? "zh", "inventory.conflict.cancelled");
+          state.busy = false;
+          rerenderDetailPage();
+          return;
+        }
+        detail.product.shopifyBinding = {
+          ...(detail.product.shopifyBinding || {}),
+          updatedAt: currentUpdatedAt,
+          structureHash: currentStructureHash
+        };
+        expectedUpdatedAt = currentUpdatedAt;
+        expectedStructureHash = currentStructureHash;
+      }
+    }
     detailCommitted = true;
     state.feedback = pageT(currentHelpers?.lang ?? "zh", "inventory.saved");
     navigateTo("./inventory.html");
@@ -608,11 +650,7 @@ async function onInventoryDetailClick(event) {
     state.busy = true;
     rerenderDetailPage();
     try {
-      await deleteLiveInventoryProduct(
-        detail.product.id,
-        detail.product.shopifyBinding?.updatedAt || "",
-        detail.product.shopifyBinding?.structureHash || ""
-      );
+      await deleteLiveInventoryProduct(detail.product.id);
       detailCommitted = true;
       navigateTo("./inventory.html");
     } catch (error) {

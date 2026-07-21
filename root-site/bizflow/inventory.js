@@ -217,6 +217,10 @@ let state = {
 
 let currentHelpers = null;
 let activeScope = null;
+let inventoryRenderQueued = false;
+let inventoryRenderGeneration = 0;
+let pendingFocusSearch = false;
+let pendingFocusAddName = false;
 let activeNavigation = null;
 
 function isCurrentInventoryScope(scope = activeScope) {
@@ -495,23 +499,37 @@ async function ensureTabData(tab, { scope = activeScope, signal = scope?.signal 
 }
 
 function rerenderInventoryPage({ focusSearch = false, focusAddName = false } = {}) {
-  const page = document.querySelector("[data-inventory-page]");
-  if (!page || !currentHelpers) return;
-  const template = document.createElement("template");
-  template.innerHTML = renderInventory(currentHelpers).trim();
-  const nextPage = template.content.firstElementChild;
-  if (!nextPage || !page.isConnected) return;
-  // replaceWith is safe if an overlapping SPA refresh has already detached the
-  // old page; outerHTML can throw NotFoundError in that same lifecycle race.
-  page.replaceWith(nextPage);
-  if (focusSearch) {
-    const input = document.querySelector("[data-inventory-search]");
-    if (input) {
-      input.focus();
-      input.setSelectionRange(input.value.length, input.value.length);
+  pendingFocusSearch ||= focusSearch;
+  pendingFocusAddName ||= focusAddName;
+  if (inventoryRenderQueued) return;
+  inventoryRenderQueued = true;
+  const generation = ++inventoryRenderGeneration;
+  const scope = activeScope;
+  queueMicrotask(() => {
+    if (generation !== inventoryRenderGeneration) return;
+    inventoryRenderQueued = false;
+    const shouldFocusSearch = pendingFocusSearch;
+    const shouldFocusAddName = pendingFocusAddName;
+    pendingFocusSearch = false;
+    pendingFocusAddName = false;
+    if (!currentHelpers || !isCurrentInventoryScope(scope)) return;
+    const page = document.querySelector("[data-inventory-page]");
+    const parent = page?.parentNode;
+    if (!page || !parent || !page.isConnected) return;
+    const template = document.createElement("template");
+    template.innerHTML = renderInventory(currentHelpers).trim();
+    const nextPage = template.content.firstElementChild;
+    if (!nextPage || page.parentNode !== parent || document.querySelector("[data-inventory-page]") !== page) return;
+    parent.replaceChild(nextPage, page);
+    if (shouldFocusSearch) {
+      const input = document.querySelector("[data-inventory-search]");
+      if (input) {
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      }
     }
-  }
-  if (focusAddName) document.querySelector("[data-inventory-add-name]")?.focus();
+    if (shouldFocusAddName) document.querySelector("[data-inventory-add-name]")?.focus();
+  });
 }
 
 function closeCategoryMenu() {
@@ -807,6 +825,10 @@ export async function mountPage({ scope, signal, historyState = null, navigation
       shopifyHealth = null;
       authenticated = false;
       currentHelpers = null;
+      inventoryRenderGeneration += 1;
+      inventoryRenderQueued = false;
+      pendingFocusSearch = false;
+      pendingFocusAddName = false;
       if (activeScope === scope) activeScope = null;
       if (activeNavigation === navigation) activeNavigation = null;
     }

@@ -130,8 +130,10 @@ assert.match(catalogue, /shopifyStructureHash: await shopifyStructureHash\(final
   "successful writes must persist a baseline from the final live Shopify structure");
 assert.match(catalogue, /confirmCatalogBinding[\s\S]*shopify_structure_hash: structureHash/,
   "the explicit refresh-binding path must acknowledge a real external structure baseline");
-assert.match(catalogue, /SHOPIFY_UPDATED_AT_CONFLICT[\s\S]*currentStructureHash: cas\.currentStructureHash/,
+assert.match(catalogue, /SHOPIFY_UPDATED_AT_CONFLICT[\s\S]*error: "Shopify product changed outside BizFlow"[\s\S]*currentStructureHash: cas\.currentStructureHash/,
   "true external structural changes must retain the existing explicit 409 contract");
+assert.match(catalogue, /const cas = action !== "delete"[\s\S]*if \(action !== "delete" && current && cas\.conflict\)/,
+  "explicit product deletion must bypass the editor structure CAS at the service boundary");
 assert.match(structure, /updatedAt and inventory quantities are deliberately absent/);
 assert.doesNotMatch(structure, /shopifyStructureSnapshot[\s\S]*updatedAt:/,
   "updatedAt must never enter the structural fingerprint");
@@ -189,16 +191,29 @@ assert.match(inventory, /inventory\.addModal\.warranty[^]*inventory-required-mar
   "the live product form must visibly mark warranty months as required");
 assert.doesNotMatch(inventory, /page\.outerHTML\s*=/,
   "inventory rerenders must not use the detached-node outerHTML race path");
-assert.match(inventory, /page\.replaceWith\(nextPage\)/,
-  "inventory rerenders must atomically replace the still-current page node");
+assert.doesNotMatch(inventory, /page\.replaceWith\(nextPage\)/,
+  "inventory rerenders must not reuse the detached-node replaceWith race path");
+assert.match(inventory, /inventoryRenderQueued[\s\S]*inventoryRenderGeneration[\s\S]*queueMicrotask\([\s\S]*isCurrentInventoryScope\(scope\)[\s\S]*page\.parentNode !== parent[\s\S]*parent\.replaceChild\(nextPage, page\)/,
+  "inventory rerenders must coalesce and revalidate the current node immediately before replacement");
 assert.match(detail, /await updateLiveInventoryProduct\(/);
 assert.match(detail, /await deleteLiveInventoryProduct\(/);
 assert.match(snapshot, /structureHash: asText\(binding\.shopify_structure_hash\)/,
   "inventory detail must receive the structure baseline loaded with its timestamp");
 assert.match(writes, /expectedShopifyStructureHash[\s\S]*invokeCatalog\("update"/,
   "update writes must send the editor's structure baseline");
-assert.match(detail, /updateLiveInventoryProduct\([\s\S]*shopifyBinding\?\.structureHash/,
-  "the product editor must not silently overwrite a newer managed structure");
+assert.match(writes, /functionErrorPayload\(result\.error, result\.response\)[\s\S]*detail\?\.code/,
+  "non-2xx function responses must preserve the structured Shopify error code and payload");
+assert.match(writes, /export async function deleteLiveInventoryProduct\(bizflowParentProductId\)[\s\S]*invokeCatalog\("delete", \{[\s\S]*requestId: requestId\(\), bizflowParentProductId[\s\S]*\}\)/,
+  "browser deletion must not send a stale editor structure baseline");
+assert.doesNotMatch(writes, /invokeCatalog\("delete", \{[\s\S]{0,180}expectedShopify/,
+  "delete intent must stay independent of Shopify editor CAS fields");
+assert.match(detail, /SHOPIFY_UPDATED_AT_CONFLICT[\s\S]*currentStructureHash[\s\S]*confirmInPage\([\s\S]*inventory\.conflict\.message[\s\S]*expectedStructureHash = currentStructureHash/,
+  "a true conflict must require explicit confirmation before retrying with the returned live baseline");
+assert.match(detail, /if \(!proceed\)[\s\S]*return;[\s\S]*detail\.product\.shopifyBinding =/,
+  "cancelling conflict recovery must not acknowledge the new baseline for a later silent overwrite");
+assert.match(detail, /Shopify 變更衝突/);
+assert.match(detail, /Shopify change conflict/);
+assert.match(detail, /Conflit de modification Shopify/);
 assert.match(detail, /data-parent-warehouse-qty[\s\S]*detail\.warehouses\.find/,
   "single-variant products need editable per-warehouse stock for CAS writes");
 assert.match(detail, /detail\.subitems\.push\(item\)/,

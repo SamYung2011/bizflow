@@ -887,16 +887,20 @@ export async function executeCatalogWrite(
     if (binding && !current && action !== "delete") throw new Error("SHOPIFY_BOUND_PRODUCT_MISSING");
     const expected = text(body.expectedShopifyUpdatedAt) || text(binding?.shopify_updated_at);
     const expectedStructureHash = text(body.expectedShopifyStructureHash);
-    const cas = current && (expected || expectedStructureHash)
+    // The approved two-step delete is an explicit destructive intent. A remote
+    // catalogue edit may inform an update, but must never lock that product out
+    // of deletion.
+    const cas = action !== "delete" && current && (expected || expectedStructureHash)
       ? await reconcileShopifyCas(admin, binding as JsonRecord, current, expected, expectedStructureHash)
       : { conflict: false };
-    if (current && cas.conflict) {
+    if (action !== "delete" && current && cas.conflict) {
       await admin.from("shopify_catalog_jobs").update({
         status: "conflict", sanitized_error: "SHOPIFY_UPDATED_AT_CONFLICT", updated_at: new Date().toISOString(),
       }).eq("id", job.id);
       return {
         ok: false,
         code: "SHOPIFY_UPDATED_AT_CONFLICT",
+        error: "Shopify product changed outside BizFlow",
         conflict: true,
         currentUpdatedAt: current.updatedAt,
         currentStructureHash: cas.currentStructureHash,

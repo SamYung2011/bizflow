@@ -22,12 +22,32 @@ async function adminContext() {
   return { client };
 }
 
-async function functionErrorPayload(error) {
+async function responsePayload(response) {
+  if (!response) return null;
   try {
-    if (error?.context && typeof error.context.json === "function") return await error.context.json();
+    const readable = typeof response.clone === "function" ? response.clone() : response;
+    if (typeof readable.json === "function") return await readable.json();
+  } catch {
+    // Some relays expose a body without a usable JSON content type. Fall back to text.
+  }
+  try {
+    const readable = typeof response.clone === "function" ? response.clone() : response;
+    if (typeof readable.text === "function") {
+      const raw = await readable.text();
+      return raw ? JSON.parse(raw) : null;
+    }
   } catch {
     // Preserve the original safe client error when the relay body is unavailable.
   }
+  return null;
+}
+
+async function functionErrorPayload(error, response) {
+  for (const candidate of [response, error?.context, error?.context?.response]) {
+    const detail = await responsePayload(candidate);
+    if (detail && typeof detail === "object") return detail;
+  }
+  if (error?.context && typeof error.context === "object" && error.context.code) return error.context;
   return null;
 }
 
@@ -35,7 +55,7 @@ async function invokeCatalog(action, payload = {}) {
   const { client } = await adminContext();
   const result = await client.functions.invoke("shopify-catalog-write", { body: { action, ...payload } });
   if (result.error) {
-    const detail = await functionErrorPayload(result.error);
+    const detail = await functionErrorPayload(result.error, result.response);
     throw new ShopifyCatalogWriteError(detail?.error || result.error.message || "Shopify request failed", {
       code: detail?.code || "SHOPIFY_EDGE_REQUEST_FAILED",
       detail
@@ -97,11 +117,9 @@ export async function updateLiveInventoryProduct(product, expectedShopifyUpdated
   return result;
 }
 
-export async function deleteLiveInventoryProduct(
-  bizflowParentProductId, expectedShopifyUpdatedAt = "", expectedShopifyStructureHash = ""
-) {
+export async function deleteLiveInventoryProduct(bizflowParentProductId) {
   const result = await invokeCatalog("delete", {
-    requestId: requestId(), bizflowParentProductId, expectedShopifyUpdatedAt, expectedShopifyStructureHash
+    requestId: requestId(), bizflowParentProductId
   });
   await invalidateLiveTables("products", "inventory_stock", "shopify_variant_links", "shopify_catalog_bindings", "shopify_catalog_jobs");
   return result;
