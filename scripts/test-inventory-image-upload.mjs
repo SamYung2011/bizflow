@@ -33,6 +33,10 @@ assert.match(edge, /body\.action !== "delete"[\s\S]*ensureCatalogImageForWrite[\
   "catalog create/update must verify changed image bytes before the Shopify job starts");
 
 assert.match(imageEdge, /SHOPIFY_IMAGE_BUCKET = "shopify-product-images"/);
+assert.match(imageEdge, /Deno\.env\.get\("SUPABASE_PUBLIC_URL"\)[\s\S]*SHOPIFY_IMAGE_PUBLIC_URL_UNCONFIGURED[\s\S]*storage\/v1\/object\/public/,
+  "managed image URLs must be derived from the configured public Supabase origin and fail closed when it is unusable");
+assert.doesNotMatch(imageEdge, /getPublicUrl\(/,
+  "managed image URLs must never fall back to the Edge container's internal Supabase client origin");
 assert.match(imageEdge, /MANAGED_PATH_PATTERN[\s\S]*sha256\//,
   "storage paths must be derived from the SHA-256 content address");
 assert.match(imageEdge, /createSignedUploadUrl\(path, \{ upsert: false \}\)/,

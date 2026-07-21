@@ -82,8 +82,29 @@ function managedPath(value: unknown): { path: string; digest: string; mimeType: 
   return { path, digest: match[2], mimeType: EXTENSION_MIME.get(match[3])! };
 }
 
-function publicUrl(admin: SupabaseClient, path: string): string {
-  return admin.storage.from(SHOPIFY_IMAGE_BUCKET).getPublicUrl(path).data.publicUrl;
+function publicUrl(path: string): string {
+  const base = text(Deno.env.get("SUPABASE_PUBLIC_URL")).replace(/\/+$/, "");
+  let parsed: URL;
+  try {
+    parsed = new URL(base);
+  } catch {
+    throw imageError(
+      "SHOPIFY_IMAGE_PUBLIC_URL_UNCONFIGURED",
+      "Public Supabase URL is not configured for product images",
+    );
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  const localHostname = hostname === "localhost" || hostname.endsWith(".localhost") ||
+    hostname === "127.0.0.1" || hostname === "0.0.0.0" || hostname === "[::1]" || hostname === "::1";
+  const kongHostname = hostname === "kong" || hostname.startsWith("kong.") || hostname.endsWith(".kong");
+  if (!base || !["http:", "https:"].includes(parsed.protocol) || localHostname || kongHostname ||
+    parsed.username || parsed.password || parsed.search || parsed.hash || !["", "/"].includes(parsed.pathname)) {
+    throw imageError(
+      "SHOPIFY_IMAGE_PUBLIC_URL_UNCONFIGURED",
+      "Public Supabase URL is not configured for product images",
+    );
+  }
+  return `${base}/storage/v1/object/public/${SHOPIFY_IMAGE_BUCKET}/${path}`;
 }
 
 function jpegDimensions(bytes: Uint8Array): { width: number; height: number } | null {
@@ -183,7 +204,7 @@ async function exactObjectExists(admin: SupabaseClient, path: string): Promise<b
 
 export async function verifyCatalogImage(admin: SupabaseClient, value: unknown) {
   const managed = managedPath(value);
-  if (/^https?:\/\//i.test(text(value)) && text(value) !== publicUrl(admin, managed.path)) {
+  if (/^https?:\/\//i.test(text(value)) && text(value) !== publicUrl(managed.path)) {
     throw imageError("SHOPIFY_IMAGE_SOURCE_INVALID", "Product image is not from the managed image store");
   }
   const downloaded = await admin.storage.from(SHOPIFY_IMAGE_BUCKET).download(managed.path);
@@ -204,7 +225,7 @@ export async function verifyCatalogImage(admin: SupabaseClient, value: unknown) 
   return {
     bucket: SHOPIFY_IMAGE_BUCKET,
     path: managed.path,
-    publicUrl: publicUrl(admin, managed.path),
+    publicUrl: publicUrl(managed.path),
     digest: managed.digest,
     contentType: managed.mimeType,
     size: bytes.byteLength,
@@ -240,7 +261,7 @@ export async function prepareCatalogImageUpload(admin: SupabaseClient, body: Jso
     image: {
       bucket: SHOPIFY_IMAGE_BUCKET,
       path,
-      publicUrl: publicUrl(admin, path),
+      publicUrl: publicUrl(path),
       digest,
       contentType,
       size,
@@ -266,7 +287,7 @@ async function imageIsReferenced(admin: SupabaseClient, url: string): Promise<bo
 
 export async function cleanupCatalogImage(admin: SupabaseClient, value: unknown) {
   const managed = managedPath(value);
-  const url = publicUrl(admin, managed.path);
+  const url = publicUrl(managed.path);
   if (await imageIsReferenced(admin, url)) {
     return { ok: true, removed: false, retained: true, path: managed.path };
   }
