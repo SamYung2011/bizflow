@@ -302,12 +302,34 @@ function isWarrantyItem(name) {
   return name && !/運費|郵費|shipping|freight|防水盒|防水袋|押金|手續費/i.test(name);
 }
 
+function warrantyProductName(value) {
+  return asText(value).replace(/\s+-\s+Default Title$/i, "").trim().toLocaleLowerCase();
+}
+
+function warrantyRenewalKey(invoiceId, productId) {
+  return `${asText(invoiceId)}\u0000${asText(productId)}`;
+}
+
 async function buildWarrantySnapshot() {
-  const [customerSource, products] = await Promise.all([customerSourceData(), allRows("products", "name")]);
+  const [customerSource, products, renewals] = await Promise.all([
+    customerSourceData(),
+    allRows("products", "name"),
+    allRows("warranty_renewals", "created_at", false)
+  ]);
   const customerById = new Map(customerSource.roots.map((customer) => [customer.id, customer]));
-  const productWarranty = new Map();
+  const productById = new Map(products.map((product) => [String(product.id), product]));
+  const productByName = new Map();
   for (const product of products) {
-    if (product.warranty_months != null) productWarranty.set(asText(product.name), asNumber(product.warranty_months));
+    const name = warrantyProductName(product.name);
+    if (name && !productByName.has(name)) productByName.set(name, product);
+  }
+  const latestRenewalByLine = new Map();
+  const orderedRenewals = [...renewals].sort((a, b) =>
+    timestamp(b.created_at) - timestamp(a.created_at) || String(b.id).localeCompare(String(a.id)));
+  for (const renewal of orderedRenewals) {
+    if (!renewal.invoice_id || !renewal.product_id) continue;
+    const key = warrantyRenewalKey(renewal.invoice_id, renewal.product_id);
+    if (!latestRenewalByLine.has(key)) latestRenewalByLine.set(key, renewal);
   }
   const items = [];
   const todayParts = dateParts(new Date());
@@ -315,19 +337,24 @@ async function buildWarrantySnapshot() {
   const lower = new Date(today); lower.setUTCDate(lower.getUTCDate() - 30);
   const upper = new Date(today); upper.setUTCDate(upper.getUTCDate() + 365);
   for (const [rootId, invoices] of customerSource.invoicesByRoot) {
-    // Mirrors bizflow_samyung/src/context/AppContext.jsx:429-447: warranties require a live customer.
+    // Production warranty coverage remains invoice-line derived; warranty_renewals only overlays its effective end.
     const customer = customerById.get(rootId);
     if (!customer) continue;
     for (const invoice of invoices) {
       for (const item of normalizedInvoiceItems(invoice)) {
         if (!isWarrantyItem(item.name)) continue;
-        const normalizedName = item.name.replace(/ - Default Title$/i, "");
-        const months = asNumber(item.warranty_months, productWarranty.get(item.name) ?? productWarranty.get(normalizedName) ?? 0);
+        const product = productById.get(String(item.product_id || "")) ?? productByName.get(warrantyProductName(item.name));
+        const months = asNumber(item.warranty_months, asNumber(product?.warranty_months));
         if (months <= 0) continue;
-        const expiry = addMonths(invoice.date, months);
+        const renewal = product?.id
+          ? latestRenewalByLine.get(warrantyRenewalKey(invoice.id, product.id))
+          : null;
+        const expiry = renewal ? formatDate(renewal.new_end) : addMonths(invoice.date, months);
         const expiryTime = Date.parse(expiry.replaceAll("/", "-") + "T00:00:00Z");
         if (expiryTime < lower.getTime() || expiryTime > upper.getTime()) continue;
         items.push({
+          invoiceId: String(invoice.id),
+          productId: product?.id == null ? null : String(product.id),
           no: invoiceNumber(invoice),
           product: item.name,
           customer: asText(customer.name, "—"),
@@ -335,13 +362,19 @@ async function buildWarrantySnapshot() {
           phone: asText(customer.phone),
           purchaseDate: formatDate(invoice.date),
           expiry,
-          warrantyMonths: months
+          warrantyMonths: months,
+          latestRenewal: renewal ? {
+            months: asNumber(renewal.months),
+            paidAt: formatDate(renewal.paid_at),
+            previousEnd: formatDate(renewal.previous_end),
+            newEnd: formatDate(renewal.new_end)
+          } : null
         });
       }
     }
   }
   items.sort((a, b) => a.expiry.localeCompare(b.expiry));
-  return { generated_at: new Date().toISOString(), scope: "RLS-visible production warranties", items };
+  return { generated_at: new Date().toISOString(), scope: "RLS-visible invoice-line warranties with renewal overlay", items };
 }
 
 async function buildTasksSnapshot() {

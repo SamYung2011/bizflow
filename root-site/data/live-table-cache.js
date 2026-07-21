@@ -8,6 +8,13 @@ const CACHE_SNAPSHOT_PREFIX = `${CACHE_PREFIX}snapshot:`;
 const CACHE_DB_NAME = "tp-live-table-cache";
 const CACHE_DB_VERSION = 1;
 const CACHE_STORE_NAME = "rows";
+// Shape generations are deliberately local to affected snapshots. WAR-renew-1
+// adds invoice/product renewal keys, so pre-release cached rows cannot serve the
+// write UI even though their old display-only shape remains otherwise valid.
+const SNAPSHOT_CONTRACT_GENERATIONS = new Map([
+  ["home.json", 1],
+  ["warranty.json", 1]
+]);
 
 export const LIVE_TABLE_CACHE_TTL_MS = 10 * 60_000;
 export const LIVE_AUTH_CACHE_TTL_MS = 30 * 60_000;
@@ -294,7 +301,8 @@ function authVersionChangedInThisPage() {
 }
 
 function snapshotVersionChangedInThisPage(snapshot) {
-  return cacheEpoch > 0 || snapshotVersions.has(String(snapshot || ""));
+  const key = String(snapshot || "");
+  return cacheEpoch > 0 || (SNAPSHOT_CONTRACT_GENERATIONS.get(key) || 0) > 0 || snapshotVersions.has(key);
 }
 
 function fallbackPayload(key) {
@@ -402,7 +410,8 @@ export function liveAuthCacheVersion() {
 }
 
 export function liveSnapshotCacheVersion(snapshot) {
-  return `${cacheEpoch}:${snapshotVersions.get(String(snapshot || "")) || 0}`;
+  const key = String(snapshot || "");
+  return `${cacheEpoch}:${SNAPSHOT_CONTRACT_GENERATIONS.get(key) || 0}:${snapshotVersions.get(key) || 0}`;
 }
 
 export async function readLiveSnapshotCache({ userId, snapshot }) {

@@ -23,13 +23,20 @@ import {
   captureWarrantyState,
   clearWarrantyDateRange,
   closeWarrantyDateRange,
+  closeWarrantyRenewal,
+  closeWarrantyRenewalDate,
   disposeWarrantyState,
   ensureWarrantyData,
+  isWarrantyRenewalOpen,
   moveWarrantyPage,
   openWarrantyDateRange,
+  openWarrantyRenewal,
+  openWarrantyRenewalDate,
   renderWarranty,
   restoreWarrantyState,
-  setWarrantySearch
+  setWarrantyRenewalMonths,
+  setWarrantySearch,
+  submitWarrantyRenewal
 } from "./customers-warranty.js";
 
 const dict = {
@@ -367,7 +374,7 @@ export function renderCustomers(helpers) {
       </button>` : ""}
     </header>
     ${segment}
-    ${state.tab === "warranty" ? renderWarranty(helpers) : renderCustomerList(helpers)}
+    ${state.tab === "warranty" ? renderWarranty({ ...helpers, liveWritable, writeBusy: state.writeBusy }) : renderCustomerList(helpers)}
   </div>`;
 }
 
@@ -484,6 +491,7 @@ async function onCustomersClick(event) {
     closeAllFilterMenus(null);
     dateFilter.close();
     closeWarrantyDateRange();
+    if (isWarrantyRenewalOpen() && !closeWarrantyRenewal()) return;
     rerenderCustomersPage();
     if (tab === "warranty") {
       await ensureWarrantyData({ scope });
@@ -499,6 +507,54 @@ async function onCustomersClick(event) {
     event.stopPropagation();
     const scope = activeScope;
     await copyPhoneNumber(warrantyPhone.getAttribute("data-warranty-phone"), currentHelpers.lang, { scope });
+    return;
+  }
+
+  const warrantyRenew = event.target.closest("[data-warranty-renew]");
+  if (warrantyRenew && state.tab === "warranty") {
+    event.preventDefault();
+    event.stopPropagation();
+    if (warrantyRenew.disabled || !liveWritable) return;
+    closeWarrantyDateRange();
+    if (openWarrantyRenewal(warrantyRenew.getAttribute("data-warranty-renew"))) {
+      rerenderCustomersPage();
+      activeScope?.animationFrame(() => document.querySelector('[data-warranty-renewal-months="12"]')?.focus());
+    }
+    return;
+  }
+
+  const renewalMonths = event.target.closest("[data-warranty-renewal-months]");
+  if (renewalMonths && state.tab === "warranty") {
+    if (renewalMonths.disabled) return;
+    if (setWarrantyRenewalMonths(renewalMonths.getAttribute("data-warranty-renewal-months"))) {
+      rerenderCustomersPage();
+      activeScope?.animationFrame(() => document.querySelector(`[data-warranty-renewal-months="${renewalMonths.getAttribute("data-warranty-renewal-months")}"]`)?.focus());
+    }
+    return;
+  }
+
+  const renewalDateTrigger = event.target.closest("[data-warranty-renewal-date-trigger]");
+  if (renewalDateTrigger && state.tab === "warranty") {
+    if (renewalDateTrigger.disabled) return;
+    openWarrantyRenewalDate(renewalDateTrigger, currentHelpers, () => {
+      rerenderCustomersPage();
+      activeScope?.animationFrame(() => document.querySelector("[data-warranty-renewal-date-trigger]")?.focus());
+    });
+    return;
+  }
+
+  if (event.target.closest("[data-warranty-renewal-submit]") && state.tab === "warranty") {
+    const result = await submitWarrantyRenewal({ scope: activeScope, onChange: rerenderCustomersPage });
+    if (result.ok) activeScope?.animationFrame(() => document.querySelector(`[data-warranty-renew="${result.target}"]`)?.focus());
+    return;
+  }
+
+  if ((event.target.closest("[data-warranty-renewal-close]") || event.target.matches("[data-warranty-renewal-overlay]")) && state.tab === "warranty") {
+    const renewalTarget = closeWarrantyRenewal();
+    if (renewalTarget) {
+      rerenderCustomersPage();
+      activeScope?.animationFrame(() => document.querySelector(`[data-warranty-renew="${renewalTarget}"]`)?.focus());
+    }
     return;
   }
 
@@ -635,6 +691,15 @@ function onCustomersKeydown(event) {
   if (event.key !== "Escape") return;
   closeAllFilterMenus(null);
   dateFilter.close();
+  if (isWarrantyRenewalOpen()) {
+    const renewalTarget = closeWarrantyRenewal();
+    if (renewalTarget) {
+      event.preventDefault();
+      rerenderCustomersPage();
+      activeScope?.animationFrame(() => document.querySelector(`[data-warranty-renew="${renewalTarget}"]`)?.focus());
+    }
+    return;
+  }
   if (state.modalOpen) closeAddCustomerModal();
 }
 
@@ -644,6 +709,7 @@ function onCustomersResize() {
     resizeTimer = 0;
     if (!isCurrentCustomersScope()) return;
     closeWarrantyDateRange();
+    closeWarrantyRenewalDate();
     rerenderCustomersPage();
   }, 120);
 }
