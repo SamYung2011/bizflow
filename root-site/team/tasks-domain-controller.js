@@ -1,5 +1,5 @@
 import { taskT } from "./tasks-i18n.js";
-import { isTaskCreator, isWaitingApproval } from "./tasks-model.js";
+import { canEditSubtaskTitle, canManageTaskSubtasks, isTaskCreator, isWaitingApproval } from "./tasks-model.js";
 import { setSessionValue } from "../data/session-state.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
@@ -15,6 +15,10 @@ export function attachTaskDomainController({
   localTimestamp,
   toggleTaskParticipation,
   toggleSubtaskCompletion,
+  createSubtask,
+  updateSubtaskTitle,
+  deleteSubtask,
+  refreshTaskBoardReadState,
   approveTask,
   refreshLiveData,
   isLiveRefreshBlocked,
@@ -188,43 +192,123 @@ export function attachTaskDomainController({
       return;
     }
 
+    const subtaskEdit = event.target.closest("[data-task-subtask-edit]");
+    if (subtaskEdit) {
+      if (state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites)) return;
+      const subtask = taskById(subtaskEdit.getAttribute("data-task-subtask-edit"));
+      if (!canEditSubtaskTitle(subtask, state.currentUser, state.permissions)) return;
+      state.subtaskEditingId = subtask.id;
+      state.subtaskEditDraft = subtask.title;
+      state.subtaskEditOriginal = subtask.title;
+      rerender({ focusSubtaskEditId: subtask.id });
+      return;
+    }
+
+    const subtaskEditCancel = event.target.closest("[data-task-subtask-edit-cancel]");
+    if (subtaskEditCancel) {
+      if (state.writeBusy) return;
+      const subtaskId = subtaskEditCancel.getAttribute("data-task-subtask-edit-cancel");
+      state.subtaskEditingId = null;
+      state.subtaskEditDraft = "";
+      state.subtaskEditOriginal = "";
+      rerender({ focusSubtaskId: subtaskId });
+      return;
+    }
+
     const subtaskDelete = event.target.closest("[data-task-subtask-delete]");
     if (subtaskDelete) {
-      if (state.liveReadOnly || subtaskDelete.disabled) return;
+      if (state.writeBusy || subtaskDelete.disabled || (state.liveReadOnly && !state.liveTaskWrites)) return;
+      const subtask = taskById(subtaskDelete.getAttribute("data-task-subtask-delete"));
+      const parent = subtask?.parentId ? taskById(subtask.parentId) : null;
+      if (!subtask || !canManageTaskSubtasks(parent, state.currentUser)) return;
       if (await confirmInPage(taskT(getHelpers().lang, "tasks.detail.deleteSubtaskConfirm"), { danger: true })) {
         if (!scope.isCurrent()) return;
-        removeSubtask(subtaskDelete.getAttribute("data-task-subtask-delete"));
-        rerender();
+        if (state.liveTaskWrites && !await deleteSubtask(subtask)) {
+          if (scope.isCurrent()) rerender({ focusSubtaskId: subtask.id });
+          return;
+        }
+        if (!scope.isCurrent()) return;
+        removeSubtask(subtask.id);
+        if (state.subtaskEditingId === subtask.id) {
+          state.subtaskEditingId = null;
+          state.subtaskEditDraft = "";
+          state.subtaskEditOriginal = "";
+        }
+        refreshTaskBoardReadState?.();
+        rerender({ focusSubtaskAdd: true });
       }
+      return;
     }
   });
 
-  scope.listen(document, "submit", (event) => {
+  scope.listen(document, "submit", async (event) => {
+    const editForm = event.target.closest("[data-task-subtask-edit-form]");
+    if (editForm) {
+      event.preventDefault();
+      if (state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites)) return;
+      const subtask = taskById(editForm.getAttribute("data-task-subtask-edit-form"));
+      const title = String(state.subtaskEditDraft || "").trim();
+      if (!subtask || state.subtaskEditingId !== subtask.id || !title ||
+        !canEditSubtaskTitle(subtask, state.currentUser, state.permissions)) return;
+      if (title === subtask.title) {
+        state.subtaskEditingId = null;
+        state.subtaskEditDraft = "";
+        state.subtaskEditOriginal = "";
+        rerender({ focusSubtaskId: subtask.id });
+        return;
+      }
+      const updated = state.liveTaskWrites ? await updateSubtaskTitle(subtask, title) : { title };
+      if (!scope.isCurrent()) return;
+      if (!updated) {
+        rerender({ focusSubtaskEditId: subtask.id });
+        return;
+      }
+      subtask.title = String(updated.title || title);
+      state.subtaskEditingId = null;
+      state.subtaskEditDraft = "";
+      state.subtaskEditOriginal = "";
+      refreshTaskBoardReadState?.();
+      rerender({ focusSubtaskId: subtask.id });
+      return;
+    }
+
     const form = event.target.closest("[data-task-subtask-form]");
     if (!form) return;
     event.preventDefault();
-    if (state.liveReadOnly || !state.permissions.canCreate) return;
+    if (state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites)) return;
     const values = new FormData(form);
-    const title = String(values.get("title") || "").trim();
-    const assigneeName = String(values.get("assignee") || "").trim();
+    const title = String(values.get("title") ?? state.subtaskAddDraft.title ?? "").trim();
+    const assigneeId = String(values.get("assigneeId") ?? state.subtaskAddDraft.assigneeId ?? "");
+    state.subtaskAddDraft = { title, assigneeId };
     const parent = taskById(form.getAttribute("data-parent-task-id"));
-    const member = state.members.find((item) => item.name === assigneeName);
-    if (!title || !assigneeName || !parent) return;
+    const member = state.members.find((item) => item.id === assigneeId);
+    const department = parent?.departmentId
+      ? (state.departments ?? []).find((item) => item.id === parent.departmentId)
+      : null;
+    const eligible = !parent?.departmentId || department?.memberIds?.includes(member?.id);
+    if (!title || !member || !parent || !eligible || !canManageTaskSubtasks(parent, state.currentUser)) return;
+    const created = state.liveTaskWrites ? await createSubtask(parent, title, member) : null;
+    if (!scope.isCurrent()) return;
+    if (state.liveTaskWrites && !created) {
+      rerender({ focusSubtaskAdd: true });
+      return;
+    }
     const subtask = {
-      id: `local-subtask-${Date.now()}`,
-      title,
+      id: created?.task?.id || `local-subtask-${Date.now()}`,
+      title: String(created?.task?.title || title),
       content: "",
-      owner: assigneeName,
-      members: [assigneeName],
+      owner: member.name,
+      members: [member.name],
       priority: "low",
+      dbPriority: "none",
       status: "inProgress",
       done: false,
       due: "",
       startDate: "",
       createdAt: localTimestamp(),
       completedAt: "",
-      creator: state.currentUser.name,
-      creatorId: state.currentUser.id,
+      creator: parent.creator,
+      creatorId: parent.creatorId,
       parentId: parent.id,
       visibility: parent.visibility,
       visibilityDepartment: parent.visibilityDepartment,
@@ -233,7 +317,7 @@ export function attachTaskDomainController({
       approvedBy: "",
       attachmentCount: 0,
       countBadge: "",
-      assignees: [{ employeeId: member?.id || "", name: assigneeName, completedAt: null, abandonedAt: null }],
+      assignees: [{ employeeId: member.id, name: member.name, completedAt: null, abandonedAt: null }],
       feedback: [],
       subtasks: []
     };
@@ -242,10 +326,29 @@ export function attachTaskDomainController({
     state.summary.total += 1;
     state.summary.inProgress += 1;
     adjustOpenTaskCounts(subtask, 1);
-    rerender();
+    state.subtaskAddDraft = { title: "", assigneeId: "" };
+    refreshTaskBoardReadState?.();
+    rerender({ focusSubtaskAdd: true });
+  });
+
+  scope.listen(document, "input", (event) => {
+    const addTitle = event.target.closest('[data-task-subtask-form] input[name="title"]');
+    if (addTitle) {
+      state.subtaskAddDraft.title = addTitle.value;
+      return;
+    }
+    const editTitle = event.target.closest('[data-task-subtask-edit-form] input[name="subtaskTitle"]');
+    if (editTitle && state.subtaskEditingId === editTitle.closest("[data-task-subtask-edit-form]")?.getAttribute("data-task-subtask-edit-form")) {
+      state.subtaskEditDraft = editTitle.value;
+    }
   });
 
   scope.listen(document, "change", (event) => {
+    const subtaskAssignee = event.target.closest('[data-task-subtask-form] select[name="assigneeId"]');
+    if (subtaskAssignee) {
+      state.subtaskAddDraft.assigneeId = subtaskAssignee.value;
+      return;
+    }
     if (!event.target.matches("[data-task-only-mine]")) return;
     if (state.onlyMine !== event.target.checked) state.boardExpandedPriorities.clear();
     state.onlyMine = event.target.checked;
@@ -255,7 +358,15 @@ export function attachTaskDomainController({
 
   scope.listen(document, "keydown", (event) => {
     if (event.key !== "Escape") return;
-    if (state.aiOpen) {
+    if (state.subtaskEditingId) {
+      const subtaskId = state.subtaskEditingId;
+      state.subtaskEditingId = null;
+      state.subtaskEditDraft = "";
+      state.subtaskEditOriginal = "";
+      event.preventDefault();
+      event.stopPropagation();
+      rerender({ focusSubtaskId: subtaskId });
+    } else if (state.aiOpen) {
       state.aiOpen = false;
       rerender();
     } else if (state.calendarExpandedDate) {

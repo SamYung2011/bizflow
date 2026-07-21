@@ -1,5 +1,5 @@
 import { taskT } from "./tasks-i18n.js";
-import { canDeleteTaskForUser, isTaskCreator, isWaitingApproval, taskAssignee, taskSubtaskProgress } from "./tasks-model.js";
+import { canDeleteTaskForUser, canEditSubtaskTitle, canManageTaskSubtasks, isTaskCreator, isWaitingApproval, taskAssignee, taskSubtaskProgress } from "./tasks-model.js";
 
 function initials(name) {
   return String(name || "?").trim().slice(0, 1).toUpperCase();
@@ -81,8 +81,15 @@ function renderFeedbackEntry(entry, state, helpers) {
 function renderSubtasks(task, state, helpers) {
   const { escapeHtml, lang } = helpers;
   const tt = (key) => taskT(lang, key);
-  const members = state.members.filter((member) => member.dept !== "all");
+  const department = task.departmentId
+    ? (state.departments ?? []).find((item) => item.id === task.departmentId)
+    : null;
+  const departmentMemberIds = department ? new Set(department.memberIds ?? []) : null;
+  const members = state.members.filter((member) => member.dept !== "all" &&
+    (!task.departmentId || departmentMemberIds?.has(member.id)));
   const progress = taskSubtaskProgress(task);
+  const canManage = canManageTaskSubtasks(task, state.currentUser);
+  const addDraft = state.subtaskAddDraft ?? { title: "", assigneeId: "" };
   const rows = (task.subtasks ?? []).map((subtask) => {
     const assigneeNames = (subtask.assignees ?? []).map((assignee) => assignee.name).join(", ") || "—";
     const aggregateCompleted = subtask.done === true || subtask.status === "completed";
@@ -91,20 +98,33 @@ function renderSubtasks(task, state, helpers) {
     const canToggle = state.liveTaskWrites ? Boolean(ownAssignee) : !state.liveReadOnly;
     const disabled = !canToggle || state.writeBusy;
     const toggleTitle = canToggle ? subtask.title : tt("tasks.detail.subtaskOnlyAssignee");
+    const canEditTitle = canEditSubtaskTitle(subtask, state.currentUser, state.permissions);
+    const editing = canEditTitle && state.subtaskEditingId === subtask.id;
+    const title = editing
+      ? `<form class="task-detail__subtask-edit" data-task-subtask-edit-form="${escapeHtml(subtask.id)}">
+          <input name="subtaskTitle" required value="${escapeHtml(state.subtaskEditDraft ?? subtask.title)}" aria-label="${escapeHtml(tt("tasks.detail.subtaskTitle"))}">
+          <button type="submit"${state.writeBusy ? " disabled" : ""}>${escapeHtml(tt("tasks.detail.saveSubtask"))}</button>
+          <button type="button" data-task-subtask-edit-cancel="${escapeHtml(subtask.id)}"${state.writeBusy ? " disabled" : ""}>${escapeHtml(tt("tasks.detail.cancelSubtask"))}</button>
+        </form>`
+      : `<span class="${aggregateCompleted ? "is-completed" : ""}" title="${escapeHtml(subtask.title)}">${escapeHtml(subtask.title)}</span>`;
+    const actions = !editing && (canEditTitle || canManage) ? `<span class="task-detail__subtask-actions">
+      ${canEditTitle ? `<button type="button" data-task-subtask-edit="${escapeHtml(subtask.id)}" aria-label="${escapeHtml(tt("tasks.detail.editSubtask"))}" title="${escapeHtml(tt("tasks.detail.editSubtask"))}"${state.writeBusy ? " disabled" : ""}>${escapeHtml(tt("tasks.detail.editSubtask"))}</button>` : ""}
+      ${canManage ? `<button type="button" data-task-subtask-delete="${escapeHtml(subtask.id)}" aria-label="${escapeHtml(tt("tasks.detail.deleteSubtask"))}" title="${escapeHtml(tt("tasks.detail.deleteSubtask"))}"${state.writeBusy ? " disabled" : ""}>×</button>` : ""}
+    </span>` : "";
     return `<div class="task-detail__subtask" data-task-subtask="${escapeHtml(subtask.id)}">
       <input type="checkbox" data-task-subtask-toggle="${escapeHtml(subtask.id)}"${completed ? " checked" : ""} aria-label="${escapeHtml(toggleTitle)}" title="${escapeHtml(toggleTitle)}"${disabled ? " disabled" : ""}>
-      <span class="${aggregateCompleted ? "is-completed" : ""}" title="${escapeHtml(subtask.title)}">${escapeHtml(subtask.title)}</span>
+      ${title}
       <small title="${escapeHtml(assigneeNames)}">${escapeHtml(assigneeNames)}</small>
-      <button type="button" data-task-subtask-delete="${escapeHtml(subtask.id)}" aria-label="${escapeHtml(tt("tasks.detail.deleteSubtask"))}" title="${escapeHtml(tt("tasks.detail.deleteSubtask"))}"${state.liveReadOnly ? " disabled" : ""}>×</button>
+      ${actions}
     </div>`;
   }).join("");
   return `<section class="task-detail__subtasks"><h3>${escapeHtml(tt("tasks.detail.subtasks"))}<span>${progress.done}/${progress.total}</span></h3>
     <div>${rows}</div>
-    <form data-task-subtask-form data-parent-task-id="${escapeHtml(task.id)}">
-      <input name="title" required placeholder="${escapeHtml(tt("tasks.detail.subtaskTitle"))}" aria-label="${escapeHtml(tt("tasks.detail.subtaskTitle"))}">
-      <select name="assignee" required aria-label="${escapeHtml(tt("tasks.detail.subtaskAssignee"))}"><option value="">${escapeHtml(tt("tasks.detail.subtaskAssignee"))}</option>${members.map((member) => `<option value="${escapeHtml(member.name)}">${escapeHtml(member.name)}</option>`).join("")}</select>
-      <button type="submit"${state.liveReadOnly ? " disabled" : ""}>+ ${escapeHtml(tt("tasks.detail.addSubtask"))}</button>
-    </form>
+    ${canManage ? `<form data-task-subtask-form data-parent-task-id="${escapeHtml(task.id)}">
+      <input name="title" required value="${escapeHtml(addDraft.title)}" placeholder="${escapeHtml(tt("tasks.detail.subtaskTitle"))}" aria-label="${escapeHtml(tt("tasks.detail.subtaskTitle"))}"${state.writeBusy ? " disabled" : ""}>
+      <select name="assigneeId" required aria-label="${escapeHtml(tt("tasks.detail.subtaskAssignee"))}"${state.writeBusy ? " disabled" : ""}><option value="">${escapeHtml(tt("tasks.detail.subtaskAssignee"))}</option>${members.map((member) => `<option value="${escapeHtml(member.id)}"${member.id === addDraft.assigneeId ? " selected" : ""}>${escapeHtml(member.name)}</option>`).join("")}</select>
+      <button type="submit"${state.writeBusy ? " disabled" : ""}>+ ${escapeHtml(tt("tasks.detail.addSubtask"))}</button>
+    </form>` : ""}
   </section>`;
 }
 

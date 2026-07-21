@@ -27,6 +27,17 @@ export function canDeleteTaskForUser(task, member, permissions = {}) {
     member?.isAdminOfActive === true || permissions.canDeleteOthers === true);
 }
 
+export function canManageTaskSubtasks(task, member) {
+  return Boolean(task) && task.parentId == null && (isTaskCreator(task, member) ||
+    member?.isSuperAdmin === true || member?.isAdminOfActive === true);
+}
+
+export function canEditSubtaskTitle(task, member, permissions = {}) {
+  return Boolean(task?.parentId) && (isTaskCreator(task, member) ||
+    member?.isSuperAdmin === true || member?.isAdminOfActive === true ||
+    permissions.canEditOthers === true);
+}
+
 export function isTaskAssignedTo(task, member) {
   return taskAssignee(task, member) !== null;
 }

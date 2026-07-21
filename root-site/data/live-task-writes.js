@@ -400,6 +400,45 @@ export async function setLiveSubtaskCompletion({ taskId, completed }) {
   return { completedAt, allDone, taskDone };
 }
 
+export async function createLiveSubtask({ parentTaskId, title, assigneeId }) {
+  const { client } = await writeContext();
+  const normalizedTitle = String(title || "").trim();
+  if (!normalizedTitle || !parentTaskId || !assigneeId) throw new Error("Subtask requires a title and assignee");
+  const result = await client.rpc("create_employee_subtask", {
+    p_parent_task_id: parentTaskId,
+    p_title: normalizedTitle,
+    p_assignee_id: assigneeId
+  });
+  throwIfError(result.error);
+  if (!result.data?.task?.id || !result.data?.assignee?.employee_id) throw new Error("Subtask create returned an invalid result");
+  await invalidateTaskReads("employee_tasks", "task_assignees");
+  return result.data;
+}
+
+export async function updateLiveSubtaskTitle({ subtaskId, title }) {
+  const { client } = await writeContext();
+  const normalizedTitle = String(title || "").trim();
+  if (!normalizedTitle || !subtaskId) throw new Error("Subtask title is required");
+  const result = await client.rpc("update_employee_subtask_title", {
+    p_subtask_id: subtaskId,
+    p_title: normalizedTitle
+  });
+  throwIfError(result.error);
+  if (!result.data?.id || !result.data?.parent_task_id) throw new Error("Subtask update returned an invalid result");
+  await invalidateTaskReads("employee_tasks");
+  return result.data;
+}
+
+export async function deleteLiveSubtask(subtaskId) {
+  const { client } = await writeContext();
+  if (!subtaskId) throw new Error("Subtask ID is required");
+  const result = await client.rpc("delete_employee_subtask", { p_subtask_id: subtaskId });
+  throwIfError(result.error);
+  if (!result.data?.id || !result.data?.parent_task_id) throw new Error("Subtask delete returned an invalid result");
+  await invalidateTaskReads("employee_tasks", "task_assignees", "employee_task_feedbacks");
+  return result.data;
+}
+
 export async function setLiveTaskParticipation({ taskId, employeeId, abandoned, singleAssignee }) {
   const { client } = await writeContext();
   const changedAt = abandoned ? new Date().toISOString() : null;

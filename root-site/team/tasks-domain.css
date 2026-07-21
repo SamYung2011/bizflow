@@ -660,7 +660,7 @@
   border-bottom: 1px solid var(--gray-10);
 }
 
-.task-detail__subtask > span,
+.task-detail__subtask > span:not(.task-detail__subtask-actions),
 .task-detail__subtask > small {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -676,21 +676,56 @@
   color: var(--blue);
 }
 
-.task-detail__subtask > button {
+.task-detail__subtask-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-4);
+}
+
+.task-detail__subtask-actions button,
+.task-detail__subtask-edit button {
+  min-height: 32px;
+  padding: var(--space-4) var(--space-10);
   border: 0;
+  border-radius: var(--radius-10);
+  color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 8%, var(--white));
+}
+
+.task-detail__subtask-actions button[data-task-subtask-delete] {
   color: var(--red);
   background: transparent;
 }
 
-.task-detail__subtasks form {
+.task-detail__subtask-edit {
+  display: flex;
+  min-width: 0;
+  gap: var(--space-4);
+}
+
+.task-detail__subtask-edit input {
+  min-width: 0;
+  flex: 1;
+  padding: var(--space-10);
+  border: 1px solid var(--blue);
+  border-radius: var(--radius-10);
+}
+
+.task-detail__subtask-edit button[data-task-subtask-edit-cancel] {
+  color: var(--gray-50);
+  background: var(--gray-5);
+}
+
+.task-detail__subtasks form[data-task-subtask-form] {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(120px, auto) auto;
   gap: var(--space-10);
 }
 
-.task-detail__subtasks form input,
-.task-detail__subtasks form select,
-.task-detail__subtasks form button {
+.task-detail__subtasks form[data-task-subtask-form] input,
+.task-detail__subtasks form[data-task-subtask-form] select,
+.task-detail__subtasks form[data-task-subtask-form] button {
   min-width: 0;
   min-height: 40px;
   padding: var(--space-10);
@@ -699,7 +734,7 @@
   background: var(--white);
 }
 
-.task-detail__subtasks form button {
+.task-detail__subtasks form[data-task-subtask-form] button {
   border: 0;
   color: var(--white);
   background: var(--blue);
@@ -921,12 +956,20 @@
     grid-column: 2;
   }
 
-  .task-detail__subtask > button {
+  .task-detail__subtask-actions {
     grid-row: 1 / span 2;
     grid-column: 3;
   }
 
-  .task-detail__subtasks form {
+  .task-detail__subtask-edit {
+    flex-wrap: wrap;
+  }
+
+  .task-detail__subtask-edit input {
+    flex-basis: 100%;
+  }
+
+  .task-detail__subtasks form[data-task-subtask-form] {
     grid-template-columns: minmax(0, 1fr);
   }
 
