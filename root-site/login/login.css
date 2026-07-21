@@ -8,9 +8,9 @@ body {
   --login-ink: #0B1F3A; /* Figma login 标题/正文近黑实测，无全局精确色档。 */
   --login-brand-soft: #BFDBFE; /* Figma login 品牌辅助浅蓝实测，无全局精确色档。 */
   --login-input-bg: var(--gray-8);
-  --login-placeholder: #979797; /* Figma login 输入占位文字实测，无全局精确色档。 */
+  --login-placeholder: var(--gray-25); /* Figma login 输入占位文字 #979797 精确档。 */
   --login-link: #1167E0; /* Figma login 链接蓝实测，沿用品牌渐变首色。 */
-  --login-lang-idle: #F5F5F5; /* Figma login 语言按钮未选中底实测；与 gray-5 非同值，按本单“仅 4 处渲染变化”保值。 */
+  --login-lang-idle: var(--gray-6); /* Figma login 语言按钮未选中底 #F5F5F5 精确档。 */
   --login-shadow: 0 8px 10px rgba(0, 0, 0, .1);
   --login-brand-slogan-size: 72px; /* Figma desktop login 558:19812 品牌标语实测，无全局字阶；保持已验收渲染值。 */
   --login-forgot-size: 13px; /* Figma login/forgot 已验收帧实测，无全局字阶；保值。 */

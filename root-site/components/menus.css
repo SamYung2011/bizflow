@@ -57,7 +57,7 @@
   width: 280px;
   padding: var(--space-10);
   border-radius: var(--radius-20);
-  background: var(--gray-5); /* Figma #F5F5F5 → gray-5 */
+  background: var(--gray-6); /* Figma #F5F5F5 精确档 */
   box-shadow: 0 10px 30px rgba(0, 0, 0, .12);
 }
 
@@ -202,7 +202,7 @@
   gap: var(--space-10);
   padding: var(--space-10);
   border-radius: var(--radius-10);
-  background: var(--gray-5); /* Figma #F5F5F5 → gray-5 */
+  background: var(--gray-6); /* Figma #F5F5F5 精确档 */
   color: var(--gray-80);
   font-size: var(--font-title-3-size);
 }
@@ -237,7 +237,7 @@
 }
 
 .user-panel__action--exit {
-  background: var(--3a); /* 深灰退出钮(Figma #5C5C5C → 归 3a 档) */
+  background: var(--gray-50); /* 深灰退出钮 Figma #5C5C5C 精确档 */
 }
 
 .user-panel__action:hover {
@@ -270,7 +270,7 @@
   padding: var(--space-10);
   border: var(--user-panel-field-border-width) solid transparent;
   border-radius: var(--radius-10);
-  background: var(--gray-5); /* Figma #F5F5F5 → gray-5 */
+  background: var(--gray-6); /* Figma #F5F5F5 精确档 */
   color: var(--gray-80);
   font-size: var(--font-title-3-size);
 }

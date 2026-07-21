@@ -15,7 +15,7 @@
 
   /* Figma Order 组件 509:19630 档外精确值(只作用本屏,不进全局 tokens.css)。 */
   --order-chip-bg: var(--gray-8); /* 日期/金额 chip 底 Figma #F0F0F0 → gray-8 精确收编(00-设计规范 §2.1) */
-  --order-toolbar-text: var(--gray-40); /* 工具行日期/来源文字 Figma #5C5C5C → gray-40 最近次级文字档 */
+  --order-toolbar-text: var(--gray-50); /* 工具行日期/来源文字 Figma #5C5C5C 精确档 */
   --orders-search-width: 320px; /* 与全站顶栏搜索框同宽，当前无全局尺寸 token。 */
   /* 状态方块蓝底 Figma #0974EF(菜单渐变首色)与 --blue #0468EA 近同色,§2.1 小控件底统一收入 --blue,不单列 */
 }
@@ -27,12 +27,12 @@
   --orders-muted: var(--gray-40);
   --orders-gray-d9: var(--gray-12);
   --orders-gray-f0: var(--gray-8);
-  --orders-gray-e5: #E5E5E5; /* Figma 订单创建/详情输入底实测；与 gray-10 非同值，按本单“仅 4 处渲染变化”保值。 */
-  --orders-gray-5c: #5C5C5C; /* Figma 订单创建/详情次级文字实测，无全局精确色档。 */
+  --orders-gray-e5: var(--gray-11); /* Figma 订单创建/详情输入底 #E5E5E5 精确档。 */
+  --orders-gray-5c: var(--gray-50); /* Figma 订单创建/详情次级文字 #5C5C5C 精确档。 */
   --orders-status-selected: #0974EF; /* Figma 订单勾选控件实测；与 blue 非同值，按本单“仅 4 处渲染变化”保值。 */
-  --orders-red-chip: #E01010; /* Figma 订单删除/警示 chip 实测，同任务高优先级红。 */
-  --orders-close: #2E2F30; /* Figma 订单弹窗关闭钮实测，无全局精确色档。 */
-  --orders-placeholder: #979797; /* Figma 订单输入占位文字实测，无全局精确色档。 */
+  --orders-red-chip: var(--red-strong); /* Figma 订单删除/警示 chip #E01010 精确档。 */
+  --orders-close: var(--gray-70); /* Figma 订单弹窗关闭钮 #2E2F30 精确档。 */
+  --orders-placeholder: var(--gray-25); /* Figma 订单输入占位文字 #979797 精确档。 */
   --orders-border: var(--gray-15);
 }
 
@@ -66,7 +66,7 @@
   border: 0;
   border-radius: var(--radius-10);
   background: var(--blue);
-  color: var(--gray-5); /* Figma 按钮文字 #F5F5F5 → gray-5 */
+  color: var(--gray-6); /* Figma 按钮文字 #F5F5F5 精确档 */
   font-size: var(--font-title-3-size);
   font-weight: var(--font-title-3-weight);
   line-height: var(--lh-tight);
@@ -219,7 +219,7 @@
   gap: var(--space-10);
   padding: var(--space-10);
   border-radius: var(--radius-20);
-  background: var(--gray-5); /* Figma Frame784 #F5F5F5 → gray-5 */
+  background: var(--gray-6); /* Figma Frame784 #F5F5F5 精确档 */
   box-shadow: 0 10px 30px rgba(0, 0, 0, .12);
 }
 

@@ -240,10 +240,10 @@
 
 .team-member-card--add {
   /* 帧 582:35461 的成员网格里没有新增卡实例;跟随最后一张成员卡走网格自然流(煊煊验收:不许单独钉死在角落) */
-  /* 443:6600 新增成员变体实测:实线边框 #d9d9d9(取近 gray-10)、文字/图标 #979797(取近 gray-20);组件卡文档写"虚线"与本次 Figma 实测不符,按 00-设计规范"与 Figma 冲突以 Figma 为准"改,文档待回改 */
+  /* 443:6600 新增成员变体实测:实线边框 #d9d9d9(取近 gray-10)、文字/图标 Figma #979797 精确档；组件卡文档写"虚线"与本次 Figma 实测不符,按 00-设计规范"与 Figma 冲突以 Figma 为准"改,文档待回改 */
   border: 1px solid var(--gray-10);
   background: var(--white);
-  color: var(--gray-20);
+  color: var(--gray-25);
 }
 
 .team-member-card--add:hover {
