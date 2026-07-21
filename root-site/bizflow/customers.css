@@ -805,7 +805,9 @@
   gap: var(--space-20);
 }
 
-.form-new-customer__footer .btn--hug {
+.form-new-customer__footer > .btn--hug {
+  height: 40px;
+  min-height: 40px;
   flex: 1 0 0;
   width: auto;
   min-width: 0;

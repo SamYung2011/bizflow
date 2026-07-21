@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const warranty = read("root-site/bizflow/customers-warranty.css");
+const customers = read("root-site/bizflow/customers.css");
 const orders = read("root-site/bizflow/orders.css");
 
 assert.match(
@@ -12,9 +13,9 @@ assert.match(
 );
 
 assert.match(
-  warranty,
-  /\.warranty-renewal-modal\s*>\s*\.form-new-customer__footer\s*>\s*\.btn--hug\s*\{[\s\S]*?height:\s*40px;[\s\S]*?min-height:\s*40px;/,
-  "renewal footer buttons must be 40px without changing the global btn--hug"
+  customers,
+  /\.form-new-customer__footer\s*>\s*\.btn--hug\s*\{[\s\S]*?height:\s*40px;[\s\S]*?min-height:\s*40px;/,
+  "customer form footer buttons must share the local 40px height without changing the global btn--hug"
 );
 
 assert.match(
