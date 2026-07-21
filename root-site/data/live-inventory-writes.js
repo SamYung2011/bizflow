@@ -89,15 +89,19 @@ export async function createLiveInventoryProduct(product) {
   return result;
 }
 
-export async function updateLiveInventoryProduct(product, expectedShopifyUpdatedAt = "") {
-  const result = await invokeCatalog("update", { requestId: requestId(), product, expectedShopifyUpdatedAt });
+export async function updateLiveInventoryProduct(product, expectedShopifyUpdatedAt = "", expectedShopifyStructureHash = "") {
+  const result = await invokeCatalog("update", {
+    requestId: requestId(), product, expectedShopifyUpdatedAt, expectedShopifyStructureHash
+  });
   await invalidateLiveTables("products", "inventory_stock", "shopify_variant_links", "shopify_catalog_bindings", "shopify_catalog_jobs");
   return result;
 }
 
-export async function deleteLiveInventoryProduct(bizflowParentProductId, expectedShopifyUpdatedAt = "") {
+export async function deleteLiveInventoryProduct(
+  bizflowParentProductId, expectedShopifyUpdatedAt = "", expectedShopifyStructureHash = ""
+) {
   const result = await invokeCatalog("delete", {
-    requestId: requestId(), bizflowParentProductId, expectedShopifyUpdatedAt
+    requestId: requestId(), bizflowParentProductId, expectedShopifyUpdatedAt, expectedShopifyStructureHash
   });
   await invalidateLiveTables("products", "inventory_stock", "shopify_variant_links", "shopify_catalog_bindings", "shopify_catalog_jobs");
   return result;

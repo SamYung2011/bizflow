@@ -5,9 +5,11 @@ const read = (relative) => readFile(new URL(`../${relative}`, import.meta.url), 
 
 const [
   migration,
+  casMigration,
   shared,
   edge,
   catalogue,
+  structure,
   settings,
   productEdge,
   orderEdge,
@@ -24,9 +26,11 @@ const [
   legacyInvoices
 ] = await Promise.all([
   read("migrations/092_shopify_catalog_write.sql"),
+  read("migrations/093_shopify_structure_cas.sql"),
   read("supabase/functions/_shared/shopify-admin.ts"),
   read("supabase/functions/shopify-catalog-write/index.ts"),
   read("supabase/functions/shopify-catalog-write/catalog.ts"),
+  read("supabase/functions/shopify-catalog-write/structure.ts"),
   read("supabase/functions/shopify-settings/index.ts"),
   read("supabase/functions/shopify-products/index.ts"),
   read("supabase/functions/shopify-orders/index.ts"),
@@ -64,6 +68,14 @@ for (const orderClient of [liveOrderWrites, legacyApp, legacyInvoices]) {
 }
 assert.match(migration, /REVOKE UPDATE ON public\.shopify_settings FROM anon, authenticated/,
   "browser credential mutation must be retired with the plaintext unlock path");
+assert.match(casMigration, /ADD COLUMN IF NOT EXISTS shopify_structure_hash text/,
+  "bindings need a durable Shopify structure baseline separate from the request payload hash");
+assert.match(casMigration, /ADD COLUMN IF NOT EXISTS expected_shopify_structure_hash text/,
+  "jobs must retain the structure snapshot loaded by the editing client");
+assert.match(casMigration, /v_shopify_structure_hash := NULLIF\(p_shopify_result->>'shopifyStructureHash'/,
+  "DB finalization must consume the exact live structure hash returned by Shopify");
+assert.match(casMigration, /shopify_structure_hash = COALESCE\([\s\S]*EXCLUDED\.shopify_structure_hash[\s\S]*shopify_catalog_bindings\.shopify_structure_hash/,
+  "old pending jobs must not erase an already-valid structure baseline");
 
 assert.match(shared, /SHOPIFY_API_VERSION[^\n]*"2026-07"/);
 assert.match(shared, /SHOPIFY_EXPECTED_DOMAIN = "honnmonoshop\.myshopify\.com"/);
@@ -102,10 +114,25 @@ assert.match(catalogue, /changeFromQuantity: current/,
   "inventory absolute writes must carry compare-and-set state");
 assert.match(catalogue, /inventorySetQuantities\(input: \$input\) @idempotent\(key: \$key\)/);
 assert.match(catalogue, /inventoryActivate[^]*@idempotent\(key: \$key\)/);
-assert.match(catalogue, /SHOPIFY_UPDATED_AT_CONFLICT[\s\S]*conflict: true/,
-  "catalogue writes must reject a stale Shopify updatedAt");
-assert.match(catalogue, /function sameTimestamp[\s\S]*Date\.parse[\s\S]*!sameTimestamp\(current\.updatedAt, expected\)/,
+assert.match(catalogue, /reconcileShopifyCas[\s\S]*sameTimestamp\(current\.updatedAt, expectedUpdatedAt\)/,
   "CAS must compare equivalent timestamptz and Shopify ISO formats as the same instant");
+assert.match(catalogue, /shopifyCasDecision\(comparisonStructureHash, currentStructureHash\) === "conflict"[\s\S]*conflict: true/,
+  "a stale timestamp may become a 409 only when the managed Shopify structure changed");
+assert.match(catalogue, /isShopifyStructureHash\(expectedStructureHash\)[\s\S]*expectedStructureHash[\s\S]*baselineStructureHash[\s\S]*shopifyCasDecision\(comparisonStructureHash, currentStructureHash\)/,
+  "a stale editor must compare its own loaded structure baseline before the current binding fallback");
+assert.match(catalogue, /shopify_updated_at: current\.updatedAt[\s\S]*shopify_structure_hash: currentStructureHash[\s\S]*return \{ conflict: false/,
+  "Shopify timestamp noise and legacy missing baselines must refresh in place and continue the same write");
+assert.match(catalogue, /shopifyStructureHash: await shopifyStructureHash\(finalProduct/,
+  "successful writes must persist a baseline from the final live Shopify structure");
+assert.match(catalogue, /confirmCatalogBinding[\s\S]*shopify_structure_hash: structureHash/,
+  "the explicit refresh-binding path must acknowledge a real external structure baseline");
+assert.match(catalogue, /SHOPIFY_UPDATED_AT_CONFLICT[\s\S]*currentStructureHash: cas\.currentStructureHash/,
+  "true external structural changes must retain the existing explicit 409 contract");
+assert.match(structure, /updatedAt and inventory quantities are deliberately absent/);
+assert.doesNotMatch(structure, /shopifyStructureSnapshot[\s\S]*updatedAt:/,
+  "updatedAt must never enter the structural fingerprint");
+assert.doesNotMatch(structure, /shopifyStructureSnapshot[\s\S]*inventoryLevels:/,
+  "inventory quantities keep their dedicated changeFromQuantity CAS instead of product 409s");
 assert.match(catalogue, /shopify_applied_pending_db[\s\S]*Resume DB apply failed/,
   "a Shopify-successful job must resume DB finalization instead of repeating the remote write");
 assert.match(catalogue, /productDelete\(input: \$input, synchronous: true\)/,
@@ -162,6 +189,12 @@ assert.match(inventory, /page\.replaceWith\(nextPage\)/,
   "inventory rerenders must atomically replace the still-current page node");
 assert.match(detail, /await updateLiveInventoryProduct\(/);
 assert.match(detail, /await deleteLiveInventoryProduct\(/);
+assert.match(snapshot, /structureHash: asText\(binding\.shopify_structure_hash\)/,
+  "inventory detail must receive the structure baseline loaded with its timestamp");
+assert.match(writes, /expectedShopifyStructureHash[\s\S]*invokeCatalog\("update"/,
+  "update writes must send the editor's structure baseline");
+assert.match(detail, /updateLiveInventoryProduct\([\s\S]*shopifyBinding\?\.structureHash/,
+  "the product editor must not silently overwrite a newer managed structure");
 assert.match(detail, /data-parent-warehouse-qty[\s\S]*detail\.warehouses\.find/,
   "single-variant products need editable per-warehouse stock for CAS writes");
 assert.match(detail, /detail\.subitems\.push\(item\)/,

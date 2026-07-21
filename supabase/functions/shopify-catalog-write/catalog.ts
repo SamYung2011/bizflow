@@ -4,6 +4,11 @@ import {
   sanitizeError,
   shopifyGraphQL,
 } from "../_shared/shopify-admin.ts";
+import {
+  isShopifyStructureHash,
+  shopifyCasDecision,
+  shopifyStructureHash,
+} from "./structure.ts";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -416,6 +421,56 @@ async function catalogueMappings(admin: SupabaseClient, product: NormalizedProdu
   };
 }
 
+async function managedShopifyCollectionIds(admin: SupabaseClient): Promise<Set<string>> {
+  const result = await admin.from("shopify_resource_mappings")
+    .select("shopify_resource_id")
+    .eq("kind", "collection")
+    .eq("active", true);
+  if (result.error) throw new Error(`Collection mapping read failed: ${result.error.message}`);
+  return new Set((result.data || []).map((row) => text(row.shopify_resource_id)).filter(Boolean));
+}
+
+async function reconcileShopifyCas(
+  admin: SupabaseClient,
+  binding: JsonRecord,
+  current: ShopifyProductNode,
+  expectedUpdatedAt: string,
+  expectedStructureHash: string,
+) {
+  const timestampMatches = !expectedUpdatedAt || sameTimestamp(current.updatedAt, expectedUpdatedAt);
+  const hasEditorStructureBaseline = isShopifyStructureHash(expectedStructureHash);
+  if (timestampMatches && !hasEditorStructureBaseline) {
+    return { conflict: false };
+  }
+
+  const managedCollectionIds = await managedShopifyCollectionIds(admin);
+  const currentStructureHash = await shopifyStructureHash(current, managedCollectionIds);
+  const baselineStructureHash = text(binding.shopify_structure_hash);
+  const comparisonStructureHash = isShopifyStructureHash(expectedStructureHash)
+    ? expectedStructureHash
+    : baselineStructureHash;
+  if (shopifyCasDecision(comparisonStructureHash, currentStructureHash) === "conflict") {
+    return { conflict: true, currentStructureHash, baselineStructureHash: comparisonStructureHash };
+  }
+  if (timestampMatches && baselineStructureHash === currentStructureHash) {
+    return { conflict: false, currentStructureHash };
+  }
+
+  // Product.updatedAt also advances for Shopify-owned activity such as tracked
+  // inventory adjustments. If the BizFlow-owned structure is unchanged, absorb
+  // that timestamp churn into the durable baseline and continue this same job.
+  // A null baseline is a pre-093/legacy binding: first sight establishes the
+  // versioned structure hash without rejecting the user's write.
+  const refreshed = await admin.from("shopify_catalog_bindings").update({
+    shopify_updated_at: current.updatedAt,
+    shopify_structure_hash: currentStructureHash,
+    verified_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }).eq("id", binding.id);
+  if (refreshed.error) throw new Error(`Refresh Shopify CAS baseline failed: ${refreshed.error.message}`);
+  return { conflict: false, currentStructureHash, refreshed: true };
+}
+
 async function ensureCatalogOwnership(admin: SupabaseClient, parentId: string, shopifyProductId: string) {
   const [products, links] = await Promise.all([
     admin.from("products").select("id,parent_product_id").or(`id.eq.${parentId},parent_product_id.eq.${parentId}`),
@@ -709,6 +764,7 @@ async function createOrUpdateShopifyProduct(
   return {
     shopifyProductId: finalProduct.id,
     shopifyUpdatedAt: finalProduct.updatedAt,
+    shopifyStructureHash: await shopifyStructureHash(finalProduct, mappings.managedCollectionIds),
     variants: sourceItems.map((item) => {
       const variant = bySku.get(item.internalCode.toLowerCase()) || finalProduct.variants[0];
       if (!variant) throw new Error(`Unable to match Shopify variant ${item.internalCode}`);
@@ -806,6 +862,7 @@ export async function executeCatalogWrite(
       status: "pending",
       bizflow_parent_product_id: parentId,
       expected_shopify_updated_at: text(body.expectedShopifyUpdatedAt) || null,
+      expected_shopify_structure_hash: text(body.expectedShopifyStructureHash) || null,
       request_payload: product ? { product } : { bizflowParentProductId: parentId },
       payload_hash: payloadHash,
       actor_user_id: actorUserId,
@@ -829,11 +886,22 @@ export async function executeCatalogWrite(
     const current = binding ? await fetchShopifyProduct(credentials, binding.shopify_product_id) : null;
     if (binding && !current && action !== "delete") throw new Error("SHOPIFY_BOUND_PRODUCT_MISSING");
     const expected = text(body.expectedShopifyUpdatedAt) || text(binding?.shopify_updated_at);
-    if (current && expected && !sameTimestamp(current.updatedAt, expected)) {
+    const expectedStructureHash = text(body.expectedShopifyStructureHash);
+    const cas = current && (expected || expectedStructureHash)
+      ? await reconcileShopifyCas(admin, binding as JsonRecord, current, expected, expectedStructureHash)
+      : { conflict: false };
+    if (current && cas.conflict) {
       await admin.from("shopify_catalog_jobs").update({
         status: "conflict", sanitized_error: "SHOPIFY_UPDATED_AT_CONFLICT", updated_at: new Date().toISOString(),
       }).eq("id", job.id);
-      return { ok: false, code: "SHOPIFY_UPDATED_AT_CONFLICT", conflict: true, currentUpdatedAt: current.updatedAt, jobId: job.id };
+      return {
+        ok: false,
+        code: "SHOPIFY_UPDATED_AT_CONFLICT",
+        conflict: true,
+        currentUpdatedAt: current.updatedAt,
+        currentStructureHash: cas.currentStructureHash,
+        jobId: job.id,
+      };
     }
     const groupIds = binding
       ? await ensureCatalogOwnership(admin, parentId, binding.shopify_product_id)
@@ -897,6 +965,7 @@ export async function confirmCatalogBinding(
   await ensureCatalogOwnership(admin, parentId, shopifyProductId);
   const product = await fetchShopifyProduct(credentials, shopifyProductId);
   if (!product) throw new Error("Shopify product not found");
+  const structureHash = await shopifyStructureHash(product, await managedShopifyCollectionIds(admin));
   const collision = await admin.from("shopify_catalog_bindings").select("bizflow_parent_product_id")
     .eq("shopify_product_id", shopifyProductId).neq("bizflow_parent_product_id", parentId).maybeSingle();
   if (collision.error) throw new Error(`Binding collision check failed: ${collision.error.message}`);
@@ -905,6 +974,7 @@ export async function confirmCatalogBinding(
     bizflow_parent_product_id: parentId,
     shopify_product_id: shopifyProductId,
     shopify_updated_at: product.updatedAt,
+    shopify_structure_hash: structureHash,
     status: "active",
     verified_at: new Date().toISOString(),
     created_by: actorUserId,

@@ -555,7 +555,11 @@ async function saveInventoryDetail() {
   state.feedback = "";
   rerenderDetailPage();
   try {
-    await updateLiveInventoryProduct(payload, detail.product.shopifyBinding?.updatedAt || "");
+    await updateLiveInventoryProduct(
+      payload,
+      detail.product.shopifyBinding?.updatedAt || "",
+      detail.product.shopifyBinding?.structureHash || ""
+    );
     detailCommitted = true;
     state.feedback = pageT(currentHelpers?.lang ?? "zh", "inventory.saved");
     navigateTo("./inventory.html");
@@ -586,7 +590,11 @@ async function onInventoryDetailClick(event) {
     state.busy = true;
     rerenderDetailPage();
     try {
-      await deleteLiveInventoryProduct(detail.product.id, detail.product.shopifyBinding?.updatedAt || "");
+      await deleteLiveInventoryProduct(
+        detail.product.id,
+        detail.product.shopifyBinding?.updatedAt || "",
+        detail.product.shopifyBinding?.structureHash || ""
+      );
       detailCommitted = true;
       navigateTo("./inventory.html");
     } catch (error) {

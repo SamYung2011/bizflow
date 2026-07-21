@@ -107,6 +107,7 @@ export async function buildInventorySnapshot() {
         shopifyBinding: binding ? {
           shopifyProductId: asText(binding.shopify_product_id),
           updatedAt: asText(binding.shopify_updated_at),
+          structureHash: asText(binding.shopify_structure_hash),
           status: asText(binding.status)
         } : null,
         variants: variants.map((variant) => ({
