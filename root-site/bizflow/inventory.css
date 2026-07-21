@@ -5,15 +5,15 @@
 .inventory-page,
 .inventory-detail-page {
   --inventory-panel-line: var(--gray-12);
-  --inventory-field-bg: #F5F5F5; /* Figma inventory 输入底实测；与 gray-5 非同值，按本单“仅 4 处渲染变化”保值。 */
+  --inventory-field-bg: var(--gray-6); /* Figma inventory 输入底 #F5F5F5 精确档。 */
   --inventory-list-bg: var(--gray-8);
-  --inventory-muted: #5C5C5C; /* Figma inventory 次级文字实测，无全局精确色档。 */
+  --inventory-muted: var(--gray-50); /* Figma inventory 次级文字 #5C5C5C 精确档。 */
   --inventory-line: var(--gray-15);
-  --inventory-chip-bg: #E5E5E5; /* Figma inventory chip 底实测；与 gray-10 非同值，按本单“仅 4 处渲染变化”保值。 */
-  --inventory-field-border: #979797; /* Figma inventory 输入描边实测，无全局精确色档。 */
-  --inventory-add-border: #0099FF; /* Figma Add 组件描边实测，同 tasks.css 列底新增钮与卡片蓝渐变尾色。 */
-  --inventory-danger: #E01010; /* Figma inventory 危险操作实测，同 tasks.css 高优先级红。 */
-  --inventory-modal-close: #2E2F30; /* Figma inventory 弹窗关闭钮实测，无全局精确色档。 */
+  --inventory-chip-bg: var(--gray-11); /* Figma inventory chip 底 #E5E5E5 精确档。 */
+  --inventory-field-border: var(--gray-25); /* Figma inventory 输入描边 #979797 精确档。 */
+  --inventory-add-border: var(--blue-bright); /* Figma Add 组件描边 #0099FF 精确档。 */
+  --inventory-danger: var(--red-strong); /* Figma inventory 危险操作 #E01010 精确档。 */
+  --inventory-modal-close: var(--gray-70); /* Figma inventory 弹窗关闭钮 #2E2F30 精确档。 */
   --inventory-shadow-soft: 0 4px 5px rgba(0, 0, 0, .1);
   --inventory-shadow-popover: 0 4px 5px rgba(0, 0, 0, .2);
   display: flex;

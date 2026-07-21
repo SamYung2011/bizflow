@@ -9,14 +9,13 @@
   flex-direction: column;
   gap: var(--space-20);
 
-  /* 本屏优先级配色 = 任务分类组件(507:15102)实测的 Figma 档外精确值。
-     只动 tasks.*,不进全局 tokens.css;照 Figma 落此处并注释(色差审计见 team/README)。
-     蓝/绿列前景直接命中 --blue/--green,唯红为 #E01010(≠ 全局 --red #DC2626),故单列。 */
+  /* 本屏优先级配色 = 任务分类组件(507:15102)实测的 Figma 精确值。
+     蓝/绿列前景直接命中 --blue/--green；跨模块复现的红与 Add 蓝已升格全局精确档。 */
   --team-col-high-bg: #FBDECE;   /* 高列底  I558:21605 red background(salmon,≠ red 14% 混色) */
   --team-col-medium-bg: #D5EEFD; /* 中列底  I558:21606 blue background */
   --team-col-low-bg: #D4F1D4;    /* 低列底  I558:21607 green background */
-  --team-high-fg: #E01010;       /* 高列标题/徽标前景  Figma 用 #E01010,非 --red #DC2626 */
-  --team-add-border: #0099FF;    /* 列底新增钮描边  Figma add 组件 border #09f(= 卡片蓝头部渐变尾色) */
+  --team-high-fg: var(--red-strong);       /* 高列标题/徽标前景 Figma #E01010 精确档 */
+  --team-add-border: var(--blue-bright);   /* 列底新增钮描边 Figma #0099FF 精确档 */
 }
 
 .team-task-title {
@@ -200,7 +199,7 @@
   padding: var(--space-4) var(--space-10); /* Figma 徽标 px10 py5(hug);py5 归最近档 4 */
   border-radius: var(--radius-20);
   background: var(--red);
-  color: var(--gray-5); /* Figma #F5F5F5 → gray-5 */
+  color: var(--gray-6); /* Figma #F5F5F5 精确档 */
   font-size: var(--font-title-3-size);
   font-weight: var(--font-title-2-weight); /* 16 Semi Bold */
   line-height: var(--lh-tight);
@@ -299,7 +298,7 @@
   padding: var(--space-10);
   overflow-y: auto;
   border-radius: var(--radius-20);
-  background: var(--gray-5); /* Figma Frame784 #F5F5F5 → gray-5 */
+  background: var(--gray-6); /* Figma Frame784 #F5F5F5 精确档 */
   box-shadow: 0 10px 30px rgba(0, 0, 0, .12);
 }
 

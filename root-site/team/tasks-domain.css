@@ -713,7 +713,8 @@
 }
 
 .task-detail__subtask-edit button[data-task-subtask-edit-cancel] {
-  color: var(--gray-50);
+  /* 原未定义变量按 CSS 规则等价于继承色；全局新增 gray-50 后仍保持该非 Figma 点位原样。 */
+  color: inherit;
   background: var(--gray-5);
 }
 

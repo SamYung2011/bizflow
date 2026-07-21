@@ -139,7 +139,7 @@
   border: 0;
   border-radius: var(--radius-10);
   background: var(--white);
-  color: var(--gray-40); /* Figma #5C5C5C 最近档,同日期 pill */
+  color: var(--gray-50); /* Figma #5C5C5C 精确档,同日期 pill */
   font-size: var(--font-description-size);
   font-weight: var(--font-description-weight);
   cursor: pointer;
@@ -272,7 +272,7 @@
   height: 31px;
   padding: var(--space-4) var(--space-10); /* Figma px10 py5;py5 归最近档 4(同 team 徽标既有换算) */
   border-radius: var(--radius-20);
-  background: var(--gray-10); /* Figma #E5E5E5 → gray-10(00-设计规范 §2.1 收编) */
+  background: var(--gray-11); /* Figma #E5E5E5 精确档(00-设计规范 §2.1) */
   color: var(--3a);
   font-size: var(--font-title-3-size);
   font-weight: var(--font-title-2-weight); /* Semi Bold(600) */
@@ -760,7 +760,7 @@
   padding: var(--space-10);
   border: 0;
   border-radius: var(--radius-10);
-  background: var(--gray-5); /* Figma #F5F5F5 精确命中 */
+  background: var(--gray-6); /* Figma #F5F5F5 精确档 */
   color: var(--gray-80);
   font-size: var(--font-description-size);
   font-weight: var(--font-description-weight);
@@ -778,7 +778,7 @@
 
 .form-new-customer__address-label {
   width: 100%;
-  color: var(--gray-40); /* Figma #5C5C5C 最近档 */
+  color: var(--gray-50); /* Figma #5C5C5C 精确档 */
   font-size: var(--font-body-size);
   font-weight: var(--font-body-weight);
 }
@@ -811,10 +811,10 @@
   min-width: 0;
 }
 
-/* Figma 取消钮实测 #5C5C5C 深灰底白字;同 menus.css user-panel__action--exit 既有换算,归 --3a 档 */
+/* Figma 取消钮实测 #5C5C5C 深灰底白字；与 menus.css 退出钮共用精确档。 */
 .btn--hug--gray {
   color: var(--white);
-  background: var(--3a);
+  background: var(--gray-50);
 }
 
 .form-new-customer__close {
@@ -825,7 +825,7 @@
   height: 20px;
   border: 0;
   border-radius: 50%;
-  background: var(--3a); /* Figma 实测 #2E2F30,无对应 token,归最近档 --3a(#3A3A3A) */
+  background: var(--gray-70); /* Figma #2E2F30 精确档 */
   cursor: pointer;
 }
 
