@@ -129,7 +129,7 @@ export function renderTaskCalendar({ tasks, state, helpers }) {
     </div>`;
   }).join("");
   const expandedTasks = tasksForCalendarDay(tasks, state.calendarExpandedDate);
-  return `<section class="task-calendar" data-task-calendar data-calendar-related-count="${tasks.length}" data-calendar-scheduled-count="${scheduledCount}" data-calendar-active-month="${state.calendarYear}-${String(state.calendarMonth + 1).padStart(2, "0")}">
+  return `<section class="task-calendar" data-task-calendar data-scroll-restore="team.tasks.calendar" data-calendar-related-count="${tasks.length}" data-calendar-scheduled-count="${scheduledCount}" data-calendar-active-month="${state.calendarYear}-${String(state.calendarMonth + 1).padStart(2, "0")}">
     <header class="task-calendar__head"><h2>${escapeHtml(monthLabel)}</h2><div>
       <button type="button" data-calendar-month="previous" title="${escapeHtml(taskT(lang, "tasks.calendar.previous"))}">${icon("icon-arrow-left", "icon")}</button>
       <button type="button" class="task-calendar__today" data-calendar-month="today">${escapeHtml(taskT(lang, "tasks.calendar.today"))}</button>

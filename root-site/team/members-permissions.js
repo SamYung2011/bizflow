@@ -41,7 +41,7 @@ export function renderMemberPermissions({ state, helpers }) {
     ${roles.map((role) => renderPermissionToggle(row, role, state, helpers)).join("")}
     <span class="permission-matrix__row-end" aria-hidden="true"></span>`).join("");
 
-  return `<div class="permission-matrix-scroll" tabindex="0" aria-label="${escapeHtml(tt("members.permission.scrollLabel"))}">
+  return `<div class="permission-matrix-scroll" data-scroll-restore="team.members.permissions" tabindex="0" aria-label="${escapeHtml(tt("members.permission.scrollLabel"))}">
     <section class="tp-component permission-matrix" style="--permission-role-count:${roles.length};--permission-row-count:${rows.length}" aria-label="${escapeHtml(tt("members.tab.permissions"))}">
       <span class="permission-matrix__corner" aria-hidden="true"></span>
       ${roleHeaders}
