@@ -3,11 +3,12 @@ import { readFile } from "node:fs/promises";
 import { aggregateRevenue } from "../root-site/components/order-metrics.js";
 import { normalizedItems } from "../root-site/data/live-orders-writes.js";
 
-const [writes, createPage, detailPage, ordersPage, shopifyOrders, shopifyMigration] = await Promise.all([
+const [writes, createPage, detailPage, ordersPage, ordersCss, shopifyOrders, shopifyMigration] = await Promise.all([
   readFile(new URL("../root-site/data/live-orders-writes.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/bizflow/orders-create.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/bizflow/orders-detail.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/bizflow/orders.js", import.meta.url), "utf8"),
+  readFile(new URL("../root-site/bizflow/orders.css", import.meta.url), "utf8"),
   readFile(new URL("../supabase/functions/shopify-orders/index.ts", import.meta.url), "utf8"),
   readFile(new URL("../migrations/079_shopify_orders_variant_sync.sql", import.meta.url), "utf8")
 ]);
@@ -86,6 +87,8 @@ assert.match(detailPage, /data-detail-paid-total>[\s\S]*?paidText/,
   "Unpaid details must not present the invoice total as already paid");
 assert.match(detailPage, /"orders\.receipt"[\s\S]*?"receipt", !paid, helpers/,
   "the receipt action must stay disabled until payment");
+assert.match(ordersCss, /\.orders-payment-check-row > \.orders-money-input\s*\{[^}]*grid-column:\s*3;[^}]*width:\s*100%;[^}]*justify-self:\s*end;/,
+  "fee inputs and their disabled placeholders must share the payment card's right-hand money column at every width");
 
 assert.match(ordersPage, /"in-progress": "orders\.status\.unpaid"/,
   "the order list must label Unpaid invoice rows explicitly");

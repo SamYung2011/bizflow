@@ -1277,6 +1277,12 @@ button.order-card__phone:focus-visible {
   text-align: center;
 }
 
+.orders-payment-check-row > .orders-money-input {
+  grid-column: 3;
+  width: 100%;
+  justify-self: end;
+}
+
 .orders-money-input--placeholder {
   color: var(--orders-placeholder);
 }
@@ -2024,10 +2030,6 @@ button.order-card__phone:focus-visible {
     gap: var(--space-10);
   }
 
-  .orders-workspace[data-orders-detail-page] .orders-payment-check-row .orders-money-input {
-    grid-column: 3;
-  }
-
   .orders-workspace[data-orders-detail-page] .orders-money-input {
     min-width: var(--orders-detail-mobile-price-column);
   }
@@ -2130,10 +2132,6 @@ button.order-card__phone:focus-visible {
 
   .orders-workspace[data-orders-create-page] .orders-payment-status-segment {
     width: 100%;
-  }
-
-  .orders-workspace[data-orders-create-page] .orders-payment-check-row .orders-money-input {
-    grid-column: 3;
   }
 
   .orders-workspace[data-orders-create-page] .orders-money-input {
