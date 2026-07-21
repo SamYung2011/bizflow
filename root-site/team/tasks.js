@@ -667,9 +667,10 @@ async function performTaskAction(taskId, action) {
   }
   if (action === "delete") {
     if (!canDeleteTaskForUser(task, state.currentUser, state.permissions)) return;
+    state.writeError = "";
+    state.writeNotice = "";
     if (state.liveTaskWrites) {
       state.writeBusy = true;
-      state.writeError = "";
       rerenderTaskPage();
       try {
         await deleteLiveTask(task.id);
@@ -699,6 +700,7 @@ async function performTaskAction(taskId, action) {
       }
     });
     if (removedIds.has(state.selectedTaskId)) leaveTaskDetailForNavigation();
+    state.writeNotice = "tasks.write.deleted";
   }
   state.actionTaskId = null;
   rerenderTaskPage({ focusBoard: true });

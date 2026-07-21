@@ -214,6 +214,13 @@ assert.match(controller, /refreshTaskBoardReadState\?\.\(\)/,
 assert.match(tasksSource, /taskBoardReadTracker\?\.refresh\(state\.tasks\)/);
 assert.match(tasksSource, /state\.subtaskEditingId[\s\S]*event\.stopImmediatePropagation\(\)/,
   "Escape in title edit must cancel editing instead of closing the whole detail view");
+const parentDeleteFlow = tasksSource.slice(
+  tasksSource.indexOf('if (action === "delete")'),
+  tasksSource.indexOf("state.actionTaskId = null", tasksSource.indexOf('if (action === "delete")'))
+);
+assert.match(parentDeleteFlow, /state\.writeNotice = ""[\s\S]*state\.writeNotice = "tasks\.write\.deleted"/,
+  "parent deletion must replace any stale subtask toast with the task-level success message");
+assert.doesNotMatch(parentDeleteFlow, /tasks\.write\.subtaskDeleted/);
 assert.match(detailSource, /select name="assigneeId"/);
 assert.doesNotMatch(detailSource, /data-task-subtask-edit-form[\s\S]{0,500}select name="assigneeId"/,
   "the rendered edit form must remain title-only");
@@ -223,6 +230,7 @@ for (const lang of ["zh", "en", "fr"]) {
     "tasks.detail.editSubtask",
     "tasks.detail.saveSubtask",
     "tasks.detail.cancelSubtask",
+    "tasks.write.deleted",
     "tasks.write.subtaskCreated",
     "tasks.write.subtaskSaved",
     "tasks.write.subtaskDeleted"
