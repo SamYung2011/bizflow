@@ -305,14 +305,16 @@
 .warranty-renewal-term > .warranty-renewal-options {
   display: flex;
   width: min(280px, 100%);
+  height: 40px;
   align-self: flex-start;
-  padding: var(--space-4);
+  padding: 0;
   border-radius: var(--radius-10);
-  background: var(--gray-8);
+  background: var(--gray-11);
+  overflow: hidden;
 }
 
-.warranty-renewal-options button {
-  height: 36px;
+.warranty-renewal-term > .warranty-renewal-options > button {
+  height: 40px;
   flex: 1 0 0;
   padding: 0 var(--space-10);
   border: 0;
@@ -323,9 +325,14 @@
   white-space: nowrap;
 }
 
-.warranty-renewal-options button.is-active {
-  color: var(--white);
-  background: var(--blue);
+.warranty-renewal-term > .warranty-renewal-options > button.is-active {
+  color: var(--blue);
+  background: var(--white);
+}
+
+.warranty-renewal-modal > .form-new-customer__footer > .btn--hug {
+  height: 40px;
+  min-height: 40px;
 }
 
 .warranty-renewal-date__trigger {

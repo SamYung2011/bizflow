@@ -62,7 +62,7 @@ for (const expected of [
   "--orders-close: var(--gray-70)",
   "--orders-placeholder: var(--gray-25)",
 ]) assert.ok(orders.includes(expected), `orders must use ${expected}`)
-assert.match(orders, /--orders-status-selected:\s*#0974EF/i, "the approved order segment blue must stay local")
+assert.match(orders, /--orders-status-selected:\s*var\(--blue\)/, "the audited order control blue must use the shared token")
 
 const customers = read("root-site/bizflow/customers.css")
 assert.equal((customers.match(/var\(--gray-50\)/g) || []).length, 3, "customer 5C text and cancel points must share gray-50")
