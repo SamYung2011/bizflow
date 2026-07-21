@@ -1063,9 +1063,14 @@ button.order-card__phone:focus-visible {
   line-height: var(--lh-tight);
 }
 
-.orders-payment-status-segment {
-  width: min(280px, 60%);
+.orders-payment-status-row > span {
   flex: none;
+}
+
+.orders-payment-status-row > .orders-payment-status-segment {
+  width: min(280px, 60%);
+  flex: 0 0 auto;
+  align-self: center;
 }
 
 .orders-payment-line,

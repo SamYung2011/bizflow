@@ -89,6 +89,12 @@ assert.match(detailPage, /"orders\.receipt"[\s\S]*?"receipt", !paid, helpers/,
   "the receipt action must stay disabled until payment");
 assert.match(ordersCss, /\.orders-payment-check-row > \.orders-money-input\s*\{[^}]*grid-column:\s*3;[^}]*width:\s*100%;[^}]*justify-self:\s*end;/,
   "fee inputs and their disabled placeholders must share the payment card's right-hand money column at every width");
+assert.match(ordersCss, /\.orders-payment-status-row > \.orders-payment-status-segment\s*\{[^}]*width:\s*min\(280px, 60%\);[^}]*flex:\s*0 0 auto;[^}]*align-self:\s*center;/,
+  "the compact payment segment must outrank the later full-width logistics base rule without relying on source order");
+assert.match(ordersCss, /\.orders-payment-status-row > span\s*\{[^}]*flex:\s*none;/,
+  "the payment-status label must retain its natural width beside the compact segment");
+assert.doesNotMatch(ordersCss, /(?:^|\n)\.orders-payment-status-segment\s*\{/,
+  "the compact override must not regress to a source-order-dependent single-class selector");
 
 assert.match(ordersPage, /"in-progress": "orders\.status\.unpaid"/,
   "the order list must label Unpaid invoice rows explicitly");
