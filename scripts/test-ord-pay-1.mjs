@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { aggregateRevenue } from "../root-site/components/order-metrics.js";
+import { normalizedItems } from "../root-site/data/live-orders-writes.js";
 
 const [writes, createPage, detailPage, ordersPage, shopifyOrders, shopifyMigration] = await Promise.all([
   readFile(new URL("../root-site/data/live-orders-writes.js", import.meta.url), "utf8"),
@@ -15,6 +16,27 @@ const unpaidInsert = writes.slice(
   writes.indexOf("async function insertUnpaidLiveOrder"),
   writes.indexOf("async function restoreAfterPaidFailure")
 );
+
+assert.deepEqual(normalizedItems([{
+  id: "line-db-shape",
+  name: "DB product",
+  qty: 2,
+  price: 99,
+  product_id: "product-db",
+  warehouse_id: "warehouse-db",
+  warranty_months: 24,
+  imei_code: "123456789012345"
+}]), [{
+  id: "line-db-shape",
+  name: "DB product",
+  qty: 2,
+  price: 99,
+  product_id: "product-db",
+  warehouse_id: "warehouse-db",
+  warranty_months: 24,
+  imei_code: "123456789012345"
+}], "DB-shaped invoice items must retain product, warehouse, warranty and IMEI fields before later payment");
+
 assert.match(unpaidInsert, /status: "Unpaid"/,
   "manual order creation must always begin with an Unpaid invoice");
 assert.doesNotMatch(unpaidInsert, /inventory_stock|inventory_movements|stock_deduction_audit/,

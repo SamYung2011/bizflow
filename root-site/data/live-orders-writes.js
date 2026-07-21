@@ -52,21 +52,25 @@ function hongKongDate() {
   }).format(new Date());
 }
 
-function normalizedItems(items) {
+export function normalizedItems(items) {
   return (Array.isArray(items) ? items : []).map((item) => {
     const name = String(item?.name ?? "").trim();
     const qty = positiveNumber(item?.quantity ?? item?.qty);
     const price = moneyNumber(item?.price);
+    const productId = item?.productId ?? item?.product_id;
+    const warehouseId = item?.warehouseId ?? item?.warehouse_id;
+    const warrantyMonths = item?.warrantyMonths ?? item?.warranty_months;
+    const imeiCode = textOrNull(item?.imeiCode ?? item?.imei_code);
     if (!name || qty <= 0) throw new Error("Order item requires a name and positive quantity");
     return {
       id: item?.id || invoiceLineId(),
       name,
       qty,
       price,
-      ...(item?.productId ? { product_id: String(item.productId) } : {}),
-      ...(item?.warehouseId ? { warehouse_id: String(item.warehouseId) } : {}),
-      ...(item?.warrantyMonths != null ? { warranty_months: Number(item.warrantyMonths) } : {}),
-      ...(textOrNull(item?.imeiCode) ? { imei_code: textOrNull(item.imeiCode) } : {})
+      ...(productId ? { product_id: String(productId) } : {}),
+      ...(warehouseId ? { warehouse_id: String(warehouseId) } : {}),
+      ...(warrantyMonths != null ? { warranty_months: Number(warrantyMonths) } : {}),
+      ...(imeiCode ? { imei_code: imeiCode } : {})
     };
   });
 }
