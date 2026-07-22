@@ -205,7 +205,7 @@ assert.match(writes, /expectedShopifyStructureHash[\s\S]*invokeCatalog\("update"
   "update writes must send the editor's structure baseline");
 assert.match(writes, /functionErrorPayload\(result\.error, result\.response\)[\s\S]*detail\?\.code/,
   "non-2xx function responses must preserve the structured Shopify error code and payload");
-assert.match(writes, /export async function deleteLiveInventoryProduct\(bizflowParentProductId\)[\s\S]*invokeCatalog\("delete", \{[\s\S]*requestId: requestId\(\), bizflowParentProductId[\s\S]*\}\)/,
+assert.match(writes, /export async function deleteLiveInventoryProduct\(bizflowParentProductId, \{ shopifyBound = true \} = \{\}\)[\s\S]*invokeCatalog\("delete", \{[\s\S]*requestId: requestId\(\), bizflowParentProductId[\s\S]*\}\)/,
   "browser deletion must not send a stale editor structure baseline");
 assert.doesNotMatch(writes, /invokeCatalog\("delete", \{[\s\S]{0,180}expectedShopify/,
   "delete intent must stay independent of Shopify editor CAS fields");
@@ -222,8 +222,8 @@ assert.match(detail, /detail\.subitems\.push\(item\)/,
   "variant creation must enter the full save payload");
 assert.match(detail, /data-modal-delete/,
   "variant deletion needs a real draft action before save");
-assert.match(detail, /shopifyBinding\?\.status === "active"/,
-  "existing products must stay disabled until their catalogue binding is active");
+assert.match(detail, /data-inventory-write-mode="\$\{bound \? "shopify" : "bizflow-only"\}"/,
+  "unbound products must expose an honest BizFlow-only editing mode");
 assert.match(detail, /deleteConfirm[\s\S]*deleteFinal/,
   "true product deletion must use the approved two-step confirmation");
 

@@ -76,9 +76,12 @@ const dict = {
     "inventory.shopifyWriteHint": "目前只讀連接正常；補齊 write_products、write_inventory 後即可保存。",
     "inventory.writeReady": "Shopify 寫入連接已就緒",
     "inventory.bindingRequired": "此老商品尚未綁定 Shopify 商品，請先到 Shopify API 頁確認綁定。",
+    "inventory.bizflowOnlyProduct": "僅 BizFlow：此商品尚未綁定 Shopify，保存只更新 BizFlow。",
     "inventory.adminOnly": "商品目錄與庫存只限管理員修改",
     "inventory.saving": "正在同步 Shopify 與 BizFlow…",
+    "inventory.savingLocal": "正在保存至 BizFlow…",
     "inventory.saved": "商品已同步保存",
+    "inventory.savedLocal": "商品已保存至 BizFlow",
     "inventory.saveFailed": "保存失敗",
     "inventory.conflict.title": "Shopify 變更衝突",
     "inventory.conflict.message": "Shopify 商品已在外部變更，現已取得最新版本。繼續會以目前 BizFlow 表單內容覆蓋外部改動。",
@@ -86,6 +89,8 @@ const dict = {
     "inventory.conflict.cancelled": "已保留目前表單，尚未覆蓋 Shopify 的外部改動。",
     "inventory.deleteConfirm": "刪除會同時從 Shopify 與 BizFlow 真實刪除，是否繼續？",
     "inventory.deleteFinal": "最後確認：此操作不可還原。",
+    "inventory.deleteLocalConfirm": "此商品僅存在於 BizFlow，是否刪除？",
+    "inventory.deleteLocalFinal": "最後確認：將從 BizFlow 永久刪除，此操作不可還原。",
     "inventory.deleteFailed": "刪除失敗",
     "inventory.subitem.delete": "刪除子類"
   },
@@ -149,9 +154,12 @@ const dict = {
     "inventory.shopifyWriteHint": "The read connection works. Add write_products and write_inventory to enable saving.",
     "inventory.writeReady": "Shopify write connection is ready",
     "inventory.bindingRequired": "This existing product is not bound. Confirm its Shopify product in the Shopify API tab first.",
+    "inventory.bizflowOnlyProduct": "BizFlow only: this product is not bound to Shopify, so saving updates BizFlow only.",
     "inventory.adminOnly": "Only administrators can modify the catalogue and inventory",
     "inventory.saving": "Syncing Shopify and BizFlow…",
+    "inventory.savingLocal": "Saving to BizFlow…",
     "inventory.saved": "Product synchronized and saved",
+    "inventory.savedLocal": "Product saved to BizFlow",
     "inventory.saveFailed": "Save failed",
     "inventory.conflict.title": "Shopify change conflict",
     "inventory.conflict.message": "This Shopify product changed outside BizFlow. The latest version is now loaded. Continuing will overwrite those external changes with the current BizFlow form.",
@@ -159,6 +167,8 @@ const dict = {
     "inventory.conflict.cancelled": "The current form was kept and the external Shopify changes were not overwritten.",
     "inventory.deleteConfirm": "This permanently deletes the product from Shopify and BizFlow. Continue?",
     "inventory.deleteFinal": "Final confirmation: this cannot be undone.",
+    "inventory.deleteLocalConfirm": "This product exists only in BizFlow. Delete it?",
+    "inventory.deleteLocalFinal": "Final confirmation: this permanently deletes the product from BizFlow.",
     "inventory.deleteFailed": "Delete failed",
     "inventory.subitem.delete": "Delete variant"
   },
@@ -222,9 +232,12 @@ const dict = {
     "inventory.shopifyWriteHint": "La lecture fonctionne. Ajoutez write_products et write_inventory pour enregistrer.",
     "inventory.writeReady": "La connexion d'écriture Shopify est prête",
     "inventory.bindingRequired": "Ce produit existant n'est pas associé. Confirmez d'abord le produit Shopify dans l'onglet API Shopify.",
+    "inventory.bizflowOnlyProduct": "BizFlow uniquement : ce produit n'est pas associé à Shopify ; l'enregistrement ne met à jour que BizFlow.",
     "inventory.adminOnly": "Seuls les administrateurs peuvent modifier le catalogue et le stock",
     "inventory.saving": "Synchronisation de Shopify et BizFlow…",
+    "inventory.savingLocal": "Enregistrement dans BizFlow…",
     "inventory.saved": "Produit synchronisé et enregistré",
+    "inventory.savedLocal": "Produit enregistré dans BizFlow",
     "inventory.saveFailed": "Échec de l'enregistrement",
     "inventory.conflict.title": "Conflit de modification Shopify",
     "inventory.conflict.message": "Ce produit Shopify a été modifié hors de BizFlow. La dernière version est maintenant chargée. Continuer remplacera ces modifications externes par le formulaire BizFlow actuel.",
@@ -232,6 +245,8 @@ const dict = {
     "inventory.conflict.cancelled": "Le formulaire actuel est conservé et les modifications Shopify externes n'ont pas été remplacées.",
     "inventory.deleteConfirm": "Cette action supprime définitivement le produit de Shopify et BizFlow. Continuer ?",
     "inventory.deleteFinal": "Confirmation finale : cette action est irréversible.",
+    "inventory.deleteLocalConfirm": "Ce produit existe uniquement dans BizFlow. Le supprimer ?",
+    "inventory.deleteLocalFinal": "Confirmation finale : ce produit sera supprimé définitivement de BizFlow.",
     "inventory.deleteFailed": "Échec de la suppression",
     "inventory.subitem.delete": "Supprimer la variante"
   }
@@ -272,6 +287,10 @@ let detailCommitted = false;
 
 function pageT(lang, key) {
   return dict[lang]?.[key] ?? dict.zh[key] ?? key;
+}
+
+function shopifyBindingReady() {
+  return detail?.product.shopifyBinding?.status === "active";
 }
 
 function imageErrorText(lang, error) {
@@ -531,12 +550,12 @@ function renderWriteStatus(helpers) {
   const { escapeHtml, lang } = helpers;
   const isAdmin = currentUser?.isBfAdmin === true;
   const writeReady = isAdmin && shopifyWriteReady(shopifyHealth);
-  const bound = detail.product.shopifyBinding?.status === "active";
+  const bound = shopifyBindingReady();
   const title = !isAdmin ? pageT(lang, "inventory.adminOnly")
     : !writeReady ? pageT(lang, "inventory.shopifyWriteNotReady")
-      : !bound ? pageT(lang, "inventory.bindingRequired") : pageT(lang, "inventory.writeReady");
+      : !bound ? pageT(lang, "inventory.bizflowOnlyProduct") : pageT(lang, "inventory.writeReady");
   const hint = isAdmin && !writeReady ? pageT(lang, "inventory.shopifyWriteHint") : "";
-  return `<section class="inventory-write-status${liveReadOnly ? " is-blocked" : " is-ready"}" data-shopify-binding-ready="${bound}">
+  return `<section class="inventory-write-status${liveReadOnly ? " is-blocked" : " is-ready"}" data-shopify-binding-ready="${bound}" data-inventory-write-mode="${bound ? "shopify" : "bizflow-only"}">
     <strong>${escapeHtml(title)}</strong>${hint ? `<span>${escapeHtml(hint)}</span>` : ""}
     ${state.error ? `<span class="inventory-domain-error">${escapeHtml(state.error)}</span>` : ""}
     ${state.feedback ? `<span class="inventory-domain-hint">${escapeHtml(state.feedback)}</span>` : ""}
@@ -553,7 +572,7 @@ export function renderInventoryDetail(helpers) {
         ${icon("icon-arrow-right", "icon")}
         <span class="inventory-breadcrumb__current" title="${escapeHtml(detail.product.breadcrumbName)}">${escapeHtml(detail.product.breadcrumbName)}</span>
       </nav>
-      <button type="button" class="inventory-detail-action" data-detail-save data-inventory-write title="${escapeHtml(pageT(lang, "inventory.detail.save"))}"${writeAttributes}>${escapeHtml(state.busy ? pageT(lang, "inventory.saving") : pageT(lang, "inventory.detail.save"))}</button>
+      <button type="button" class="inventory-detail-action" data-detail-save data-inventory-write title="${escapeHtml(pageT(lang, "inventory.detail.save"))}"${writeAttributes}>${escapeHtml(state.busy ? pageT(lang, shopifyBindingReady() ? "inventory.saving" : "inventory.savingLocal") : pageT(lang, "inventory.detail.save"))}</button>
     </header>
     ${renderWriteStatus(helpers)}
     ${renderBasicCard(helpers)}
@@ -675,11 +694,12 @@ async function saveInventoryDetail() {
   state.feedback = "";
   rerenderDetailPage();
   try {
+    const shopifyBound = shopifyBindingReady();
     let expectedUpdatedAt = detail.product.shopifyBinding?.updatedAt || "";
     let expectedStructureHash = detail.product.shopifyBinding?.structureHash || "";
     while (true) {
       try {
-        await updateLiveInventoryProduct(payload, expectedUpdatedAt, expectedStructureHash);
+        await updateLiveInventoryProduct(payload, expectedUpdatedAt, expectedStructureHash, { shopifyBound });
         break;
       } catch (error) {
         const conflict = error?.code === "SHOPIFY_UPDATED_AT_CONFLICT" ? error.detail : null;
@@ -717,7 +737,7 @@ async function saveInventoryDetail() {
     }
     state.uploadedImageUrl = "";
     state.uploadedImageOwned = false;
-    state.feedback = pageT(currentHelpers?.lang ?? "zh", "inventory.saved");
+    state.feedback = pageT(currentHelpers?.lang ?? "zh", shopifyBound ? "inventory.saved" : "inventory.savedLocal");
     navigateTo("./inventory.html");
   } catch (error) {
     state.error = `${pageT(currentHelpers?.lang ?? "zh", "inventory.saveFailed")}: ${error.message}`;
@@ -759,14 +779,15 @@ async function onInventoryDetailClick(event) {
 
   if (event.target.closest("[data-detail-delete]")) {
     if (!authenticated || state.busy) return;
-    const first = await confirmInPage(pageT(currentHelpers?.lang ?? "zh", "inventory.deleteConfirm"), { danger: true });
+    const shopifyBound = shopifyBindingReady();
+    const first = await confirmInPage(pageT(currentHelpers?.lang ?? "zh", shopifyBound ? "inventory.deleteConfirm" : "inventory.deleteLocalConfirm"), { danger: true });
     if (!first) return;
-    const final = await confirmInPage(pageT(currentHelpers?.lang ?? "zh", "inventory.deleteFinal"), { danger: true });
+    const final = await confirmInPage(pageT(currentHelpers?.lang ?? "zh", shopifyBound ? "inventory.deleteFinal" : "inventory.deleteLocalFinal"), { danger: true });
     if (!final) return;
     state.busy = true;
     rerenderDetailPage();
     try {
-      await deleteLiveInventoryProduct(detail.product.id);
+      await deleteLiveInventoryProduct(detail.product.id, { shopifyBound });
       detailCommitted = true;
       await cleanupCommittedDetailImages([state.originalImageUrl, state.uploadedImageUrl]);
       state.uploadedImageUrl = "";
@@ -991,9 +1012,8 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
     ? await getShopifyCredentialHealth({ refresh: true })
     : null;
   throwIfPageAborted(signal, scope);
-  const bindingReady = detail.product.shopifyBinding?.status === "active";
   liveReadOnly = authenticated && (
-    currentUser?.isBfAdmin !== true || !shopifyWriteReady(shopifyHealth) || !bindingReady
+    currentUser?.isBfAdmin !== true || !shopifyWriteReady(shopifyHealth)
   );
   writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
   if (detail.product.status === "enabled") detail.product.status = "active";

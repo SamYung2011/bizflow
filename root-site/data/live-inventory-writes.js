@@ -230,7 +230,84 @@ export async function createLiveInventoryProduct(product) {
   return result;
 }
 
-export async function updateLiveInventoryProduct(product, expectedShopifyUpdatedAt = "", expectedShopifyStructureHash = "") {
+function localProductRow(product, parentProduct, parentProductId = null) {
+  return {
+    id: product.id,
+    name: String(product.name || "").trim(),
+    price: Math.max(0, Number(product.price) || 0),
+    warranty_months: Math.max(0, Math.trunc(Number(product.warrantyMonths) || 0)),
+    category: String(parentProduct.category || "").trim() || null,
+    internal_code: String(product.internalCode || "").trim() || null,
+    status: ["draft", "active", "discontinued"].includes(product.status) ? product.status : "draft",
+    image_url: String(product.imageUrl || parentProduct.imageUrl || "").trim() || null,
+    specs: String(product.specs || "").trim() || null,
+    product_type: String(parentProduct.productType || "").trim() || null,
+    collections: parentProductId ? [] : (Array.isArray(parentProduct.collections) ? parentProduct.collections : []),
+    tags: parentProductId ? [] : (Array.isArray(parentProduct.tags) ? parentProduct.tags : []),
+    parent_product_id: parentProductId,
+    is_virtual: false
+  };
+}
+
+function localStockRows(product) {
+  return [product, ...(Array.isArray(product.variants) ? product.variants : [])]
+    .flatMap((item) => (Array.isArray(item.stocks) ? item.stocks : []).map((stock) => ({
+      product_id: item.id,
+      warehouse_id: stock.warehouseId,
+      qty: Math.max(0, Math.trunc(Number(stock.quantity) || 0)),
+      updated_at: new Date().toISOString()
+    })));
+}
+
+async function updateBizflowOnlyInventoryProduct(product) {
+  const { client } = await adminContext();
+  const variants = Array.isArray(product.variants) ? product.variants : [];
+  const parent = localProductRow(product, product);
+  const updated = await client.from("products").update(parent).eq("id", product.id).select("id").maybeSingle();
+  if (updated.error) throw new ShopifyCatalogWriteError(updated.error.message, { code: "BIZFLOW_PRODUCT_UPDATE_FAILED" });
+  if (!updated.data?.id) throw new ShopifyCatalogWriteError("BizFlow product not found", { code: "BIZFLOW_PRODUCT_NOT_FOUND" });
+
+  if (variants.length) {
+    const savedVariants = await client.from("products").upsert(
+      variants.map((variant) => localProductRow(variant, product, product.id)),
+      { onConflict: "id" }
+    );
+    if (savedVariants.error) {
+      throw new ShopifyCatalogWriteError(savedVariants.error.message, { code: "BIZFLOW_VARIANT_UPDATE_FAILED" });
+    }
+  }
+
+  const existingVariants = await client.from("products").select("id").eq("parent_product_id", product.id);
+  if (existingVariants.error) {
+    throw new ShopifyCatalogWriteError(existingVariants.error.message, { code: "BIZFLOW_VARIANT_READ_FAILED" });
+  }
+  const retainedIds = new Set(variants.map((variant) => variant.id));
+  const removedIds = (existingVariants.data || []).map((row) => row.id).filter((id) => !retainedIds.has(id));
+  if (removedIds.length) {
+    const removed = await client.from("products").delete().in("id", removedIds).eq("parent_product_id", product.id);
+    if (removed.error) {
+      throw new ShopifyCatalogWriteError(removed.error.message, { code: "BIZFLOW_VARIANT_DELETE_FAILED" });
+    }
+  }
+
+  const stocks = localStockRows(product);
+  if (stocks.length) {
+    const savedStocks = await client.from("inventory_stock").upsert(stocks, { onConflict: "product_id,warehouse_id" });
+    if (savedStocks.error) {
+      throw new ShopifyCatalogWriteError(savedStocks.error.message, { code: "BIZFLOW_STOCK_UPDATE_FAILED" });
+    }
+  }
+  await invalidateLiveTables("products", "inventory_stock");
+  return { ok: true, localOnly: true, productId: product.id };
+}
+
+export async function updateLiveInventoryProduct(
+  product,
+  expectedShopifyUpdatedAt = "",
+  expectedShopifyStructureHash = "",
+  { shopifyBound = true } = {}
+) {
+  if (!shopifyBound) return updateBizflowOnlyInventoryProduct(product);
   const result = await invokeCatalog("update", {
     requestId: requestId(), product, expectedShopifyUpdatedAt, expectedShopifyStructureHash
   });
@@ -238,7 +315,15 @@ export async function updateLiveInventoryProduct(product, expectedShopifyUpdated
   return result;
 }
 
-export async function deleteLiveInventoryProduct(bizflowParentProductId) {
+export async function deleteLiveInventoryProduct(bizflowParentProductId, { shopifyBound = true } = {}) {
+  if (!shopifyBound) {
+    const { client } = await adminContext();
+    const removed = await client.from("products").delete().eq("id", bizflowParentProductId).select("id").maybeSingle();
+    if (removed.error) throw new ShopifyCatalogWriteError(removed.error.message, { code: "BIZFLOW_PRODUCT_DELETE_FAILED" });
+    if (!removed.data?.id) throw new ShopifyCatalogWriteError("BizFlow product not found", { code: "BIZFLOW_PRODUCT_NOT_FOUND" });
+    await invalidateLiveTables("products", "inventory_stock");
+    return { ok: true, localOnly: true, productId: bizflowParentProductId };
+  }
   const result = await invokeCatalog("delete", {
     requestId: requestId(), bizflowParentProductId
   });

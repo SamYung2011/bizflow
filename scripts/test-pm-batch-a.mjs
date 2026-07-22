@@ -4,6 +4,9 @@ import { readFileSync } from "node:fs";
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const shellCss = read("root-site/shell/shell.css");
 const homeJs = read("root-site/bizflow/home.js");
+const inventoryDetail = read("root-site/bizflow/inventory-detail.js");
+const inventoryWrites = read("root-site/data/live-inventory-writes.js");
+const shopifyCatalog = read("supabase/functions/shopify-catalog-write/catalog.ts");
 
 assert.match(shellCss, /\.shell-page-inner\s*\{[\s\S]*?width:\s*100%;[\s\S]*?max-width:\s*100%;/,
   "desktop page content must fill the available shell width");
@@ -23,4 +26,22 @@ assert.match(homeJs, /data-home-members/,
 assert.match(homeJs, /<section class="home-logistics"[\s\S]*?logisticsCard\(\{ filter: "pending"[\s\S]*?logisticsCard\(\{ filter: "in_transit"[\s\S]*?logisticsCard\(\{ filter: "exception"/,
   "the three logistics summary cards must remain unchanged");
 
-console.log("PM batch A contracts: PASS (full-width shell, five-card Home banner)");
+assert.match(inventoryDetail, /liveReadOnly\s*=\s*authenticated\s*&&\s*\([\s\S]*?currentUser\?\.isBfAdmin !== true \|\| !shopifyWriteReady\(shopifyHealth\)[\s\S]*?\);/,
+  "an absent Shopify binding must not make an otherwise write-ready administrator read-only");
+assert.doesNotMatch(inventoryDetail, /liveReadOnly\s*=\s*authenticated\s*&&\s*\([^)]*bindingReady/,
+  "the product binding must stay outside the page-wide write gate");
+assert.match(inventoryDetail, /updateLiveInventoryProduct\(payload, expectedUpdatedAt, expectedStructureHash, \{ shopifyBound \}\)/,
+  "detail saves must explicitly select the bound or BizFlow-only write path");
+assert.match(inventoryWrites, /if \(!shopifyBound\) return updateBizflowOnlyInventoryProduct\(product\);[\s\S]*?invokeCatalog\("update"/,
+  "unbound saves must take the DB-only branch before the Shopify Edge invocation");
+assert.match(inventoryWrites, /status:\s*\["draft", "active", "discontinued"\]\.includes\(product\.status\) \? product\.status/,
+  "the DB row must preserve the selected product status");
+assert.match(inventoryWrites, /from\("products"\)\.update\(parent\)\.eq\("id", product\.id\)/,
+  "BizFlow-only saves must persist the local product row");
+assert.match(shopifyCatalog, /function shopifyStatus\(status: string\)[\s\S]*?active[\s\S]*?"ACTIVE"[\s\S]*?discontinued[\s\S]*?"ARCHIVED"[\s\S]*?"DRAFT"/,
+  "bound saves must preserve the approved BizFlow-to-Shopify status mapping");
+for (const label of ["僅 BizFlow：", "BizFlow only:", "BizFlow uniquement :"]) {
+  assert.match(inventoryDetail, new RegExp(label), `missing local-only product status copy: ${label}`);
+}
+
+console.log("PM batch A contracts: PASS (full-width shell, five-card Home banner, local inventory writes)");
