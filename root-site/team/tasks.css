@@ -1008,6 +1008,11 @@
   overflow: auto;
 }
 
+/* 限高线程必须让气泡溢出滚动，禁止 column flex 把长反馈压缩叠印。 */
+.task-detail__thread > .chat-bubble {
+  flex: 0 0 auto;
+}
+
 .task-detail .chat-bubble {
   --chat-avatar-size: 40px; /* Figma 495:11439 对话头像实测尺寸，无对应 token。 */
   --chat-menu-width: 33px; /* Figma 495:11439 三点操作胶囊实测宽，无对应 token。 */

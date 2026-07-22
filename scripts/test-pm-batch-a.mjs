@@ -8,6 +8,7 @@ const inventoryDetail = read("root-site/bizflow/inventory-detail.js");
 const inventoryWrites = read("root-site/data/live-inventory-writes.js");
 const shopifyCatalog = read("supabase/functions/shopify-catalog-write/catalog.ts");
 const taskDetail = read("root-site/team/tasks-detail.js");
+const tasksCss = read("root-site/team/tasks.css");
 const taskDomainCss = read("root-site/team/tasks-domain.css");
 
 assert.match(shellCss, /\.shell-page-inner\s*\{[\s\S]*?width:\s*100%;[\s\S]*?max-width:\s*100%;/,
@@ -52,6 +53,8 @@ assert.match(taskDomainCss, /@media \(min-width: 769px\)[\s\S]*?\.team-task-page
   "the member rail and feedback column must stick only at desktop widths");
 assert.match(taskDomainCss, /\.task-detail__thread\s*\{[\s\S]*?max-height:\s*60vh;[\s\S]*?overflow-y:\s*auto;/,
   "long task feedback must scroll inside a viewport-bounded thread");
+assert.match(tasksCss, /\.task-detail__thread\s*>\s*\.chat-bubble\s*\{[\s\S]*?flex:\s*0\s+0\s+auto;/,
+  "direct feedback bubbles must not flex-shrink inside the height-limited thread");
 assert.doesNotMatch(taskDetail, /addEventListener|setInterval|setTimeout/,
   "the task detail layout change must not add data or lifecycle behavior");
 
