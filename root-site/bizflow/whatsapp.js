@@ -153,7 +153,8 @@ export function renderWhatsapp(helpers) {
     active: state.tab,
     ariaLabel: t("title"),
     escapeHtml: helpers.escapeHtml,
-    dataAttribute: "data-wa-tab"
+    dataAttribute: "data-wa-tab",
+    sliding: false
   });
   const body = renderWhatsappConfig(state.tab, state, helpers, t) || renderWhatsappActivity(state.tab, state, helpers, t, {
     conversations: conversationDateFilter,

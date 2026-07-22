@@ -108,6 +108,7 @@ export function renderOcppShare({ data, state, helpers, t, money }) {
     ariaLabel: t("shareTab"),
     escapeHtml: helpers.escapeHtml,
     dataAttribute: "data-ocpp-share-tab",
+    sliding: false,
   });
   const body =
     state.shareTab === "shareCharges"

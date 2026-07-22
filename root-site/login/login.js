@@ -285,7 +285,10 @@ import {
 
     const segment = $("[data-segment]");
     segment.hidden = state.view === "forgot";
-    segment.dataset.activeIndex = state.view === "register" ? "1" : "0";
+    const segmentIndex = state.view === "register" ? 1 : 0;
+    segment.dataset.activeIndex = String(segmentIndex);
+    segment.style.setProperty("--app-segment-count", String($$(".app-segment__button", segment).length));
+    segment.style.setProperty("--app-segment-active-index", String(segmentIndex));
     $("[data-mobile-brand]").hidden = state.view === "register";
     $("[data-action='forgot']").hidden = state.view !== "login";
     $("[data-action='resend-code']").hidden = state.view !== "forgot" || state.forgotStage !== "verify";

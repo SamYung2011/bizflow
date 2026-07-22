@@ -3,12 +3,13 @@
   --app-segment-height: 47px;
   --app-segment-gap: var(--space-10);
   --app-segment-padding: var(--space-4);
-  --app-segment-radius: var(--radius-20);
+  --app-segment-radius: calc(var(--radius-10) + var(--app-segment-padding)); /* 外圆角=内圆角 10px+轨道内边距，所有断点保持同心。 */
   --app-segment-bg: var(--gray-15);
   --app-segment-button-height: 39px;
   --app-segment-button-padding: var(--space-10);
   --app-segment-button-size: var(--font-title-3-size);
-  --app-segment-figma-radius: 14px; /* Figma login/inventory segment radius; no matching global token. */
+  --app-segment-count: 2;
+  --app-segment-active-index: 0;
   position: relative;
   display: flex;
   width: var(--app-segment-width);
@@ -80,7 +81,6 @@
 
 .app-segment--login {
   --app-segment-height: 48px;
-  --app-segment-radius: var(--app-segment-figma-radius);
   --app-segment-bg: var(--gray-12);
   --app-segment-button-height: 40px;
 }
@@ -95,18 +95,20 @@
   top: var(--app-segment-padding);
   bottom: var(--app-segment-padding);
   left: var(--app-segment-padding);
-  width: calc((100% - var(--app-segment-gap)) / 2 - var(--app-segment-padding));
+  width: calc((100% - var(--app-segment-padding) - var(--app-segment-padding) - (var(--app-segment-count) - 1) * var(--app-segment-gap)) / var(--app-segment-count));
   border-radius: var(--radius-10);
   background: var(--blue);
-  transition: transform var(--transition);
-}
-
-.app-segment--sliding[data-active-index="1"]::before {
-  transform: translateX(calc(100% + var(--app-segment-gap)));
+  transform: translateX(calc(var(--app-segment-active-index) * (100% + var(--app-segment-gap))));
+  transition: transform var(--transition), width var(--transition);
 }
 
 .app-segment--sliding .app-segment__button.is-active {
   background: transparent;
+}
+
+/* WhatsApp 长标签轨道与 OCPP 内层分段为并行族，本轮保留旧圆角与非滑块活性片。 */
+.app-segment--parallel {
+  --app-segment-radius: var(--radius-20);
 }
 
 @media (max-width: 768px) {
@@ -114,24 +116,17 @@
     --app-segment-height: 40px;
     --app-segment-gap: 0;
     --app-segment-padding: 0;
-    --app-segment-radius: var(--radius-10);
-  }
-
-  .app-segment--sliding::before {
-    inset: 0 auto 0 0;
-    width: 50%;
-  }
-
-  .app-segment--sliding[data-active-index="1"]::before {
-    transform: translateX(100%);
   }
 
   .app-segment--domain {
     --app-segment-width: 100%;
     --app-segment-gap: var(--space-4);
-    --app-segment-radius: var(--radius-10);
     --app-segment-button-height: 36px;
     --app-segment-button-padding: var(--space-4);
     --app-segment-button-size: var(--font-body-size);
+  }
+
+  .app-segment--parallel.app-segment--domain {
+    --app-segment-radius: var(--radius-10);
   }
 }
