@@ -128,6 +128,7 @@ import { aggregateInventoryStock, aggregateRevenue, aggregateShippingCounts } fr
 import { navigationPresetKeys, setNavigationPreset } from "../components/navigation-presets.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { availableQuickCreateActions } from "../components/quick-create.js";
+import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 
 let data = null;
@@ -140,10 +141,91 @@ let homeTaskFilter = "inProgress";
 let homeTaskFilterOpen = false;
 let homeHelpers = null;
 let activeScope = null;
+let homeUnreadWatermarks = null;
+let homeLiveRefresh = null;
+let rebindHomeTeamActivity = null;
 
 const HOME_TASK_FILTERS = ["inProgress", "completed", "abandoned", "all"];
+const HOME_LIVE_SNAPSHOTS = [
+  "home.json", "tasks.json", "home-order-metrics.json", "inventory.json", "warranty.json", "customers.json"
+];
+const HOME_LIVE_TABLES = [
+  "invoices", "customers", "employees", "shipment_events", "customer_devices", "products",
+  "employee_tasks", "task_assignees", "employee_task_feedbacks", "departments",
+  "employee_departments", "employee_companies", "roles", "task_pending",
+  "company_join_pending", "warehouses", "inventory_stock", "warranty_renewals",
+  "shopify_catalog_bindings", "shopify_variant_links", "shopify_resource_mappings"
+];
 
 const STAT_TONE_CLASS = { "": "", blue: "board-card--blue", green: "board-card--green", yellow: "board-card--yellow" };
+
+async function loadHomeViewState() {
+  const [homeData, orderMetricRows, inventoryMetricProducts, warrantyData, customerData, currentUser, unread, unreadWatermarks] = await Promise.all([
+    getHomeData(),
+    getHomeOrderMetricRows(),
+    getInventoryMetricProducts(),
+    getWarrantyData(),
+    getCustomersPageData(),
+    getCurrentUser(),
+    getUnread(),
+    getUnreadWatermarks()
+  ]);
+  return {
+    data: {
+      ...homeData,
+      unread: { ...(homeData.unread ?? {}), ...unread },
+      stats: homeData.stats.map((stat) => {
+        if (stat.key === "warranty") return { ...stat, value: warrantyData.items.length, alert: warrantyData.items.length > 0 };
+        if (stat.key === "customers") return { ...stat, value: customerData.dashboardCustomerCount };
+        return stat;
+      }),
+      warrantyItems: warrantyData.items.slice(0, 4).map((item) => ({
+        no: item.no,
+        product: item.product,
+        customer: item.customer,
+        phone: item.phone,
+        date: item.expiry
+      }))
+    },
+    revenueMetrics: orderMetricRows
+      ? aggregateRevenue(orderMetricRows, { aliases: [], customers: [], products: [] }, "thisMonth")
+      : null,
+    shippingMetrics: orderMetricRows ? aggregateShippingCounts(orderMetricRows) : null,
+    inventoryMetrics: inventoryMetricProducts ? aggregateInventoryStock(inventoryMetricProducts) : null,
+    currentUser,
+    unread,
+    unreadWatermarks
+  };
+}
+
+function applyHomeViewState(next) {
+  data = next.data;
+  revenueMetrics = next.revenueMetrics;
+  shippingMetrics = next.shippingMetrics;
+  inventoryMetrics = next.inventoryMetrics;
+  showRevenue = next.currentUser?.canViewRevenue !== false;
+  homeCurrentUser = next.currentUser;
+  homeUnreadWatermarks = next.unreadWatermarks;
+}
+
+function preloadHomeStockImages() {
+  (data?.stock ?? []).map((item) => item.image).filter(Boolean).forEach((src) => {
+    const image = new Image();
+    image.decoding = "sync";
+    image.loading = "eager";
+    image.src = src;
+  });
+}
+
+function isHomeRefreshBlocked() {
+  return homeTaskFilterOpen || Boolean(
+    document.querySelector("[data-quick-create-portal], .home-page [aria-busy=\"true\"]")
+  );
+}
+
+function flushHomeLiveRefresh() {
+  if (!isHomeRefreshBlocked()) void homeLiveRefresh?.flush();
+}
 
 export function renderHome({ icon, escapeHtml, lang }) {
   homeHelpers = { icon, escapeHtml, lang };
@@ -332,6 +414,7 @@ function rerenderHome({ focusTaskFilter = false } = {}) {
   if (!page || !homeHelpers) return;
   page.outerHTML = renderHome(homeHelpers);
   if (focusTaskFilter) document.querySelector("[data-home-task-filter-trigger]")?.focus();
+  rebindHomeTeamActivity?.();
 }
 
 function onHomeClick(event) {
@@ -340,6 +423,7 @@ function onHomeClick(event) {
     homeTaskFilterOpen = !homeTaskFilterOpen;
     rerenderHome();
     if (homeTaskFilterOpen) activeScope?.animationFrame(() => document.querySelector(`[data-home-task-filter-option="${CSS.escape(homeTaskFilter)}"]`)?.focus());
+    else flushHomeLiveRefresh();
     return;
   }
   const taskFilterOption = event.target.closest("[data-home-task-filter-option]");
@@ -348,6 +432,7 @@ function onHomeClick(event) {
     if (HOME_TASK_FILTERS.includes(nextFilter)) homeTaskFilter = nextFilter;
     homeTaskFilterOpen = false;
     rerenderHome({ focusTaskFilter: true });
+    flushHomeLiveRefresh();
     return;
   }
   const preset = event.target.closest("[data-home-preset]")?.getAttribute("data-home-preset");
@@ -369,6 +454,7 @@ function onHomeClick(event) {
   if (homeTaskFilterOpen && !event.target.closest("[data-home-task-filter]")) {
     homeTaskFilterOpen = false;
     rerenderHome();
+    flushHomeLiveRefresh();
   }
 }
 
@@ -377,6 +463,7 @@ function onHomeKeydown(event) {
     event.preventDefault();
     homeTaskFilterOpen = false;
     rerenderHome({ focusTaskFilter: true });
+    flushHomeLiveRefresh();
     return;
   }
   if ((event.key === "Enter" || event.key === " ") && event.target.closest("[data-home-members]")) {
@@ -388,54 +475,17 @@ function onHomeKeydown(event) {
 export async function mountPage({ scope, signal, historyState = null }) {
   activeScope = scope;
   // 数据全走接口层(煊煊 2026-07-08:不写死样板,留好数据接口)
-  const [homeData, orderMetricRows, inventoryMetricProducts, warrantyData, customerData, currentUser, unread, unreadWatermarks] = await Promise.all([
-    getHomeData(),
-    getHomeOrderMetricRows(),
-    getInventoryMetricProducts(),
-    getWarrantyData(),
-    getCustomersPageData(),
-    getCurrentUser(),
-    getUnread(),
-    getUnreadWatermarks()
-  ]);
+  const nextState = await loadHomeViewState();
   throwIfPageAborted(signal, scope);
-  data = {
-    ...homeData,
-    unread: { ...(homeData.unread ?? {}), ...unread },
-    stats: homeData.stats.map((stat) => {
-      if (stat.key === "warranty") return { ...stat, value: warrantyData.items.length, alert: warrantyData.items.length > 0 };
-      if (stat.key === "customers") return { ...stat, value: customerData.dashboardCustomerCount };
-      return stat;
-    }),
-    warrantyItems: warrantyData.items.slice(0, 4).map((item) => ({
-      no: item.no,
-      product: item.product,
-      customer: item.customer,
-      phone: item.phone,
-      date: item.expiry
-    }))
-  };
-  revenueMetrics = orderMetricRows
-    ? aggregateRevenue(orderMetricRows, { aliases: [], customers: [], products: [] }, "thisMonth")
-    : null;
-  shippingMetrics = orderMetricRows ? aggregateShippingCounts(orderMetricRows) : null;
-  inventoryMetrics = inventoryMetricProducts ? aggregateInventoryStock(inventoryMetricProducts) : null;
-  showRevenue = currentUser?.canViewRevenue !== false;
-  homeCurrentUser = currentUser;
+  applyHomeViewState(nextState);
   homeTaskFilter = HOME_TASK_FILTERS.includes(historyState?.taskFilter) ? historyState.taskFilter : "inProgress";
   homeTaskFilterOpen = false;
-
-  data.stock.map((item) => item.image).filter(Boolean).forEach((src) => {
-    const image = new Image();
-    image.decoding = "sync";
-    image.loading = "eager";
-    image.src = src;
-  });
+  preloadHomeStockImages();
 
   return {
     page: {
       menu: createBizflowMenu("home"),
-      data: { unread, user: currentUser },
+      data: { unread: nextState.unread, user: nextState.currentUser },
       render: renderHome,
       title: "任務平台 Home Desktop"
     },
@@ -444,37 +494,82 @@ export async function mountPage({ scope, signal, historyState = null }) {
       scope.listen(document, "keydown", onHomeKeydown);
       let cardVisible = false;
       let marked = false;
+      let currentCard = null;
       let observer = null;
       const syncMessageRead = () => {
         if (marked || !cardVisible || document.visibilityState === "hidden" || (data?.unread?.messages ?? 0) <= 0) return;
+        const unreadWatermarks = homeUnreadWatermarks;
+        if (!unreadWatermarks?.messages) return;
         marked = true;
         markRead("messages", unreadWatermarks.messages);
         if (data?.unread) data.unread.messages = 0;
         document.querySelector("[data-home-team-activity] .home-badge")?.remove();
         observer?.disconnect();
       };
-      scope.animationFrame(() => {
-        const card = document.querySelector("[data-home-team-activity]");
-        if (!card) return;
-        // Router restores its scroll position after activate(); one extra frame
-        // keeps the hash target authoritative for this explicit notification jump.
-        if (window.location.hash === "#team-activity") {
-          scope.animationFrame(() => card.scrollIntoView({ block: "center" }));
-        }
-        if ((data?.unread?.messages ?? 0) <= 0) return;
-        if (typeof IntersectionObserver !== "function") {
-          cardVisible = true;
-          syncMessageRead();
-          return;
-        }
+      if (typeof IntersectionObserver === "function") {
         observer = scope.track(new IntersectionObserver((entries) => {
-          const entry = entries.find((item) => item.target === card);
+          const entry = entries.find((item) => item.target === currentCard);
           cardVisible = Boolean(entry?.isIntersecting && entry.intersectionRatio >= 0.5);
           syncMessageRead();
         }, { threshold: [0, 0.5] }));
-        observer.observe(card);
-      });
+      }
+      const bindTeamActivity = ({ honorHash = false } = {}) => {
+        observer?.disconnect();
+        cardVisible = false;
+        marked = false;
+        currentCard = null;
+        scope.animationFrame(() => {
+          const card = document.querySelector("[data-home-team-activity]");
+          if (!card || !scope.isCurrent()) return;
+          currentCard = card;
+          // Router restores its scroll position after activate(); one extra frame
+          // keeps the hash target authoritative for this explicit notification jump.
+          if (honorHash && window.location.hash === "#team-activity") {
+            scope.animationFrame(() => card.scrollIntoView({ block: "center" }));
+          }
+          if ((data?.unread?.messages ?? 0) <= 0) {
+            marked = true;
+            return;
+          }
+          if (!observer) {
+            cardVisible = true;
+            syncMessageRead();
+            return;
+          }
+          observer.observe(card);
+        });
+      };
+      rebindHomeTeamActivity = () => bindTeamActivity();
+      bindTeamActivity({ honorHash: true });
       scope.listen(document, "visibilitychange", syncMessageRead);
+      homeLiveRefresh = attachLiveSnapshotRefresh({
+        scope,
+        snapshots: HOME_LIVE_SNAPSHOTS,
+        tables: HOME_LIVE_TABLES,
+        isBlocked: isHomeRefreshBlocked,
+        async refresh({ defer, isCurrent }) {
+          const refreshedState = await loadHomeViewState();
+          if (!isCurrent()) return;
+          if (isHomeRefreshBlocked()) {
+            defer();
+            return;
+          }
+          applyHomeViewState(refreshedState);
+          preloadHomeStockImages();
+          if (!isCurrent()) return;
+          rerenderHome();
+          window.dispatchEvent(new CustomEvent("tp:unread-change"));
+        }
+      });
+      if (typeof MutationObserver === "function") {
+        const blockerObserver = scope.track(new MutationObserver(flushHomeLiveRefresh));
+        blockerObserver.observe(document.querySelector("#shell-root") ?? document.body, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ["aria-busy"]
+        });
+      }
     },
     captureState: () => ({ taskFilter: homeTaskFilter }),
     dispose() {
@@ -483,8 +578,11 @@ export async function mountPage({ scope, signal, historyState = null }) {
       shippingMetrics = null;
       inventoryMetrics = null;
       homeCurrentUser = null;
+      homeUnreadWatermarks = null;
       homeHelpers = null;
       homeTaskFilterOpen = false;
+      homeLiveRefresh = null;
+      rebindHomeTeamActivity = null;
       if (activeScope === scope) activeScope = null;
     }
   };
