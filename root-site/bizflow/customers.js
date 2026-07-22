@@ -17,6 +17,7 @@ import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { renderNewCustomerFields } from "../components/new-customer-fields.js";
 import { copyPhoneNumber } from "../components/phone-copy.js";
 import { createLiveOrderCustomer } from "../data/live-orders-writes.js";
+import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { createCustomerSorter, customerSortKeys } from "./customers-sort.js";
 import {
@@ -201,9 +202,45 @@ let customerSorter = null;
 let dateFilter = null;
 let resizeTimer = 0;
 let activeScope = null;
+let customersLiveRefresh = null;
+
+const CUSTOMERS_LIVE_SNAPSHOTS = ["customers.json"];
+const CUSTOMERS_LIVE_TABLES = ["customers", "invoices", "customer_devices"];
 
 function isCurrentCustomersScope(scope = activeScope) {
   return Boolean(scope && scope === activeScope && scope.isCurrent());
+}
+
+function isCustomersRefreshBlocked() {
+  return state.writeBusy || state.modalOpen || isWarrantyRenewalOpen() || Boolean(document.querySelector(
+    "[data-quick-create-portal], [data-date-range-panel], " +
+    "[data-customers-filter-popover].menu-popover--open, .customers-page [aria-busy=\"true\"]"
+  ));
+}
+
+function flushCustomersLiveRefresh() {
+  if (!isCustomersRefreshBlocked()) void customersLiveRefresh?.flush();
+}
+
+function captureCustomersTextFocus() {
+  const input = document.activeElement;
+  if (!(input instanceof HTMLInputElement)) return null;
+  const selector = input.matches("[data-customers-search]")
+    ? "[data-customers-search]"
+    : input.matches("[data-warranty-search]")
+      ? "[data-warranty-search]"
+      : "";
+  if (!selector) return null;
+  return { selector, start: input.selectionStart, end: input.selectionEnd };
+}
+
+function restoreCustomersTextFocus(focus) {
+  if (!focus) return;
+  const input = document.querySelector(focus.selector);
+  if (!(input instanceof HTMLInputElement)) return;
+  input.focus();
+  const end = input.value.length;
+  input.setSelectionRange(Math.min(focus.start ?? end, end), Math.min(focus.end ?? end, end));
 }
 
 function filteredCustomers() {
@@ -388,9 +425,11 @@ function closeAllFilterMenus(except) {
   });
 }
 
-function rerenderCustomersPage({ focusModal = false, restoreAddFocus = false } = {}) {
+function rerenderCustomersPage({ focusModal = false, restoreAddFocus = false, preserveTextFocus = false } = {}) {
+  const textFocus = preserveTextFocus ? captureCustomersTextFocus() : null;
   const page = document.querySelector(".customers-page");
   if (page && currentHelpers) page.outerHTML = renderCustomers(currentHelpers);
+  restoreCustomersTextFocus(textFocus);
   if (focusModal) document.querySelector('[data-customers-modal-overlay] [data-new-customer-field="name"]')?.focus();
   if (restoreAddFocus) document.querySelector("[data-customers-modal-open]")?.focus();
 }
@@ -780,6 +819,31 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       scope.listen(document, "input", onCustomersInput);
       scope.listen(document, "keydown", onCustomersKeydown);
       scope.listen(window, "resize", onCustomersResize);
+      customersLiveRefresh = attachLiveSnapshotRefresh({
+        scope,
+        snapshots: CUSTOMERS_LIVE_SNAPSHOTS,
+        tables: CUSTOMERS_LIVE_TABLES,
+        isBlocked: isCustomersRefreshBlocked,
+        async refresh({ defer, isCurrent }) {
+          const nextData = await getCustomersPageData();
+          if (!isCurrent()) return;
+          if (isCustomersRefreshBlocked()) {
+            defer();
+            return;
+          }
+          data = nextData;
+          rerenderCustomersPage({ preserveTextFocus: true });
+        }
+      });
+      if (typeof MutationObserver === "function") {
+        const blockerObserver = scope.track(new MutationObserver(flushCustomersLiveRefresh));
+        blockerObserver.observe(document.body, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ["aria-busy", "class"]
+        });
+      }
       if (state.modalOpen) scope.animationFrame(() => document.querySelector('[data-customers-modal-overlay] [data-new-customer-field="name"]')?.focus());
     },
     captureState() {
@@ -806,6 +870,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       currentHelpers = null;
       customerSorter = null;
       dateFilter = null;
+      customersLiveRefresh = null;
       if (activeScope === scope) activeScope = null;
     }
   };

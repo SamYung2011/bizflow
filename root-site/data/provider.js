@@ -1090,13 +1090,12 @@ function loadGroupedCustomers() {
 
 export async function getCustomersPageData() {
   const grouped = await loadGroupedCustomers();
-  // Mirrors bizflow_samyung/src/views/Customers.jsx:571-574: list keeps IMEI-only customers.
-  // Mirrors Customers.jsx:516,597: default customer sort is created DESC.
-  const customers = grouped.filter((customer) => customer.hasEmail || customer.hasPhone || customer.hasImei)
-    .sort((left, right) => Date.parse(String(right.joinedAt || "").replaceAll("/", "-")) -
-      Date.parse(String(left.joinedAt || "").replaceAll("/", "-")));
-  // Mirrors bizflow_samyung/src/views/Dashboard.jsx:98-101: KPI requires email or phone.
-  const dashboardCustomerCount = grouped.filter((customer) => customer.hasEmail || customer.hasPhone).length;
+  // Every persisted customer group is a customer. The live create form only requires
+  // a name, so the legacy React contact-field gate made valid new rows invisible here
+  // and kept the Home KPI stale even after customers.json had refreshed.
+  const customers = [...grouped].sort((left, right) => Date.parse(String(right.joinedAt || "").replaceAll("/", "-")) -
+    Date.parse(String(left.joinedAt || "").replaceAll("/", "-")));
+  const dashboardCustomerCount = grouped.length;
   return { customers, dashboardCustomerCount };
 }
 

@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { getCustomersPageData } from "../root-site/data/provider.js";
+import { updateProviderSnapshotMemo } from "../root-site/data/provider-snapshot-cache.js";
 
-const home = await readFile(new URL("../root-site/bizflow/home.js", import.meta.url), "utf8");
+const [home, customers, provider, snapshots] = await Promise.all([
+  readFile(new URL("../root-site/bizflow/home.js", import.meta.url), "utf8"),
+  readFile(new URL("../root-site/bizflow/customers.js", import.meta.url), "utf8"),
+  readFile(new URL("../root-site/data/provider.js", import.meta.url), "utf8"),
+  readFile(new URL("../root-site/data/live-snapshots.js", import.meta.url), "utf8")
+]);
 
 assert.match(home, /import \{ attachLiveSnapshotRefresh \} from "\.\.\/data\/live-snapshot-listener\.js"/);
 for (const snapshot of [
@@ -58,4 +65,55 @@ assert.match(home, /captureState: \(\) => \(\{ taskFilter: homeTaskFilter \}\)/,
 assert.match(home, /dispose\(\) \{[\s\S]*homeLiveRefresh = null;[\s\S]*rebindHomeTeamActivity = null;/,
   "Home disposal must release its refresh and observer callbacks");
 
-console.log("HOME-live-1 contracts: PASS");
+assert.match(customers, /import \{ attachLiveSnapshotRefresh \} from "\.\.\/data\/live-snapshot-listener\.js"/);
+const customersAttachment = customers.slice(
+  customers.indexOf("customersLiveRefresh = attachLiveSnapshotRefresh"),
+  customers.indexOf("if (typeof MutationObserver", customers.indexOf("customersLiveRefresh = attachLiveSnapshotRefresh"))
+);
+assert.match(customersAttachment, /scope,[\s\S]*snapshots: CUSTOMERS_LIVE_SNAPSHOTS,[\s\S]*tables: CUSTOMERS_LIVE_TABLES,[\s\S]*isBlocked: isCustomersRefreshBlocked/);
+assert.match(customersAttachment, /const nextData = await getCustomersPageData\(\)[\s\S]*if \(!isCurrent\(\)\) return;[\s\S]*if \(isCustomersRefreshBlocked\(\)\) \{[\s\S]*defer\(\);[\s\S]*return;[\s\S]*data = nextData;[\s\S]*rerenderCustomersPage\(\{ preserveTextFocus: true \}\)/,
+  "customer snapshot updates must refetch and rerender without replacing UI state");
+assert.doesNotMatch(customersAttachment, /state\.(?:tab|sort|source|imei|search|page)\s*=|dateFilter\s*=/,
+  "live customer refresh must preserve search, filters, page, tab, and date-filter state");
+assert.match(customers, /function isCustomersRefreshBlocked\(\)[\s\S]*state\.writeBusy[\s\S]*state\.modalOpen[\s\S]*data-date-range-panel[\s\S]*data-customers-filter-popover/,
+  "open writes, filters, and calendar panels must defer customer rerenders");
+assert.match(customers, /new MutationObserver\(flushCustomersLiveRefresh\)[\s\S]*attributeFilter: \["aria-busy", "class"\]/,
+  "closing a customer UI blocker must flush deferred live data");
+assert.match(customers, /captureCustomersTextFocus[\s\S]*selectionStart[\s\S]*restoreCustomersTextFocus[\s\S]*setSelectionRange/,
+  "an active customer or warranty search must retain focus and caret across live rerenders");
+assert.match(customers, /captureState\(\) \{[\s\S]*search: state\.search,[\s\S]*page: state\.page,[\s\S]*dateFilter: dateFilter\.captureState/);
+assert.match(customers, /dispose\(\) \{[\s\S]*customersLiveRefresh = null;/,
+  "customer page disposal must release its scoped refresh handle");
+
+assert.match(home, /stat\.key === "customers"[\s\S]*value: customerData\.dashboardCustomerCount/,
+  "Home must override the customer KPI from the refreshed customer provider");
+assert.match(provider, /const dashboardCustomerCount = grouped\.length;/,
+  "the customer KPI must count every persisted customer group");
+assert.doesNotMatch(provider.slice(provider.indexOf("export async function getCustomersPageData"), provider.indexOf("export async function getCustomerMergeCandidates")),
+  /grouped\.filter\(\(customer\) => customer\.has/,
+  "name-only customers must not disappear behind a contact-field gate");
+assert.match(snapshots, /\{ key: "customers", tone: "blue", value: customersSnapshot\.customers\.length \}/,
+  "the live Home snapshot must use the same all-customer KPI contract");
+
+const customerRow = (id, name, phone = "") => ({
+  id,
+  name,
+  phone,
+  source: "other",
+  joinedAt: "2026/07/22",
+  imei: "",
+  orderCount: 0,
+  detail: { email: "", orders: [] }
+});
+updateProviderSnapshotMemo("customers.json", { __live: true, customers: [customerRow("contact", "Contact", "+852 1")] });
+assert.equal((await getCustomersPageData()).dashboardCustomerCount, 1);
+updateProviderSnapshotMemo("customers.json", {
+  __live: true,
+  customers: [customerRow("contact", "Contact", "+852 1"), customerRow("name-only", "Name only")]
+});
+const refreshedCustomers = await getCustomersPageData();
+assert.equal(refreshedCustomers.dashboardCustomerCount, 2, "a refreshed name-only customer must increment the Home KPI");
+assert.ok(refreshedCustomers.customers.some((customer) => customer.id === "name-only"),
+  "a refreshed name-only customer must remain searchable in the customer list");
+
+console.log("HOME-live-1 contracts: PASS (Home + customers live refresh, state preservation, all-customer KPI)");

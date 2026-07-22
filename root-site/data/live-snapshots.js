@@ -797,8 +797,7 @@ async function buildHomeSnapshot() {
     unread: { tasks: 0, orders: 0, inventory: 0, messages: 0 },
     stats: [
       { key: "orders", tone: "", value: ordersSnapshot.orders.length },
-      // Mirrors bizflow_samyung/src/views/Dashboard.jsx:98-101: IMEI-only customers do not enter the KPI.
-      { key: "customers", tone: "blue", value: customersSnapshot.customers.filter((customer) => customer.hasEmail || customer.hasPhone).length },
+      { key: "customers", tone: "blue", value: customersSnapshot.customers.length },
       { key: "members", tone: "green", value: membersSnapshot.membersStats.all },
       { key: "warranty", tone: "yellow", value: warrantySnapshot.items.length, alert: warrantySnapshot.items.length > 0 }
     ],
