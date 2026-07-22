@@ -5,19 +5,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Honnmono password recovery</title>
   </head>
-  <body style="margin:0;padding:24px;background:#F5F5F5;color:#2E2F30;font-family:Arial,'Helvetica Neue',sans-serif;">
-    <main style="max-width:520px;margin:0 auto;padding:32px;background:#FFFFFF;border-radius:10px;">
-      <p style="margin:0 0 24px;font-size:18px;font-weight:700;">Honnmono</p>
-      <h1 style="margin:0 0 16px;font-size:24px;line-height:1.4;">密碼重置驗證碼</h1>
-      <p style="margin:0 0 20px;font-size:15px;line-height:1.7;color:#5C5C5C;">
-        輸入此驗證碼完成密碼重置，10 分鐘內有效；非本人操作請忽略。
-      </p>
-      <div style="margin:0 0 20px;padding:18px 12px;background:#F5F5F5;border-radius:10px;font-family:'Courier New',monospace;font-size:34px;font-weight:700;letter-spacing:.2em;line-height:1;text-align:center;">
-        {{ .Token }}
-      </div>
-      <p style="margin:0;font-size:15px;line-height:1.7;color:#5C5C5C;">
-        Enter this code to complete your password reset. It is valid for 10 minutes. If you did not request this, please ignore this email.
-      </p>
-    </main>
+  <body style="margin:0;padding:0;background:#F5F5F5;color:#2E2F30;font-family:Arial,'Helvetica Neue',sans-serif;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#F5F5F5;">
+      <tr>
+        <td align="center" style="padding:32px 16px;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:520px;background:#FFFFFF;border-radius:14px;overflow:hidden;">
+            <tr>
+              <td style="padding:24px 32px;background:#0468EA;color:#FFFFFF;font-size:20px;font-weight:700;letter-spacing:.08em;">
+                HONNMONO
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:32px;">
+                <h1 style="margin:0 0 12px;font-size:24px;line-height:1.35;color:#0B1F3A;">重設密碼驗證碼</h1>
+                <p style="margin:0 0 8px;font-size:15px;line-height:1.6;color:#5C5C5C;">輸入此驗證碼完成密碼重置，10 分鐘內有效；非本人操作請忽略。</p>
+                <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#979797;">Enter this code to complete your password reset. It is valid for 10 minutes. If you did not request this, please ignore this email.</p>
+                <div style="margin:0;padding:18px 12px;border-radius:10px;background:#F0F0F0;color:#0468EA;font-family:'Courier New',monospace;font-size:34px;font-weight:700;letter-spacing:.24em;line-height:1;text-align:center;">
+                  {{ .Token }}
+                </div>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
   </body>
 </html>
