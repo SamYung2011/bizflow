@@ -114,8 +114,9 @@
 @media (max-width: 768px) {
   .app-segment--login {
     --app-segment-height: 40px;
-    --app-segment-gap: 0;
-    --app-segment-padding: 0;
+    /* calc() mixes these with lengths/percentages; dimensional zero keeps the radius and slider geometry valid. */
+    --app-segment-gap: 0px;
+    --app-segment-padding: 0px;
   }
 
   .app-segment--domain {
