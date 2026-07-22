@@ -70,9 +70,14 @@ async function verifyManifest() {
   assert.equal(spaCrossSectionNavigation, true, "P6 must enable same-document Bizflow/Team navigation");
   assert.deepEqual([...spaRouteAllowlist], expectedSpaRoutes, "SPA allowlist must contain all 16 routes");
   const bizflowFallbackMenu = createRouteMenu("/bizflow/orders-detail.html");
-  assert.equal(bizflowFallbackMenu.length, 10, "Bizflow loading shell must expose the complete formal menu");
+  assert.equal(bizflowFallbackMenu.length, 11, "Bizflow loading shell must expose the complete formal menu including tasks");
   assert.equal(bizflowFallbackMenu.find((item) => item.active)?.key, "nav.orders", "detail routes must highlight their owning domain");
   assert.ok(bizflowFallbackMenu.every((item) => routeManifest[item.href]), "Bizflow loading menu links must resolve to manifest routes");
+  assert.deepEqual(
+    bizflowFallbackMenu.slice(5, 7).map((item) => item.key),
+    ["nav.tasks", "nav.whatsapp"],
+    "the main Bizflow menu must expose task management immediately before WhatsApp"
+  );
   assert.equal(bizflowFallbackMenu.filter((item) => item.adminOnly).length, 4, "loading menu must preserve the OCPP admin gate");
   const teamFallbackMenu = createRouteMenu("/team/members.html");
   assert.deepEqual(teamFallbackMenu.map((item) => item.href), ["/team/index.html", "/team/members.html"]);
@@ -422,6 +427,70 @@ function fakeBrowser(pathname = "/a.html") {
   };
   const documentRef = { ...documentTarget };
   return { windowRef, documentRef, assigned, history };
+}
+
+async function verifyDirectoryRouteNormalization() {
+  const manifest = {
+    "/team/index.html": {
+      path: "/team/index.html",
+      section: "team",
+      styles: [],
+      frame: testFrame("tasks"),
+      load: async () => ({
+        async mountPage() {
+          return { page: { data: { name: "tasks" }, render: () => "tasks" } };
+        }
+      })
+    }
+  };
+  const routerFor = (browser, pages) => createAppRouter({
+    shell: {
+      setLoadingPage() {},
+      setPage(page) { pages.push(page.data.name); }
+    },
+    manifest,
+    allowlist: Object.keys(manifest),
+    windowRef: browser.windowRef,
+    documentRef: browser.documentRef,
+    styleManager: {
+      adopt() {},
+      async prepare() { return { commit() {}, rollback() {} }; },
+      dispose() {}
+    }
+  });
+
+  for (const requestedPath of ["/team/", "/team"]) {
+    const browser = fakeBrowser(requestedPath);
+    const pages = [];
+    const router = routerFor(browser, pages);
+    assert.equal(await router.start(), true, `${requestedPath} must resolve to the Team index route`);
+    assert.equal(browser.windowRef.location.href, "https://example.test/team/index.html");
+    assert.equal(browser.history.state[SPA_HISTORY_KEY].path, "/team/index.html");
+    assert.deepEqual(pages, ["tasks"]);
+    await router.dispose();
+  }
+
+  const popBrowser = fakeBrowser("/team/index.html");
+  const popRouter = routerFor(popBrowser, []);
+  assert.equal(await popRouter.start(), true);
+  const legacyDirectoryState = structuredClone(popBrowser.history.state);
+  legacyDirectoryState[SPA_HISTORY_KEY].path = "/team/";
+  popBrowser.windowRef.location.href = "https://example.test/team/";
+  popBrowser.history.state = legacyDirectoryState;
+  await [...popBrowser.windowRef.listeners.get("popstate")][0]({ state: legacyDirectoryState });
+  assert.equal(popBrowser.windowRef.location.href, "https://example.test/team/index.html",
+    "popstate must replace a legacy directory URL with the canonical route URL");
+  assert.equal(popBrowser.history.state[SPA_HISTORY_KEY].path, "/team/index.html",
+    "popstate must also normalize the SPA history metadata path");
+  await popRouter.dispose();
+
+  const unknownBrowser = fakeBrowser("/team/index.html");
+  const unknownRouter = routerFor(unknownBrowser, []);
+  assert.equal(await unknownRouter.start(), true);
+  assert.equal(await unknownRouter.navigate("/unknown-section"), false,
+    "an unknown directory-like path must retain the existing hard-navigation behavior");
+  assert.equal(unknownBrowser.assigned.at(-1), "https://example.test/unknown-section");
+  await unknownRouter.dispose();
 }
 
 async function verifyRouter() {
@@ -895,6 +964,7 @@ await verifyLifecycle();
 verifyOcppGuard();
 verifyWhatsappI18n();
 await verifyRouter();
+await verifyDirectoryRouteNormalization();
 await verifyFrameHistoryNavigation();
 await verifySmartBackNavigation();
 await verifyFrameSupersedingNavigation();

@@ -191,10 +191,22 @@ export function createAppRouter({
   const cancelFrame = windowRef.cancelAnimationFrame ?? windowRef.clearTimeout ?? clearTimeout;
 
   function routeForUrl(url) {
-    const route = manifest[url.pathname] ?? null;
+    const pathname = String(url.pathname || "");
+    const candidatePaths = [
+      pathname,
+      pathname.endsWith("/") ? `${pathname}index.html` : `${pathname}/index.html`
+    ];
+    const route = candidatePaths.map((path) => manifest[path]).find(Boolean) ?? null;
     if (!route || !allowedPaths.has(route.path) || typeof route.load !== "function") return null;
     if (!crossSection && currentRoute && route.section !== currentRoute.section) return null;
     return route;
+  }
+
+  function normalizedUrlForRoute(url, route) {
+    if (!route || url.pathname === route.path) return url;
+    const normalized = new URL(url.href);
+    normalized.pathname = route.path;
+    return normalized;
   }
 
   function replaceCurrentHistory(pageState = currentController?.captureState?.()) {
@@ -300,14 +312,24 @@ export function createAppRouter({
 
   async function navigate(rawUrl, { replace = false, fromPopstate = false, historyState = null } = {}) {
     if (disposed) return false;
-    const url = new URL(rawUrl, windowRef.location.href);
-    const route = routeForUrl(url);
+    const requestedUrl = new URL(rawUrl, windowRef.location.href);
+    const route = routeForUrl(requestedUrl);
     if (!active || !route) {
       if (!fromPopstate) {
-        if (currentController && !await canLeave(url, "hard-navigation")) return false;
-        hardNavigate(url);
+        if (currentController && !await canLeave(requestedUrl, "hard-navigation")) return false;
+        hardNavigate(requestedUrl);
       }
       return false;
+    }
+    const url = normalizedUrlForRoute(requestedUrl, route);
+    if (fromPopstate && url.href !== requestedUrl.href) {
+      const baseState = historyState ?? windowRef.history.state;
+      const details = historyDetails(baseState);
+      const normalizedState = details
+        ? nextHistoryState(baseState, { ...details, path: route.path })
+        : baseState;
+      windowRef.history.replaceState(normalizedState, "", url.href);
+      historyState = normalizedState;
     }
     if (!fromPopstate && currentRoute && url.href === currentUrl.href) return true;
     if (!await canLeave(url, fromPopstate ? "popstate" : "link")) {
@@ -397,14 +419,15 @@ export function createAppRouter({
     if (!active) return false;
     const route = routeForUrl(currentUrl);
     if (!route) return false;
+    const normalizedUrl = normalizedUrlForRoute(currentUrl, route);
     styleManager.adopt(route.styles);
     const existing = historyDetails(windowRef.history.state);
     currentIndex = existing?.index ?? 0;
     if (!existing) {
       const details = { index: currentIndex, path: route.path, previous: null, pageState: null, scroll: { x: 0, y: 0, containers: {} } };
-      windowRef.history.replaceState(nextHistoryState(windowRef.history.state, details), "", currentUrl.href);
+      windowRef.history.replaceState(nextHistoryState(windowRef.history.state, details), "", normalizedUrl.href);
     }
-    return navigate(currentUrl, { replace: true, historyState: windowRef.history.state });
+    return navigate(normalizedUrl, { replace: true, historyState: windowRef.history.state });
   }
 
   async function onDocumentClick(event) {
