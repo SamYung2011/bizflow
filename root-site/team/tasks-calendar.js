@@ -116,7 +116,7 @@ export function renderTaskCalendar({ tasks, state, helpers }) {
   const monthLabel = new Intl.DateTimeFormat(localeFor(lang), { year: "numeric", month: "long" })
     .format(new Date(state.calendarYear, state.calendarMonth, 1));
   const scheduledCount = tasks.filter(taskDateRange).length;
-  const unscheduled = tasks.filter((task) => !taskDateRange(task) && task.status !== "completed" && task.status !== "abandoned");
+  const unscheduled = tasks.filter((task) => !taskDateRange(task));
   const weeks = layout.weeks.map((week, weekIndex) => {
     const overflow = Array(7).fill(0);
     week.items.filter((item) => item.lane >= CALENDAR_VISIBLE_LANES).forEach((item) => {

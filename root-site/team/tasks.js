@@ -7,7 +7,7 @@ import { isTaskFilterGroup } from "./tasks-filters.js";
 import { renderTaskCalendar } from "./tasks-calendar.js";
 import { renderTaskOverview } from "./tasks-overview.js";
 import { renderTaskAiDialog } from "./tasks-ai.js";
-import { calendarRelatedTasks, canDeleteTaskForUser, isTaskCreator, isWaitingApproval, memberIdentity, openAssignedTaskCount, taskAssignee } from "./tasks-model.js";
+import { calendarRelatedTasks, canDeleteTaskForUser, isOpenTask, isTaskCreator, isWaitingApproval, memberIdentity, openAssignedTaskCount, taskAssignee } from "./tasks-model.js";
 import { attachTaskDomainController } from "./tasks-domain-controller.js";
 import { renderTaskBoardGrid, renderTaskToolbar } from "./tasks-board.js";
 import { getSessionValue, setSessionValue } from "../data/session-state.js";
@@ -151,7 +151,7 @@ function renderMember(member, tasks, helpers) {
   const active = state.mode === "board" && filterState.member === memberKey ? " team-member-task--active" : "";
   const dept = member.deptLabel ?? pageT(lang, `tasks.dept.${member.dept}`);
   const openCount = member.dept === "all"
-    ? tasks.filter((task) => task.parentId === null && task.done !== true && task.status !== "completed" && task.status !== "abandoned").length
+    ? tasks.filter((task) => task.parentId === null && isOpenTask(task)).length
     : openAssignedTaskCount(member, tasks);
   return `<button type="button" class="team-member-task${active}" data-task-member="${escapeHtml(memberKey)}">
     <span class="avatar--initial team-member-task__avatar" style="--component-width:60px;--component-height:60px">${escapeHtml(initials(member.name))}</span>

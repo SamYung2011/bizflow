@@ -55,6 +55,10 @@ export function taskAbandonedForMember(task, member) {
   return task.status === "abandoned";
 }
 
+export function isOpenTask(task) {
+  return Boolean(task) && task.done !== true && task.status !== "completed" && task.status !== "abandoned";
+}
+
 // Mirrors bizflow_samyung/team/src/views/Tasks.jsx:148: sidebar counts assignees only.
 export function openAssignedTaskCount(member, tasks) {
   return tasks.filter((task) => task.parentId === null && isTaskAssignedTo(task, member) &&
@@ -76,8 +80,7 @@ export function taskMatchesMemberStatus(task, member, status) {
     return assigned ? done && !abandoned : task.done === true || task.status === "completed";
   }
   if (status === "abandoned") return assigned ? abandoned && !done : task.status === "abandoned";
-  const overallOpen = task.done !== true && task.status !== "completed" && task.status !== "abandoned";
-  if (!overallOpen) return false;
+  if (!isOpenTask(task)) return false;
   if (creatorAwaitingApproval) return status === "overdue" ? task.status === "overdue" : true;
   if (assigned && (done || abandoned)) return false;
   if (status === "overdue") return task.status === "overdue";
@@ -90,8 +93,7 @@ export function isTaskRelated(task, currentUser) {
 
 export function isWaitingApproval(task) {
   const assignees = task.assignees ?? [];
-  const overallOpen = task.done !== true && task.status !== "completed" && task.status !== "abandoned";
-  return overallOpen && task.requiresReview === true && !task.approvedAt && assignees.length > 0 &&
+  return isOpenTask(task) && task.requiresReview === true && !task.approvedAt && assignees.length > 0 &&
     assignees.every((assignee) => Boolean(assignee.completedAt) || Boolean(assignee.abandonedAt));
 }
 
@@ -119,7 +121,8 @@ export function scopedTopTasks(tasks, { onlyMine = false, currentUser, member = 
 }
 
 export function calendarRelatedTasks(tasks, { onlyMine = false, currentUser } = {}) {
-  return scopedTopTasks(tasks, { onlyMine, currentUser }).filter((task) => isTaskRelated(task, currentUser));
+  return scopedTopTasks(tasks, { onlyMine, currentUser })
+    .filter((task) => isOpenTask(task) && isTaskRelated(task, currentUser));
 }
 
 export function overviewForMember(member, tasks) {
@@ -127,8 +130,7 @@ export function overviewForMember(member, tasks) {
   const rows = topTasks.map((task) => ({ task, assignee: taskAssignee(task, member) }))
     .filter(({ task }) => isTaskOwnedByMember(task, member));
   // Mirrors bizflow_samyung/team/src/views/Tasks.jsx:200-205 overview member counts.
-  const open = rows.filter(({ task }) =>
-    task.done !== true && task.status !== "completed" && task.status !== "abandoned" &&
+  const open = rows.filter(({ task }) => isOpenTask(task) &&
     !taskDoneForMember(task, member) && !taskAbandonedForMember(task, member));
   const completed = rows.filter(({ task }) => taskDoneForMember(task, member));
   const recentlyCompleted = completed
