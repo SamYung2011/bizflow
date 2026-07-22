@@ -7,6 +7,8 @@ const homeJs = read("root-site/bizflow/home.js");
 const inventoryDetail = read("root-site/bizflow/inventory-detail.js");
 const inventoryWrites = read("root-site/data/live-inventory-writes.js");
 const shopifyCatalog = read("supabase/functions/shopify-catalog-write/catalog.ts");
+const taskDetail = read("root-site/team/tasks-detail.js");
+const taskDomainCss = read("root-site/team/tasks-domain.css");
 
 assert.match(shellCss, /\.shell-page-inner\s*\{[\s\S]*?width:\s*100%;[\s\S]*?max-width:\s*100%;/,
   "desktop page content must fill the available shell width");
@@ -44,4 +46,13 @@ for (const label of ["僅 BizFlow：", "BizFlow only:", "BizFlow uniquement :"])
   assert.match(inventoryDetail, new RegExp(label), `missing local-only product status copy: ${label}`);
 }
 
-console.log("PM batch A contracts: PASS (full-width shell, five-card Home banner, local inventory writes)");
+assert.match(taskDetail, /data-task-detail-panel="feedback" data-task-detail-sticky="feedback"/,
+  "the feedback column must expose a stable sticky layout hook");
+assert.match(taskDomainCss, /@media \(min-width: 769px\)[\s\S]*?\.team-task-page--detail \.team-member-rail,[\s\S]*?\.task-detail__feedback\[data-task-detail-sticky="feedback"\][\s\S]*?position: sticky;[\s\S]*?top: var\(--task-detail-sticky-top\)/,
+  "the member rail and feedback column must stick only at desktop widths");
+assert.match(taskDomainCss, /\.task-detail__thread\s*\{[\s\S]*?max-height:\s*60vh;[\s\S]*?overflow-y:\s*auto;/,
+  "long task feedback must scroll inside a viewport-bounded thread");
+assert.doesNotMatch(taskDetail, /addEventListener|setInterval|setTimeout/,
+  "the task detail layout change must not add data or lifecycle behavior");
+
+console.log("PM batch A contracts: PASS (full width, Home banner, inventory writes, sticky task detail)");

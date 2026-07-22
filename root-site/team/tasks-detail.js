@@ -208,7 +208,7 @@ function renderTaskFeedback(task, state, helpers) {
   const attachments = state.feedbackDraft.attachments ?? [];
   const writable = !state.liveReadOnly || state.liveTaskWrites;
   const disabled = !writable || state.writeBusy || Boolean(state.feedbackEditingId);
-  return `<section class="task-detail__feedback" data-task-detail-panel="feedback">
+  return `<section class="task-detail__feedback" data-task-detail-panel="feedback" data-task-detail-sticky="feedback">
     <h3>${escapeHtml(tt("tasks.detail.feedbackTitle"))}</h3>
     <div class="task-detail__thread">${task.feedback.length
       ? task.feedback.map((entry) => renderFeedbackEntry(entry, state, helpers)).join("")

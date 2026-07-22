@@ -614,6 +614,43 @@
 }
 
 /* Detail additions */
+.team-task-page--detail {
+  --task-detail-sticky-top: 84px; /* 固定顶栏 64px + 页面上间距 20px。 */
+  --task-detail-sticky-gap: var(--space-20);
+}
+
+@media (min-width: 769px) {
+  /* Detail mode needs viewport sticky children; the board/card overflow used by
+     the regular kanban would otherwise turn both into inert local stickies. */
+  .team-task-page--detail .team-board {
+    align-items: flex-start;
+    overflow: visible;
+  }
+
+  .team-task-page--detail .task-detail {
+    overflow: visible;
+  }
+
+  .team-task-page--detail .team-member-rail,
+  .task-detail__feedback[data-task-detail-sticky="feedback"] {
+    position: sticky;
+    top: var(--task-detail-sticky-top);
+    align-self: flex-start;
+  }
+
+  .team-task-page--detail .team-member-rail {
+    max-height: calc(100vh - var(--task-detail-sticky-top) - var(--task-detail-sticky-gap));
+    overflow-y: auto;
+  }
+
+  .task-detail__thread {
+    max-height: 60vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+}
+
 .task-detail__assignees {
   display: flex;
   flex-wrap: wrap;
