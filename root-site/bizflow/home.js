@@ -180,6 +180,7 @@ export function renderHome({ icon, escapeHtml, lang }) {
     .slice(0, 4);
   const taskFilterOptions = HOME_TASK_FILTERS.map((key) => `<button type="button" class="dropdown-item${homeTaskFilter === key ? " dropdown-item--selected" : ""}" role="option" aria-selected="${homeTaskFilter === key}" data-home-task-filter-option="${key}">${e(th(`home.filter.${key}`))}</button>`).join("");
   const hasQuickCreate = availableQuickCreateActions(homeCurrentUser).length > 0;
+  const bannerStats = data.stats.filter((stat) => stat.key !== "members");
 
   const feedRow = ({ name, action, title, date, time, avatar }) => `
     <div class="home-feed-row">
@@ -235,7 +236,7 @@ export function renderHome({ icon, escapeHtml, lang }) {
     <section class="home-stats">
       ${showRevenue ? statCard({ titleKey: "home.stat.revenue", value: revenueMetrics ? money(revenueMetrics.totalRevenue) : "—", href: "./orders.html", preset: "orders-revenue", sub: month }) : ""}
       ${statCard({ titleKey: "home.stat.inventory", value: inventoryMetrics ? String(inventoryMetrics.activeSkuCount) : "—", href: "./inventory.html", sub: inventoryMetrics ? replace(th("home.inventory.summary"), { total: inventoryMetrics.totalQuantity }) : "", warning: inventoryMetrics?.lowStockCount ? replace(th("home.inventory.low"), { count: inventoryMetrics.lowStockCount }) : "" })}
-      ${data.stats.map((s) => statCard({
+      ${bannerStats.map((s) => statCard({
         mod: STAT_TONE_CLASS[s.tone] ?? "",
         titleKey: `home.stat.${s.key === "customers" ? "customers" : s.key}`,
         value: String(s.value),
