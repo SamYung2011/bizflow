@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const html = read("root-site/login/index.html");
 const css = read("root-site/login/login.css");
 const login = read("root-site/login/login.js");
 const auth = read("root-site/data/auth.js");
+const recoveryTemplateUrl = new URL("../root-site/auth-templates/recovery.html", import.meta.url);
+assert.ok(existsSync(recoveryTemplateUrl), "the hosted recovery email template must exist");
 const recoveryTemplate = read("root-site/auth-templates/recovery.html");
 
 const fieldBlocks = [...html.matchAll(/<label class="login-field"([^>]*)>([\s\S]*?)<\/label>/g)];
@@ -65,9 +67,15 @@ for (const language of ["zh", "en", "fr"]) {
 
 assert.match(recoveryTemplate, /\{\{\s*\.Token\s*\}\}/,
   "the hosted recovery template must render GoTrue's six-digit Token placeholder");
-assert.match(recoveryTemplate, /重設密碼驗證碼[\s\S]*Enter this 6-digit code/,
-  "the recovery email must explain the code in Chinese and English");
-assert.doesNotMatch(recoveryTemplate, /<(?:img|script|link)\b|(?:src|href)\s*=\s*["']https?:/i,
-  "the recovery email must remain self-contained without external resources");
+assert.match(recoveryTemplate, /Honnmono/,
+  "the recovery email must carry the Honnmono brand name");
+assert.match(recoveryTemplate, /輸入此驗證碼完成密碼重置，10 分鐘內有效；非本人操作請忽略。/,
+  "the recovery email must explain the ten-minute validity in Chinese");
+assert.match(recoveryTemplate, /Enter this code to complete your password reset\. It is valid for 10 minutes\.[\s\S]*please ignore this email\./,
+  "the recovery email must explain the ten-minute validity in English");
+assert.doesNotMatch(recoveryTemplate, /https?:\/\//i,
+  "the recovery email must not reference any HTTP external resource");
+assert.doesNotMatch(recoveryTemplate, /<(?:img|script|link|iframe)\b/i,
+  "the recovery email must remain static and self-contained");
 
 console.log("LOGIN-forgot-1 contracts: PASS (three stages, persistent return, recovery OTP, resend cooldown, legacy link)");
