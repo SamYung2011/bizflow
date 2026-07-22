@@ -6,6 +6,7 @@ const html = read("root-site/login/index.html");
 const css = read("root-site/login/login.css");
 const login = read("root-site/login/login.js");
 const auth = read("root-site/data/auth.js");
+const recoveryTemplate = read("root-site/auth-templates/recovery.html");
 
 const fieldBlocks = [...html.matchAll(/<label class="login-field"([^>]*)>([\s\S]*?)<\/label>/g)];
 for (const [name, stage] of [
@@ -61,5 +62,12 @@ for (const language of ["zh", "en", "fr"]) {
     "auth.otpVerified"
   ]) assert.ok(dictionary.includes(`"${key}"`), `${language} must define ${key}`);
 }
+
+assert.match(recoveryTemplate, /\{\{\s*\.Token\s*\}\}/,
+  "the hosted recovery template must render GoTrue's six-digit Token placeholder");
+assert.match(recoveryTemplate, /重設密碼驗證碼[\s\S]*Enter this 6-digit code/,
+  "the recovery email must explain the code in Chinese and English");
+assert.doesNotMatch(recoveryTemplate, /<(?:img|script|link)\b|(?:src|href)\s*=\s*["']https?:/i,
+  "the recovery email must remain self-contained without external resources");
 
 console.log("LOGIN-forgot-1 contracts: PASS (three stages, persistent return, recovery OTP, resend cooldown, legacy link)");
