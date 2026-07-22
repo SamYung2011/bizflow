@@ -177,6 +177,10 @@
   white-space: nowrap;
 }
 
+.team-member-task__meta {
+  font-weight: var(--font-description-weight); /* Figma 271:720「任務待完成」12 Medium。 */
+}
+
 .team-member-task__meta span:first-child {
   font-size: var(--font-title-3-size);
 }

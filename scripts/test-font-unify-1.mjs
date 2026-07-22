@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [home, homeCss, snapshots, tableCache] = await Promise.all([
+const [home, homeCss, snapshots, tableCache, tasksCss] = await Promise.all([
   readFile(new URL("../root-site/bizflow/home.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/bizflow/home.css", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/live-snapshots.js", import.meta.url), "utf8"),
-  readFile(new URL("../root-site/data/live-table-cache.js", import.meta.url), "utf8")
+  readFile(new URL("../root-site/data/live-table-cache.js", import.meta.url), "utf8"),
+  readFile(new URL("../root-site/team/tasks.css", import.meta.url), "utf8")
 ]);
 
 assert.match(homeCss, /\.home-stats \.board-card \.tp-number\s*\{[\s\S]*?font-size:\s*var\(--font-display-size\)/,
@@ -27,5 +28,7 @@ assert.match(homeCss, /\.home-chip--dept\s*\{[\s\S]*?font-size:\s*8px;[\s\S]*?fo
   "department chips must use the Figma 8px Medium typography");
 assert.match(homeCss, /home-chip--dept-design[\s\S]*?var\(--dept-design\)[\s\S]*?home-chip--dept-tech[\s\S]*?var\(--dept-tech\)/,
   "department chips must reuse the existing department tint tokens");
+assert.match(tasksCss, /\.team-member-task__meta\s*\{\s*font-weight:\s*var\(--font-description-weight\)/,
+  "task rail pending copy must use the Figma 12px Medium bucket");
 
-console.log("FONT-unify-1 contracts: PASS (Home typography and live department chip)");
+console.log("FONT-unify-1 contracts: PASS (Home typography, live department chip, task rail pending copy)");
