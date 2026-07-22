@@ -18,6 +18,11 @@ assert.doesNotMatch(css, /--app-segment-figma-radius/,
 assert.match(css, /--app-segment-bg:\s*var\(--gray-15\)/);
 assert.match(css, /\.app-segment--login\s*\{[\s\S]*?--app-segment-bg:\s*var\(--gray-12\)/,
   "the approved base and login track colors must remain unchanged");
+assert.match(
+  css,
+  /@media\s*\(max-width:\s*768px\)[\s\S]*?\.app-segment--login\s*\{[\s\S]*?--app-segment-gap:\s*0px;[\s\S]*?--app-segment-padding:\s*0px;/,
+  "the mobile login segment must use dimensional zeroes so its radius and slider calc expressions remain valid"
+);
 
 assert.match(
   css,
