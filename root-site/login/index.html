@@ -45,7 +45,7 @@
                 <input class="login-field__input" type="text" name="regName" autocomplete="name" data-placeholder-key="placeholder.regName">
               </label>
 
-              <label class="login-field" data-field-views="login register forgot">
+              <label class="login-field" data-field-views="login register forgot" data-forgot-stages="request">
                 <span class="login-field__label" data-i18n="field.email"></span>
                 <input class="login-field__input" type="email" name="email" autocomplete="email" data-placeholder-key="placeholder.email">
               </label>
@@ -55,12 +55,17 @@
                 <input class="login-field__input" type="password" name="password" autocomplete="current-password">
               </label>
 
-              <label class="login-field" data-field-views="forgot">
+              <label class="login-field" data-field-views="forgot" data-forgot-stages="verify">
+                <span class="login-field__label" data-i18n="field.verificationCode"></span>
+                <input class="login-field__input login-field__input--otp" type="text" name="recoveryToken" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" data-placeholder-key="placeholder.verificationCode">
+              </label>
+
+              <label class="login-field" data-field-views="forgot" data-forgot-stages="password">
                 <span class="login-field__label" data-i18n="field.newPassword"></span>
                 <input class="login-field__input" type="password" name="newPassword" autocomplete="new-password">
               </label>
 
-              <label class="login-field" data-field-views="forgot">
+              <label class="login-field" data-field-views="forgot" data-forgot-stages="password">
                 <span class="login-field__label" data-i18n="field.confirmPassword"></span>
                 <input class="login-field__input" type="password" name="confirmPassword" autocomplete="new-password">
               </label>
@@ -81,6 +86,8 @@
             <div class="login-form__actions">
               <button class="login-submit" type="submit" data-i18n="action.login"></button>
               <button class="login-forgot" type="button" data-action="forgot" data-i18n="action.forgot"></button>
+              <button class="login-forgot" type="button" data-action="resend-code" data-i18n="action.resendCode" hidden></button>
+              <button class="login-forgot" type="button" data-action="back-login" data-i18n="action.backLogin" hidden></button>
             </div>
           </form>
         </div>

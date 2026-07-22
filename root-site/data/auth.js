@@ -219,6 +219,13 @@ export async function resetPasswordForEmail(email, redirectTo) {
   if (error) throw error;
 }
 
+export async function verifyRecoveryOtp({ email, token }) {
+  const client = requireClient(await getSupabaseClient());
+  const { data, error } = await client.auth.verifyOtp({ email, token, type: "recovery" });
+  if (error) throw error;
+  return data;
+}
+
 export async function updatePassword(password) {
   const client = requireClient(await getSupabaseClient());
   const { data, error } = await client.auth.updateUser({ password });

@@ -253,6 +253,13 @@ body {
   font-size: var(--login-compact-size);
 }
 
+.login-field__input--otp {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .45em;
+  text-align: center;
+}
+
 .login-field__input::placeholder {
   color: var(--login-placeholder);
   opacity: 1;
