@@ -9,7 +9,7 @@
 html {
   min-height: 100%;
   color: var(--gray-80);
-  background: var(--gray-5);
+  background: var(--gray-10);
   font-family: var(--font-family-base);
   line-height: var(--lh-body);
   text-size-adjust: 100%;
@@ -18,7 +18,7 @@ html {
 body {
   min-height: 100%;
   margin: 0;
-  background: var(--gray-5);
+  background: var(--gray-10);
   color: var(--gray-80);
   font-family: var(--font-family-base);
   font-size: var(--font-description-size);

@@ -39,7 +39,7 @@ body {
 
 .shell-app {
   min-height: 100vh;
-  background: var(--gray-5);
+  background: var(--gray-10);
 }
 
 .shell-boot__block {
@@ -531,7 +531,7 @@ body {
   min-height: 100vh;
   margin-left: 320px;
   padding: 84px var(--space-20) var(--space-20);
-  background: var(--gray-5);
+  background: var(--gray-10);
   transition: margin-left var(--transition);
 }
 

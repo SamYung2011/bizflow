@@ -518,7 +518,7 @@
 }
 
 .team-task-card .team-count-badge {
-  color: var(--gray-5);
+  color: var(--gray-6); /* Figma 507:15262 徽标字 #F5F5F5 精确档。 */
 }
 
 .team-task-card--high .team-count-badge {
