@@ -33,6 +33,8 @@ assert.match(login, /\[data-action='back-login'\][^\n]*hidden\s*=\s*state\.view\
   "the return-to-login action must stay visible throughout forgot mode");
 assert.match(login, /async function returnToLogin\(\)[\s\S]*clearRecoveryUrl\(\);[\s\S]*setView\("login"\)/,
   "returning to login must clear recovery routing and the view message state");
+assert.match(login, /async function returnToLogin\(\)[\s\S]*input\[name='email'\][\s\S]*emailInput\.value\s*=\s*""/,
+  "returning from password recovery must clear the shared email input");
 
 assert.match(auth, /client\.auth\.verifyOtp\(\{\s*email,\s*token,\s*type:\s*"recovery"\s*\}\)/,
   "the auth wrapper must verify the email recovery OTP with the Supabase v2 shape");
