@@ -60,10 +60,6 @@
   cursor: pointer;
 }
 
-.home-stat-card--detailed .tp-number {
-  font-size: var(--font-title-2-size);
-}
-
 .home-stat-card__sub {
   display: flex;
   min-width: 0;
@@ -129,6 +125,7 @@
 /* 无图标时数字回到第一列,保持 标题上/数字下 的纵排(Figma 结构) */
 .home-stats .board-card .tp-number {
   grid-column: 1;
+  font-size: var(--font-display-size); /* Figma Home 统计卡数字 40 Bold。 */
 }
 
 .board-card--green {
@@ -249,7 +246,15 @@
   line-height: var(--lh-body);
 }
 
-.home-card__list .task-item .tp-title,
+.home-card__list .task-item .tp-title {
+  display: block;
+  font-size: var(--font-description-size); /* Figma 我的任务行标题 12 Medium。 */
+  font-weight: var(--font-description-weight);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .home-card__list .task-item .tp-muted {
   display: block;
   white-space: nowrap;
@@ -297,6 +302,7 @@
 }
 
 .home-feed-row__line .home-feed-name {
+  font-weight: var(--font-title-2-weight); /* Figma 团队动态姓名 12 SemiBold。 */
   white-space: nowrap;
 }
 
@@ -422,6 +428,11 @@
   text-overflow: ellipsis;
 }
 
+.home-order-row__customer {
+  font-size: var(--font-body-size); /* Figma 订单列表客户名 10 Regular。 */
+  font-weight: var(--font-body-weight);
+}
+
 .home-line-row__meta {
   display: flex;
   gap: var(--space-10);
@@ -502,7 +513,15 @@
   justify-content: center;
 }
 
+.home-member__identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-4);
+}
+
 .home-member__name {
+  min-width: 0;
   font-size: var(--font-description-size);
   font-weight: 600;
   color: var(--black);
@@ -548,7 +567,13 @@
 }
 
 /* 部门 chip(栅格帧 296:1570 明画各部门色;role chip 煊煊 2026-07-08 拍不显示已移除) */
-.home-chip--dept { color: var(--gray-80); font-weight: 500; align-self: flex-start; }
+.home-chip--dept {
+  flex: none;
+  background: var(--gray-11);
+  color: var(--gray-80);
+  font-size: 8px;
+  font-weight: var(--font-description-weight);
+}
 .home-chip--dept-design { background: var(--dept-design); }
 .home-chip--dept-tech { background: var(--dept-tech); }
 .home-chip--dept-sales { background: var(--dept-sales); }

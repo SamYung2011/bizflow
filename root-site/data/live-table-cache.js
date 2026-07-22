@@ -9,10 +9,10 @@ const CACHE_DB_NAME = "tp-live-table-cache";
 const CACHE_DB_VERSION = 1;
 const CACHE_STORE_NAME = "rows";
 // Shape generations are deliberately local to affected snapshots. WAR-renew-1
-// adds invoice/product renewal keys, so pre-release cached rows cannot serve the
-// write UI even though their old display-only shape remains otherwise valid.
+// added renewal keys; FONT-unify-1 adds member departments to home cards. Old
+// display-only shapes stay compatible elsewhere but must not mask new UI data.
 const SNAPSHOT_CONTRACT_GENERATIONS = new Map([
-  ["home.json", 1],
+  ["home.json", 2],
   ["warranty.json", 1]
 ]);
 

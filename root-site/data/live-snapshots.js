@@ -834,6 +834,7 @@ async function buildHomeSnapshot() {
     members: membersSnapshot.members.map((member) => ({
       name: member.name,
       dept: "member",
+      departments: member.departments.slice(),
       role: member.roleName,
       openTasks: member.openTasks,
       joinedAt: member.joinedAt,

@@ -235,6 +235,29 @@ export function renderHome({ icon, escapeHtml, lang }) {
   const replace = (template, values) => Object.entries(values).reduce((text, [key, value]) => text.replace(`{${key}}`, String(value)), template);
   const money = (value) => `HKD$ ${Math.round(Number(value) || 0).toLocaleString("en-US")}`;
   const month = new Intl.DateTimeFormat(lang === "zh" ? "zh-HK" : lang, { year: "numeric", month: "2-digit", timeZone: "Asia/Hong_Kong" }).format(new Date());
+  const departmentTone = (label, legacyKey = "") => {
+    const tones = ["design", "tech", "sales", "finance", "service", "purchase"];
+    const value = `${legacyKey} ${label}`.toLocaleLowerCase();
+    const semanticTone = [
+      ["design", ["design", "graphic", "設計", "设计"]],
+      ["tech", ["tech", "development", "engineering", "技術", "技术", "開發", "开发"]],
+      ["sales", ["sales", "marketing", "銷售", "销售", "市場", "市场"]],
+      ["finance", ["finance", "account", "財務", "财务", "會計", "会计"]],
+      ["service", ["service", "support", "客服", "服務", "服务"]],
+      ["purchase", ["purchase", "procurement", "採購", "采购"]]
+    ].find(([, aliases]) => aliases.some((alias) => value.includes(alias)))?.[0];
+    if (semanticTone) return semanticTone;
+    const stableIndex = Array.from(label).reduce((total, character) => total + character.codePointAt(0), 0) % tones.length;
+    return tones[stableIndex];
+  };
+  const memberDepartment = (member) => {
+    const liveLabel = Array.isArray(member.departments)
+      ? member.departments.find((name) => typeof name === "string" && name.trim())?.trim()
+      : "";
+    const legacyKey = typeof member.dept === "string" ? member.dept : "";
+    const label = liveLabel || thOpt(`home.dept.${legacyKey}`) || "";
+    return label ? { label, tone: departmentTone(label, legacyKey) } : null;
+  };
 
   const statCard = ({ mod = "", titleKey, value, withIcon = false, href, preset, sub = "", warning = "" }) => `
     <a class="tp-component board-card home-stat-card${sub || warning ? " home-stat-card--detailed" : ""} ${mod}" href="${e(href)}"${preset ? ` data-home-preset="${e(preset)}"` : ""}>
@@ -286,7 +309,7 @@ export function renderHome({ icon, escapeHtml, lang }) {
           <span>${e(no)}</span>
           <span class="home-chip" title="${e(product)}">${e(product)}</span>
         </div>
-        <span class="home-line-row__sub"><span>${e(customer)}</span><span>${e(phone)}</span></span>
+        <span class="home-line-row__sub"><span class="home-order-row__customer">${e(customer)}</span><span>${e(phone)}</span></span>
       </div>
       <span class="home-line-row__meta"><span>${e(date)}</span><span>${e(time)}</span></span>
     </div>`;
@@ -301,14 +324,19 @@ export function renderHome({ icon, escapeHtml, lang }) {
       <span class="home-line-row__count">${e(count)}</span>
     </div>`; };
 
-  const memberCell = (m) => `
-    <div class="home-member">
-      <span class="tp-component avatar avatar--image" style="--component-width:40px;--component-height:40px"></span>
-      <div class="home-member__body">
-        <span class="home-member__name" title="${e(m.name)}">${e(m.name)}</span>
-        ${thOpt(`home.dept.${m.dept}`) ? `<span class="home-chip home-chip--dept home-chip--dept-${e(m.dept)}">${e(thOpt(`home.dept.${m.dept}`))}</span>` : ""}
-      </div>
-    </div>`;
+  const memberCell = (m) => {
+    const department = memberDepartment(m);
+    return `
+      <div class="home-member">
+        <span class="tp-component avatar avatar--image" style="--component-width:40px;--component-height:40px"></span>
+        <div class="home-member__body">
+          <span class="home-member__identity">
+            <span class="home-member__name" title="${e(m.name)}">${e(m.name)}</span>
+            ${department ? `<span class="home-chip home-chip--dept home-chip--dept-${department.tone}">${e(department.label)}</span>` : ""}
+          </span>
+        </div>
+      </div>`;
+  };
 
   return `<div class="home-page" data-home-monthly-revenue="${showRevenue ? (revenueMetrics?.totalRevenue ?? "") : ""}" data-home-inventory-carriers="${inventoryMetrics?.carrierCount ?? ""}" data-home-inventory-active="${inventoryMetrics?.activeSkuCount ?? ""}" data-home-inventory-total="${inventoryMetrics?.totalQuantity ?? ""}" data-home-inventory-low="${inventoryMetrics?.lowStockCount ?? ""}" data-home-shipping-pending="${shippingMetrics?.pending ?? ""}" data-home-shipping-transit="${shippingMetrics?.in_transit ?? ""}" data-home-shipping-overdue="${shippingMetrics?.exception ?? ""}">
     <header class="home-head">
