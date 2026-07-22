@@ -86,6 +86,12 @@
   height: var(--space-20);
 }
 
+/* 财务页头主动作与订单/客户/库存页头按钮统一为 16px Medium。 */
+.expense-add {
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+}
+
 .expense-segment .app-segment {
   width: min(100%, var(--expense-segment-width));
 }

@@ -125,7 +125,7 @@
   background: var(--white);
   color: var(--inventory-muted);
   font-size: var(--font-title-3-size);
-  font-weight: var(--font-title-3-weight); /* docs/01 输入框下拉触发器 451:12872。 */
+  font-weight: var(--font-body-weight); /* Figma 478:12883/12889：16px Regular。 */
   line-height: var(--lh-tight);
 }
 
@@ -277,12 +277,14 @@ img.inventory-detail-image {
 
 .inventory-stock-label {
   color: var(--inventory-muted);
+  font-size: var(--font-body-size);
   font-weight: var(--font-body-weight);
 }
 
 .inventory-stock-count {
   color: var(--blue);
-  font-weight: var(--font-description-weight);
+  font-size: var(--font-body-size);
+  font-weight: var(--font-body-weight);
 }
 
 .inventory-product-card--low-stock .inventory-stock-count {
@@ -819,7 +821,7 @@ button.inventory-series-icon {
   border-radius: var(--radius-pill, 999px);
   background: var(--gray-20, #eef0f3);
   color: var(--text-secondary, #68707d);
-  font-size: 11px;
+  font-size: var(--font-description-size);
   font-weight: 600;
   line-height: 16px;
   white-space: nowrap;

@@ -283,6 +283,12 @@
   text-decoration: none;
 }
 
+/* Figma 客户头像组件 275:813；共享 avatar 档保持给其他页面自行对帧。 */
+.customer-row > .avatar--initial {
+  font-size: var(--font-title-2-size);
+  font-weight: var(--font-title-2-weight);
+}
+
 @media (max-width: 768px) {
   .shell-app {
     min-width: 0;
