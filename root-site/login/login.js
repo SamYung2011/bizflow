@@ -422,6 +422,8 @@ import {
 
   async function returnToLogin() {
     if (state.busy) return;
+    const emailInput = $("input[name='email']");
+    if (emailInput) emailInput.value = "";
     const hasRecoverySession = state.forgotStage === "password";
     if (hasRecoverySession && state.authConfigured && state.authReady) {
       setBusy(true);
