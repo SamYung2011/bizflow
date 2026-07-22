@@ -1251,8 +1251,7 @@
   </span>`;
   }
   function renderMessageButton() {
-    const href = canAccessTeamActivity() ? "../bizflow/home.html#team-activity" : "../team/index.html";
-    return `<a href="${href}" class="tp-component btn-messenger shell-icon-button ${hasUnreadMessages ? "btn-messenger--update" : ""}" data-shell-message aria-label="${escapeHtml2(t("shell.message"))}">
+    return `<a href="../team/index.html" class="tp-component btn-messenger shell-icon-button ${hasUnreadMessages ? "btn-messenger--update" : ""}" data-shell-message aria-label="${escapeHtml2(t("shell.message"))}">
     ${icon2("icon-nav-messenger")}
     ${hasUnreadMessages ? redDot() : ""}
   </a>`;

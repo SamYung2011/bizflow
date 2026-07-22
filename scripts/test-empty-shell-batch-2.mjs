@@ -303,7 +303,10 @@ const [shellSource, homeSource, tasksSource, controllerSource, writesSource] = a
   readFile(new URL("../root-site/data/live-task-writes.js", import.meta.url), "utf8")
 ]);
 
-assert.match(shellSource, /"\.\.\/bizflow\/home\.html#team-activity"/);
+assert.match(shellSource, /function renderMessageButton\(\)\s*\{[^]*?href="\.\.\/team\/index\.html"/,
+  "the topbar message button must always open task management");
+assert.doesNotMatch(shellSource, /home\.html#team-activity/,
+  "the topbar message button must not route Bizflow users back to the Home activity anchor");
 assert.match(shellSource, /user\.isBfAdmin === true \|\| user\.bizflowMainAccess === true/);
 assert.doesNotMatch(shellSource, /data-shell-message[^]*?markRead\("messages"/,
   "topbar navigation must never clear the activity feed before it is seen");
