@@ -84,6 +84,29 @@ async function verifyManifest() {
   assert.equal(teamFallbackMenu.find((item) => item.active)?.key, "nav.team");
   assert.equal(createRouteFrame("/bizflow/ocpp-monitor.html").access, "bf-admin", "OCPP frames must carry the pre-render admin gate");
   assert.equal(createRouteFrame("/bizflow/orders.html").access, "default");
+  const [bizflowMenuSource, routeMenuSource, shellBundleSource] = await Promise.all([
+    readFile(path.join(rootDir, "root-site/components/bizflow-menu.js"), "utf8"),
+    readFile(path.join(rootDir, "root-site/spa/route-menu.js"), "utf8"),
+    readFile(path.join(rootDir, "root-site/shell/shell.bundle.js"), "utf8")
+  ]);
+  const menuSequence = (source, startMarker, endMarker, field) => {
+    const start = source.indexOf(startMarker);
+    const end = source.indexOf(endMarker, start + startMarker.length);
+    assert.ok(start >= 0 && end > start, `menu source must contain ${startMarker}`);
+    return [...source.slice(start, end).matchAll(new RegExp(`\\{\\s*${field}:\\s*"([^"]+)"`, "g"))]
+      .map((match) => match[1]);
+  };
+  const componentMenuIds = menuSequence(bizflowMenuSource, "const items = [", "];", "key");
+  const routeMenuIds = menuSequence(routeMenuSource, "bizflow: Object.freeze([", "]),\n  team:", "id");
+  const bundleMenuIds = menuSequence(shellBundleSource, "bizflow: Object.freeze([", "]),\n    team:", "id");
+  assert.deepEqual(componentMenuIds, routeMenuIds,
+    "the controller Bizflow menu must stay in sync with the SPA route menu");
+  assert.deepEqual(bundleMenuIds, routeMenuIds,
+    "the preview shell bundle must stay in sync with the SPA route menu");
+  assert.deepEqual(routeMenuIds, [
+    "home", "orders", "customers", "inventory", "finance", "tasks", "whatsapp",
+    "ocpp-monitor", "ocpp-charging", "ocpp-users", "ocpp-finance"
+  ], "all three Bizflow menu copies must retain the approved item order");
   for (const route of routes) {
     const migrated = expectedSpaRoutes.includes(route.path);
     assert.ok(route.path.endsWith(".html"), `${route.path} must retain its .html URL`);

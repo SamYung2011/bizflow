@@ -4,6 +4,7 @@ const items = [
   { key: "customers", labelKey: "nav.customers", icon: "icon-nav-user", href: "./customers.html" },
   { key: "inventory", labelKey: "nav.inventory", icon: "icon-nav-inventory", href: "./inventory.html", unreadKey: "inventory" },
   { key: "finance", labelKey: "nav.finance", icon: "icon-nav-sales", href: "./expense.html" },
+  { key: "tasks", labelKey: "nav.tasks", icon: "icon-nav-task", href: "../team/index.html", unreadKey: "tasks" },
   { key: "whatsapp", labelKey: "nav.whatsapp", icon: "icon-nav-messenger", href: "./whatsapp.html" },
   { key: "ocpp-monitor", labelKey: "nav.ocppMonitor", icon: "icon-nav-remix", href: "./ocpp-monitor.html", adminOnly: true },
   { key: "ocpp-charging", labelKey: "nav.ocppCharging", icon: "icon-nav-cloud", href: "./ocpp-charging.html", adminOnly: true },
