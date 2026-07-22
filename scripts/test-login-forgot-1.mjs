@@ -69,6 +69,12 @@ assert.match(recoveryTemplate, /\{\{\s*\.Token\s*\}\}/,
   "the hosted recovery template must render GoTrue's six-digit Token placeholder");
 assert.match(recoveryTemplate, /Honnmono/,
   "the recovery email must carry the Honnmono brand name");
+assert.match(recoveryTemplate, /background:#0468EA;color:#FFFFFF[^>]*>\s*HONNMONO\s*</,
+  "the recovery email must retain the branded blue Honnmono header");
+assert.match(recoveryTemplate, /max-width:520px;background:#FFFFFF;border-radius:14px/,
+  "the recovery email must retain the rounded white content card");
+assert.match(recoveryTemplate, /background:#F0F0F0;color:#0468EA;font-family:'Courier New',monospace;font-size:34px/,
+  "the recovery code must retain the large monospace blue-on-gray treatment");
 assert.match(recoveryTemplate, /輸入此驗證碼完成密碼重置，10 分鐘內有效；非本人操作請忽略。/,
   "the recovery email must explain the ten-minute validity in Chinese");
 assert.match(recoveryTemplate, /Enter this code to complete your password reset\. It is valid for 10 minutes\.[\s\S]*please ignore this email\./,
