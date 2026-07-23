@@ -109,9 +109,10 @@ assert.deepEqual(
   "the Bizflow page adapter must retain relative hrefs, metadata and active semantics"
 );
 
-const [bizflowSource, routeSource] = await Promise.all([
+const [bizflowSource, routeSource, maintenanceDoc] = await Promise.all([
   read("root-site/components/bizflow-menu.js"),
-  read("root-site/spa/route-menu.js")
+  read("root-site/spa/route-menu.js"),
+  read("docs/navigation-shell-maintenance.md")
 ]);
 assert.match(bizflowSource, /import \{ SECTION_MENU_ITEMS \} from "\.\/navigation-registry\.js"/);
 assert.match(routeSource, /import \{ SECTION_MENU_ITEMS \} from "\.\.\/components\/navigation-registry\.js"/);
@@ -123,5 +124,11 @@ assert.doesNotMatch(bizflowSource, /"nav\.home"/,
   "the Bizflow adapter must not duplicate registry labels under another local variable");
 assert.doesNotMatch(routeSource, /"nav\.home"/,
   "the SPA adapter must not duplicate registry labels under another local variable");
+assert.match(maintenanceDoc, /root-site\/components\/navigation-registry\.js[\s\S]*唯一手写源/,
+  "maintenance docs must name the navigation registry as the only handwritten menu source");
+assert.match(maintenanceDoc, /root-site\/components\/menus\.js[\s\S]*唯一手写源/,
+  "maintenance docs must name menus.js as the only handwritten user-panel source");
+assert.match(maintenanceDoc, /npm run build:shell[\s\S]*npm run check:shell/,
+  "maintenance docs must record the generated-bundle workflow");
 
 console.log("MENU-unify-1 registry contracts: PASS (full fields, uniqueness, route coverage, gates, unread, adapters)");

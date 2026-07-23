@@ -3,11 +3,13 @@ import { readFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 
 const read = (relative) => readFile(new URL(`../${relative}`, import.meta.url), "utf8");
-const [pkgSource, lockSource, generator, bundle] = await Promise.all([
+const [pkgSource, lockSource, generator, bundle, desktopHtml, mobileHtml] = await Promise.all([
   read("package.json"),
   read("package-lock.json"),
   read("scripts/build-shell-bundle.mjs"),
-  read("root-site/shell/shell.bundle.js")
+  read("root-site/shell/shell.bundle.js"),
+  read("root-site/shell/desktop.html"),
+  read("root-site/shell/mobile.html")
 ]);
 const pkg = JSON.parse(pkgSource);
 const lock = JSON.parse(lockSource);
@@ -38,9 +40,11 @@ const check = spawnSync(process.execPath, ["scripts/build-shell-bundle.mjs", "--
 assert.equal(check.status, 0, `${check.stdout}\n${check.stderr}`.trim());
 assert.match(check.stdout, /shell\.bundle\.js matches shell\.js/);
 
-assert.match(bundle, /root-site\/components\/navigation-registry\.js/,
-  "the generated preview bundle must consume the shared navigation registry");
-assert.match(bundle, /var SECTION_MENU_ITEMS = Object\.freeze/,
-  "the generated preview bundle must include the registry rather than a hand-maintained menu copy");
+const externalScripts = (html) => [...html.matchAll(/<script\s+src="([^"]+)"/g)]
+  .map((match) => match[1]);
+assert.deepEqual(externalScripts(desktopHtml), ["./shell.bundle.js"],
+  "the desktop preview must load only the controlled shell bundle");
+assert.deepEqual(externalScripts(mobileHtml), ["./shell.bundle.js"],
+  "the mobile preview must load the same controlled shell bundle");
 
-console.log("MENU-unify-1 shell contracts: PASS (pinned builder, generated bundle, byte parity, registry bundled)");
+console.log("MENU-unify-1 shell contracts: PASS (pinned builder, byte parity, desktop/mobile controlled entry)");

@@ -107,7 +107,6 @@ assert.doesNotMatch(assigneeAbandonedDetail, /data-task-action-delete=/,
 
 const [
   shellSource,
-  shellBundle,
   membersSource,
   providerSource,
   snapshotSource,
@@ -117,7 +116,6 @@ const [
   northboundSource
 ] = await Promise.all([
   readFile(new URL("../root-site/shell/shell.js", import.meta.url), "utf8"),
-  readFile(new URL("../root-site/shell/shell.bundle.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/team/members.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/provider.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/live-snapshots.js", import.meta.url), "utf8"),
@@ -132,8 +130,6 @@ const [
 const shellMenuFlow = shellSource.slice(shellSource.indexOf("function buildMenuItems"), shellSource.indexOf("let menuItems"));
 assert.match(shellMenuFlow, /user\.isSuperAdmin === true \|\| user\.isAdminOfAny === true \|\|\s*user\.hasPermission\("can_manage_employees"\)/);
 assert.match(shellMenuFlow, /\["nav\.team", "nav\.updates"\]\.includes\(item\.key\) && !canManageEmployees \? "nav\.updates" : item\.key/);
-assert.match(shellBundle, /\["nav\.team", "nav\.updates"\]\.includes\(item\.key\) && !canManageEmployees \? "nav\.updates" : item\.key/,
-  "built shell must carry the same low-permission label gate");
 const memberAccessFlow = membersSource.slice(membersSource.indexOf("function buildMemberAccess"), membersSource.indexOf("export async function mountPage"));
 assert.match(memberAccessFlow, /currentUser\.isSuperAdmin === true \|\| currentUser\.isAdminOfAny === true \|\| currentUser\.hasPermission\("can_manage_employees"\)/);
 assert.match(memberAccessFlow, /"updates",\s*\.\.\.\(memberAccess\.canManageEmployees \? \["members"\] : \[\]\)/,
