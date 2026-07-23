@@ -962,6 +962,30 @@
   // root-site/data/read-state.js
   var READ_STATE_STORAGE_KEY = "tp-read-state-v1";
 
+  // root-site/components/navigation-registry.js
+  function freezeItems(items) {
+    return Object.freeze(items.map((item) => Object.freeze(item)));
+  }
+  var SECTION_MENU_ITEMS = Object.freeze({
+    bizflow: freezeItems([
+      { id: "home", labelKey: "nav.home", icon: "icon-nav-home", canonicalHref: "/bizflow/home.html" },
+      { id: "orders", labelKey: "nav.orders", icon: "icon-nav-list", canonicalHref: "/bizflow/orders.html", unreadKey: "orders" },
+      { id: "customers", labelKey: "nav.customers", icon: "icon-nav-user", canonicalHref: "/bizflow/customers.html" },
+      { id: "inventory", labelKey: "nav.inventory", icon: "icon-nav-inventory", canonicalHref: "/bizflow/inventory.html", unreadKey: "inventory" },
+      { id: "finance", labelKey: "nav.finance", icon: "icon-nav-sales", canonicalHref: "/bizflow/expense.html" },
+      { id: "tasks", labelKey: "nav.tasks", icon: "icon-nav-task", canonicalHref: "/team/index.html", unreadKey: "tasks" },
+      { id: "whatsapp", labelKey: "nav.whatsapp", icon: "icon-nav-messenger", canonicalHref: "/bizflow/whatsapp.html" },
+      { id: "ocpp-monitor", labelKey: "nav.ocppMonitor", icon: "icon-nav-remix", canonicalHref: "/bizflow/ocpp-monitor.html", adminOnly: true },
+      { id: "ocpp-charging", labelKey: "nav.ocppCharging", icon: "icon-nav-cloud", canonicalHref: "/bizflow/ocpp-charging.html", adminOnly: true },
+      { id: "ocpp-users", labelKey: "nav.ocppUsers", icon: "icon-nav-user", canonicalHref: "/bizflow/ocpp-users.html", adminOnly: true },
+      { id: "ocpp-finance", labelKey: "nav.ocppFinance", icon: "icon-nav-sales", canonicalHref: "/bizflow/ocpp-finance.html", adminOnly: true }
+    ]),
+    team: freezeItems([
+      { id: "tasks", labelKey: "nav.tasks", icon: "icon-nav-task", canonicalHref: "/team/index.html", unreadKey: "tasks" },
+      { id: "team", labelKey: "nav.team", icon: "icon-nav-user", canonicalHref: "/team/members.html" }
+    ])
+  });
+
   // root-site/spa/route-menu.js
   var skeleton = (kind, stats = 0) => Object.freeze({ kind, stats });
   var routeMenuEntries = Object.freeze({
@@ -982,30 +1006,22 @@
     "/team/index.html": { section: "team", menuKey: "tasks", title: "Honnmono \xB7 Tasks", skeleton: skeleton("board", 3) },
     "/team/members.html": { section: "team", menuKey: "team", title: "Honnmono \xB7 Team", skeleton: skeleton("dashboard", 4) }
   });
-  var sectionMenus = Object.freeze({
-    bizflow: Object.freeze([
-      { id: "home", key: "nav.home", icon: "icon-nav-home", href: "/bizflow/home.html" },
-      { id: "orders", key: "nav.orders", icon: "icon-nav-list", href: "/bizflow/orders.html", unreadKey: "orders" },
-      { id: "customers", key: "nav.customers", icon: "icon-nav-user", href: "/bizflow/customers.html" },
-      { id: "inventory", key: "nav.inventory", icon: "icon-nav-inventory", href: "/bizflow/inventory.html", unreadKey: "inventory" },
-      { id: "finance", key: "nav.finance", icon: "icon-nav-sales", href: "/bizflow/expense.html" },
-      { id: "tasks", key: "nav.tasks", icon: "icon-nav-task", href: "/team/index.html", unreadKey: "tasks" },
-      { id: "whatsapp", key: "nav.whatsapp", icon: "icon-nav-messenger", href: "/bizflow/whatsapp.html" },
-      { id: "ocpp-monitor", key: "nav.ocppMonitor", icon: "icon-nav-remix", href: "/bizflow/ocpp-monitor.html", adminOnly: true },
-      { id: "ocpp-charging", key: "nav.ocppCharging", icon: "icon-nav-cloud", href: "/bizflow/ocpp-charging.html", adminOnly: true },
-      { id: "ocpp-users", key: "nav.ocppUsers", icon: "icon-nav-user", href: "/bizflow/ocpp-users.html", adminOnly: true },
-      { id: "ocpp-finance", key: "nav.ocppFinance", icon: "icon-nav-sales", href: "/bizflow/ocpp-finance.html", adminOnly: true }
-    ]),
-    team: Object.freeze([
-      { id: "tasks", key: "nav.tasks", icon: "icon-nav-task", href: "/team/index.html", unreadKey: "tasks" },
-      { id: "team", key: "nav.team", icon: "icon-nav-user", href: "/team/members.html" }
-    ])
-  });
   function createRouteMenu(pathname) {
     const currentRoute = routeMenuEntries[String(pathname || "")];
     if (!currentRoute) return [];
-    return (sectionMenus[currentRoute.section] ?? []).map(({ id, ...item }) => ({
-      ...item,
+    return (SECTION_MENU_ITEMS[currentRoute.section] ?? []).map(({
+      id,
+      labelKey,
+      icon: icon3,
+      canonicalHref,
+      unreadKey,
+      adminOnly
+    }) => ({
+      key: labelKey,
+      icon: icon3,
+      href: canonicalHref,
+      ...unreadKey ? { unreadKey } : {},
+      ...adminOnly === true ? { adminOnly: true } : {},
       active: id === currentRoute.menuKey
     }));
   }

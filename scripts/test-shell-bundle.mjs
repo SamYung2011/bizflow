@@ -3,12 +3,11 @@ import { readFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 
 const read = (relative) => readFile(new URL(`../${relative}`, import.meta.url), "utf8");
-const [pkgSource, lockSource, generator, bundle, spaContract] = await Promise.all([
+const [pkgSource, lockSource, generator, bundle] = await Promise.all([
   read("package.json"),
   read("package-lock.json"),
   read("scripts/build-shell-bundle.mjs"),
-  read("root-site/shell/shell.bundle.js"),
-  read("scripts/test-spa-p1.mjs")
+  read("root-site/shell/shell.bundle.js")
 ]);
 const pkg = JSON.parse(pkgSource);
 const lock = JSON.parse(lockSource);
@@ -39,11 +38,9 @@ const check = spawnSync(process.execPath, ["scripts/build-shell-bundle.mjs", "--
 assert.equal(check.status, 0, `${check.stdout}\n${check.stderr}`.trim());
 assert.match(check.stdout, /shell\.bundle\.js matches shell\.js/);
 
-assert.match(spaContract, /assert\.deepEqual\(componentMenuIds, routeMenuIds,/,
-  "phase one must retain the controller-vs-route menu sequence lock");
-assert.match(spaContract, /assert\.deepEqual\(bundleMenuIds, routeMenuIds,/,
-  "phase one must retain the bundle-vs-route menu sequence lock beside byte parity");
-assert.match(spaContract, /all three Bizflow menu copies must retain the approved item order/,
-  "the old approved-order lock stays until the phase-two registry replaces it");
+assert.match(bundle, /root-site\/components\/navigation-registry\.js/,
+  "the generated preview bundle must consume the shared navigation registry");
+assert.match(bundle, /var SECTION_MENU_ITEMS = Object\.freeze/,
+  "the generated preview bundle must include the registry rather than a hand-maintained menu copy");
 
-console.log("MENU-unify-1 batch 1 contracts: PASS (pinned builder, generated bundle, byte parity, legacy lock retained)");
+console.log("MENU-unify-1 shell contracts: PASS (pinned builder, generated bundle, byte parity, registry bundled)");
