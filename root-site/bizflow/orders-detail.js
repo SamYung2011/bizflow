@@ -4,6 +4,7 @@ import { getOrderCreateData, getOrderDetailData, getUnread, getCurrentUser } fro
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { renderNewCustomerFields } from "../components/new-customer-fields.js";
+import { renderSegment as renderSharedSegment } from "../components/segment.js";
 import { createShippingFeePanel } from "../components/shipping-fee-panel.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import {
@@ -619,10 +620,19 @@ function renderTrackingCard(helpers) {
   return `<section class="orders-detail-card">
     <h2 class="orders-card-title">${escapeHtml(pageT(lang, "orders.trackingNo"))}</h2>
     ${liveWritable
-      ? `<div class="orders-logistics-segment" role="tablist">
-          <button type="button" class="${state.shippingMode === "delivery" ? "is-active" : ""}${shippingDisabledClass}" data-shipping-mode="delivery" data-shipping-write data-orders-write${shippingAttributes}>${escapeHtml(pageT(lang, "orders.shipping"))}</button>
-          <button type="button" class="${state.shippingMode === "pickup" ? "is-active" : ""}${shippingDisabledClass}" data-shipping-mode="pickup" data-shipping-write data-orders-write${shippingAttributes}>${escapeHtml(pageT(lang, "orders.pickup"))}</button>
-        </div>
+      ? `${renderSharedSegment({
+          items: [
+            { key: "delivery", label: pageT(lang, "orders.shipping") },
+            { key: "pickup", label: pageT(lang, "orders.pickup") }
+          ],
+          active: state.shippingMode,
+          ariaLabel: pageT(lang, "orders.trackingNo"),
+          escapeHtml,
+          dataAttribute: "data-shipping-mode",
+          buttonDataAttributes: ["data-shipping-write", "data-orders-write"],
+          disabled: shippingDisabled,
+          disabledTitle: pageT(lang, "orders.shippingPermission")
+        })}
         ${state.shippingMode === "delivery"
           ? `<input class="orders-select-like orders-tracking-input${shippingDisabledClass}" type="text" data-tracking-input data-shipping-write data-orders-write value="${escapeHtml(state.trackingNumber)}" placeholder="${escapeHtml(pageT(lang, "orders.unshipped"))}"${shippingAttributes}>`
           : `<span class="orders-select-like">${escapeHtml(pageT(lang, "orders.pickup"))}</span>`}`

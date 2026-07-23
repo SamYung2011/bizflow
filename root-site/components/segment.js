@@ -5,11 +5,20 @@ export function renderSegment({
   escapeHtml,
   dataAttribute,
   variant = "domain",
-  sliding = true
+  sliding = true,
+  buttonDataAttributes = [],
+  disabled = false,
+  disabledTitle = ""
 }) {
   if (!/^data-[a-z0-9-]+$/.test(dataAttribute)) {
     throw new Error(`Invalid segment data attribute: ${dataAttribute}`);
   }
+  const extraButtonAttributes = [...new Set(buttonDataAttributes)].map((attribute) => {
+    if (!/^data-[a-z0-9-]+$/.test(attribute)) {
+      throw new Error(`Invalid segment button data attribute: ${attribute}`);
+    }
+    return ` ${attribute}`;
+  }).join("");
 
   const e = escapeHtml;
   const itemCount = Math.max(items.length, 1);
@@ -22,7 +31,9 @@ export function renderSegment({
       const badge = item.badge === null || item.badge === undefined
         ? ""
         : `<span class="app-segment__badge">${e(String(item.badge))}</span>`;
-      return `<button type="button" role="tab" aria-selected="${selected}" class="app-segment__button${selected ? " is-active" : ""}" ${dataAttribute}="${e(item.key)}" title="${e(item.title ?? label)}"><span class="app-segment__label">${e(label)}</span>${badge}</button>`;
+      const title = disabled && disabledTitle ? disabledTitle : item.title ?? label;
+      const disabledAttributes = disabled ? ' disabled aria-disabled="true"' : "";
+      return `<button type="button" role="tab" aria-selected="${selected}" class="app-segment__button${selected ? " is-active" : ""}" ${dataAttribute}="${e(item.key)}"${extraButtonAttributes}${disabledAttributes} title="${e(title)}"><span class="app-segment__label">${e(label)}</span>${badge}</button>`;
     }).join("")}
   </div>`;
 }

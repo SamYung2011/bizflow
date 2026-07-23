@@ -807,40 +807,6 @@ button.order-card__phone:focus-visible {
   gap: var(--space-20);
 }
 
-.orders-pickup-border-box {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: var(--space-10);
-  padding: var(--space-10);
-  border: 1px solid var(--orders-border);
-  border-radius: var(--radius-10);
-  background: var(--white);
-}
-
-.orders-pickup-line {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: var(--space-10);
-  color: var(--3a);
-  font-size: var(--font-description-size);
-  font-weight: var(--font-description-weight);
-  line-height: var(--lh-tight);
-}
-
-.orders-pickup-line .icon {
-  width: 16px;
-  height: 16px;
-  flex: none;
-}
-
-.orders-pickup-line a {
-  color: var(--blue);
-  text-decoration: none;
-  white-space: nowrap;
-}
-
 .orders-figma-table {
   display: flex;
   min-width: 0;
@@ -1408,7 +1374,6 @@ button.order-card__phone:focus-visible {
   line-height: var(--lh-body);
 }
 
-.orders-pickup-box,
 .orders-soft-box {
   display: flex;
   min-width: 0;
@@ -1419,7 +1384,6 @@ button.order-card__phone:focus-visible {
   background: var(--orders-fill);
 }
 
-.orders-pickup-row,
 .orders-info-row,
 .orders-total-row {
   display: flex;
@@ -1433,7 +1397,6 @@ button.order-card__phone:focus-visible {
   line-height: var(--lh-body);
 }
 
-.orders-pickup-row span,
 .orders-info-row span,
 .orders-total-row span {
   min-width: 0;
@@ -1441,7 +1404,6 @@ button.order-card__phone:focus-visible {
   text-overflow: ellipsis;
 }
 
-.orders-pickup-row strong,
 .orders-info-row strong,
 .orders-total-row strong {
   flex: none;
