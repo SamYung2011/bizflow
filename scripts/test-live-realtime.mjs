@@ -78,6 +78,8 @@ assert.deepEqual(visibleRealtimeTables({ ...teamUser, bizflowMainAccess: true })
   "task_assignees",
   "employee_task_feedbacks",
   "invoices",
+  "customers",
+  "charger_leads",
   "northbound_records",
   "northbound_statuses",
   ...WHATSAPP_REALTIME_TABLES

@@ -9,6 +9,8 @@ const TASK_TABLES = Object.freeze([
 ]);
 const BIZFLOW_TABLES = Object.freeze([
   "invoices",
+  "customers",
+  "charger_leads",
   "northbound_records",
   "northbound_statuses",
   ...WHATSAPP_REALTIME_TABLES
