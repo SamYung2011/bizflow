@@ -148,6 +148,14 @@ function renderStatCard({ title, value, tone }, { escapeHtml }) {
   </article>`;
 }
 
+export function memberPageHeading(access, lang) {
+  return pageT(lang, access?.canManageEmployees ? "members.title" : "members.tab.updates");
+}
+
+export function memberDocumentTitle(access) {
+  return access?.canManageEmployees ? "Honnmono · Team" : "Honnmono · Update log";
+}
+
 function renderTab(tab, helpers) {
   const { escapeHtml, lang, redDot } = helpers;
   const text = pageT(lang, `members.tab.${tab.key}`);
@@ -267,6 +275,7 @@ export function renderTeamMembers({ icon, escapeHtml, lang, redDot }) {
   currentHelpers = { icon, escapeHtml, lang, redDot };
   const tt = (key) => pageT(lang, key);
   const helpers = { icon, escapeHtml, lang, redDot };
+  const pageHeading = memberPageHeading(state.access, lang);
   const stats = [
     { title: tt("members.stat.total"), value: state.summary.total, tone: "" },
     { title: tt("members.stat.active"), value: state.summary.active, tone: "blue" },
@@ -275,7 +284,7 @@ export function renderTeamMembers({ icon, escapeHtml, lang, redDot }) {
   ];
 
   return `<div class="team-members-page" data-live-read-only="${state.liveReadOnly}">
-    <h1 class="team-members-title" title="${escapeHtml(tt("members.title"))}">${escapeHtml(tt("members.title"))}</h1>
+    <h1 class="team-members-title" title="${escapeHtml(pageHeading)}">${escapeHtml(pageHeading)}</h1>
     ${state.access.canManageEmployees ? `<section class="team-members-stats">${stats.map((stat) => renderStatCard(stat, helpers)).join("")}</section>` : ""}
     <section class="team-members-panel">
       <div class="team-members-tabs" role="tablist">${visibleTabs.map((tab) => renderTab(tab, helpers)).join("")}</div>
@@ -753,7 +762,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       ],
       data: { unread, user: currentUser },
       render: renderTeamMembers,
-      title: "Honnmono · Team"
+      title: memberDocumentTitle(memberAccess)
     },
     activate() {
       scope.listen(document, "click", onMembersClick);
