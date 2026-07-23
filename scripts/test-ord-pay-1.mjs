@@ -66,8 +66,8 @@ assert.match(createPage, /import \{[\s\S]*?createLiveOrder,[\s\S]*?\} from "\.\.
   "the form must call the split order creator");
 assert.match(createPage, /paymentStatus: "paid"/,
   "manual orders must default to today's paid behavior");
-assert.match(createPage, /data-payment-status="\$\{status\}"[\s\S]*?aria-pressed="\$\{state\.paymentStatus === status\}"/,
-  "the paid/unpaid choice must expose a real accessible state");
+assert.match(createPage, /renderSharedSegment\(\{[\s\S]*?key: "paid"[\s\S]*?key: "unpaid"[\s\S]*?active: state\.paymentStatus[\s\S]*?dataAttribute: "data-payment-status"/,
+  "the paid/unpaid choice must expose its real state through the shared segment");
 assert.match(createPage, /paymentStatus: state\.paymentStatus === "paid" \? "Paid" : "Unpaid"/,
   "the selected payment state must reach the live write helper");
 assert.match(createPage, /data-create-paid-total>[\s\S]*?paidText/,
@@ -90,7 +90,7 @@ assert.match(detailPage, /"orders\.receipt"[\s\S]*?"receipt", !paid, helpers/,
 assert.match(ordersCss, /\.orders-payment-check-row > \.orders-money-input\s*\{[^}]*grid-column:\s*3;[^}]*width:\s*100%;[^}]*justify-self:\s*end;/,
   "fee inputs and their disabled placeholders must share the payment card's right-hand money column at every width");
 assert.match(ordersCss, /\.orders-payment-status-row > \.orders-payment-status-segment\s*\{[^}]*width:\s*min\(280px, 60%\);[^}]*flex:\s*0 0 auto;[^}]*align-self:\s*center;/,
-  "the compact payment segment must outrank the later full-width logistics base rule without relying on source order");
+  "the shared payment segment must retain the approved compact desktop width");
 assert.match(ordersCss, /\.orders-payment-status-row > span\s*\{[^}]*flex:\s*none;/,
   "the payment-status label must retain its natural width beside the compact segment");
 assert.doesNotMatch(ordersCss, /(?:^|\n)\.orders-payment-status-segment\s*\{/,

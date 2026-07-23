@@ -6,6 +6,7 @@ export function renderSegment({
   dataAttribute,
   variant = "domain",
   sliding = true,
+  className = "",
   buttonDataAttributes = [],
   disabled = false,
   disabledTitle = ""
@@ -24,7 +25,8 @@ export function renderSegment({
   const itemCount = Math.max(items.length, 1);
   const selectedIndex = Math.max(items.findIndex((item) => item.key === active), 0);
   const motionClass = sliding ? " app-segment--sliding" : " app-segment--parallel";
-  return `<div class="app-segment app-segment--${e(variant)}${motionClass}" role="tablist" aria-label="${e(ariaLabel)}" data-active-index="${selectedIndex}" style="--app-segment-count:${itemCount};--app-segment-active-index:${selectedIndex}">
+  const extraClass = className ? ` ${e(className)}` : "";
+  return `<div class="app-segment app-segment--${e(variant)}${motionClass}${extraClass}" role="tablist" aria-label="${e(ariaLabel)}" data-active-index="${selectedIndex}" style="--app-segment-count:${itemCount};--app-segment-active-index:${selectedIndex}">
     ${items.map((item) => {
       const selected = item.key === active;
       const label = item.label ?? item.key;

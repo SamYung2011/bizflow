@@ -4,6 +4,7 @@ import { getOrderCreateData, getUnread, getCurrentUser } from "../data/provider.
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { renderNewCustomerFields } from "../components/new-customer-fields.js";
+import { renderSegment as renderSharedSegment } from "../components/segment.js";
 import { createShippingFeePanel } from "../components/shipping-fee-panel.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import {
@@ -483,9 +484,19 @@ function renderCreatePaymentBox(helpers, subtotalAmount, totalAmount) {
   return `<div class="orders-payment-detail-box">
     <div class="orders-payment-status-row">
       <span>${escapeHtml(pageT(lang, "orders.paymentStatus"))}</span>
-      <div class="orders-logistics-segment orders-payment-status-segment" role="group" aria-label="${escapeHtml(pageT(lang, "orders.paymentStatus"))}">
-        ${["paid", "unpaid"].map((status) => `<button type="button" class="${state.paymentStatus === status ? "is-active" : ""}" data-payment-status="${status}" data-orders-write aria-pressed="${state.paymentStatus === status}"${writeAttributes}>${escapeHtml(pageT(lang, `orders.${status}`))}</button>`).join("")}
-      </div>
+      ${renderSharedSegment({
+        items: [
+          { key: "paid", label: pageT(lang, "orders.paid") },
+          { key: "unpaid", label: pageT(lang, "orders.unpaid") }
+        ],
+        active: state.paymentStatus,
+        ariaLabel: pageT(lang, "orders.paymentStatus"),
+        escapeHtml,
+        dataAttribute: "data-payment-status",
+        className: "orders-payment-status-segment",
+        buttonDataAttributes: ["data-orders-write"],
+        disabled: liveReadOnly
+      })}
     </div>
     <div class="orders-payment-divider"></div>
     <div class="orders-payment-line">
@@ -622,10 +633,19 @@ function renderCreate(helpers) {
 
     <section class="orders-detail-card">
       <h2 class="orders-card-title">${escapeHtml(pageT(lang, "orders.logistics"))}</h2>
-      <div class="orders-logistics-segment" role="tablist">
-        <button type="button" class="${state.shippingMode === "delivery" ? "is-active" : ""}${shippingDisabledClass}" data-shipping-mode="delivery" data-shipping-write data-orders-write${shippingAttributes}>${escapeHtml(pageT(lang, "orders.delivery"))}</button>
-        <button type="button" class="${state.shippingMode === "pickup" ? "is-active" : ""}${shippingDisabledClass}" data-shipping-mode="pickup" data-shipping-write data-orders-write${shippingAttributes}>${escapeHtml(pageT(lang, "orders.pickup"))}</button>
-      </div>
+      ${renderSharedSegment({
+        items: [
+          { key: "delivery", label: pageT(lang, "orders.delivery") },
+          { key: "pickup", label: pageT(lang, "orders.pickup") }
+        ],
+        active: state.shippingMode,
+        ariaLabel: pageT(lang, "orders.logistics"),
+        escapeHtml,
+        dataAttribute: "data-shipping-mode",
+        buttonDataAttributes: ["data-shipping-write", "data-orders-write"],
+        disabled: shippingPermissionDenied,
+        disabledTitle: pageT(lang, "orders.shippingPermission")
+      })}
       <div class="orders-field">
         <span class="orders-field__label">${escapeHtml(pageT(lang, "orders.trackingNo"))}</span>
         ${liveWritable && currentUser?.canShip === true && state.shippingMode === "delivery"

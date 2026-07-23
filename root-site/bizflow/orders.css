@@ -1678,34 +1678,6 @@ button.order-card__phone:focus-visible {
   resize: vertical;
 }
 
-.orders-logistics-segment {
-  display: flex;
-  width: 100%;
-  align-self: stretch;
-  padding: 0;
-  border-radius: var(--radius-10);
-  background: var(--orders-gray-e5);
-  overflow: hidden;
-}
-
-.orders-logistics-segment button {
-  height: 40px;
-  flex: 1 0 0;
-  padding: 0 var(--space-10);
-  border: 0;
-  border-radius: var(--radius-10);
-  background: transparent;
-  color: var(--gray-60);
-  font-size: var(--font-description-size);
-  font-weight: var(--font-description-weight);
-  white-space: nowrap;
-}
-
-.orders-logistics-segment button.is-active {
-  background: var(--white);
-  color: var(--blue);
-}
-
 .orders-timeline {
   display: flex;
   min-width: 0;
