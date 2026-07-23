@@ -57,9 +57,12 @@ const dict = {
     "inventory.delete": "刪除商品",
     "inventory.confirmModify": "確認修改",
     "inventory.modal.title": "產品子類修改",
+    "inventory.modal.titleNew": "新增產品子類",
     "inventory.modal.price": "價格 HKD$",
-    "inventory.modal.warranty": "保修（年）",
+    "inventory.modal.warranty": "保修月數",
     "inventory.modal.warehouseQuantity": "倉庫&數量",
+    "inventory.modal.validation.name": "請輸入子類名稱",
+    "inventory.modal.validation.sku": "請輸入子類 SKU",
     "inventory.warehouse.hk": "香港",
     "inventory.warehouse.zh": "珠海",
     "inventory.warehouse.zhuhai": "珠海",
@@ -135,9 +138,12 @@ const dict = {
     "inventory.delete": "Delete product",
     "inventory.confirmModify": "Confirm changes",
     "inventory.modal.title": "Edit product subitem",
+    "inventory.modal.titleNew": "Add product subitem",
     "inventory.modal.price": "Price HKD$",
-    "inventory.modal.warranty": "Warranty (years)",
+    "inventory.modal.warranty": "Warranty months",
     "inventory.modal.warehouseQuantity": "Warehouse & quantity",
+    "inventory.modal.validation.name": "Enter a subitem name",
+    "inventory.modal.validation.sku": "Enter a subitem SKU",
     "inventory.warehouse.hk": "Hong Kong",
     "inventory.warehouse.zh": "Zhuhai",
     "inventory.warehouse.zhuhai": "Zhuhai",
@@ -213,9 +219,12 @@ const dict = {
     "inventory.delete": "Supprimer",
     "inventory.confirmModify": "Confirmer",
     "inventory.modal.title": "Modifier la sous-catégorie",
+    "inventory.modal.titleNew": "Ajouter une sous-catégorie",
     "inventory.modal.price": "Prix HKD$",
-    "inventory.modal.warranty": "Garantie (ans)",
+    "inventory.modal.warranty": "Garantie en mois",
     "inventory.modal.warehouseQuantity": "Entrepôt et quantité",
+    "inventory.modal.validation.name": "Saisissez un nom de sous-catégorie",
+    "inventory.modal.validation.sku": "Saisissez un SKU de sous-catégorie",
     "inventory.warehouse.hk": "Hong Kong",
     "inventory.warehouse.zh": "Zhuhai",
     "inventory.warehouse.zhuhai": "Zhuhai",
@@ -267,6 +276,7 @@ let state = {
   statusOpen: false,
   modalOpen: false,
   modalItem: null,
+  modalValidation: { name: false, code: false },
   warehouseOpen: null,
   basicDirty: false,
   seriesCount: 0,
@@ -503,21 +513,26 @@ function renderWarehouseSelect(row, index, helpers) {
 function renderSubitemModal(helpers) {
   const { escapeHtml, lang } = helpers;
   const item = state.modalItem ?? cloneModalItem(null);
+  const modalTitle = pageT(lang, item.id === "new" ? "inventory.modal.titleNew" : "inventory.modal.title");
+  const nameInvalid = state.modalValidation.name;
+  const codeInvalid = state.modalValidation.code;
   return `<div class="customers-modal-overlay inventory-subitem-overlay${state.modalOpen ? " customers-modal-overlay--open" : ""}" data-inventory-subitem-overlay ${state.modalOpen ? "" : 'aria-hidden="true"'}>
-    <section class="inventory-subitem-modal" data-node-id="676:99691" role="dialog" aria-modal="true" aria-label="${escapeHtml(pageT(lang, "inventory.modal.title"))}">
+    <section class="inventory-subitem-modal" data-node-id="676:99691" role="dialog" aria-modal="true" aria-label="${escapeHtml(modalTitle)}">
       <div class="inventory-subitem-modal__head">
-        <h2 class="inventory-subitem-modal__title" title="${escapeHtml(pageT(lang, "inventory.modal.title"))}">${escapeHtml(pageT(lang, "inventory.modal.title"))}</h2>
+        <h2 class="inventory-subitem-modal__title" title="${escapeHtml(modalTitle)}">${escapeHtml(modalTitle)}</h2>
       </div>
       <button type="button" class="inventory-subitem-modal__close" data-modal-close aria-label="${escapeHtml(pageT(lang, "inventory.close"))}"></button>
       <div class="inventory-subitem-modal__body">
         <div class="inventory-modal-grid">
           <label class="inventory-modal-field">
             <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.field.variantName"))}</span>
-            <input class="inventory-modal-input" data-modal-name data-inventory-write value="${escapeHtml(item.name)}"${writeAttributes}>
+            <input class="inventory-modal-input${nameInvalid ? " is-invalid" : ""}" data-modal-name data-inventory-write value="${escapeHtml(item.name)}"${nameInvalid ? ' aria-invalid="true" aria-describedby="inventory-modal-name-error"' : ""}${writeAttributes}>
+            ${nameInvalid ? `<span class="inventory-modal-field-error" id="inventory-modal-name-error" data-modal-error="name" role="alert">${escapeHtml(pageT(lang, "inventory.modal.validation.name"))}</span>` : ""}
           </label>
           <label class="inventory-modal-field">
             <span class="inventory-modal-label">${escapeHtml(pageT(lang, "inventory.field.variantSku"))}</span>
-            <input class="inventory-modal-input" data-modal-code data-inventory-write value="${escapeHtml(item.internalCode || "")}"${writeAttributes}>
+            <input class="inventory-modal-input${codeInvalid ? " is-invalid" : ""}" data-modal-code data-inventory-write value="${escapeHtml(item.internalCode || "")}"${codeInvalid ? ' aria-invalid="true" aria-describedby="inventory-modal-code-error"' : ""}${writeAttributes}>
+            ${codeInvalid ? `<span class="inventory-modal-field-error" id="inventory-modal-code-error" data-modal-error="code" role="alert">${escapeHtml(pageT(lang, "inventory.modal.validation.sku"))}</span>` : ""}
           </label>
           <label class="inventory-modal-field">
             <span class="inventory-modal-label" title="${escapeHtml(pageT(lang, "inventory.modal.price"))}">${escapeHtml(pageT(lang, "inventory.modal.price"))}</span>
@@ -612,6 +627,7 @@ function closeWarehouseMenus() {
 function closeModal() {
   state.modalOpen = false;
   state.modalItem = null;
+  state.modalValidation = { name: false, code: false };
   state.warehouseOpen = null;
   rerenderDetailPage();
 }
@@ -620,6 +636,7 @@ function openModal(item) {
   if (liveReadOnly) return;
   state.modalOpen = true;
   state.modalItem = cloneModalItem(item);
+  state.modalValidation = { name: false, code: false };
   state.warehouseOpen = null;
   state.statusOpen = false;
   rerenderDetailPage();
@@ -875,17 +892,27 @@ async function onInventoryDetailClick(event) {
   }
 
   if (event.target.closest("[data-modal-confirm]") && state.modalItem) {
+    const name = String(state.modalItem.name || "").trim();
+    const internalCode = String(state.modalItem.internalCode || "").trim();
+    state.modalValidation = {
+      name: !name,
+      code: !internalCode
+    };
+    if (state.modalValidation.name || state.modalValidation.code) {
+      rerenderDetailPage();
+      document.querySelector(state.modalValidation.name ? "[data-modal-name]" : "[data-modal-code]")?.focus();
+      return;
+    }
     const item = {
       ...state.modalItem,
       id: state.modalItem.id === "new" ? globalThis.crypto.randomUUID() : state.modalItem.id,
-      name: String(state.modalItem.name || "").trim(),
-      internalCode: String(state.modalItem.internalCode || "").trim(),
+      name,
+      internalCode,
       price: Math.max(0, Number(state.modalItem.editPrice) || 0),
       editPrice: Math.max(0, Number(state.modalItem.editPrice) || 0),
       warrantyMonths: Math.max(0, Math.trunc(Number(state.modalItem.warrantyMonths) || 0)),
       quantity: state.modalItem.warehouses.reduce((sum, row) => sum + Math.max(0, Number(row.quantity) || 0), 0)
     };
-    if (!item.name || !item.internalCode) return;
     const index = detail.subitems.findIndex((row) => row.id === state.modalItem.id);
     if (index >= 0) detail.subitems[index] = item;
     else detail.subitems.push(item);
@@ -962,6 +989,20 @@ async function onInventoryDetailInput(event) {
   const qty = event.target.closest("[data-modal-warehouse-qty]");
   if (name) state.modalItem.name = name.value;
   if (code) state.modalItem.internalCode = code.value;
+  if (name && state.modalValidation.name && name.value.trim()) {
+    state.modalValidation.name = false;
+    name.classList.remove("is-invalid");
+    name.removeAttribute("aria-invalid");
+    name.removeAttribute("aria-describedby");
+    name.closest(".inventory-modal-field")?.querySelector('[data-modal-error="name"]')?.remove();
+  }
+  if (code && state.modalValidation.code && code.value.trim()) {
+    state.modalValidation.code = false;
+    code.classList.remove("is-invalid");
+    code.removeAttribute("aria-invalid");
+    code.removeAttribute("aria-describedby");
+    code.closest(".inventory-modal-field")?.querySelector('[data-modal-error="code"]')?.remove();
+  }
   if (price) state.modalItem.editPrice = price.value;
   if (warranty) state.modalItem.warrantyMonths = warranty.value;
   if (qty) {
@@ -1024,6 +1065,7 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
     statusOpen: false,
     modalOpen: false,
     modalItem: null,
+    modalValidation: { name: false, code: false },
     warehouseOpen: null,
     basicDirty: false,
     imageBusy: false,
