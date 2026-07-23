@@ -245,12 +245,20 @@ function localProductRow(product, parentProduct, parentProductId = null) {
     collections: parentProductId ? [] : (Array.isArray(parentProduct.collections) ? parentProduct.collections : []),
     tags: parentProductId ? [] : (Array.isArray(parentProduct.tags) ? parentProduct.tags : []),
     parent_product_id: parentProductId,
+    shopify_excluded: product.shopifyExcluded === true,
     is_virtual: false
   };
 }
 
+function localVariants(product) {
+  return [
+    ...(Array.isArray(product.variants) ? product.variants : []),
+    ...(Array.isArray(product.bizflowOnlyVariants) ? product.bizflowOnlyVariants : [])
+  ];
+}
+
 function localStockRows(product) {
-  return [product, ...(Array.isArray(product.variants) ? product.variants : [])]
+  return [product, ...localVariants(product)]
     .flatMap((item) => (Array.isArray(item.stocks) ? item.stocks : []).map((stock) => ({
       product_id: item.id,
       warehouse_id: stock.warehouseId,
@@ -261,7 +269,7 @@ function localStockRows(product) {
 
 async function updateBizflowOnlyInventoryProduct(product) {
   const { client } = await adminContext();
-  const variants = Array.isArray(product.variants) ? product.variants : [];
+  const variants = localVariants(product);
   const parent = localProductRow(product, product);
   const updated = await client.from("products").update(parent).eq("id", product.id).select("id").maybeSingle();
   if (updated.error) throw new ShopifyCatalogWriteError(updated.error.message, { code: "BIZFLOW_PRODUCT_UPDATE_FAILED" });
@@ -308,9 +316,17 @@ export async function updateLiveInventoryProduct(
   { shopifyBound = true } = {}
 ) {
   if (!shopifyBound) return updateBizflowOnlyInventoryProduct(product);
-  const result = await invokeCatalog("update", {
-    requestId: requestId(), product, expectedShopifyUpdatedAt, expectedShopifyStructureHash
-  });
+  let result;
+  try {
+    result = await invokeCatalog("update", {
+      requestId: requestId(), product, expectedShopifyUpdatedAt, expectedShopifyStructureHash
+    });
+  } catch (error) {
+    // The Edge function may have persisted the explicit exclusion intent
+    // before a later Shopify step failed; do not leave the local snapshot stale.
+    await invalidateLiveTables("products");
+    throw error;
+  }
   await invalidateLiveTables("products", "inventory_stock", "shopify_variant_links", "shopify_catalog_bindings", "shopify_catalog_jobs");
   return result;
 }

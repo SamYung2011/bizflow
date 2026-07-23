@@ -1588,6 +1588,7 @@ export async function getInventoryDetailData(id) {
           imageUrl: variant.imageUrl || "",
           specs: variant.specs || "",
           shopifyVariantId: variant.shopifyVariantId || "",
+          shopifyExcluded: variant.shopifyExcluded === true,
           warehouses: completeWarehouses(Array.isArray(variant.warehouses) ? variant.warehouses : variantWarehouses)
         };
       }),

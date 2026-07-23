@@ -596,6 +596,14 @@ img.inventory-detail-image {
   flex: 1 1 0;
 }
 
+.inventory-subitem-main {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 0;
+  align-items: center;
+  gap: var(--space-10);
+}
+
 .inventory-quantity-input {
   width: 100px;
   border: 1px solid var(--inventory-panel-line);
@@ -798,6 +806,22 @@ button.inventory-series-icon {
   font-size: var(--font-description-size);
   font-weight: var(--font-description-weight);
   line-height: var(--lh-tight);
+}
+
+.inventory-modal-shopify-excluded {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  color: var(--3a);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-tight);
+}
+
+.inventory-modal-shopify-excluded input {
+  width: 18px;
+  height: 18px;
+  flex: none;
 }
 
 .inventory-warehouse-block {

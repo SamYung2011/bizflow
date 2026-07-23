@@ -61,6 +61,8 @@ const dict = {
     "inventory.modal.price": "價格 HKD$",
     "inventory.modal.warranty": "保修月數",
     "inventory.modal.warehouseQuantity": "倉庫&數量",
+    "inventory.modal.shopifyExcluded": "僅 BizFlow（不推送 Shopify）",
+    "inventory.modal.shopifyExcludedHint": "此子類只保留在 BizFlow；若已同步，下次保存會從 Shopify 移除。",
     "inventory.modal.validation.name": "請輸入子類名稱",
     "inventory.modal.validation.sku": "請輸入子類 SKU",
     "inventory.warehouse.hk": "香港",
@@ -142,6 +144,8 @@ const dict = {
     "inventory.modal.price": "Price HKD$",
     "inventory.modal.warranty": "Warranty months",
     "inventory.modal.warehouseQuantity": "Warehouse & quantity",
+    "inventory.modal.shopifyExcluded": "BizFlow only (do not send to Shopify)",
+    "inventory.modal.shopifyExcludedHint": "Keep this subitem only in BizFlow. If already synced, the next save removes it from Shopify.",
     "inventory.modal.validation.name": "Enter a subitem name",
     "inventory.modal.validation.sku": "Enter a subitem SKU",
     "inventory.warehouse.hk": "Hong Kong",
@@ -223,6 +227,8 @@ const dict = {
     "inventory.modal.price": "Prix HKD$",
     "inventory.modal.warranty": "Garantie en mois",
     "inventory.modal.warehouseQuantity": "Entrepôt et quantité",
+    "inventory.modal.shopifyExcluded": "BizFlow uniquement (ne pas envoyer à Shopify)",
+    "inventory.modal.shopifyExcludedHint": "Conserve cette sous-catégorie uniquement dans BizFlow. Si elle est déjà synchronisée, le prochain enregistrement la retirera de Shopify.",
     "inventory.modal.validation.name": "Saisissez un nom de sous-catégorie",
     "inventory.modal.validation.sku": "Saisissez un SKU de sous-catégorie",
     "inventory.warehouse.hk": "Hong Kong",
@@ -325,6 +331,7 @@ function cloneModalItem(item) {
       price: "",
       editPrice: "",
       internalCode: "",
+      shopifyExcluded: false,
       warrantyMonths: 0,
       status: "active",
       imageUrl: "",
@@ -441,9 +448,14 @@ function renderParentStocksCard(helpers) {
 function renderSubitemRow(item, helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const name = item.name ?? pageT(lang, item.nameKey);
+  const exclusionLabel = pageT(lang, "inventory.warehouse.bizflowOnly");
+  const exclusionHint = pageT(lang, "inventory.modal.shopifyExcludedHint");
   return `<div class="inventory-subitem-row" role="button" tabindex="${liveReadOnly ? "-1" : "0"}" data-subitem-row data-inventory-write data-subitem-id="${escapeHtml(item.id)}" aria-disabled="${liveReadOnly}" title="${escapeHtml(name)}">
     <span class="inventory-subitem-image" aria-hidden="true"></span>
-    <span class="inventory-subitem-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
+    <span class="inventory-subitem-main">
+      <span class="inventory-subitem-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
+      ${item.shopifyExcluded === true ? `<span class="inventory-warehouse-scope-badge" title="${escapeHtml(exclusionHint)}">${escapeHtml(exclusionLabel)}</span>` : ""}
+    </span>
     <span class="inventory-quantity-input" aria-label="${escapeHtml(pageT(lang, "inventory.field.stock"))}">${escapeHtml(item.quantity)}</span>
     <span class="inventory-subitem-price" title="${escapeHtml(formatHkd(item.price))}">${escapeHtml(formatHkd(item.price))}</span>
     <span class="inventory-subitem-icon">${icon("icon-add-surface-add", "icon")}</span>
@@ -541,6 +553,10 @@ function renderSubitemModal(helpers) {
           <label class="inventory-modal-field">
             <span class="inventory-modal-label" title="${escapeHtml(pageT(lang, "inventory.modal.warranty"))}">${escapeHtml(pageT(lang, "inventory.modal.warranty"))}</span>
             <input class="inventory-modal-input" type="number" min="0" step="1" data-modal-warranty data-inventory-write value="${escapeHtml(item.warrantyMonths ?? 0)}"${writeAttributes}>
+          </label>
+          <label class="inventory-modal-shopify-excluded inventory-modal-field--wide" title="${escapeHtml(pageT(lang, "inventory.modal.shopifyExcludedHint"))}">
+            <input type="checkbox" data-modal-shopify-excluded data-inventory-write${item.shopifyExcluded === true ? " checked" : ""}${writeAttributes}>
+            <span>${escapeHtml(pageT(lang, "inventory.modal.shopifyExcluded"))}</span>
           </label>
         </div>
         <div class="inventory-warehouse-block">
@@ -647,6 +663,18 @@ function catalogPayload() {
     warehouseId: row.id,
     quantity: Math.max(0, Math.trunc(Number(row.quantity) || 0))
   }));
+  const variants = detail.subitems.map((item) => ({
+    id: item.id,
+    name: String(item.name || "").trim(),
+    internalCode: String(item.internalCode || "").trim(),
+    price: Math.max(0, Number(item.editPrice ?? item.price) || 0),
+    warrantyMonths: Math.max(0, Math.trunc(Number(item.warrantyMonths) || 0)),
+    status: item.status || "active",
+    imageUrl: item.imageUrl || "",
+    specs: item.specs || "",
+    shopifyExcluded: item.shopifyExcluded === true,
+    stocks: stocks(item.warehouses || [])
+  }));
   return {
     id: detail.product.id,
     name: String(detail.product.name || "").trim(),
@@ -661,17 +689,10 @@ function catalogPayload() {
     tags: Array.isArray(detail.product.tags) ? detail.product.tags : [],
     collections: detail.series.map((item) => String(item.name || "").trim()).filter(Boolean),
     stocks: stocks(detail.warehouses || []),
-    variants: detail.subitems.map((item) => ({
-      id: item.id,
-      name: String(item.name || "").trim(),
-      internalCode: String(item.internalCode || "").trim(),
-      price: Math.max(0, Number(item.editPrice ?? item.price) || 0),
-      warrantyMonths: Math.max(0, Math.trunc(Number(item.warrantyMonths) || 0)),
-      status: item.status || "active",
-      imageUrl: item.imageUrl || "",
-      specs: item.specs || "",
-      stocks: stocks(item.warehouses || [])
-    }))
+    // Front-end defence: only ordinary variants enter Shopify's option payload.
+    variants: variants.filter((item) => item.shopifyExcluded !== true),
+    // The DB apply path merges this list back into the local catalogue.
+    bizflowOnlyVariants: variants.filter((item) => item.shopifyExcluded === true)
   };
 }
 
@@ -705,7 +726,8 @@ async function saveInventoryDetail() {
     return;
   }
   const payload = catalogPayload();
-  if (!payload.name || !payload.internalCode || payload.variants.some((item) => !item.name || !item.internalCode)) return;
+  const localVariants = [...payload.variants, ...payload.bizflowOnlyVariants];
+  if (!payload.name || !payload.internalCode || localVariants.some((item) => !item.name || !item.internalCode)) return;
   state.busy = true;
   state.error = "";
   state.feedback = "";
@@ -908,6 +930,7 @@ async function onInventoryDetailClick(event) {
       id: state.modalItem.id === "new" ? globalThis.crypto.randomUUID() : state.modalItem.id,
       name,
       internalCode,
+      shopifyExcluded: state.modalItem.shopifyExcluded === true,
       price: Math.max(0, Number(state.modalItem.editPrice) || 0),
       editPrice: Math.max(0, Number(state.modalItem.editPrice) || 0),
       warrantyMonths: Math.max(0, Math.trunc(Number(state.modalItem.warrantyMonths) || 0)),
@@ -986,6 +1009,7 @@ async function onInventoryDetailInput(event) {
   const code = event.target.closest("[data-modal-code]");
   const price = event.target.closest("[data-modal-price]");
   const warranty = event.target.closest("[data-modal-warranty]");
+  const shopifyExcluded = event.target.closest("[data-modal-shopify-excluded]");
   const qty = event.target.closest("[data-modal-warehouse-qty]");
   if (name) state.modalItem.name = name.value;
   if (code) state.modalItem.internalCode = code.value;
@@ -1005,6 +1029,7 @@ async function onInventoryDetailInput(event) {
   }
   if (price) state.modalItem.editPrice = price.value;
   if (warranty) state.modalItem.warrantyMonths = warranty.value;
+  if (shopifyExcluded) state.modalItem.shopifyExcluded = shopifyExcluded.checked;
   if (qty) {
     const index = Number(qty.getAttribute("data-modal-warehouse-qty"));
     if (state.modalItem.warehouses[index]) state.modalItem.warehouses[index].quantity = qty.value;

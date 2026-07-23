@@ -27,6 +27,7 @@ interface NormalizedVariant {
   status: string;
   imageUrl: string;
   specs: string;
+  shopifyExcluded: boolean | null;
   stocks: NormalizedStock[];
 }
 
@@ -36,6 +37,7 @@ interface NormalizedProduct extends NormalizedVariant {
   tags: string[];
   collections: string[];
   variants: NormalizedVariant[];
+  bizflowOnlyVariants: NormalizedVariant[];
 }
 
 interface ShopifyInventoryLevel {
@@ -159,6 +161,7 @@ function normalizeVariant(value: unknown): NormalizedVariant {
     status: text(row.status) || "active",
     imageUrl: text(row.imageUrl),
     specs: text(row.specs),
+    shopifyExcluded: typeof row.shopifyExcluded === "boolean" ? row.shopifyExcluded : null,
     stocks,
   };
 }
@@ -167,10 +170,12 @@ export function normalizeCatalogProduct(value: unknown): NormalizedProduct {
   const row = value && typeof value === "object" ? value as JsonRecord : {};
   const base = normalizeVariant(row);
   const variants = (Array.isArray(row.variants) ? row.variants : []).map(normalizeVariant);
+  const bizflowOnlyVariants = (Array.isArray(row.bizflowOnlyVariants) ? row.bizflowOnlyVariants : [])
+    .map((variant) => ({ ...normalizeVariant(variant), shopifyExcluded: true }));
   const ids = new Set<string>([base.id]);
   const codes = new Set<string>([base.internalCode.toLowerCase()]);
   const names = new Set<string>();
-  for (const variant of variants) {
+  for (const variant of [...variants, ...bizflowOnlyVariants]) {
     const normalizedName = variant.name.toLowerCase();
     if (ids.has(variant.id) || codes.has(variant.internalCode.toLowerCase()) || names.has(normalizedName)) {
       throw new Error("Duplicate variant ID, SKU, or option name");
@@ -186,7 +191,75 @@ export function normalizeCatalogProduct(value: unknown): NormalizedProduct {
     tags: stringList(row.tags),
     collections: stringList(row.collections),
     variants,
+    bizflowOnlyVariants,
   };
+}
+
+async function enforceShopifyExclusions(
+  admin: SupabaseClient,
+  product: NormalizedProduct,
+): Promise<NormalizedProduct> {
+  const stored = await admin.from("products")
+    .select("id,internal_code,shopify_excluded")
+    .eq("parent_product_id", product.id);
+  if (stored.error) throw new Error(`Shopify exclusion read failed: ${stored.error.message}`);
+  const excludedIds = new Set<string>();
+  const excludedCodes = new Set<string>();
+  for (const row of stored.data || []) {
+    if (row.shopify_excluded !== true) continue;
+    excludedIds.add(text(row.id));
+    excludedCodes.add(text(row.internal_code).toLowerCase());
+  }
+  const allVariants = [...product.variants, ...product.bizflowOnlyVariants];
+  const isExcluded = (variant: NormalizedVariant) =>
+    variant.shopifyExcluded === true ||
+    excludedIds.has(variant.id) ||
+    excludedCodes.has(variant.internalCode.toLowerCase());
+  return {
+    ...product,
+    variants: allVariants
+      .filter((variant) => !isExcluded(variant))
+      .map((variant) => ({ ...variant, shopifyExcluded: false })),
+    bizflowOnlyVariants: allVariants
+      .filter(isExcluded)
+      .map((variant) => ({ ...variant, shopifyExcluded: true })),
+  };
+}
+
+async function persistShopifyExclusionState(
+  admin: SupabaseClient,
+  product: NormalizedProduct,
+): Promise<void> {
+  const stored = await admin.from("products")
+    .select("id")
+    .eq("parent_product_id", product.id);
+  if (stored.error) throw new Error(`Shopify exclusion target read failed: ${stored.error.message}`);
+  const storedIds = new Set((stored.data || []).map((row) => text(row.id)));
+  const variants = [...product.variants, ...product.bizflowOnlyVariants];
+  const includedIds = variants
+    .filter((variant) => variant.shopifyExcluded === false && storedIds.has(variant.id))
+    .map((variant) => variant.id);
+  const excludedIds = variants
+    .filter((variant) => variant.shopifyExcluded === true && storedIds.has(variant.id))
+    .map((variant) => variant.id);
+  const writes = [];
+  if (includedIds.length) {
+    writes.push(
+      admin.from("products").update({ shopify_excluded: false })
+        .eq("parent_product_id", product.id)
+        .in("id", includedIds),
+    );
+  }
+  if (excludedIds.length) {
+    writes.push(
+      admin.from("products").update({ shopify_excluded: true })
+        .eq("parent_product_id", product.id)
+        .in("id", excludedIds),
+    );
+  }
+  const results = await Promise.all(writes);
+  const failure = results.find((result) => result.error);
+  if (failure?.error) throw new Error(`Shopify exclusion update failed: ${failure.error.message}`);
 }
 
 function mapShopifyProduct(node: JsonRecord): ShopifyProductNode {
@@ -252,7 +325,7 @@ export async function buildAlignmentPlan(admin: SupabaseClient, credentials: Sho
   const [shopifyProducts, productsResult, linksResult, bindingsResult, mappingsResult, warehousesResult, locationsData, collectionsData] = await Promise.all([
     fetchAllShopifyProducts(credentials),
     admin.from("products")
-      .select("id,name,parent_product_id,internal_code,status,category,collections")
+      .select("id,name,parent_product_id,internal_code,status,category,collections,shopify_excluded")
       .eq("is_virtual", false)
       .or("category.neq._archived,category.is.null"),
     admin.from("shopify_variant_links").select("id,shopify_variant_id,shopify_product_id,shopify_sku,bizflow_product_id,qty"),
@@ -267,7 +340,12 @@ export async function buildAlignmentPlan(admin: SupabaseClient, credentials: Sho
   }
 
   const products = productsResult.data || [];
-  const links = linksResult.data || [];
+  const excludedProductIds = new Set(
+    products.filter((product) => product.shopify_excluded === true).map((product) => product.id),
+  );
+  // Excluded subitems are expected to be absent from Shopify. Ignore any stale
+  // pre-save links so alignment never reports their deliberate absence as drift.
+  const links = (linksResult.data || []).filter((link) => !excludedProductIds.has(link.bizflow_product_id));
   const shopifyById = new Map(shopifyProducts.map((product) => [product.id, product]));
   const productById = new Map(products.map((product) => [product.id, product]));
   const rootId = (product: { id: string; parent_product_id?: string | null }) => product.parent_product_id || product.id;
@@ -803,7 +881,7 @@ async function ensureBizflowPayloadIdentity(
   product: NormalizedProduct,
   action: "create" | "update",
 ) {
-  const items = [product, ...product.variants];
+  const items = [product, ...product.variants, ...product.bizflowOnlyVariants];
   const ids = items.map((item) => item.id);
   const codes = items.map((item) => item.internalCode);
   const [idRows, codeRows] = await Promise.all([
@@ -946,8 +1024,20 @@ export async function executeCatalogWrite(
       // timed-out/retried delete safely resumable without a second mutation.
       result = { shopifyProductId: binding.shopify_product_id, deleted: true, alreadyMissing: !current };
     } else {
+      // Persist the explicit toggle only after CAS succeeds, then immediately
+      // re-read it. DB state, plus a new row's explicit true flag, is the final
+      // authority for Shopify options and inventory.
+      await persistShopifyExclusionState(admin, product!);
+      const shopifyProduct = await enforceShopifyExclusions(admin, product!);
+      const authoritativePayload = await admin.from("shopify_catalog_jobs").update({
+        request_payload: { product: shopifyProduct },
+        updated_at: new Date().toISOString(),
+      }).eq("id", job.id);
+      if (authoritativePayload.error) {
+        throw new Error(`Persist authoritative Shopify payload failed: ${authoritativePayload.error.message}`);
+      }
       const includeFiles = await catalogMediaChanged(admin, action, product!.id, product!.imageUrl);
-      result = await createOrUpdateShopifyProduct(admin, credentials, product!, current, job.id, includeFiles);
+      result = await createOrUpdateShopifyProduct(admin, credentials, shopifyProduct, current, job.id, includeFiles);
     }
 
     await admin.from("shopify_catalog_jobs").update({
@@ -1012,6 +1102,22 @@ export async function mutateComponentLink(admin: SupabaseClient, action: "link" 
       .eq("shopify_variant_id", variantId).eq("bizflow_product_id", productId).select("id");
     if (result.error) throw new Error(`Unlink failed: ${result.error.message}`);
     return { ok: true, deleted: result.data?.length || 0 };
+  }
+  const product = await admin.from("products")
+    .select("shopify_excluded")
+    .eq("id", productId)
+    .maybeSingle();
+  if (product.error) throw new Error(`Component exclusion check failed: ${product.error.message}`);
+  if (product.data?.shopify_excluded === true) {
+    const [links, legacy] = await Promise.all([
+      admin.from("shopify_variant_links").delete().eq("bizflow_product_id", productId),
+      admin.from("products").update({
+        shopify_variant_id: null,
+        shopify_sku: null,
+      }).eq("id", productId),
+    ]);
+    if (links.error || legacy.error) throw new Error("Excluded component unlink failed");
+    return { ok: true, skipped: true, reason: "shopify_excluded" };
   }
   const qty = Math.max(1, Math.trunc(finiteNumber(body.qty, 1)));
   const result = await admin.from("shopify_variant_links").upsert({
