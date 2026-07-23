@@ -45,9 +45,11 @@ const routes = [
     "../bizflow/orders.css", "../bizflow/orders-domain.css"
   ], () => import("../bizflow/orders.js")),
   route("/bizflow/orders-create.html", "bizflow", "../bizflow/orders-create.js", [
+    "../components/segment.css",
     "../bizflow/customers.css", "../bizflow/orders.css"
   ], () => import("../bizflow/orders-create.js")),
   route("/bizflow/orders-detail.html", "bizflow", "../bizflow/orders-detail.js", [
+    "../components/segment.css",
     "../bizflow/customers.css", "../bizflow/orders.css"
   ], () => import("../bizflow/orders-detail.js")),
   route("/bizflow/customers.html", "bizflow", "../bizflow/customers.js", [
