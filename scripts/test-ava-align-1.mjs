@@ -7,6 +7,7 @@ const [
   taskDomainCss,
   taskCss,
   tasksJs,
+  tasksDetailJs,
   customersCss,
   homeCss,
   membersCss
@@ -16,6 +17,7 @@ const [
   readFile(new URL("../root-site/team/tasks-domain.css", import.meta.url), "utf8"),
   readFile(new URL("../root-site/team/tasks.css", import.meta.url), "utf8"),
   readFile(new URL("../root-site/team/tasks.js", import.meta.url), "utf8"),
+  readFile(new URL("../root-site/team/tasks-detail.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/bizflow/customers.css", import.meta.url), "utf8"),
   readFile(new URL("../root-site/bizflow/home.css", import.meta.url), "utf8"),
   readFile(new URL("../root-site/team/members.css", import.meta.url), "utf8")
@@ -35,6 +37,16 @@ assert.match(taskCss, /\.team-member-task__avatar\s*\{[\s\S]*?font-size:\s*var\(
 assert.match(tasksJs, /class="avatar--initial team-member-task__avatar" style="--component-width:60px;--component-height:60px"/,
   "task rail initials must retain their verified 60px avatar size");
 
+assert.match(taskCss, /\.task-detail \.chat-bubble\s*\{[\s\S]*?--chat-avatar-size:\s*40px;/,
+  "task feedback bubbles must retain their 40px desktop avatar container");
+const chatAvatarRule = taskCss.match(/\.chat-bubble__avatar\s*\{([^}]*)\}/)?.[1] ?? "";
+assert.match(chatAvatarRule, /width:\s*var\(--chat-avatar-size\);[\s\S]*?height:\s*var\(--chat-avatar-size\);/,
+  "task feedback avatars must consume the shared 40px chat avatar size");
+assert.doesNotMatch(chatAvatarRule, /font-(?:size|weight)\s*:/,
+  "task feedback initials must inherit the shared 24px SemiBold avatar typography");
+assert.match(tasksDetailJs, /class="avatar--initial chat-bubble__avatar"/,
+  "task feedback initials must retain the shared avatar class for 24px SemiBold inheritance");
+
 assert.doesNotMatch(customersCss, /\.customer-row\s*>\s*\.avatar--initial\s*\{/,
   "customer rows must inherit the shared avatar default without a redundant page override");
 
@@ -47,4 +59,4 @@ for (const css of responsiveSources) {
   }
 }
 
-console.log("AVA-align-1 contracts: PASS (40px default, 32px pin, 60px panel/rail, no mobile shrink gap)");
+console.log("AVA-align-1 contracts: PASS (40px default/feedback, 32px pin, 60px panel/rail, no mobile shrink gap)");
