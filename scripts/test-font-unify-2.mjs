@@ -16,10 +16,10 @@ const [ordersCss, customersCss, inventoryCss, expenseCss, sharedStyles] = await 
   readFile(new URL("../root-site/components/styles.css", import.meta.url), "utf8")
 ]);
 
-assert.match(customersCss, /\.customer-row\s*>\s*\.avatar--initial\s*\{[\s\S]*?font-size:\s*var\(--font-title-2-size\);[\s\S]*?font-weight:\s*var\(--font-title-2-weight\)/,
-  "customer list initials must use the scoped Figma 24px SemiBold avatar type");
-assert.match(sharedStyles, /\.avatar,\s*\n\.avatar--initial\s*\{[\s\S]*?font-size:\s*var\(--font-title-3-size\);[\s\S]*?font-weight:\s*var\(--font-title-3-weight\)/,
-  "the shared avatar initial must remain 16px Medium for unreviewed consumers");
+assert.doesNotMatch(customersCss, /\.customer-row\s*>\s*\.avatar--initial\s*\{/,
+  "customer list initials must inherit the shared Figma avatar type without a redundant override");
+assert.match(sharedStyles, /\.avatar,\s*\n\.avatar--initial\s*\{[\s\S]*?font-size:\s*var\(--font-title-2-size\);[\s\S]*?font-weight:\s*var\(--font-title-2-weight\)/,
+  "the shared avatar initial must use the Figma 24px SemiBold default type");
 
 assert.match(inventoryCss, /\.inventory-category__trigger,\s*\n\.inventory-search\s*\{[\s\S]*?font-size:\s*var\(--font-title-3-size\);[\s\S]*?font-weight:\s*var\(--font-body-weight\)/,
   "inventory category and search controls must use Figma 16px Regular text");

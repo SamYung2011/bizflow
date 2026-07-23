@@ -159,6 +159,8 @@
   --component-height: 32px;
 
   flex: none;
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
 }
 
 .task-overview__member-head strong {
