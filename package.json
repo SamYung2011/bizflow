@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "vite",
-    "build": "node scripts/build-front-door.mjs",
+    "build:shell": "node scripts/build-shell-bundle.mjs",
+    "check:shell": "node scripts/build-shell-bundle.mjs --check",
+    "build": "npm run build:shell && node scripts/build-front-door.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -20,6 +22,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.0",
+    "esbuild": "0.21.5",
     "vite": "^5.1.0"
   }
 }
