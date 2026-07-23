@@ -11,6 +11,7 @@ import {
   writeLiveTableCache
 } from "./live-table-cache.js";
 import { fetchAllTablePages } from "./fetch-all-pages.js";
+import { LIVE_TABLE_SWR_REFRESHED_EVENT } from "./live-snapshot-dependencies.js";
 
 const CONFIG_URL = new URL("../config.local.js", import.meta.url);
 const ADMIN_EMAIL = "samyung2011@gmail.com";
@@ -271,7 +272,12 @@ export async function fetchAllTable(table, orderCol, ascending = true, secondary
   if (cached && !cached.stale) return cached.rows;
   if (cached) {
     void fetchAllTableOnce(client, userId, table, orderCol, ascending, secondaryOrder, cacheVersion)
-      .then((rows) => writeLiveTableCache({ ...cacheArgs, rows, version: cacheVersion }))
+      .then(async (rows) => {
+        const stored = await writeLiveTableCache({ ...cacheArgs, rows, version: cacheVersion });
+        if (stored && typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent(LIVE_TABLE_SWR_REFRESHED_EVENT, { detail: { table } }));
+        }
+      })
       .catch((error) => console.warn(`[live-table-cache] ${table} refresh failed`, error));
     return cached.rows;
   }

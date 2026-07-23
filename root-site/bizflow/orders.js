@@ -6,7 +6,7 @@ import { markRead } from "../data/read-state.js";
 import { createDateRangeFilter, latestDateInput } from "../components/date-range-filter.js";
 import { managementPageSize, renderManagementList, renderManagementPager } from "../components/management-list.js";
 import { renderSegment as renderSharedSegment } from "../components/segment.js";
-import { aggregateShippingCounts, matchesShippingFilter } from "../components/order-metrics.js";
+import { deriveShippingListView } from "../components/order-metrics.js";
 import { consumeNavigationPreset, navigationPresetKeys } from "../components/navigation-presets.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
@@ -182,8 +182,12 @@ function ordersBeforeShipping() {
   });
 }
 
+function shippingListView() {
+  return deriveShippingListView(ordersBeforeShipping(), state.shipping);
+}
+
 function filteredOrders() {
-  return ordersBeforeShipping().filter((order) => matchesShippingFilter(order, state.shipping));
+  return shippingListView().orders;
 }
 
 function currentPageSize() {
@@ -267,9 +271,8 @@ function renderDomainSegment(helpers) {
   });
 }
 
-function renderShippingFilters(helpers) {
+function renderShippingFilters(helpers, counts) {
   const { escapeHtml, lang } = helpers;
-  const counts = aggregateShippingCounts(ordersBeforeShipping());
   return `<div class="orders-shipping-filters" role="group" aria-label="${escapeHtml(pageT(lang, "orders.tab.list"))}">
     ${shippingFilters.map((filter) => `<button type="button" class="orders-shipping-chip orders-shipping-chip--${filter}${state.shipping === filter ? " is-active" : ""}" data-orders-shipping="${filter}" aria-pressed="${state.shipping === filter}">
       <span>${escapeHtml(pageT(lang, `orders.shipping.${filter}`))}</span><strong>${counts[filter]}</strong>
@@ -290,7 +293,8 @@ function renderOrderList(helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const e = escapeHtml;
   const tt = (key) => pageT(lang, key);
-  const filtered = filteredOrders();
+  const view = shippingListView();
+  const filtered = view.orders;
   const pageSize = currentPageSize();
   const pages = totalPages(filtered, pageSize);
   const shouldPaginate = filtered.length > pageSize;
@@ -311,7 +315,7 @@ function renderOrderList(helpers) {
   });
   return `<div class="orders-list-panel" data-orders-list-panel>
     <div class="orders-toolbar">${dateFilter.render(helpers)}${renderSourceFilter(helpers)}${renderOrderSearch(helpers)}</div>
-    ${renderShippingFilters(helpers)}
+    ${renderShippingFilters(helpers, view.counts)}
     ${renderManagementList({ content: listHtml, pager: pagerHtml, paged: shouldPaginate })}
   </div>`;
 }

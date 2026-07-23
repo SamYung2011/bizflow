@@ -65,7 +65,7 @@ for (const [snapshot, previousVersion] of cacheVersionsBeforeWrite) {
 }
 assert.match(tableCache, /export async function invalidateLiveTableCache[\s\S]*snapshotsForTables\(targets\)[\s\S]*invalidateLiveSnapshotCache\(\[\.\.\.snapshots\]\)/,
   "table invalidation must evict every dependent snapshot from IDB");
-assert.match(tableCache, /SNAPSHOT_CONTRACT_GENERATIONS[\s\S]*\["home\.json", [1-9]\d*\][\s\S]*\["warranty\.json", 1\]/,
+assert.match(tableCache, /SNAPSHOT_CONTRACT_GENERATIONS[\s\S]*\["home\.json", [1-9]\d*\][\s\S]*\["warranty\.json", 2\]/,
   "pre-release cached rows without invoice/product write keys must be rejected on rollout");
 assert.match(snapshots, /LIVE_SNAPSHOT_INVALIDATED_EVENT[\s\S]*invalidateProviderSnapshotMemo\(snapshots\)[\s\S]*LIVE_BUILDERS\.delete/,
   "snapshot invalidation must also evict provider and live-builder memory state");

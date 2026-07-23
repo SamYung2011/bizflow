@@ -9,6 +9,7 @@ export function liveSnapshotEventMatches(event, { snapshots = [], tables = [] } 
   const snapshotTargets = normalizedSet(snapshots);
   const tableTargets = normalizedSet(tables);
   if (detail.snapshot && snapshotTargets.has(String(detail.snapshot))) return true;
+  if (Array.isArray(detail.snapshots) && detail.snapshots.some((snapshot) => snapshotTargets.has(String(snapshot || "")))) return true;
   return Array.isArray(detail.tables) && detail.tables.some((table) => tableTargets.has(String(table || "")));
 }
 

@@ -41,6 +41,10 @@ assert.equal(liveSnapshotEventMatches(event({ snapshot: "orders.json" }), {
   snapshots: ["orders.json"],
   tables: ["invoices"]
 }), true);
+assert.equal(liveSnapshotEventMatches(event({ snapshots: ["orders.json"], tables: ["customers"] }), {
+  snapshots: ["orders.json"],
+  tables: ["invoices"]
+}), true);
 assert.equal(liveSnapshotEventMatches(event({ tables: ["invoices"] }), {
   snapshots: ["orders.json"],
   tables: ["invoices"]
@@ -109,6 +113,6 @@ assert.match(northboundSource, /snapshots:\s*\["northbound\.json"\]/);
 assert.match(tasksControllerSource, /snapshots:\s*\["tasks\.json"\]/);
 assert.match(whatsappSource, /snapshots:\s*\[WHATSAPP_SNAPSHOT\]/);
 assert.match(whatsappSource, /tables:\s*WHATSAPP_REALTIME_TABLES/);
-assert.match(tableSource, /detail:\s*\{\s*tables:\s*refreshedTables\s*\}/);
+assert.match(tableSource, /detail:\s*\{\s*tables:\s*refreshedTables,\s*snapshots\s*\}/);
 
 console.log("Live snapshot page refresh contracts: PASS (match, rerender, edit deferral, disposal)");

@@ -1,8 +1,18 @@
 import { fetchAllTable, getSession, TRANSIENT_AUTH_RESET_EVENT } from "./auth.js";
-import { activateLiveTableCacheUser, invalidateLiveAuthCache, invalidateLiveTableCache } from "./live-table-cache.js";
-import { LIVE_SNAPSHOT_UPDATED_EVENT } from "./live-snapshot-dependencies.js";
+import {
+  activateLiveTableCacheUser,
+  invalidateLiveAuthCache,
+  invalidateLiveSnapshotCache,
+  invalidateLiveTableCache
+} from "./live-table-cache.js";
+import {
+  LIVE_SNAPSHOT_UPDATED_EVENT,
+  LIVE_TABLE_SWR_REFRESHED_EVENT,
+  snapshotsForTables
+} from "./live-snapshot-dependencies.js";
 
 const HK_TIME_ZONE = "Asia/Hong_Kong";
+export const LIVE_TABLE_SWR_BATCH_DELAY_MS = 250;
 const tablePromises = new Map();
 const freshTablePromises = new Map();
 const tableQueries = new Map();
@@ -162,6 +172,86 @@ function evictLiveTablePromises(targets) {
   }
 }
 
+export function createLiveTableSWRBatcher({
+  delay = LIVE_TABLE_SWR_BATCH_DELAY_MS,
+  scheduleTimeout = setTimeout,
+  cancelTimeout = clearTimeout,
+  evictTables = evictLiveTablePromises,
+  snapshotsFor = snapshotsForTables,
+  invalidateSnapshots = (snapshots) => invalidateLiveSnapshotCache(snapshots),
+  dispatchUpdated = (tables, snapshots) => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent(LIVE_SNAPSHOT_UPDATED_EVENT, {
+      detail: { tables, snapshots, source: "table-swr" }
+    }));
+  },
+  warn = (...args) => console.warn(...args)
+} = {}) {
+  const pendingTables = new Set();
+  let timer = null;
+  let flushChain = Promise.resolve();
+  let disposed = false;
+
+  function drain() {
+    const tables = [...pendingTables];
+    pendingTables.clear();
+    if (!tables.length || disposed) return flushChain;
+    flushChain = flushChain
+      .then(async () => {
+        const snapshots = [...snapshotsFor(new Set(tables))];
+        if (snapshots.length) await invalidateSnapshots(snapshots);
+        dispatchUpdated(tables, snapshots);
+      })
+      .catch((error) => warn("[live-table-cache] SWR snapshot refresh failed", error));
+    return flushChain;
+  }
+
+  function queue(...tables) {
+    if (disposed) return;
+    const targets = liveTableTargets(tables);
+    if (!targets.size) return;
+    evictTables(targets);
+    targets.forEach((table) => pendingTables.add(table));
+    if (timer !== null) cancelTimeout(timer);
+    timer = scheduleTimeout(() => {
+      timer = null;
+      void drain();
+    }, delay);
+  }
+
+  async function flush() {
+    if (timer !== null) {
+      cancelTimeout(timer);
+      timer = null;
+      return drain();
+    }
+    return flushChain;
+  }
+
+  function dispose() {
+    disposed = true;
+    pendingTables.clear();
+    if (timer !== null) cancelTimeout(timer);
+    timer = null;
+  }
+
+  return Object.freeze({
+    dispose,
+    flush,
+    queue,
+    get pending() {
+      return pendingTables.size > 0;
+    }
+  });
+}
+
+if (typeof window !== "undefined") {
+  const swrBatcher = createLiveTableSWRBatcher();
+  window.addEventListener(LIVE_TABLE_SWR_REFRESHED_EVENT, (event) => {
+    swrBatcher.queue(event.detail?.table);
+  });
+}
+
 export async function refreshLiveTables(...tables) {
   const targets = liveTableTargets(tables);
   if (!targets.size) return [];
@@ -177,7 +267,8 @@ export async function refreshLiveTables(...tables) {
   const refreshedTables = [...targets].filter((table) => !queriedTables.has(table) || queries.some((query, index) =>
     query.table === table && results[index]?.status === "fulfilled"));
   if (refreshedTables.length && typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent(LIVE_SNAPSHOT_UPDATED_EVENT, { detail: { tables: refreshedTables } }));
+    const snapshots = [...snapshotsForTables(new Set(refreshedTables))];
+    window.dispatchEvent(new CustomEvent(LIVE_SNAPSHOT_UPDATED_EVENT, { detail: { tables: refreshedTables, snapshots } }));
   }
   return results;
 }

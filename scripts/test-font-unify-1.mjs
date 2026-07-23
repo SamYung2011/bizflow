@@ -19,7 +19,7 @@ assert.match(homeCss, /\.home-order-row__customer\s*\{[\s\S]*?font-size:\s*var\(
   "Home order customer names must use 10px Regular");
 assert.match(snapshots, /members:\s*membersSnapshot\.members\.map[\s\S]*?departments:\s*member\.departments\.slice\(\)/,
   "home.json must retain live member department names");
-assert.match(tableCache, /SNAPSHOT_CONTRACT_GENERATIONS[\s\S]*?\["home\.json", 2\]/,
+assert.match(tableCache, /SNAPSHOT_CONTRACT_GENERATIONS[\s\S]*?\["home\.json", 3\]/,
   "the new home member shape must invalidate older cached home snapshots");
 
 assert.match(home, /const department = memberDepartment\(m\);[\s\S]*?home-member__identity[\s\S]*?department \? `<span class="home-chip home-chip--dept/,

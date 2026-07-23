@@ -185,6 +185,14 @@ export function aggregateShippingCounts(orders, now = new Date()) {
   return counts;
 }
 
+export function deriveShippingListView(orders, filter = "all", now = new Date()) {
+  const source = Array.isArray(orders) ? orders : [];
+  return {
+    counts: aggregateShippingCounts(source, now),
+    orders: source.filter((order) => matchesShippingFilter(order, filter, now))
+  };
+}
+
 export function aggregateInventoryStock(products) {
   const carriers = products.filter((product) => product.parentId !== null || (product.detail?.variants?.length ?? 0) === 0);
   const positive = carriers.filter((product) => Number(product.stock) > 0);

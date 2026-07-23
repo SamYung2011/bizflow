@@ -2,6 +2,7 @@ import { WHATSAPP_SNAPSHOT, WHATSAPP_SNAPSHOT_TABLES } from "./live-whatsapp-con
 
 export const LIVE_SNAPSHOT_INVALIDATED_EVENT = "tp:live-snapshot-invalidated";
 export const LIVE_SNAPSHOT_UPDATED_EVENT = "tp:live-snapshot-updated";
+export const LIVE_TABLE_SWR_REFRESHED_EVENT = "tp:live-table-swr-refreshed";
 
 const SNAPSHOT_TABLES = Object.freeze({
   "home.json": [

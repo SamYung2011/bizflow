@@ -8,12 +8,15 @@ const CACHE_SNAPSHOT_PREFIX = `${CACHE_PREFIX}snapshot:`;
 const CACHE_DB_NAME = "tp-live-table-cache";
 const CACHE_DB_VERSION = 1;
 const CACHE_STORE_NAME = "rows";
-// Shape generations are deliberately local to affected snapshots. WAR-renew-1
-// added renewal keys; FONT-unify-1 adds member departments to home cards. Old
-// display-only shapes stay compatible elsewhere but must not mask new UI data.
+// Shape generations are deliberately local to affected snapshots. Customer
+// joins are embedded in these five payloads, so PILL-cache-1 rejects snapshots
+// that could have been rebuilt from stale pre-refresh customer rows.
 const SNAPSHOT_CONTRACT_GENERATIONS = new Map([
-  ["home.json", 2],
-  ["warranty.json", 1]
+  ["home.json", 3],
+  ["customers.json", 1],
+  ["warranty.json", 2],
+  ["orders.json", 1],
+  ["pending-deduction.json", 1]
 ]);
 
 export const LIVE_TABLE_CACHE_TTL_MS = 10 * 60_000;
