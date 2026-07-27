@@ -242,6 +242,12 @@ input.ocpp-filter-control {
   color: var(--gray-20);
   cursor: not-allowed;
 }
+.ocpp-link:disabled,
+.ocpp-primary:disabled {
+  background: var(--gray-5);
+  color: var(--gray-20);
+  cursor: not-allowed;
+}
 .ocpp-link {
   min-height: var(--space-20);
   border-color: color-mix(in srgb, var(--blue) 20%, var(--white));
@@ -356,6 +362,95 @@ input.ocpp-filter-control {
   border-radius: var(--radius-40); /* docs/01 add-surface 267:270。 */
   background: var(--gray-5);
   color: var(--gray-60);
+}
+.ocpp-command-alert {
+  padding: var(--space-10) var(--space-20);
+  border: var(--ocpp-line) solid var(--gray-10);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  color: var(--gray-60);
+}
+.ocpp-command-alert--error {
+  border-color: color-mix(in srgb, var(--red) 30%, var(--white));
+  background: color-mix(in srgb, var(--red) 8%, var(--white));
+  color: var(--red);
+}
+.ocpp-command-schedules {
+  display: grid;
+  gap: var(--space-10);
+  margin-top: var(--space-20);
+}
+.ocpp-command-schedules h2 {
+  margin: 0;
+  color: var(--gray-80);
+  font-size: var(--font-title-2-size);
+}
+.ocpp-command-modal {
+  width: min(94vw, 520px);
+}
+.ocpp-command-modal > p {
+  margin: 0 0 var(--space-20);
+  color: var(--gray-60);
+  line-height: var(--lh-num);
+}
+.ocpp-command-form {
+  display: grid;
+  gap: var(--space-10);
+}
+.ocpp-command-field {
+  display: grid;
+  gap: var(--space-4);
+  color: var(--gray-60);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-title-2-weight);
+}
+.ocpp-command-field .ocpp-filter-control {
+  width: 100%;
+}
+.ocpp-command-form-hint {
+  min-height: var(--space-20);
+  margin: 0;
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+}
+.ocpp-command-form-hint[data-invalid="true"] {
+  color: var(--red);
+}
+.ocpp-command-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-10);
+  margin-top: var(--space-20);
+}
+.ocpp-command-modal-actions .ocpp-primary {
+  margin-top: 0;
+}
+.ocpp-command-toast {
+  position: fixed;
+  z-index: 240;
+  right: var(--space-20);
+  bottom: var(--space-20);
+  display: flex;
+  max-width: min(90vw, 560px);
+  align-items: center;
+  gap: var(--space-20);
+  padding: var(--space-10) var(--space-20);
+  border-radius: var(--radius-10);
+  background: var(--gray-80);
+  color: var(--white);
+  box-shadow: var(--ocpp-shadow);
+}
+.ocpp-command-toast--ok {
+  background: var(--green);
+}
+.ocpp-command-toast--error {
+  background: var(--red);
+}
+.ocpp-command-toast button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: var(--font-title-2-size);
 }
 @media (max-width: 768px) {
   .shell-app {
