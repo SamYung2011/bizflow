@@ -7,6 +7,7 @@ const OcppMonitorView = lazy(() => import("./views/ocpp/OcppMonitor.jsx"));
 const OcppChargingView = lazy(() => import("./views/ocpp/OcppCharging.jsx"));
 const OcppUsersView = lazy(() => import("./views/ocpp/OcppUsers.jsx"));
 const OcppFinanceView = lazy(() => import("./views/ocpp/finance/OcppFinance.jsx"));
+const AppFeedbackView = lazy(() => import("./views/honnmono/AppFeedback.jsx"));
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase, fetchAllTable } from "./lib/supabaseClient.js";
 import { isNonWarrantyItem, itemWarrantyMonths } from "./lib/warranty.js";
@@ -1044,6 +1045,9 @@ export default function App() {
       { id: "ocppUsers", label: t("OCPP 用戶"), icon: "charger" },
       { id: "ocppFinance", label: t("OCPP 財務"), icon: "charger" },
     ]}] : []),
+    ...(isBfAdmin ? [{ type: "group", id: "g_honnmono", label: t("Honnmono APP"), icon: "chat", children: [
+      { id: "appFeedback", label: t("用戶反饋"), icon: "chat" },
+    ]}] : []),
     { type: "single", id: "gototeam", label: t("團隊管理"), icon: "external", external: "https://team.honnmono.top" },
   ];
 
@@ -2026,6 +2030,13 @@ export default function App() {
               session={session}
               isAdmin={isBfAdmin}
             />
+          </Suspense>
+        )}
+
+        {/* HONNMONO APP — admin-only feedback list through honnmono-admin */}
+        {tab === "appFeedback" && isBfAdmin && (
+          <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#999" }}>{t("載入 Honnmono 反饋…")}</div>}>
+            <AppFeedbackView session={session} isAdmin={isBfAdmin} />
           </Suspense>
         )}
 
