@@ -10,11 +10,18 @@ import {
   safeHttpUrl,
 } from "./app-feedback-api.js";
 import { translateAppFeedback } from "./app-feedback-i18n.js";
+import {
+  applyFeedbackListPayload,
+  createFeedbackPoller,
+  feedbackListSignature,
+  feedbackStateSignature,
+} from "./app-feedback-poller.js";
 
 const PAGE_SIZE = 20;
 let state = null;
 let helpers = null;
 let activeScope = null;
+let activePoller = null;
 let instanceSequence = 0;
 let activeInstance = 0;
 
@@ -157,6 +164,11 @@ function renderPager() {
   </nav>`;
 }
 
+function renderNewFeedbackNotice() {
+  const count = state.newFeedbackCount;
+  return `<button type="button" class="app-feedback-new" data-feedback-new aria-live="polite"${count > 0 ? "" : " hidden"}>${count > 0 ? rawE(t("newFeedback", { count })) : ""}</button>`;
+}
+
 function detailRow(labelKey, value, { mono = false } = {}) {
   return `<div class="app-feedback-detail-row${mono ? " app-feedback-detail-row--mono" : ""}"><dt>${rawE(t(labelKey))}</dt><dd>${e(value)}</dd></div>`;
 }
@@ -265,6 +277,7 @@ function render(nextHelpers) {
     <div class="app-feedback-card">
       ${renderToolbar()}
       ${error}
+      ${renderNewFeedbackNotice()}
       ${renderTable()}
       ${renderPager()}
     </div>
@@ -272,27 +285,31 @@ function render(nextHelpers) {
   </section>`;
 }
 
-function rerender() {
-  const page = document.querySelector("[data-app-feedback-page]");
-  if (page && helpers) page.outerHTML = render(helpers);
-}
-
-function normalizedFacets(facets) {
+function captureScrollState() {
   return {
-    clientModels: Array.isArray(facets?.clientModels)
-      ? facets.clientModels
-      : [],
-    appVersions: Array.isArray(facets?.appVersions)
-      ? facets.appVersions
-      : [],
-    statuses: Array.isArray(facets?.statuses) ? facets.statuses : [],
+    x: window.scrollX,
+    y: window.scrollY,
+    tableLeft:
+      document.querySelector(".app-feedback-table-shell")?.scrollLeft || 0,
+    drawerTop:
+      document.querySelector(".app-feedback-drawer")?.scrollTop || 0,
   };
 }
 
-function applyListPayload(targetState, payload) {
-  targetState.rows = Array.isArray(payload?.items) ? payload.items : [];
-  targetState.total = Number(payload?.total) || 0;
-  targetState.facets = normalizedFacets(payload?.facets);
+function restoreScrollState(scrollState) {
+  window.scrollTo(scrollState.x, scrollState.y);
+  const table = document.querySelector(".app-feedback-table-shell");
+  if (table) table.scrollLeft = scrollState.tableLeft;
+  const drawer = document.querySelector(".app-feedback-drawer");
+  if (drawer) drawer.scrollTop = scrollState.drawerTop;
+}
+
+function rerender({ preserveScroll = false } = {}) {
+  const page = document.querySelector("[data-app-feedback-page]");
+  if (!page || !helpers) return;
+  const scrollState = preserveScroll ? captureScrollState() : null;
+  page.outerHTML = render(helpers);
+  if (scrollState) restoreScrollState(scrollState);
 }
 
 function listSubPath(targetState) {
@@ -315,11 +332,106 @@ function isActive(instance = activeInstance, scope = activeScope) {
   return instance === activeInstance && scope?.isCurrent() === true;
 }
 
+function updateNewFeedbackNotice() {
+  const notice = document.querySelector("[data-feedback-new]");
+  if (!notice || !state) return;
+  const count = state.newFeedbackCount;
+  notice.hidden = count <= 0;
+  notice.textContent = count > 0 ? t("newFeedback", { count }) : "";
+}
+
+function clearPendingFeedback({ updateNotice = true } = {}) {
+  if (!state) return;
+  state.pendingListPayload = null;
+  state.pendingListSignature = "";
+  state.newFeedbackCount = 0;
+  if (updateNotice) updateNewFeedbackNotice();
+}
+
+function acceptPendingFeedback() {
+  if (!state?.pendingListPayload) return;
+  const payload = state.pendingListPayload;
+  clearPendingFeedback({ updateNotice: false });
+  applyFeedbackListPayload(state, payload);
+  rerender();
+  activeScope?.animationFrame(() =>
+    document
+      .querySelector(".app-feedback-table-shell")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+  );
+}
+
+async function pollFeedbackList({ signal } = {}) {
+  const instance = activeInstance;
+  const scope = activeScope;
+  if (
+    !state ||
+    !isActive(instance, scope) ||
+    document.visibilityState !== "visible" ||
+    state.loading
+  ) {
+    return true;
+  }
+
+  const subPath = listSubPath(state);
+  const listRequest = state.listRequest;
+  let payload;
+  try {
+    payload = await callHonnmonoAdmin(subPath, { signal });
+  } catch {
+    return false;
+  }
+
+  if (
+    !state ||
+    !isActive(instance, scope) ||
+    document.visibilityState !== "visible" ||
+    listRequest !== state.listRequest ||
+    subPath !== listSubPath(state)
+  ) {
+    return true;
+  }
+
+  const nextSignature = feedbackListSignature(payload);
+  const currentSignature = feedbackStateSignature(state);
+  if (!state.hasLoadedList || state.listError) {
+    clearPendingFeedback({ updateNotice: false });
+    applyFeedbackListPayload(state, payload);
+    state.hasLoadedList = true;
+    state.listError = null;
+    rerender({ preserveScroll: true });
+    return true;
+  }
+  if (nextSignature === currentSignature) {
+    if (state.pendingListPayload) clearPendingFeedback();
+    return true;
+  }
+  if (nextSignature === state.pendingListSignature) return true;
+
+  const newFeedbackCount = Math.max(
+    0,
+    (Number(payload?.total) || 0) - state.total,
+  );
+  if (newFeedbackCount > 0) {
+    state.pendingListPayload = payload;
+    state.pendingListSignature = nextSignature;
+    state.newFeedbackCount = newFeedbackCount;
+    updateNewFeedbackNotice();
+    return true;
+  }
+
+  clearPendingFeedback({ updateNotice: false });
+  applyFeedbackListPayload(state, payload);
+  rerender({ preserveScroll: true });
+  return true;
+}
+
 async function loadList() {
   const instance = activeInstance;
   const scope = activeScope;
   if (!state || !isActive(instance, scope)) return;
   const request = ++state.listRequest;
+  clearPendingFeedback({ updateNotice: false });
   state.loading = true;
   state.listError = null;
   rerender();
@@ -333,7 +445,8 @@ async function loadList() {
     ) {
       return;
     }
-    applyListPayload(state, payload);
+    applyFeedbackListPayload(state, payload);
+    state.hasLoadedList = true;
     if (state.page > pageCount()) {
       state.page = pageCount();
       void loadList();
@@ -355,6 +468,7 @@ async function loadList() {
     ) {
       state.loading = false;
       rerender();
+      activePoller?.restart();
     }
   }
 }
@@ -460,6 +574,10 @@ async function downloadLog(id) {
 }
 
 function onFeedbackClick(event) {
+  if (event.target.closest?.("[data-feedback-new]")) {
+    acceptPendingFeedback();
+    return;
+  }
   const detail = event.target.closest?.("[data-feedback-detail]");
   if (detail) {
     void openDetail(detail.getAttribute("data-feedback-detail"));
@@ -542,12 +660,16 @@ function createState(historyState) {
       typeof saved.searchInput === "string" ? saved.searchInput : "",
     keyword: typeof saved.keyword === "string" ? saved.keyword : "",
     loading: false,
+    hasLoadedList: false,
     listError: null,
     selectedId: null,
     detail: null,
     detailError: null,
     downloadingId: null,
     downloadError: null,
+    pendingListPayload: null,
+    pendingListSignature: "",
+    newFeedbackCount: 0,
     listRequest: 0,
     detailRequest: 0,
   };
@@ -585,7 +707,8 @@ export async function mountPage({
   ]);
   throwIfPageAborted(signal, scope);
   if (initialResult.payload) {
-    applyListPayload(nextState, initialResult.payload);
+    applyFeedbackListPayload(nextState, initialResult.payload);
+    nextState.hasLoadedList = true;
   } else {
     nextState.listError = initialResult.error;
   }
@@ -594,6 +717,7 @@ export async function mountPage({
   activeScope = scope;
   state = nextState;
   helpers = null;
+  let poller = null;
 
   return {
     page: createFeedbackPage({ currentUser, unread }),
@@ -603,6 +727,13 @@ export async function mountPage({
       scope.listen(document, "change", onFeedbackChange);
       scope.listen(document, "submit", onFeedbackSubmit);
       scope.listen(document, "keydown", onFeedbackKeydown);
+      poller = createFeedbackPoller({
+        scope,
+        documentRef: document,
+        poll: pollFeedbackList,
+      });
+      activePoller = poller;
+      poller.start();
     },
     captureState: () => ({
       page: state.page,
@@ -613,6 +744,8 @@ export async function mountPage({
       keyword: state.keyword,
     }),
     dispose() {
+      poller?.dispose();
+      if (activePoller === poller) activePoller = null;
       if (activeInstance === instance) activeInstance = 0;
       if (activeScope === scope) activeScope = null;
       state = null;

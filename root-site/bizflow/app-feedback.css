@@ -152,6 +152,36 @@
   overflow-wrap: anywhere;
 }
 
+.app-feedback-new {
+  position: sticky;
+  z-index: 2;
+  top: var(--space-10);
+  display: block;
+  margin: 0 auto var(--space-10);
+  padding: var(--space-4) var(--space-10);
+  border: var(--feedback-line) solid
+    color-mix(in srgb, var(--blue) 30%, var(--white));
+  border-radius: var(--radius-20);
+  background: color-mix(in srgb, var(--blue) 8%, var(--white));
+  color: var(--blue);
+  font: inherit;
+  font-size: var(--font-description-size);
+  cursor: pointer;
+}
+
+.app-feedback-new:hover {
+  background: color-mix(in srgb, var(--blue) 14%, var(--white));
+}
+
+.app-feedback-new:focus-visible {
+  outline: var(--feedback-line) solid var(--blue);
+  outline-offset: var(--space-4);
+}
+
+.app-feedback-new[hidden] {
+  display: none;
+}
+
 .app-feedback-table-shell {
   max-width: 100%;
   border: var(--feedback-line) solid var(--gray-10);
