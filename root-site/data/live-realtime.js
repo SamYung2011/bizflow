@@ -2,10 +2,12 @@ import { getCurrentUser, getSession, getSupabaseClient } from "./auth.js";
 import { invalidateLiveTableData, refreshLiveTables } from "./live-snapshot-utils.js";
 import { WHATSAPP_REALTIME_TABLES } from "./live-whatsapp-contract.js";
 
-const TASK_TABLES = Object.freeze([
+const SHARED_REALTIME_TABLES = Object.freeze([
   "employee_tasks",
   "task_assignees",
-  "employee_task_feedbacks"
+  "employee_task_feedbacks",
+  "employees",
+  "employee_departments"
 ]);
 const BIZFLOW_TABLES = Object.freeze([
   "invoices",
@@ -13,13 +15,20 @@ const BIZFLOW_TABLES = Object.freeze([
   "charger_leads",
   "northbound_records",
   "northbound_statuses",
+  "shipment_events",
+  "products",
+  "inventory_stock",
+  "inventory_movements",
+  "shopify_catalog_bindings",
+  "shopify_variant_links",
+  "shopify_resource_mappings",
   ...WHATSAPP_REALTIME_TABLES
 ]);
 const INVALIDATION_DELAY_MS = 250;
 
 export function visibleRealtimeTables(currentUser) {
   if (!currentUser?.userId) return [];
-  const tables = [...TASK_TABLES];
+  const tables = [...SHARED_REALTIME_TABLES];
   if (currentUser.isBfAdmin === true || currentUser.bizflowMainAccess === true) {
     tables.push(...BIZFLOW_TABLES);
   }

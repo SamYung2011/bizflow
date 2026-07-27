@@ -71,17 +71,28 @@ const teamUser = { userId: "team-user", bizflowMainAccess: false, isBfAdmin: fal
 assert.deepEqual(visibleRealtimeTables(teamUser), [
   "employee_tasks",
   "task_assignees",
-  "employee_task_feedbacks"
+  "employee_task_feedbacks",
+  "employees",
+  "employee_departments"
 ]);
 assert.deepEqual(visibleRealtimeTables({ ...teamUser, bizflowMainAccess: true }), [
   "employee_tasks",
   "task_assignees",
   "employee_task_feedbacks",
+  "employees",
+  "employee_departments",
   "invoices",
   "customers",
   "charger_leads",
   "northbound_records",
   "northbound_statuses",
+  "shipment_events",
+  "products",
+  "inventory_stock",
+  "inventory_movements",
+  "shopify_catalog_bindings",
+  "shopify_variant_links",
+  "shopify_resource_mappings",
   ...WHATSAPP_REALTIME_TABLES
 ]);
 assert.deepEqual(visibleRealtimeTables(null), []);
