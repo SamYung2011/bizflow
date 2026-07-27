@@ -27,6 +27,7 @@ const expectedSpaRoutes = [
   "/bizflow/ocpp-charging.html",
   "/bizflow/ocpp-users.html",
   "/bizflow/ocpp-finance.html",
+  "/bizflow/app-feedback.html",
   "/bizflow/customers.html",
   "/bizflow/customer-detail.html",
   "/bizflow/orders.html",
@@ -65,12 +66,12 @@ async function verifyManifest() {
   assert.match(spaEntry, /url\.searchParams\.get\("tpSpa"\)\s*===\s*"0"/, "SPA entry must recognize one-shot document fallback mode");
   assert.match(spaEntry, /mountWithoutRouter\(\)/, "SPA entry must preserve a no-router MPA fallback");
   const routes = Object.values(routeManifest);
-  assert.equal(routes.length, 16, "manifest must enumerate the 16 approved pages");
+  assert.equal(routes.length, 17, "manifest must enumerate the 17 approved pages");
   assert.equal(spaNavigation, true, "SPA master switch must stay enabled");
   assert.equal(spaCrossSectionNavigation, true, "P6 must enable same-document Bizflow/Team navigation");
-  assert.deepEqual([...spaRouteAllowlist], expectedSpaRoutes, "SPA allowlist must contain all 16 routes");
+  assert.deepEqual([...spaRouteAllowlist], expectedSpaRoutes, "SPA allowlist must contain all 17 routes");
   const bizflowFallbackMenu = createRouteMenu("/bizflow/orders-detail.html");
-  assert.equal(bizflowFallbackMenu.length, 11, "Bizflow loading shell must expose the complete formal menu including tasks");
+  assert.equal(bizflowFallbackMenu.length, 12, "Bizflow loading shell must expose the complete formal menu including tasks");
   assert.equal(bizflowFallbackMenu.find((item) => item.active)?.key, "nav.orders", "detail routes must highlight their owning domain");
   assert.ok(bizflowFallbackMenu.every((item) => routeManifest[item.href]), "Bizflow loading menu links must resolve to manifest routes");
   assert.deepEqual(
@@ -78,11 +79,12 @@ async function verifyManifest() {
     ["nav.tasks", "nav.whatsapp"],
     "the main Bizflow menu must expose task management immediately before WhatsApp"
   );
-  assert.equal(bizflowFallbackMenu.filter((item) => item.adminOnly).length, 4, "loading menu must preserve the OCPP admin gate");
+  assert.equal(bizflowFallbackMenu.filter((item) => item.adminOnly).length, 5, "loading menu must preserve all admin gates");
   const teamFallbackMenu = createRouteMenu("/team/members.html");
   assert.deepEqual(teamFallbackMenu.map((item) => item.href), ["/team/index.html", "/team/members.html"]);
   assert.equal(teamFallbackMenu.find((item) => item.active)?.key, "nav.team");
   assert.equal(createRouteFrame("/bizflow/ocpp-monitor.html").access, "bf-admin", "OCPP frames must carry the pre-render admin gate");
+  assert.equal(createRouteFrame("/bizflow/app-feedback.html").access, "bf-admin", "Honnmono APP feedback must carry the pre-render admin gate");
   assert.equal(createRouteFrame("/bizflow/orders.html").access, "default");
   for (const route of routes) {
     const migrated = expectedSpaRoutes.includes(route.path);
@@ -974,4 +976,4 @@ await verifyDataRaceGuards();
 await verifyWriteInvalidateRemount();
 await verifyShellAdapter();
 await verifyTransitions();
-console.log("SPA rollout contracts: PASS (16 migrated routes, cross-section navigation, 30-cycle lifecycle, fallback, shell adapter)");
+console.log("SPA rollout contracts: PASS (17 migrated routes, cross-section navigation, 30-cycle lifecycle, fallback, shell adapter)");

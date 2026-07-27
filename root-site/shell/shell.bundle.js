@@ -35,6 +35,7 @@
       "nav.ocppCharging": "OCPP \u5145\u96FB\u7AD9",
       "nav.ocppUsers": "OCPP \u7528\u6236",
       "nav.ocppFinance": "OCPP \u8CA1\u52D9",
+      "nav.appFeedback": "\u7528\u6236\u53CD\u994B",
       "menu.language": "\u8A9E\u8A00",
       "menu.user": "\u4F7F\u7528\u8005\u9078\u55AE",
       "menu.edit": "\u7DE8\u8F2F",
@@ -99,6 +100,7 @@
       "nav.ocppCharging": "OCPP charging",
       "nav.ocppUsers": "OCPP users",
       "nav.ocppFinance": "OCPP finance",
+      "nav.appFeedback": "User feedback",
       "menu.language": "Language",
       "menu.user": "User menu",
       "menu.edit": "Edit",
@@ -163,6 +165,7 @@
       "nav.ocppCharging": "Recharge OCPP",
       "nav.ocppUsers": "Utilisateurs OCPP",
       "nav.ocppFinance": "Finance OCPP",
+      "nav.appFeedback": "Commentaires utilisateurs",
       "menu.language": "Langue",
       "menu.user": "Menu utilisateur",
       "menu.edit": "Modifier",
@@ -978,7 +981,8 @@
       { id: "ocpp-monitor", labelKey: "nav.ocppMonitor", icon: "icon-nav-remix", canonicalHref: "/bizflow/ocpp-monitor.html", adminOnly: true },
       { id: "ocpp-charging", labelKey: "nav.ocppCharging", icon: "icon-nav-cloud", canonicalHref: "/bizflow/ocpp-charging.html", adminOnly: true },
       { id: "ocpp-users", labelKey: "nav.ocppUsers", icon: "icon-nav-user", canonicalHref: "/bizflow/ocpp-users.html", adminOnly: true },
-      { id: "ocpp-finance", labelKey: "nav.ocppFinance", icon: "icon-nav-sales", canonicalHref: "/bizflow/ocpp-finance.html", adminOnly: true }
+      { id: "ocpp-finance", labelKey: "nav.ocppFinance", icon: "icon-nav-sales", canonicalHref: "/bizflow/ocpp-finance.html", adminOnly: true },
+      { id: "app-feedback", labelKey: "nav.appFeedback", icon: "icon-nav-messenger", canonicalHref: "/bizflow/app-feedback.html", adminOnly: true }
     ]),
     team: freezeItems([
       { id: "tasks", labelKey: "nav.tasks", icon: "icon-nav-task", canonicalHref: "/team/index.html", unreadKey: "tasks" },
@@ -1003,6 +1007,7 @@
     "/bizflow/ocpp-charging.html": { section: "bizflow", menuKey: "ocpp-charging", title: "OCPP \u5145\u96FB\u7AD9", skeleton: skeleton("dashboard", 4) },
     "/bizflow/ocpp-users.html": { section: "bizflow", menuKey: "ocpp-users", title: "OCPP \u7528\u6236", skeleton: skeleton("table") },
     "/bizflow/ocpp-finance.html": { section: "bizflow", menuKey: "ocpp-finance", title: "OCPP \u8CA1\u52D9", skeleton: skeleton("dashboard", 4) },
+    "/bizflow/app-feedback.html": { section: "bizflow", menuKey: "app-feedback", title: "Honnmono APP \xB7 \u7528\u6236\u53CD\u994B", skeleton: skeleton("table") },
     "/team/index.html": { section: "team", menuKey: "tasks", title: "Honnmono \xB7 Tasks", skeleton: skeleton("board", 3) },
     "/team/members.html": { section: "team", menuKey: "team", title: "Honnmono \xB7 Team", skeleton: skeleton("dashboard", 4) }
   });

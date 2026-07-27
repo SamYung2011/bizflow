@@ -114,7 +114,7 @@ async function businessHtmlFiles() {
     }
   }
   files.sort();
-  if (files.length !== 16) throw new Error(`Expected 16 business HTML files; found ${files.length}`);
+  if (files.length !== 17) throw new Error(`Expected 17 business HTML files; found ${files.length}`);
   return files;
 }
 

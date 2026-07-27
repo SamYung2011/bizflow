@@ -1,4 +1,4 @@
-// P6 completes all 16 routes and enables same-document Bizflow/Team navigation.
+// P6 completed the original 16 routes; Honnmono APP feedback extends the live SPA to 17.
 import { createRouteFrame, routeMenuKey } from "./route-menu.js";
 
 export { createRouteFrame, createRouteMenu } from "./route-menu.js";
@@ -11,6 +11,7 @@ export const spaRouteAllowlist = Object.freeze([
   "/bizflow/ocpp-charging.html",
   "/bizflow/ocpp-users.html",
   "/bizflow/ocpp-finance.html",
+  "/bizflow/app-feedback.html",
   "/bizflow/customers.html",
   "/bizflow/customer-detail.html",
   "/bizflow/orders.html",
@@ -84,6 +85,9 @@ const routes = [
   route("/bizflow/ocpp-finance.html", "bizflow", "../bizflow/ocpp-finance.js", [
     "../components/segment.css", "../bizflow/ocpp.css"
   ], () => import("../bizflow/ocpp-finance.js")),
+  route("/bizflow/app-feedback.html", "bizflow", "../bizflow/app-feedback.js", [
+    "../bizflow/app-feedback.css"
+  ], () => import("../bizflow/app-feedback.js")),
   route("/team/index.html", "team", "../team/tasks.js", ["../components/date-range-panel.css", "../team/tasks.css", "../team/tasks-domain.css"], () => import("../team/tasks.js")),
   route("/team/members.html", "team", "../team/members.js", ["../team/members.css", "../team/members-domain.css"], () => import("../team/members.js"))
 ];

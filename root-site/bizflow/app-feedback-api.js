@@ -1,0 +1,130 @@
+import { getSession, getSupabaseClient } from "../data/auth.js";
+
+const EDGE_FUNCTION = "honnmono-admin";
+const ALLOWED_REQUESTS = [
+  { method: "GET", path: /^\/feedback(?:\?[^#]*)?$/ },
+  { method: "GET", path: /^\/feedback\/[1-9]\d*$/ },
+  { method: "POST", path: /^\/feedback\/[1-9]\d*\/log-link$/ },
+];
+
+export class HonnmonoAdminError extends Error {
+  constructor(code, status = 0) {
+    super(code);
+    this.name = "HonnmonoAdminError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
+export function assertHonnmonoAdminRequest(subPath, method = "GET") {
+  const normalizedMethod = String(method).toUpperCase();
+  if (
+    !ALLOWED_REQUESTS.some(
+      (rule) =>
+        rule.method === normalizedMethod && rule.path.test(String(subPath)),
+    )
+  ) {
+    throw new HonnmonoAdminError("requestError");
+  }
+}
+
+async function edgeContext() {
+  const [session, client] = await Promise.all([
+    getSession(),
+    getSupabaseClient(),
+  ]);
+  if (!session?.user || !session.access_token) {
+    throw new HonnmonoAdminError("authError", 401);
+  }
+  if (!client?.supabaseUrl || !client?.supabaseKey) {
+    throw new HonnmonoAdminError("configError");
+  }
+  return {
+    accessToken: session.access_token,
+    anonKey: client.supabaseKey,
+    baseUrl: String(client.supabaseUrl).replace(/\/$/, ""),
+  };
+}
+
+export async function callHonnmonoAdmin(
+  subPath,
+  { method = "GET", signal } = {},
+) {
+  const normalizedMethod = String(method).toUpperCase();
+  assertHonnmonoAdminRequest(subPath, normalizedMethod);
+  const context = await edgeContext();
+  const response = await fetch(
+    `${context.baseUrl}/functions/v1/${EDGE_FUNCTION}${subPath}`,
+    {
+      method: normalizedMethod,
+      cache: "no-store",
+      signal,
+      headers: {
+        apikey: context.anonKey,
+        Authorization: `Bearer ${context.accessToken}`,
+      },
+    },
+  );
+  const text = await response.text();
+  let parsed = null;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch {
+    throw new HonnmonoAdminError("responseError", response.status);
+  }
+  if (!response.ok) {
+    throw new HonnmonoAdminError("upstreamError", response.status);
+  }
+  if (parsed == null || typeof parsed !== "object") {
+    throw new HonnmonoAdminError("responseError", response.status);
+  }
+  return parsed;
+}
+
+export function safeHttpUrl(value) {
+  try {
+    const parsed = new URL(String(value || ""));
+    if (
+      !["http:", "https:"].includes(parsed.protocol) ||
+      parsed.username ||
+      parsed.password
+    ) {
+      return "";
+    }
+    return parsed.href;
+  } catch {
+    return "";
+  }
+}
+
+export function normalizeFeedbackLogStatus(row) {
+  if (row?.logStatus === "available") return "available";
+  if (
+    row?.logStatus === "external" &&
+    safeHttpUrl(row.logExternalUrl)
+  ) {
+    return "external";
+  }
+  return "expired";
+}
+
+export function formatFeedbackTime(value, lang = "zh") {
+  if (value == null || value === "") return "—";
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return String(value);
+  const millis = numeric < 1_000_000_000_000 ? numeric * 1000 : numeric;
+  const date = new Date(millis);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const locale =
+    lang === "fr" ? "fr-FR" : lang === "en" ? "en-GB" : "zh-HK";
+  return new Intl.DateTimeFormat(locale, {
+    timeZone: "Asia/Hong_Kong",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).format(date);
+}

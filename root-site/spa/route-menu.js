@@ -17,6 +17,7 @@ const routeMenuEntries = Object.freeze({
   "/bizflow/ocpp-charging.html": { section: "bizflow", menuKey: "ocpp-charging", title: "OCPP 充電站", skeleton: skeleton("dashboard", 4) },
   "/bizflow/ocpp-users.html": { section: "bizflow", menuKey: "ocpp-users", title: "OCPP 用戶", skeleton: skeleton("table") },
   "/bizflow/ocpp-finance.html": { section: "bizflow", menuKey: "ocpp-finance", title: "OCPP 財務", skeleton: skeleton("dashboard", 4) },
+  "/bizflow/app-feedback.html": { section: "bizflow", menuKey: "app-feedback", title: "Honnmono APP · 用戶反饋", skeleton: skeleton("table") },
   "/team/index.html": { section: "team", menuKey: "tasks", title: "Honnmono · Tasks", skeleton: skeleton("board", 3) },
   "/team/members.html": { section: "team", menuKey: "team", title: "Honnmono · Team", skeleton: skeleton("dashboard", 4) }
 });

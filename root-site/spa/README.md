@@ -1,6 +1,6 @@
 # SPA rollout contract
 
-P0 added the dormant native SPA foundation. P1 enabled Home and the four OCPP pages; P2 added customers; P3 added orders; P4 added inventory and finance; P5 added Team tasks and members; P6 adds WhatsApp and completes the 16-route rollout.
+P0 added the dormant native SPA foundation. P1 enabled Home and the four OCPP pages; P2 added customers; P3 added orders; P4 added inventory and finance; P5 added Team tasks and members; P6 added WhatsApp and completed the original 16-route rollout. Honnmono APP feedback is the seventeenth live route.
 
 ## Fixed decisions
 
