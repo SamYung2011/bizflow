@@ -11,6 +11,21 @@ function assigneeIdentity(assignee) {
   return assignee?.employeeId ? String(assignee.employeeId) : normalizedName(assignee?.name);
 }
 
+const DAY_MS = 86400000;
+
+function dateOnlyUtc(value) {
+  const match = String(value || "").replaceAll("/", "-").match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (!match) return NaN;
+  return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+function timestampMs(value) {
+  const text = String(value || "").trim();
+  if (!text) return NaN;
+  const normalized = text.replace(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/, "$1-$2-$3");
+  return Date.parse(normalized);
+}
+
 export function taskAssignee(task, member) {
   const identity = memberIdentity(member);
   return (task.assignees ?? []).find((assignee) => assigneeIdentity(assignee) === identity) ?? null;
@@ -84,6 +99,45 @@ export function isTaskVisibleToMember(task, member) {
   return isTaskOwnedByMember(task, member) || isTaskMentionedForMember(task, member);
 }
 
+export function defaultTaskViewForUser(currentUser, currentMember) {
+  const admin = currentUser?.isSuperAdmin === true || currentUser?.isAdminOfActive === true;
+  return {
+    mode: admin ? "overview" : "board",
+    member: admin ? "all" : memberIdentity(currentMember) || "all"
+  };
+}
+
+export function taskCompletionForMember(task, member) {
+  if (!task) {
+    return { checked: false, canToggle: false, wholeTask: false };
+  }
+  const assignee = taskAssignee(task, member);
+  if (assignee) {
+    return {
+      checked: assignee.completedAt != null && assignee.abandonedAt == null,
+      canToggle: true,
+      wholeTask: false
+    };
+  }
+  const creator = isTaskCreator(task, member);
+  return {
+    checked: taskDoneForMember(task, member),
+    canToggle: creator && !taskAbandonedForMember(task, member),
+    wholeTask: creator
+  };
+}
+
+export function taskDuePresentation(task, now = new Date()) {
+  const due = dateOnlyUtc(task?.due);
+  if (!Number.isFinite(due)) return { tone: "none", days: null };
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const days = Math.round((due - today) / DAY_MS);
+  if (!isOpenTask(task)) return { tone: "terminal", days };
+  if (days < 0) return { tone: "overdue", days: Math.abs(days) };
+  if (days <= 2) return { tone: "soon", days };
+  return { tone: "normal", days };
+}
+
 // Mirrors bizflow_samyung/team/src/views/Tasks.jsx:293-307 (showInOpen/showInDone/showInAb).
 export function taskMatchesMemberStatus(task, member, status) {
   const assigned = isTaskAssignedTo(task, member);
@@ -100,6 +154,30 @@ export function taskMatchesMemberStatus(task, member, status) {
   if (assigned && (done || abandoned)) return false;
   if (status === "overdue") return task.status === "overdue";
   return true;
+}
+
+export function terminalTasksForMember(member, tasks, { now = Date.now(), windowDays = 180 } = {}) {
+  const owned = tasks.filter((task) => isTaskOwnedByMember(task, member));
+  const ownedById = new Map(owned.map((task) => [task.id, task]));
+  const cutoff = now - (windowDays * DAY_MS);
+  const visibleTerminalChild = (task) => {
+    if (task.parentId === null) return true;
+    const parent = ownedById.get(task.parentId);
+    return !parent || isOpenTask(parent);
+  };
+  const withinWindow = (task) => {
+    const assignee = taskAssignee(task, member);
+    // Match the old board exactly: assignee completion wins, then the task
+    // terminal timestamp, then creation time. A row-level abandon timestamp
+    // alone does not extend the task's 180-day visibility window.
+    const stamp = timestampMs(assignee?.completedAt || task.completedAt || task.createdAt);
+    return Number.isFinite(stamp) && stamp >= cutoff;
+  };
+  const candidates = owned.filter((task) => visibleTerminalChild(task) && withinWindow(task));
+  return {
+    completed: candidates.filter((task) => taskDoneForMember(task, member) && !taskAbandonedForMember(task, member)),
+    abandoned: candidates.filter((task) => taskAbandonedForMember(task, member) && !taskDoneForMember(task, member))
+  };
 }
 
 export function isTaskRelated(task, currentUser) {
@@ -141,7 +219,7 @@ export function scopedTopTasks(tasks, { onlyMine = false, currentUser, member = 
 
 export function calendarRelatedTasks(tasks, { onlyMine = false, currentUser } = {}) {
   return scopedTopTasks(tasks, { onlyMine, currentUser })
-    .filter((task) => isOpenTask(task) && isTaskRelated(task, currentUser));
+    .filter((task) => isTaskRelated(task, currentUser));
 }
 
 export function overviewForMember(member, tasks) {

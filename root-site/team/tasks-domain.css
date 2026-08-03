@@ -128,6 +128,90 @@
   background: color-mix(in srgb, var(--task-mention-color) 10%, var(--white));
 }
 
+.task-assigned-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-4) var(--space-10);
+  border-radius: var(--radius-20);
+  color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 9%, var(--white));
+  font-size: var(--font-body-size);
+  font-weight: var(--font-description-weight);
+  white-space: nowrap;
+}
+
+.team-task-card__completion {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  margin: var(--space-4) 0 0;
+  accent-color: var(--blue);
+  cursor: pointer;
+}
+
+.team-task-card__completion:disabled {
+  cursor: not-allowed;
+}
+
+.team-task-card__parent {
+  max-width: 100%;
+  color: var(--gray-40);
+  font-size: var(--font-body-size);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-task-card__due--overdue {
+  color: var(--red);
+  font-weight: var(--font-description-weight);
+}
+
+.team-task-card__due--soon {
+  color: color-mix(in srgb, var(--yellow) 70%, var(--black));
+  font-weight: var(--font-description-weight);
+}
+
+.team-task-card--completed .team-task-card__title,
+.team-task-card--abandoned .team-task-card__title {
+  color: var(--gray-40);
+  text-decoration: line-through;
+}
+
+.task-terminal-groups {
+  display: grid;
+  min-width: 0;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-20);
+}
+
+.task-terminal-group {
+  min-width: 0;
+  padding: var(--space-10);
+  border: 1px solid var(--gray-15);
+  border-radius: var(--radius-10);
+  background: var(--gray-5);
+}
+
+.task-terminal-group > summary {
+  color: var(--gray-60);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+  cursor: pointer;
+}
+
+.task-terminal-group > summary span {
+  margin-left: var(--space-4);
+  color: var(--gray-40);
+}
+
+.task-terminal-group > div {
+  display: grid;
+  gap: var(--space-10);
+  margin-top: var(--space-10);
+}
+
 .team-task-card__approval {
   align-self: flex-start;
   color: color-mix(in srgb, var(--yellow) 65%, var(--black));
@@ -510,6 +594,15 @@
   background: var(--team-col-low-bg);
 }
 
+.task-calendar__bar--terminal,
+.task-calendar-dialog__task--terminal,
+.task-calendar__unscheduled-task--terminal {
+  border-color: var(--gray-15);
+  color: var(--gray-50);
+  background: var(--gray-10);
+  text-decoration: line-through;
+}
+
 .task-calendar__more {
   position: absolute;
   top: calc(var(--task-calendar-date-height) + (var(--task-calendar-lane-step) * 3));
@@ -700,6 +793,14 @@
   min-width: 0;
   flex-wrap: wrap;
   gap: var(--space-4);
+}
+
+.task-detail__attachment-chip img {
+  width: 56px;
+  height: 40px;
+  flex: none;
+  border-radius: var(--radius-10);
+  object-fit: cover;
 }
 
 .task-detail__mention-chip {
@@ -946,6 +1047,16 @@
   gap: var(--space-10);
 }
 
+.task-detail__metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4) var(--space-20);
+  padding-top: var(--space-10);
+  border-top: 1px solid var(--gray-10);
+  color: var(--gray-40);
+  font-size: var(--font-body-size);
+}
+
 .task-detail__abandon,
 .task-detail__delete {
   align-self: flex-start;
@@ -1021,6 +1132,10 @@
 }
 
 @media (max-width: 768px) {
+  .task-terminal-groups {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .team-domain-toolbar {
     display: flex;
     align-items: stretch;

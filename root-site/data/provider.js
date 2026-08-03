@@ -425,6 +425,8 @@ function normalizeFullTask(task, currentUserName, today) {
     completedAt: task.completedAt || "",
     creator: task.creator || "—",
     creatorId: task.creatorId || "",
+    titleEditedBy: task.titleEditedBy || "",
+    titleEditedAt: task.titleEditedAt || "",
     parentId: task.parentId || null,
     departmentId: typeof task.departmentId === "string" ? task.departmentId : "",
     visibility: task.visibility?.scope === "department" ? "department" : "team",
@@ -582,6 +584,7 @@ export async function getTeamTaskData() {
           owner: "",
           requiresReview: "no",
           members: "",
+          startDate: "",
           due: today
         }
       }

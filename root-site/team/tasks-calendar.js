@@ -1,4 +1,5 @@
 import { taskT } from "./tasks-i18n.js";
+import { taskAbandonedForMember, taskDoneForMember } from "./tasks-model.js";
 
 const MS_PER_DAY = 86400000;
 export const CALENDAR_VISIBLE_LANES = 3;
@@ -90,20 +91,36 @@ function localeFor(lang) {
   return "zh-HK";
 }
 
-function renderTaskBar(item, helpers) {
+function taskCalendarState(task, currentUser) {
+  if (taskAbandonedForMember(task, currentUser)) return "abandoned";
+  if (taskDoneForMember(task, currentUser)) return "completed";
+  return "open";
+}
+
+function taskCalendarLabel(task, currentUser) {
+  return `${taskCalendarState(task, currentUser) === "completed" ? "✓ " : ""}${task.title}`;
+}
+
+function renderTaskBar(item, state, helpers) {
   const { escapeHtml } = helpers;
   const span = item.colEnd - item.colStart + 1;
   const openClass = `${item.leftOpen ? " task-calendar__bar--left-open" : ""}${item.rightOpen ? " task-calendar__bar--right-open" : ""}`;
-  return `<button type="button" class="task-calendar__bar task-calendar__bar--${escapeHtml(item.task.priority)}${openClass}" style="--calendar-col:${item.colStart};--calendar-span:${span};--calendar-lane:${item.lane}" data-task-detail-open="${escapeHtml(item.task.id)}" title="${escapeHtml(item.task.title)}"><span>${escapeHtml(item.task.title)}</span></button>`;
+  const terminal = taskCalendarState(item.task, state.currentUser);
+  const terminalClass = terminal === "open" ? "" : ` task-calendar__bar--terminal task-calendar__bar--${terminal}`;
+  return `<button type="button" class="task-calendar__bar task-calendar__bar--${escapeHtml(item.task.priority)}${terminalClass}${openClass}" style="--calendar-col:${item.colStart};--calendar-span:${span};--calendar-lane:${item.lane}" data-task-detail-open="${escapeHtml(item.task.id)}" title="${escapeHtml(item.task.title)}"><span>${escapeHtml(taskCalendarLabel(item.task, state.currentUser))}</span></button>`;
 }
 
-function renderExpandedDay(tasks, key, helpers) {
+function renderExpandedDay(tasks, key, state, helpers) {
   if (!key) return "";
   const { escapeHtml, lang } = helpers;
   return `<div class="task-calendar-overlay" data-calendar-overlay>
     <section class="task-calendar-dialog" role="dialog" aria-modal="true" aria-label="${escapeHtml(key)}">
       <header><h3>${escapeHtml(key)}</h3><button type="button" data-calendar-close aria-label="${escapeHtml(taskT(lang, "tasks.calendar.close"))}">×</button></header>
-      <div>${tasks.map((task) => `<button type="button" class="task-calendar-dialog__task task-calendar-dialog__task--${escapeHtml(task.priority)}" data-task-detail-open="${escapeHtml(task.id)}"><span>${escapeHtml(task.title)}</span><small>${escapeHtml(task.startDate && task.due && task.startDate !== task.due ? `${task.startDate} → ${task.due}` : task.due || task.startDate)}</small></button>`).join("")}</div>
+      <div>${tasks.map((task) => {
+        const terminal = taskCalendarState(task, state.currentUser);
+        const terminalClass = terminal === "open" ? "" : ` task-calendar-dialog__task--terminal task-calendar-dialog__task--${terminal}`;
+        return `<button type="button" class="task-calendar-dialog__task task-calendar-dialog__task--${escapeHtml(task.priority)}${terminalClass}" data-task-detail-open="${escapeHtml(task.id)}"><span>${escapeHtml(taskCalendarLabel(task, state.currentUser))}</span><small>${escapeHtml(task.startDate && task.due && task.startDate !== task.due ? `${task.startDate} → ${task.due}` : task.due || task.startDate)}</small></button>`;
+      }).join("")}</div>
     </section>
   </div>`;
 }
@@ -125,7 +142,7 @@ export function renderTaskCalendar({ tasks, state, helpers }) {
     return `<div class="task-calendar__week" data-calendar-week="${weekIndex}">
       ${week.days.map((day) => `<div class="task-calendar__day${day.getMonth() === state.calendarMonth ? "" : " task-calendar__day--outside"}"><time class="${dateKey(day) === today ? "is-today" : ""}" datetime="${dateKey(day)}">${day.getDate()}</time></div>`).join("")}
       ${overflow.map((count, dayIndex) => count ? `<button type="button" class="task-calendar__more" style="--calendar-col:${dayIndex}" data-calendar-expand="${dateKey(week.days[dayIndex])}">+${count}</button>` : "").join("")}
-      ${week.items.filter((item) => item.lane < CALENDAR_VISIBLE_LANES).map((item) => renderTaskBar(item, helpers)).join("")}
+      ${week.items.filter((item) => item.lane < CALENDAR_VISIBLE_LANES).map((item) => renderTaskBar(item, state, helpers)).join("")}
     </div>`;
   }).join("");
   const expandedTasks = tasksForCalendarDay(tasks, state.calendarExpandedDate);
@@ -137,7 +154,10 @@ export function renderTaskCalendar({ tasks, state, helpers }) {
     </div></header>
     <div class="task-calendar__weekdays">${weekdays.map((day) => `<span>${escapeHtml(taskT(lang, `tasks.calendar.${day}`))}</span>`).join("")}</div>
     <div class="task-calendar__grid">${weeks}</div>
-    ${unscheduled.length ? `<details class="task-calendar__unscheduled"><summary>${escapeHtml(taskT(lang, "tasks.calendar.unscheduled"))} <span>${unscheduled.length}</span></summary><div>${unscheduled.map((task) => `<button type="button" data-task-detail-open="${escapeHtml(task.id)}">${escapeHtml(task.title)}</button>`).join("")}</div></details>` : ""}
-    ${renderExpandedDay(expandedTasks, state.calendarExpandedDate, helpers)}
+    ${unscheduled.length ? `<details class="task-calendar__unscheduled"><summary>${escapeHtml(taskT(lang, "tasks.calendar.unscheduled"))} <span>${unscheduled.length}</span></summary><div>${unscheduled.map((task) => {
+      const terminal = taskCalendarState(task, state.currentUser);
+      return `<button type="button" class="${terminal === "open" ? "" : `task-calendar__unscheduled-task--terminal task-calendar__unscheduled-task--${terminal}`}" data-task-detail-open="${escapeHtml(task.id)}">${escapeHtml(taskCalendarLabel(task, state.currentUser))}</button>`;
+    }).join("")}</div></details>` : ""}
+    ${renderExpandedDay(expandedTasks, state.calendarExpandedDate, state, helpers)}
   </section>`;
 }

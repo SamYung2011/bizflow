@@ -28,8 +28,8 @@ assert.equal(isOpenTask(input[1]), false);
 assert.equal(isOpenTask(input[2]), false);
 assert.equal(isOpenTask(input[3]), false);
 assert.equal(isOpenTask(null), false);
-assert.deepEqual(calendarRelatedTasks(input, { currentUser }).map((row) => row.id), ["open"],
-  "calendar input must exclude completed, abandoned, done, and unrelated tasks");
+assert.deepEqual(calendarRelatedTasks(input, { currentUser }).map((row) => row.id), ["open", "done-flag", "completed", "abandoned"],
+  "calendar input must retain related terminal tasks while excluding unrelated tasks");
 assert.deepEqual(overviewForMember(currentUser, input).open.map(({ task: row }) => row.id), ["open"],
   "member overview must share the same open-task contract");
 
@@ -41,7 +41,7 @@ const [model, tasks, calendar] = await Promise.all([
 assert.equal((model.match(/task\.done !== true && task\.status !== "completed" && task\.status !== "abandoned"/g) ?? []).length, 1,
   "the raw open-task predicate must have one source of truth");
 assert.match(model, /export function isOpenTask\(task\)/);
-assert.match(model, /calendarRelatedTasks[\s\S]*?isOpenTask\(task\) && isTaskRelated\(task, currentUser\)/);
+assert.match(model, /calendarRelatedTasks[\s\S]*?\.filter\(\(task\) => isTaskRelated\(task, currentUser\)\)/);
 assert.match(tasks, /calendarRelatedTasks\(state\.tasks,[\s\S]*?renderTaskCalendar\(\{ tasks: calendarTasks/,
   "calendar bars and day dialogs must consume the filtered calendar task list");
 assert.match(tasks, /task\.parentId === null && isOpenTask\(task\)/,
@@ -51,4 +51,4 @@ assert.doesNotMatch(calendar, /task\.status !== "completed"|task\.status !== "ab
 assert.match(calendar, /data-calendar-related-count="\$\{tasks\.length\}"[\s\S]*data-calendar-scheduled-count="\$\{scheduledCount\}"/,
   "calendar counters must derive from the already-filtered input");
 
-console.log("CAL-filter-1 contracts: PASS (shared open predicate, calendar bars/dialogs/counters)");
+console.log("CAL-filter-1 contracts: PASS (related open + terminal calendar tasks, shared overview open predicate)");

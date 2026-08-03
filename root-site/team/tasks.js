@@ -7,7 +7,7 @@ import { isTaskFilterGroup } from "./tasks-filters.js";
 import { renderTaskCalendar } from "./tasks-calendar.js";
 import { renderTaskOverview } from "./tasks-overview.js";
 import { renderTaskAiDialog } from "./tasks-ai.js";
-import { calendarRelatedTasks, canDeleteTaskForUser, isOpenTask, isTaskCreator, isTaskMentionedForMember, isWaitingApproval, memberIdentity, openAssignedTaskCount, taskAssignee } from "./tasks-model.js";
+import { calendarRelatedTasks, canDeleteTaskForUser, defaultTaskViewForUser, isOpenTask, isTaskCreator, isTaskMentionedForMember, isWaitingApproval, memberIdentity, openAssignedTaskCount, taskAssignee, taskCompletionForMember } from "./tasks-model.js";
 import { attachTaskDomainController } from "./tasks-domain-controller.js";
 import { renderTaskBoardGrid, renderTaskToolbar } from "./tasks-board.js";
 import { getSessionValue, setSessionValue } from "../data/session-state.js";
@@ -18,6 +18,7 @@ import { createDateRangePanel } from "../components/date-range-panel.js";
 import { createTaskBoardColumnReadObserver, createTaskBoardReadTracker } from "./task-board-read-state.js";
 import { consumeNavigationPreset, navigationPresetKeys } from "../components/navigation-presets.js";
 import { closeTaskFeedbackMention, createTaskFeedbackDraft, removeTaskFeedbackMention, selectTaskFeedbackMention, taskFeedbackMentionCandidates, updateTaskFeedbackMentionInput } from "./tasks-mentions.js";
+import { pastedTaskFeedbackImages, revokeTaskFeedbackAttachmentDrafts, taskFeedbackAttachmentDraft } from "./tasks-clipboard.js";
 
 let data = null;
 let currentUser = null;
@@ -34,6 +35,7 @@ let taskLiveRefresh = null;
 let taskBoardReadTracker = null;
 let taskBoardColumnReadObserver = null;
 const taskDueDatePanel = createDateRangePanel();
+const taskStartDatePanel = createDateRangePanel();
 
 function isCurrentTaskMount(mountId, scope = activeScope) {
   return mountId === activeMountId && Boolean(scope?.isCurrent());
@@ -63,6 +65,7 @@ function createTaskState(nextData, historyState = null) {
   const now = new Date();
   const storedViewMode = getSessionValue("team-tasks-view-mode");
   const restored = historyState && typeof historyState === "object" ? historyState : {};
+  const initialView = defaultTaskViewForUser(currentUser, currentMember);
   const nextState = {
     summary: { ...nextData.summary },
     members: clonedMembers,
@@ -76,7 +79,7 @@ function createTaskState(nextData, historyState = null) {
     permissions,
     liveReadOnly: authenticated,
     liveTaskWrites: authenticated,
-    mode: ["overview", "board"].includes(restored.mode) ? restored.mode : "overview",
+    mode: ["overview", "board"].includes(restored.mode) ? restored.mode : initialView.mode,
     overviewExpanded: new Set(Array.isArray(restored.overviewExpanded) ? restored.overviewExpanded : []),
     overviewCompletedExpanded: new Set(Array.isArray(restored.overviewCompletedExpanded) ? restored.overviewCompletedExpanded : []),
     boardExpandedPriorities: new Set(Array.isArray(restored.boardExpandedPriorities)
@@ -119,7 +122,7 @@ function createTaskState(nextData, historyState = null) {
     status: ["inProgress", "completed", "abandoned", "overdue"].includes(restored.status) ? restored.status : nextData.filters?.status ?? "inProgress",
     priority: ["all", "high", "medium", "low"].includes(restored.priority) ? restored.priority : nextData.filters?.priority ?? "all",
     view: ["board", "calendar"].includes(restored.view) ? restored.view : ["board", "calendar"].includes(storedViewMode) ? storedViewMode : nextData.filters?.view ?? "board",
-    member: typeof restored.member === "string" ? restored.member : "all"
+    member: typeof restored.member === "string" ? restored.member : initialView.member
   };
   return { state: nextState, filterState: nextFilterState };
 }
@@ -242,6 +245,7 @@ function closeAllFilterMenus(except) {
 
 function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, focusFeedback = false, feedbackCursor = null, focusFeedbackMenuId = "", focusFeedbackEditId = "", focusSubmit = false, restoreSubmitFocus = false, focusFilterGroup = "", focusActionMenu = false, restoreActionTaskId = "", focusBoard = false, focusSubtaskId = "", focusSubtaskAdd = false, focusSubtaskEditId = "" } = {}) {
   taskDueDatePanel.close({ restoreFocus: false });
+  taskStartDatePanel.close({ restoreFocus: false });
   const page = document.querySelector(".team-task-page");
   if (!page || !currentHelpers) return;
   page.outerHTML = renderTaskManagement(currentHelpers);
@@ -295,6 +299,15 @@ function resetFeedbackActions() {
   state.feedbackEditDraft = "";
   state.feedbackEditOriginal = "";
   state.feedbackEditError = "";
+}
+
+function clearFeedbackDraftAttachments() {
+  revokeTaskFeedbackAttachmentDrafts(state?.feedbackDraft?.attachments);
+}
+
+function resetFeedbackDraft() {
+  clearFeedbackDraftAttachments();
+  state.feedbackDraft = createTaskFeedbackDraft();
 }
 
 function resetSubtaskDrafts() {
@@ -432,7 +445,7 @@ function closeTaskDetail() {
   state.detailOpen = false;
   state.detailTab = "content";
   state.attachmentPreview = null;
-  state.feedbackDraft = createTaskFeedbackDraft();
+  resetFeedbackDraft();
   state.feedbackError = "";
   resetFeedbackActions();
   resetSubtaskDrafts();
@@ -444,7 +457,7 @@ function leaveTaskDetailForNavigation() {
   state.selectedTaskId = null;
   state.detailTab = "content";
   state.attachmentPreview = null;
-  state.feedbackDraft = createTaskFeedbackDraft();
+  resetFeedbackDraft();
   state.feedbackError = "";
   resetFeedbackActions();
   resetSubtaskDrafts();
@@ -509,6 +522,7 @@ function openTaskCopy(taskId) {
     memberIds: [],
     memberQuery: "",
     memberMenuOpen: false,
+    startDate: String(task.startDate || "").replaceAll("/", "-"),
     attachments: []
   };
   rerenderTaskPage({ focusSubmit: true });
@@ -539,6 +553,7 @@ function openTaskEdit(taskId) {
     memberIds: task.assignees.slice(1).map((assignee) => assignee.employeeId).filter(Boolean),
     memberQuery: "",
     memberMenuOpen: false,
+    startDate: String(task.startDate || "").replaceAll("/", "-"),
     due: String(task.due || "").replaceAll("/", "-"),
     attachments: (task.attachments ?? []).map((attachment) => ({ ...attachment }))
   };
@@ -548,6 +563,7 @@ function openTaskEdit(taskId) {
 function closeTaskSubmit() {
   if (state.writeBusy) return;
   taskDueDatePanel.close({ restoreFocus: false });
+  taskStartDatePanel.close({ restoreFocus: false });
   state.submitOpen = false;
   state.submitOriginalDepartmentId = "";
   state.submitError = "";
@@ -559,14 +575,6 @@ function closeTaskAction({ restoreFocus = true } = {}) {
   if (!taskId) return;
   state.actionTaskId = null;
   rerenderTaskPage({ restoreActionTaskId: restoreFocus ? taskId : "" });
-}
-
-function taskLocation(taskId) {
-  for (const column of state.board) {
-    const index = column.tasks.findIndex((task) => task.id === taskId);
-    if (index >= 0) return { column, index, task: column.tasks[index] };
-  }
-  return null;
 }
 
 function descendantTaskIds(taskId) {
@@ -605,11 +613,6 @@ function decrementOpenTaskCounts(task) {
   adjustOpenTaskCounts(task, -1);
 }
 
-function selectedActionMember() {
-  if (filterState.member === "all") return null;
-  return state.members.find((member) => memberIdentity(member) === filterState.member) ?? null;
-}
-
 function completeWholeTask(task, completedAt) {
   const wasComplete = task.done === true || task.status === "completed";
   task.assignees.forEach((assignee) => {
@@ -627,6 +630,77 @@ function completeWholeTask(task, completedAt) {
     state.summary.inProgress = Math.max(0, state.summary.inProgress - 1);
     decrementOpenTaskCounts(task);
   }
+}
+
+function reopenWholeTask(task) {
+  const wasComplete = task.done === true || task.status === "completed";
+  task.done = false;
+  task.status = "inProgress";
+  task.completedAt = "";
+  task.approvedAt = "";
+  task.approvedBy = "";
+  if (wasComplete) {
+    state.summary.completed = Math.max(0, state.summary.completed - 1);
+    state.summary.inProgress += 1;
+    adjustOpenTaskCounts(task, 1);
+  }
+}
+
+async function toggleTaskCompletion(taskId, { forceComplete = false } = {}) {
+  if (state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites)) return;
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (!task) return;
+  const completion = taskCompletionForMember(task, state.currentUser);
+  if (!completion.canToggle) return;
+  const completed = forceComplete ? true : !completion.checked;
+  if (forceComplete && completion.checked) return;
+  const targetAssignee = completion.wholeTask ? null : taskAssignee(task, state.currentUser);
+  if (!completion.wholeTask && !targetAssignee) return;
+  const mountId = activeMountId;
+  const scope = activeScope;
+  if (state.liveTaskWrites) {
+    state.writeBusy = true;
+    state.writeError = "";
+    rerenderTaskPage();
+    try {
+      const result = await completeLiveTask({
+        taskId: task.id,
+        targetEmployeeId: targetAssignee?.employeeId,
+        wholeTask: completion.wholeTask,
+        needsApproval: task.requiresReview,
+        completed
+      });
+      if (!isCurrentTaskMount(mountId, scope)) return;
+      if (completion.wholeTask) {
+        if (completed) completeWholeTask(task, result.completedAt);
+        else reopenWholeTask(task);
+      } else {
+        targetAssignee.completedAt = result.completedAt;
+        targetAssignee.abandonedAt = null;
+        if (result.taskDone) completeWholeTask(task, result.completedAt);
+        else if (!completed) reopenWholeTask(task);
+      }
+    } catch (error) {
+      if (!isCurrentTaskMount(mountId, scope)) return;
+      console.warn("Task completion update failed", error);
+      state.writeError = "tasks.write.failed";
+    } finally {
+      if (isCurrentTaskMount(mountId, scope)) state.writeBusy = false;
+    }
+  } else if (completion.wholeTask) {
+    if (completed) completeWholeTask(task, localTimestamp());
+    else reopenWholeTask(task);
+  } else {
+    targetAssignee.completedAt = completed ? localTimestamp() : null;
+    targetAssignee.abandonedAt = null;
+    const allDone = task.assignees.length > 0 && task.assignees.every((assignee) => assignee.completedAt != null);
+    if (allDone && !task.requiresReview) completeWholeTask(task, targetAssignee.completedAt);
+    else if (!completed) reopenWholeTask(task);
+  }
+  if (!isCurrentTaskMount(mountId, scope)) return;
+  state.actionTaskId = null;
+  taskBoardReadTracker?.refresh(state.tasks);
+  rerenderTaskPage({ focusBoard: true });
 }
 
 async function approveWaitingTask(task) {
@@ -661,65 +735,14 @@ async function approveWaitingTask(task) {
 
 async function performTaskAction(taskId, action) {
   if (state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites)) return;
+  if (action === "complete") {
+    await toggleTaskCompletion(taskId, { forceComplete: true });
+    return;
+  }
   const mountId = activeMountId;
   const scope = activeScope;
-  const location = taskLocation(taskId);
-  if (!location) return;
-  const { column, index, task } = location;
-  if (action === "complete" && !task.done) {
-    const scopedMember = selectedActionMember();
-    const scopedAssignee = scopedMember ? taskAssignee(task, scopedMember) : null;
-    const currentAssignee = taskAssignee(task, state.currentUser);
-    // The creator's completion action is whole-task completion even while viewing an assignee scope.
-    const wholeTask = isTaskCreator(task, state.currentUser);
-    // In live mode an assignee can only complete their own row, never the member currently being viewed.
-    const targetAssignee = state.liveTaskWrites
-      ? currentAssignee
-      : scopedAssignee ?? (!scopedMember ? currentAssignee : null);
-    if (state.liveTaskWrites) {
-      if (!wholeTask && !targetAssignee) return;
-      state.writeBusy = true;
-      state.writeError = "";
-      rerenderTaskPage();
-      try {
-        const result = await completeLiveTask({
-          taskId: task.id,
-          targetEmployeeId: targetAssignee?.employeeId,
-          wholeTask,
-          needsApproval: task.requiresReview
-        });
-        if (!isCurrentTaskMount(mountId, scope)) return;
-        if (result.wholeTask) completeWholeTask(task, result.completedAt);
-        else {
-          targetAssignee.completedAt = result.completedAt;
-          targetAssignee.abandonedAt = null;
-        }
-      } catch (error) {
-        if (!isCurrentTaskMount(mountId, scope)) return;
-        console.warn("Task completion failed", error);
-        state.writeError = "tasks.write.failed";
-      } finally {
-        if (isCurrentTaskMount(mountId, scope)) state.writeBusy = false;
-      }
-      state.actionTaskId = null;
-      rerenderTaskPage({ focusBoard: true });
-      return;
-    }
-    const completedAt = localTimestamp();
-    if (wholeTask) {
-      // Mirrors Tasks.jsx:344-366: creator completion marks every pending assignee and the task done.
-      completeWholeTask(task, completedAt);
-    } else if (scopedAssignee) {
-      // Mirrors Tasks.jsx:368-385: mock member scope completes one assignee row.
-      scopedAssignee.completedAt = completedAt;
-      scopedAssignee.abandonedAt = null;
-      const allDone = task.assignees.length > 0 && task.assignees.every((assignee) => assignee.completedAt != null);
-      if (allDone && !task.requiresReview) completeWholeTask(task, completedAt);
-    } else if (!scopedMember) {
-      // Preserve the mock/demo all-scope action for users with edit-others permission.
-      completeWholeTask(task, completedAt);
-    }
-  }
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (!task) return;
   if (action === "delete") {
     if (!canDeleteTaskForUser(task, state.currentUser, state.permissions)) return;
     state.writeError = "";
@@ -955,6 +978,13 @@ async function onTaskClick(event) {
     return;
   }
 
+  const completionToggle = event.target.closest("[data-task-completion-toggle]");
+  if (completionToggle) {
+    if (completionToggle.disabled) return;
+    await toggleTaskCompletion(completionToggle.getAttribute("data-task-completion-toggle"));
+    return;
+  }
+
   const completeAction = event.target.closest("[data-task-action-complete]");
   if (completeAction) {
     if (completeAction.disabled || (state.liveReadOnly && !state.liveTaskWrites)) return;
@@ -1009,6 +1039,7 @@ async function onTaskClick(event) {
   const dueTrigger = event.target.closest("[data-task-due-trigger]");
   if (dueTrigger) {
     if (dueTrigger.disabled || state.writeBusy) return;
+    taskStartDatePanel.close({ restoreFocus: false });
     taskDueDatePanel.open({
       anchor: dueTrigger,
       mode: "single",
@@ -1021,6 +1052,28 @@ async function onTaskClick(event) {
         if (state.submitError === "tasks.submit.dueRequired") state.submitError = "";
         rerenderTaskPage({ focusSubmit: false });
         activeScope.animationFrame(() => document.querySelector("[data-task-due-trigger]")?.focus());
+      }
+    });
+    return;
+  }
+
+  const startTrigger = event.target.closest("[data-task-start-trigger]");
+  if (startTrigger) {
+    if (startTrigger.disabled || state.writeBusy) return;
+    taskDueDatePanel.close({ restoreFocus: false });
+    taskStartDatePanel.open({
+      anchor: startTrigger,
+      mode: "single",
+      date: state.submitDraft.startDate,
+      language: currentHelpers?.lang ?? "zh",
+      t: (key) => key === "date"
+        ? pageT(currentHelpers?.lang ?? "zh", "tasks.submit.startAt")
+        : pageT(currentHelpers?.lang ?? "zh", `tasks.date.${key}`),
+      onCommit: ({ date }) => {
+        if (!activeScope?.isCurrent() || !state.submitOpen) return;
+        state.submitDraft.startDate = date;
+        rerenderTaskPage({ focusSubmit: false });
+        activeScope.animationFrame(() => document.querySelector("[data-task-start-trigger]")?.focus());
       }
     });
     return;
@@ -1117,7 +1170,10 @@ async function onTaskClick(event) {
   if (feedbackAttachmentRemove) {
     if (feedbackAttachmentRemove.disabled || state.writeBusy) return;
     const index = Number(feedbackAttachmentRemove.getAttribute("data-task-feedback-attachment-remove"));
-    if (Number.isInteger(index)) state.feedbackDraft.attachments.splice(index, 1);
+    if (Number.isInteger(index)) {
+      const removed = state.feedbackDraft.attachments.splice(index, 1);
+      revokeTaskFeedbackAttachmentDrafts(removed);
+    }
     rerenderTaskPage({ focusFeedback: true });
     return;
   }
@@ -1204,7 +1260,7 @@ async function onTaskClick(event) {
     state.detailOpen = true;
     state.detailTab = isTaskMentionedForMember(selectedTask(), state.currentUser) ? "feedback" : "content";
     state.attachmentPreview = null;
-    state.feedbackDraft = createTaskFeedbackDraft();
+    resetFeedbackDraft();
     state.feedbackError = "";
     resetFeedbackActions();
     resetSubtaskDrafts();
@@ -1272,6 +1328,11 @@ async function onTaskClick(event) {
 }
 
 function onTaskKeydown(event) {
+  if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && event.target.closest("[data-task-feedback-message]")) {
+    event.preventDefault();
+    event.target.form?.requestSubmit();
+    return;
+  }
   if (event.key !== "Escape") return;
   if (state.feedbackDraft.mentionMenu?.open) {
     event.preventDefault();
@@ -1419,6 +1480,7 @@ async function onTaskSubmit(event) {
     }
     const title = String(values.get("title") || "").trim();
     const content = String(values.get("content") || "").trim();
+    const startDate = String(values.get("startDate") || "");
     const due = String(values.get("due") || "");
     const requiresReview = values.get("requiresReview") === "yes";
     const assignedMembers = assignedRows.map((member) => member.name);
@@ -1437,24 +1499,32 @@ async function onTaskSubmit(event) {
         if (state.submitMode === "edit") {
           const task = state.tasks.find((item) => item.id === state.submitTaskId);
           if (!task || !canEditTask(task)) throw new Error("Task edit permission required");
+          const originalTitle = task.title;
+          const trackTitleEdit = !isTaskCreator(task, state.currentUser);
           const result = await updateLiveTask(task.id, {
             title,
             content,
             priority: task.dbPriority === "none" && task.priority === "low" && priority === "low" ? "none" : priority,
+            startDate,
             due,
             requiresReview,
             assigneeIds: assignedRows.map((member) => member.id),
             departmentId,
-            originalTitle: task.title,
-            trackTitleEdit: !isTaskCreator(task, state.currentUser),
+            originalTitle,
+            trackTitleEdit,
             attachments: state.submitDraft.attachments
           });
           if (!isCurrentTaskMount(mountId, scope)) return;
           try {
             task.title = title;
+            if (trackTitleEdit && title !== originalTitle) {
+              task.titleEditedBy = state.currentUser.name;
+              task.titleEditedAt = localTimestamp();
+            }
             task.content = content;
             task.priority = priority;
             task.dbPriority = task.dbPriority === "none" && priority === "low" ? "none" : priority === "medium" ? "mid" : priority;
+            task.startDate = startDate;
             task.due = due;
             task.requiresReview = requiresReview;
             task.departmentId = departmentId;
@@ -1479,6 +1549,7 @@ async function onTaskSubmit(event) {
             title,
             content,
             priority,
+            startDate,
             due,
             requiresReview,
             assigneeIds: assignedRows.map((member) => member.id),
@@ -1505,7 +1576,7 @@ async function onTaskSubmit(event) {
               requiresReview,
               members: assignedRows.map((member) => member.name),
               feedback: [],
-              startDate: "",
+              startDate,
               createdAt: localTimestamp(),
               completedAt: "",
               creator: state.currentUser.name,
@@ -1562,7 +1633,7 @@ async function onTaskSubmit(event) {
       requiresReview,
       members: assignedMembers,
       feedback: [],
-      startDate: "",
+      startDate,
       createdAt: localTimestamp(),
       completedAt: "",
       creator: state.currentUser.name,
@@ -1624,7 +1695,7 @@ async function onTaskSubmit(event) {
         own: true
       });
       task.countBadge = String(task.feedback.length);
-      state.feedbackDraft = createTaskFeedbackDraft();
+      resetFeedbackDraft();
     } catch (error) {
       if (!isCurrentTaskMount(mountId, scope)) return;
       console.warn("Task feedback save failed", error);
@@ -1646,17 +1717,27 @@ async function onTaskSubmit(event) {
       own: true
     });
     task.countBadge = String(task.feedback.length);
-    state.feedbackDraft = createTaskFeedbackDraft();
+    resetFeedbackDraft();
   }
   if (isCurrentTaskMount(mountId, scope)) rerenderTaskPage({ focusFeedback: true });
 }
 
 function syncTaskSubmitDraft(form) {
   const values = new FormData(form);
-  for (const key of ["title", "content", "priority", "visibility", "departmentId", "owner", "requiresReview", "due"]) {
+  for (const key of ["title", "content", "priority", "visibility", "departmentId", "owner", "requiresReview", "startDate", "due"]) {
     const value = values.get(key);
     if (value != null) state.submitDraft[key] = String(value);
   }
+}
+
+function onTaskPaste(event) {
+  const input = event.target.closest("[data-task-feedback-message]");
+  if (!input || input.disabled || state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites)) return;
+  const pasted = pastedTaskFeedbackImages(event.clipboardData);
+  if (!pasted.length) return;
+  event.preventDefault();
+  state.feedbackDraft.attachments = [...(state.feedbackDraft.attachments ?? []), ...pasted];
+  rerenderTaskPage({ focusFeedback: true, feedbackCursor: input.selectionStart });
 }
 
 function syncTaskSubmitSegment(control) {
@@ -1702,7 +1783,8 @@ function onTaskChange(event) {
     const currentFiles = new Set((state.feedbackDraft.attachments ?? []).map((attachment) => `${attachment.name}:${attachment.size}:${attachment.lastModified ?? ""}`));
     const nextFiles = [...feedbackAttachmentInput.files]
       .filter((file) => !currentFiles.has(`${file.name}:${file.size}:${file.lastModified}`))
-      .map((file) => ({ file, name: file.name, size: file.size, type: file.type, lastModified: file.lastModified }));
+      .map((file) => taskFeedbackAttachmentDraft(file))
+      .filter(Boolean);
     state.feedbackDraft.attachments = [...(state.feedbackDraft.attachments ?? []), ...nextFiles];
     rerenderTaskPage({ focusFeedback: true });
     return;
@@ -1781,6 +1863,7 @@ function hasTaskSubmitUnsavedChanges() {
   return String(draft.title || "") !== String(task.title || "")
     || String(draft.content || "") !== String(task.content || "")
     || String(draft.priority || "") !== String(task.priority || "")
+    || String(draft.startDate || "") !== String(task.startDate || "").replaceAll("/", "-")
     || String(draft.due || "") !== String(task.due || "")
     || String(draft.departmentId || "") !== String(task.departmentId || "")
     || String(draft.requiresReview || "no") !== (task.requiresReview ? "yes" : "no")
@@ -1826,6 +1909,7 @@ function applyRealtimeTaskData(nextData) {
   const next = createTaskState(nextData, currentTaskViewState());
   const nextTaskIds = new Set(next.state.tasks.map((task) => task.id));
   const keepDetail = currentState.detailOpen && nextTaskIds.has(selectedTaskId);
+  if (!keepDetail) revokeTaskFeedbackAttachmentDrafts(currentState.feedbackDraft?.attachments);
   Object.assign(next.state, {
     calendarExpandedDate: currentState.calendarExpandedDate,
     aiOpen: currentState.aiOpen,
@@ -1907,6 +1991,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       scope.listen(document, "mousedown", onTaskMousedown);
       scope.listen(document, "click", onTaskClick);
       scope.listen(document, "keydown", onTaskKeydown);
+      scope.listen(document, "paste", onTaskPaste);
       scope.listen(document, "submit", onTaskSubmit);
       scope.listen(document, "input", onTaskInput);
       scope.listen(document, "change", onTaskChange);
@@ -1985,6 +2070,8 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       if (activeMountId === mountId) activeMountId += 1;
       closeAllFilterMenus(null);
       taskDueDatePanel.close({ restoreFocus: false });
+      taskStartDatePanel.close({ restoreFocus: false });
+      clearFeedbackDraftAttachments();
       data = null;
       currentUser = null;
       unread = null;

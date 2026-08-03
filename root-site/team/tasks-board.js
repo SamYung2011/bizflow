@@ -1,7 +1,20 @@
 import { taskT } from "./tasks-i18n.js";
 import { filterTaskColumns, renderTaskFilter } from "./tasks-filters.js";
 import { renderTaskActionPopover } from "./tasks-actions.js";
-import { isTaskCreator, isTaskMentionedForMember, isWaitingApproval, memberIdentity, scopedTopTasks, taskAssignee, taskSubtaskProgress } from "./tasks-model.js";
+import { isTaskCreator, isTaskMentionedForMember, isWaitingApproval, memberIdentity, scopedTopTasks, taskAssignee, taskCompletionForMember, taskDuePresentation, taskSubtaskProgress, terminalTasksForMember } from "./tasks-model.js";
+
+function renderTaskDue(task, helpers) {
+  const { escapeHtml, lang } = helpers;
+  const due = task.due || taskT(lang, "tasks.detail.emptyValue");
+  const presentation = taskDuePresentation(task);
+  if (presentation.tone === "overdue") {
+    return `<span class="team-task-card__due team-task-card__due--overdue">⚠ ${escapeHtml(due)} (${escapeHtml(taskT(lang, "tasks.card.overdue", { days: presentation.days }))})</span>`;
+  }
+  if (presentation.tone === "soon") {
+    return `<span class="team-task-card__due team-task-card__due--soon">⏰ ${escapeHtml(due)} (${escapeHtml(taskT(lang, "tasks.card.dueSoon", { days: presentation.days }))})</span>`;
+  }
+  return `<span class="team-task-card__due">⏰ ${escapeHtml(due)}</span>`;
+}
 
 function renderTaskCard(task, columnKey, state, mentionMember, helpers) {
   const { escapeHtml, lang } = helpers;
@@ -10,21 +23,27 @@ function renderTaskCard(task, columnKey, state, mentionMember, helpers) {
   const subtaskProgress = taskSubtaskProgress(task);
   const waitingApproval = isWaitingApproval(task);
   const mentioned = isTaskMentionedForMember(task, mentionMember);
+  const completion = taskCompletionForMember(task, state.currentUser);
+  const parent = task.parentId ? state.tasks.find((candidate) => candidate.id === task.parentId) : null;
+  const assignedBy = task.creator && !isTaskCreator(task, mentionMember);
   const assignees = (task.assignees ?? []).length > 1
     ? task.assignees.map((assignee) => `<span class="${assignee.completedAt ? "is-completed" : ""}" title="${escapeHtml(assignee.completedAt || assignee.name)}">${assignee.completedAt ? "✓ " : ""}${escapeHtml(assignee.name)}</span>`).join("")
     : "";
   const ownTask = isTaskCreator(task, state.currentUser);
   const assigned = taskAssignee(task, state.currentUser) !== null;
   const canOpenActions = ownTask || assigned || state.permissions.canCreate || state.permissions.canEditOthers || state.permissions.canDeleteOthers;
-  return `<article class="team-task-card team-task-card--${columnKey}${actionOpen ? " team-task-card--action-open" : ""}" data-task-card="${escapeHtml(task.id)}">
+  return `<article class="team-task-card team-task-card--${columnKey}${completion.checked ? " team-task-card--completed" : ""}${task.status === "abandoned" ? " team-task-card--abandoned" : ""}${actionOpen ? " team-task-card--action-open" : ""}" data-task-card="${escapeHtml(task.id)}">
+    <input type="checkbox" class="team-task-card__completion" data-task-completion-toggle="${escapeHtml(task.id)}" aria-label="${escapeHtml(taskT(lang, "tasks.card.toggleComplete", { title: task.title }))}"${completion.checked ? " checked" : ""}${!completion.canToggle || state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites) ? " disabled" : ""}>
     <button type="button" class="team-task-card__body" data-task-detail-open="${escapeHtml(task.id)}" aria-label="${escapeHtml(`${taskT(lang, "tasks.detail.open")}: ${task.title}`)}">
+      ${parent ? `<span class="team-task-card__parent" title="${escapeHtml(parent.title)}">↳ ${escapeHtml(parent.title)}</span>` : ""}
       <h3 class="team-task-card__title" title="${escapeHtml(task.title)}">${escapeHtml(task.title)}</h3>
-      <div class="team-task-card__meta"><span>${escapeHtml(taskT(lang, "tasks.due"))}</span><span>${escapeHtml(task.due)}</span></div>
+      <div class="team-task-card__meta"><span>${escapeHtml(taskT(lang, "tasks.due"))}</span>${renderTaskDue(task, helpers)}</div>
       <div class="team-task-card__meta"><span>${escapeHtml(taskT(lang, "tasks.owner"))}</span><span title="${escapeHtml(task.owner)}">${escapeHtml(task.owner)}</span></div>
       <div class="team-task-card__signals">
         ${subtaskProgress.total ? `<span title="${escapeHtml(taskT(lang, "tasks.card.subtasks"))}">☑ ${subtaskProgress.done}/${subtaskProgress.total}</span>` : ""}
         ${task.attachmentCount > 0 ? `<span title="${escapeHtml(taskT(lang, "tasks.card.attachments"))}">📎 ${task.attachmentCount}</span>` : ""}
         ${task.feedback.length ? `<span title="${escapeHtml(taskT(lang, "tasks.card.feedback"))}">💬 ${task.feedback.length}</span>` : ""}
+        ${assignedBy ? `<span class="task-assigned-pill" data-task-assigned-by="${escapeHtml(task.creatorId || task.creator)}">${escapeHtml(taskT(lang, "tasks.card.assignedBy", { name: task.creator }))}</span>` : ""}
         ${mentioned ? `<span class="task-mention-pill" data-task-mention="${escapeHtml(mentionMember.userId)}">${escapeHtml(taskT(lang, "tasks.card.mentioned"))}</span>` : ""}
         ${task.visibility === "department" ? `<span class="team-task-card__department">${escapeHtml(task.visibilityDepartment || taskT(lang, "tasks.card.department"))}</span>` : ""}
       </div>
@@ -37,6 +56,16 @@ function renderTaskCard(task, columnKey, state, mentionMember, helpers) {
     </div>
     ${renderTaskActionPopover({ task, open: actionOpen, state, helpers })}
   </article>`;
+}
+
+function renderTerminalGroup(kind, tasks, state, mentionMember, helpers) {
+  if (!tasks.length) return "";
+  const { escapeHtml, lang } = helpers;
+  const label = taskT(lang, `tasks.detail.status.${kind}`);
+  return `<details class="task-terminal-group task-terminal-group--${kind}" data-task-terminal-group="${kind}">
+    <summary>${escapeHtml(label)} <span>${tasks.length}</span></summary>
+    <div>${tasks.map((task) => renderTaskCard(task, task.priority, state, mentionMember, helpers)).join("")}</div>
+  </details>`;
 }
 
 function renderColumn(column, state, filterState, mentionMember, helpers) {
@@ -83,7 +112,14 @@ export function renderTaskBoardGrid({ state, filterState, helpers }) {
     members: state.members
   });
   const mentionMember = scopedMember ?? state.currentUser;
-  return columns.map((column) => renderColumn(column, state, filterState, mentionMember, helpers)).join("");
+  const columnsHtml = columns.map((column) => renderColumn(column, state, filterState, mentionMember, helpers)).join("");
+  if (filterState.status !== "inProgress") return columnsHtml;
+  const terminalSource = state.onlyMine
+    ? state.tasks.filter((task) => isTaskCreator(task, state.currentUser))
+    : state.tasks;
+  const terminal = terminalTasksForMember(mentionMember, terminalSource);
+  const terminalHtml = `${renderTerminalGroup("abandoned", terminal.abandoned, state, mentionMember, helpers)}${renderTerminalGroup("completed", terminal.completed, state, mentionMember, helpers)}`;
+  return terminalHtml ? `${columnsHtml}<section class="task-terminal-groups" data-task-terminal-groups>${terminalHtml}</section>` : columnsHtml;
 }
 
 export function renderTaskToolbar({ state, filterState, members, featureAiBatch, helpers }) {

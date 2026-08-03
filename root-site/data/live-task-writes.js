@@ -63,7 +63,7 @@ async function invalidateTaskReads(...tables) {
   }
 }
 
-export async function createLiveTask({ title, content, priority, due, requiresReview, assigneeIds, departmentId = null, files = [] }) {
+export async function createLiveTask({ title, content, priority, startDate = null, due, requiresReview, assigneeIds, departmentId = null, files = [] }) {
   const { client, currentUser } = await writeContext();
   const assigned = uniqueIds(assigneeIds);
   if (!assigned.length) throw new Error("Task requires an assignee");
@@ -77,7 +77,7 @@ export async function createLiveTask({ title, content, priority, due, requiresRe
       title,
       priority: taskPriority(priority),
       note: content || null,
-      start_date: null,
+      start_date: startDate || null,
       due_date: due || null,
       company_id: currentUser.activeCompanyId,
       department_id: departmentId || null
@@ -114,7 +114,7 @@ export async function createLiveTask({ title, content, priority, due, requiresRe
   }
 }
 
-export async function updateLiveTask(taskId, { title, content, priority, due, requiresReview, assigneeIds, departmentId = null, originalTitle, trackTitleEdit, attachments }) {
+export async function updateLiveTask(taskId, { title, content, priority, startDate = null, due, requiresReview, assigneeIds, departmentId = null, originalTitle, trackTitleEdit, attachments }) {
   const { client, currentUser } = await writeContext();
   const assigned = uniqueIds(assigneeIds);
   if (!assigned.length) throw new Error("Task requires an assignee");
@@ -122,6 +122,7 @@ export async function updateLiveTask(taskId, { title, content, priority, due, re
     title,
     note: content || null,
     priority: taskPriority(priority),
+    start_date: startDate || null,
     due_date: due || null,
     needs_approval: requiresReview === true,
     department_id: departmentId || null
@@ -273,10 +274,22 @@ export async function deleteLiveTask(taskId) {
   return result.data;
 }
 
-export async function completeLiveTask({ taskId, targetEmployeeId, wholeTask, needsApproval }) {
+export async function completeLiveTask({ taskId, targetEmployeeId, wholeTask, needsApproval, completed = true }) {
   const { client, currentUser } = await writeContext();
-  const completedAt = new Date().toISOString();
+  const completedAt = completed ? new Date().toISOString() : null;
   if (wholeTask) {
+    if (!completed) {
+      // Creator undo mirrors old Tasks.jsx: clear only the task terminal state.
+      // Keep every task_assignees completion row intact.
+      const taskResult = await client.from("employee_tasks")
+        .update({ status: "open", completed_at: null, approved_at: null, approved_by: null })
+        .eq("id", taskId)
+        .select("*")
+        .single();
+      throwIfError(taskResult.error);
+      await invalidateTaskReads("employee_tasks");
+      return { completedAt: null, wholeTask: true, taskDone: false };
+    }
     const assigneeResult = await client.from("task_assignees")
       .update({ completed_at: completedAt })
       .eq("task_id", taskId)
@@ -291,9 +304,12 @@ export async function completeLiveTask({ taskId, targetEmployeeId, wholeTask, ne
     const taskResult = await client.from("employee_tasks").update(patch).eq("id", taskId).select("*").single();
     throwIfError(taskResult.error);
     await invalidateTaskReads("employee_tasks", "task_assignees");
-    return { completedAt, wholeTask: true };
+    return { completedAt, wholeTask: true, taskDone: true };
   }
 
+  if (String(targetEmployeeId || "") !== String(currentUser.employeeId)) {
+    throw new Error("Assignees can only toggle their own task row");
+  }
   const assigneeResult = await client.from("task_assignees")
     .update({ completed_at: completedAt, abandoned_at: null })
     .eq("task_id", taskId)
@@ -303,7 +319,7 @@ export async function completeLiveTask({ taskId, targetEmployeeId, wholeTask, ne
   throwIfError(assigneeResult.error);
   const rowsResult = await client.from("task_assignees").select("completed_at,abandoned_at").eq("task_id", taskId);
   throwIfError(rowsResult.error);
-  const allDone = (rowsResult.data ?? []).length > 0 && (rowsResult.data ?? []).every((row) => row.completed_at != null);
+  const allDone = completed && (rowsResult.data ?? []).length > 0 && (rowsResult.data ?? []).every((row) => row.completed_at != null);
   if (allDone && !needsApproval) {
     const taskResult = await client.from("employee_tasks")
       .update({ status: "done", completed_at: completedAt })
@@ -311,9 +327,16 @@ export async function completeLiveTask({ taskId, targetEmployeeId, wholeTask, ne
       .select("id")
       .single();
     throwIfError(taskResult.error);
+  } else if (!completed) {
+    const taskResult = await client.from("employee_tasks")
+      .update({ status: "open", completed_at: null, approved_at: null, approved_by: null })
+      .eq("id", taskId)
+      .select("id")
+      .single();
+    throwIfError(taskResult.error);
   }
   await invalidateTaskReads("employee_tasks", "task_assignees");
-  return { completedAt, wholeTask: allDone && !needsApproval };
+  return { completedAt, wholeTask: false, taskDone: allDone && !needsApproval };
 }
 
 export async function approveLiveTask(taskId) {

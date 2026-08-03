@@ -136,6 +136,11 @@ export function renderTaskSubmitDialog({ state, data, helpers }) {
           ${renderMemberEditor({ state, data, departmentId, helpers })}
         </div>
         <label class="form-task-submit__field">
+          <span>${escapeHtml(tt("tasks.submit.startAt"))}</span>
+          <button type="button" class="date-panel-trigger" data-task-start-trigger aria-haspopup="dialog" aria-expanded="false"${busy}>${helpers.icon("icon-task-calendar", "icon")}<span class="date-panel-trigger__value">${escapeHtml(displayDateInput(draft.startDate) || tt("tasks.submit.selectStart"))}</span></button>
+          <input type="hidden" name="startDate" value="${escapeHtml(draft.startDate || "")}">
+        </label>
+        <label class="form-task-submit__field">
           <span>${escapeHtml(tt("tasks.submit.expectedAt"))}</span>
           <button type="button" class="date-panel-trigger" data-task-due-trigger aria-haspopup="dialog" aria-expanded="false"${busy}>${helpers.icon("icon-task-calendar", "icon")}<span class="date-panel-trigger__value">${escapeHtml(displayDateInput(draft.due) || tt("tasks.submit.selectDue"))}</span></button>
           <input type="hidden" name="due" value="${escapeHtml(draft.due)}">

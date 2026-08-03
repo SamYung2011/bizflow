@@ -427,6 +427,8 @@ async function buildTasksSnapshot() {
       completedAt: formatDateTime(task.completed_at) || null,
       creator: asText(employeeById.get(creatorId)?.name, "—"),
       creatorId: asText(creatorId),
+      titleEditedBy: asText(employeeById.get(task.title_edited_by)?.name) || null,
+      titleEditedAt: formatDateTime(task.title_edited_at) || null,
       parentId: task.parent_task_id ?? null,
       needsApproval: task.needs_approval === true,
       approvedAt: formatDateTime(task.approved_at) || null,

@@ -152,6 +152,25 @@ function renderApproval(task, state, helpers) {
   return `${pending}${approved}${actions}`;
 }
 
+function renderTaskMetadata(task, helpers) {
+  const { escapeHtml, lang } = helpers;
+  const tt = (key, values) => taskT(lang, key, values);
+  const rows = [
+    task.creator ? tt("tasks.detail.publishedBy", { name: task.creator }) : "",
+    task.createdAt ? tt("tasks.detail.createdAt", { time: task.createdAt }) : "",
+    task.status === "completed" && task.completedAt
+      ? `✓ ${tt("tasks.detail.completedAt", { time: task.completedAt })}`
+      : "",
+    task.status === "abandoned" && task.completedAt
+      ? `✗ ${tt("tasks.detail.abandonedAt", { time: task.completedAt })}`
+      : "",
+    task.titleEditedAt
+      ? tt("tasks.detail.titleEditedAt", { name: task.titleEditedBy || "?", time: task.titleEditedAt })
+      : ""
+  ].filter(Boolean);
+  return rows.length ? `<div class="task-detail__metadata">${rows.map((row) => `<span>${escapeHtml(row)}</span>`).join("")}</div>` : "";
+}
+
 function renderDetailContent(task, state, helpers) {
   const { escapeHtml, lang } = helpers;
   const tt = (key) => taskT(lang, key);
@@ -200,6 +219,7 @@ function renderDetailContent(task, state, helpers) {
     </div>` : ""}
     ${renderSubtasks(task, state, helpers)}
     ${renderApproval(task, state, helpers)}
+    ${renderTaskMetadata(task, helpers)}
   </section>`;
 }
 
@@ -223,7 +243,7 @@ function renderTaskFeedback(task, state, helpers) {
       : `<p class="team-kanban-empty">${escapeHtml(tt("tasks.detail.feedbackEmpty"))}</p>`}</div>
     <form class="task-detail__composer" data-task-feedback-form>
       <div class="task-detail__mention-editor" data-task-feedback-mention-editor>
-        <textarea name="message" aria-label="${escapeHtml(tt("tasks.detail.feedbackPlaceholder"))}" placeholder="${escapeHtml(tt("tasks.detail.feedbackPlaceholder"))}" aria-autocomplete="list" aria-controls="task-feedback-mention-menu" aria-expanded="${mentionMenu.open === true}"${disabled ? " disabled" : ""}>${escapeHtml(state.feedbackDraft.message)}</textarea>
+        <textarea name="message" data-task-feedback-message aria-label="${escapeHtml(tt("tasks.detail.feedbackPlaceholder"))}" placeholder="${escapeHtml(tt("tasks.detail.feedbackPlaceholder"))}" aria-autocomplete="list" aria-controls="task-feedback-mention-menu" aria-expanded="${mentionMenu.open === true}"${disabled ? " disabled" : ""}>${escapeHtml(state.feedbackDraft.message)}</textarea>
         <div id="task-feedback-mention-menu" class="task-detail__mention-popover" data-task-feedback-mention-menu role="listbox" aria-label="${escapeHtml(tt("tasks.detail.mentionCandidates"))}"${mentionMenu.open === true ? "" : " hidden"}>
           ${mentionCandidates.map((member) => {
             const visible = !mentionQuery || member.name.toLocaleLowerCase().includes(mentionQuery);
@@ -234,7 +254,7 @@ function renderTaskFeedback(task, state, helpers) {
       </div>
       <input type="file" data-task-feedback-file multiple hidden${disabled ? " disabled" : ""}>
       ${mentions.length ? `<div class="task-detail__mention-drafts">${mentions.map((mention) => `<span class="task-detail__mention-chip"><span>@${escapeHtml(mention.name)}</span><button type="button" data-task-feedback-mention-remove="${escapeHtml(mention.userId)}" aria-label="${escapeHtml(taskT(lang, "tasks.detail.removeMention", { name: mention.name }))}"${disabled ? " disabled" : ""}>×</button></span>`).join("")}</div>` : ""}
-      ${attachments.length ? `<div class="task-detail__attachment-drafts">${attachments.map((attachment, index) => `<span class="task-detail__attachment-chip"><span title="${escapeHtml(attachment.name)}">${escapeHtml(attachment.name)}</span><button type="button" data-task-feedback-attachment-remove="${index}" aria-label="${escapeHtml(`${tt("tasks.detail.removeAttachment")}: ${attachment.name}`)}"${disabled ? " disabled" : ""}>×</button></span>`).join("")}</div>` : ""}
+      ${attachments.length ? `<div class="task-detail__attachment-drafts">${attachments.map((attachment, index) => `<span class="task-detail__attachment-chip">${attachment.previewUrl ? `<img src="${escapeHtml(attachment.previewUrl)}" alt="${escapeHtml(attachment.name)}">` : ""}<span title="${escapeHtml(attachment.name)}">${escapeHtml(attachment.name)}</span><button type="button" data-task-feedback-attachment-remove="${index}" aria-label="${escapeHtml(`${tt("tasks.detail.removeAttachment")}: ${attachment.name}`)}"${disabled ? " disabled" : ""}>×</button></span>`).join("")}</div>` : ""}
       ${state.feedbackError ? `<p class="task-detail__feedback-error" role="alert">${escapeHtml(tt(state.feedbackError))}</p>` : ""}
       <footer>
         <button type="button" class="task-detail__attachment" data-task-feedback-attachment aria-label="${escapeHtml(tt("tasks.detail.addAttachment"))}"${disabled ? " disabled" : ""}>+ <span>${escapeHtml(tt("tasks.detail.attachments"))}</span></button>
