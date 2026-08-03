@@ -107,12 +107,13 @@ const chipHtml = renderTaskDetail({
 assert.match(chipHtml, /data-task-feedback-mention-remove="user-jack"/);
 assert.match(chipHtml, />@Jack<\/span>/);
 
-const [snapshotSource, providerSource, cacheSource, tasksSource, writesSource] = await Promise.all([
+const [snapshotSource, providerSource, cacheSource, tasksSource, writesSource, cssSource] = await Promise.all([
   readFile(new URL("../root-site/data/live-snapshots.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/provider.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/live-table-cache.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/team/tasks.js", import.meta.url), "utf8"),
-  readFile(new URL("../root-site/data/live-task-writes.js", import.meta.url), "utf8")
+  readFile(new URL("../root-site/data/live-task-writes.js", import.meta.url), "utf8"),
+  readFile(new URL("../root-site/team/tasks-domain.css", import.meta.url), "utf8")
 ]);
 assert.match(snapshotSource, /userId: asText\(employee\.user_id\)/, "members snapshot must carry the auth account id");
 assert.match(providerSource, /userId: member\.userId[\s\S]*?status: member\.status[\s\S]*?employmentActive: member\.status === "active"/,
@@ -127,6 +128,8 @@ assert.match(tasksSource, /id: `feedback-local-[\s\S]*?mentionedUserIds,/,
   "mock optimistic feedback must retain selected mention ids");
 assert.match(writesSource, /mentioned_user_ids: mentions\.length \? mentions : null/,
   "no mentions must continue to persist as null");
+assert.match(cssSource, /\.task-detail__composer\s+\.task-detail__mention-popover\s+button\[hidden\]\s*\{\s*display:\s*none;/,
+  "hidden mention candidates must beat the composer button display rule");
 
 for (const lang of ["zh", "en", "fr"]) {
   for (const key of ["tasks.detail.feedbackPlaceholder", "tasks.detail.mentionCandidates", "tasks.detail.mentionEmpty", "tasks.detail.removeMention"]) {

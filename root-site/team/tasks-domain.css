@@ -653,6 +653,10 @@
   text-align: left;
 }
 
+.task-detail__composer .task-detail__mention-popover button[hidden] {
+  display: none;
+}
+
 .task-detail__composer .task-detail__mention-popover button:hover,
 .task-detail__composer .task-detail__mention-popover button:focus-visible {
   color: var(--blue);
