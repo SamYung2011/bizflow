@@ -564,6 +564,7 @@ async function buildMembersSnapshot() {
     const mapTask = (task) => ({ id: task.id, title: asText(task.title), due: formatDate(task.due_date) });
     return {
       id: employee.id,
+      userId: asText(employee.user_id),
       name: asText(employee.name),
       email: asText(employee.email),
       phone: asText(employee.phone),

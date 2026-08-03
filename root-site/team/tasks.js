@@ -17,6 +17,7 @@ import { approveLiveTask, completeLiveTask, createLiveSubtask, createLiveTask, c
 import { createDateRangePanel } from "../components/date-range-panel.js";
 import { createTaskBoardColumnReadObserver, createTaskBoardReadTracker } from "./task-board-read-state.js";
 import { consumeNavigationPreset, navigationPresetKeys } from "../components/navigation-presets.js";
+import { closeTaskFeedbackMention, createTaskFeedbackDraft, removeTaskFeedbackMention, selectTaskFeedbackMention, taskFeedbackMentionCandidates, updateTaskFeedbackMentionInput } from "./tasks-mentions.js";
 
 let data = null;
 let currentUser = null;
@@ -96,7 +97,7 @@ function createTaskState(nextData, historyState = null) {
     submitCanAssignOthers: permissions.canAssignOthers,
     submitDraft: { ...nextData.form.defaults, memberIds: [], memberQuery: "", memberMenuOpen: false, attachments: [] },
     submitError: "",
-    feedbackDraft: { message: "", attachments: [] },
+    feedbackDraft: createTaskFeedbackDraft(),
     feedbackError: "",
     feedbackMenuId: null,
     feedbackEditingId: null,
@@ -239,7 +240,7 @@ function closeAllFilterMenus(except) {
   });
 }
 
-function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, focusFeedback = false, focusFeedbackMenuId = "", focusFeedbackEditId = "", focusSubmit = false, restoreSubmitFocus = false, focusFilterGroup = "", focusActionMenu = false, restoreActionTaskId = "", focusBoard = false, focusSubtaskId = "", focusSubtaskAdd = false, focusSubtaskEditId = "" } = {}) {
+function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, focusFeedback = false, feedbackCursor = null, focusFeedbackMenuId = "", focusFeedbackEditId = "", focusSubmit = false, restoreSubmitFocus = false, focusFilterGroup = "", focusActionMenu = false, restoreActionTaskId = "", focusBoard = false, focusSubtaskId = "", focusSubtaskAdd = false, focusSubtaskEditId = "" } = {}) {
   taskDueDatePanel.close({ restoreFocus: false });
   const page = document.querySelector(".team-task-page");
   if (!page || !currentHelpers) return;
@@ -248,7 +249,11 @@ function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, foc
   if (restoreDetailFocus && state.selectedTaskId) {
     document.querySelector(`[data-task-detail-open="${CSS.escape(state.selectedTaskId)}"]`)?.focus();
   }
-  if (focusFeedback) document.querySelector('[data-task-feedback-form] textarea[name="message"]')?.focus();
+  if (focusFeedback) {
+    const feedbackInput = document.querySelector('[data-task-feedback-form] textarea[name="message"]');
+    feedbackInput?.focus();
+    if (feedbackInput && Number.isInteger(feedbackCursor)) feedbackInput.setSelectionRange(feedbackCursor, feedbackCursor);
+  }
   if (focusFeedbackMenuId) document.querySelector(`[data-task-feedback-menu-open="${CSS.escape(focusFeedbackMenuId)}"]`)?.focus();
   if (focusFeedbackEditId) document.querySelector(`[data-task-feedback-edit-form="${CSS.escape(focusFeedbackEditId)}"] textarea`)?.focus();
   if (focusSubmit) document.querySelector('[data-task-submit-form] input[name="title"]')?.focus();
@@ -307,6 +312,56 @@ function closeFeedbackMenuInPlace({ restoreFocus = false } = {}) {
   const trigger = document.querySelector(`[data-task-feedback-menu-open="${CSS.escape(feedbackId)}"]`);
   trigger?.setAttribute("aria-expanded", "false");
   if (restoreFocus) trigger?.focus();
+}
+
+function syncFeedbackMentionMenuInPlace(input) {
+  const editor = input?.closest("[data-task-feedback-mention-editor]");
+  const menu = editor?.querySelector("[data-task-feedback-mention-menu]");
+  if (!menu) return;
+  const mentionMenu = state.feedbackDraft.mentionMenu;
+  if (!mentionMenu?.open) {
+    menu.hidden = true;
+    input.setAttribute("aria-expanded", "false");
+    return;
+  }
+  const query = String(mentionMenu.query || "").toLocaleLowerCase();
+  let visibleCount = 0;
+  menu.querySelectorAll("[data-task-feedback-mention-option]").forEach((option) => {
+    const visible = !query || String(option.getAttribute("data-task-feedback-mention-name") || "").toLocaleLowerCase().includes(query);
+    option.hidden = !visible;
+    if (visible) visibleCount += 1;
+  });
+  const empty = menu.querySelector("[data-task-feedback-mention-empty]");
+  if (empty) empty.hidden = visibleCount > 0;
+  menu.hidden = false;
+  input.setAttribute("aria-expanded", "true");
+}
+
+function closeFeedbackMentionMenuInPlace() {
+  if (!state.feedbackDraft.mentionMenu?.open) return;
+  state.feedbackDraft = closeTaskFeedbackMention(state.feedbackDraft);
+  const input = document.querySelector('[data-task-feedback-form] textarea[name="message"]');
+  const menu = document.querySelector("[data-task-feedback-mention-menu]");
+  if (menu) menu.hidden = true;
+  input?.setAttribute("aria-expanded", "false");
+}
+
+function chooseFeedbackMention(userId) {
+  if (state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites)) return false;
+  const member = taskFeedbackMentionCandidates(state.members, state.currentUser)
+    .find((candidate) => candidate.userId === userId);
+  const selection = selectTaskFeedbackMention(state.feedbackDraft, member);
+  if (!selection) return false;
+  state.feedbackDraft = selection.draft;
+  rerenderTaskPage({ focusFeedback: true, feedbackCursor: selection.cursor });
+  return true;
+}
+
+function onTaskMousedown(event) {
+  const mentionOption = event.target.closest("[data-task-feedback-mention-option]");
+  if (!mentionOption || event.button !== 0) return;
+  event.preventDefault();
+  chooseFeedbackMention(mentionOption.getAttribute("data-task-feedback-mention-option"));
 }
 
 function taskSubmitData() {
@@ -377,7 +432,7 @@ function closeTaskDetail() {
   state.detailOpen = false;
   state.detailTab = "content";
   state.attachmentPreview = null;
-  state.feedbackDraft = { message: "", attachments: [] };
+  state.feedbackDraft = createTaskFeedbackDraft();
   state.feedbackError = "";
   resetFeedbackActions();
   resetSubtaskDrafts();
@@ -389,7 +444,7 @@ function leaveTaskDetailForNavigation() {
   state.selectedTaskId = null;
   state.detailTab = "content";
   state.attachmentPreview = null;
-  state.feedbackDraft = { message: "", attachments: [] };
+  state.feedbackDraft = createTaskFeedbackDraft();
   state.feedbackError = "";
   resetFeedbackActions();
   resetSubtaskDrafts();
@@ -873,6 +928,9 @@ async function onTaskClick(event) {
   if (state.feedbackMenuId && !event.target.closest("[data-task-feedback-menu-wrap]")) {
     closeFeedbackMenuInPlace();
   }
+  if (state.feedbackDraft.mentionMenu?.open && !event.target.closest("[data-task-feedback-mention-editor]")) {
+    closeFeedbackMentionMenuInPlace();
+  }
 
   const columnExpand = event.target.closest("[data-task-column-expand]");
   if (columnExpand) {
@@ -1040,6 +1098,21 @@ async function onTaskClick(event) {
     return;
   }
 
+  const feedbackMentionOption = event.target.closest("[data-task-feedback-mention-option]");
+  if (feedbackMentionOption) {
+    chooseFeedbackMention(feedbackMentionOption.getAttribute("data-task-feedback-mention-option"));
+    return;
+  }
+
+  const feedbackMentionRemove = event.target.closest("[data-task-feedback-mention-remove]");
+  if (feedbackMentionRemove) {
+    if (feedbackMentionRemove.disabled || state.writeBusy) return;
+    const userId = feedbackMentionRemove.getAttribute("data-task-feedback-mention-remove");
+    state.feedbackDraft = removeTaskFeedbackMention(state.feedbackDraft, userId);
+    rerenderTaskPage({ focusFeedback: true });
+    return;
+  }
+
   const feedbackAttachmentRemove = event.target.closest("[data-task-feedback-attachment-remove]");
   if (feedbackAttachmentRemove) {
     if (feedbackAttachmentRemove.disabled || state.writeBusy) return;
@@ -1131,7 +1204,7 @@ async function onTaskClick(event) {
     state.detailOpen = true;
     state.detailTab = "content";
     state.attachmentPreview = null;
-    state.feedbackDraft = { message: "", attachments: [] };
+    state.feedbackDraft = createTaskFeedbackDraft();
     state.feedbackError = "";
     resetFeedbackActions();
     resetSubtaskDrafts();
@@ -1200,6 +1273,12 @@ async function onTaskClick(event) {
 
 function onTaskKeydown(event) {
   if (event.key !== "Escape") return;
+  if (state.feedbackDraft.mentionMenu?.open) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    closeFeedbackMentionMenuInPlace();
+    return;
+  }
   if (state.subtaskEditingId) {
     const subtaskId = state.subtaskEditingId;
     event.preventDefault();
@@ -1516,6 +1595,7 @@ async function onTaskSubmit(event) {
   if (state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites)) return;
   const message = String(state.feedbackDraft.message || "").trim();
   const attachments = state.feedbackDraft.attachments ?? [];
+  const mentionedUserIds = [...new Set((state.feedbackDraft.mentions ?? []).map((mention) => mention.userId).filter(Boolean))];
   const task = selectedTask();
   if ((!message && !attachments.length) || !task) return;
   state.feedbackError = "";
@@ -1528,7 +1608,7 @@ async function onTaskSubmit(event) {
         message,
         attachments,
         parentFeedbackId: null,
-        mentionedUserIds: []
+        mentionedUserIds
       });
       if (!isCurrentTaskMount(mountId, scope)) return;
       task.feedback.push({
@@ -1538,13 +1618,13 @@ async function onTaskSubmit(event) {
         timestamp: localTimestamp(),
         message: result.feedback.body || "",
         parentId: result.feedback.parent_feedback_id || null,
-        mentionedUserIds: result.feedback.mentioned_user_ids ?? [],
+        mentionedUserIds: result.feedback.mentioned_user_ids ?? mentionedUserIds,
         attachments: result.attachments.map((attachment) => ({ ...attachment })),
         attachmentCount: result.attachments.length,
         own: true
       });
       task.countBadge = String(task.feedback.length);
-      state.feedbackDraft = { message: "", attachments: [] };
+      state.feedbackDraft = createTaskFeedbackDraft();
     } catch (error) {
       if (!isCurrentTaskMount(mountId, scope)) return;
       console.warn("Task feedback save failed", error);
@@ -1556,14 +1636,17 @@ async function onTaskSubmit(event) {
     task.feedback.push({
       id: `feedback-local-${Date.now()}`,
       author: currentUser.name,
+      authorUserId: currentUser.userId || null,
       timestamp: localTimestamp(),
       message,
+      parentId: null,
+      mentionedUserIds,
       attachments: [],
       attachmentCount: attachments.length,
       own: true
     });
     task.countBadge = String(task.feedback.length);
-    state.feedbackDraft = { message: "", attachments: [] };
+    state.feedbackDraft = createTaskFeedbackDraft();
   }
   if (isCurrentTaskMount(mountId, scope)) rerenderTaskPage({ focusFeedback: true });
 }
@@ -1593,7 +1676,12 @@ function onTaskInput(event) {
   }
   const feedbackInput = event.target.closest('[data-task-feedback-form] textarea[name="message"]');
   if (feedbackInput) {
-    state.feedbackDraft.message = feedbackInput.value;
+    state.feedbackDraft = updateTaskFeedbackMentionInput(
+      state.feedbackDraft,
+      feedbackInput.value,
+      feedbackInput.selectionStart
+    );
+    syncFeedbackMentionMenuInPlace(feedbackInput);
     return;
   }
   const memberQuery = event.target.closest("[data-task-member-query]");
@@ -1661,6 +1749,16 @@ function onTaskChange(event) {
 }
 
 function onTaskFocus(event) {
+  const feedbackInput = event.target.closest('[data-task-feedback-form] textarea[name="message"]');
+  if (feedbackInput && !feedbackInput.disabled) {
+    state.feedbackDraft = updateTaskFeedbackMentionInput(
+      state.feedbackDraft,
+      feedbackInput.value,
+      feedbackInput.selectionStart
+    );
+    syncFeedbackMentionMenuInPlace(feedbackInput);
+    return;
+  }
   const memberQuery = event.target.closest("[data-task-member-query]");
   if (!memberQuery || memberQuery.disabled) return;
   state.submitDraft.memberMenuOpen = true;
@@ -1692,7 +1790,7 @@ function hasTaskSubmitUnsavedChanges() {
 
 function hasTaskUnsavedChanges() {
   return hasTaskSubmitUnsavedChanges()
-    || Boolean(state.feedbackDraft.message.trim() || state.feedbackDraft.attachments.length)
+    || Boolean(state.feedbackDraft.message.trim() || state.feedbackDraft.attachments.length || state.feedbackDraft.mentions?.length)
     || Boolean(state.feedbackEditingId && state.feedbackEditDraft !== state.feedbackEditOriginal)
     || Boolean(String(state.subtaskAddDraft.title || "").trim() || state.subtaskAddDraft.assigneeId)
     || Boolean(state.subtaskEditingId && state.subtaskEditDraft !== state.subtaskEditOriginal);
@@ -1734,7 +1832,7 @@ function applyRealtimeTaskData(nextData) {
     detailOpen: keepDetail,
     selectedTaskId: keepDetail ? selectedTaskId : null,
     detailTab: keepDetail ? currentState.detailTab : "content",
-    feedbackDraft: keepDetail ? currentState.feedbackDraft : { message: "", attachments: [] },
+    feedbackDraft: keepDetail ? currentState.feedbackDraft : createTaskFeedbackDraft(),
     feedbackError: keepDetail ? currentState.feedbackError : "",
     feedbackMenuId: keepDetail ? currentState.feedbackMenuId : null,
     feedbackEditingId: keepDetail ? currentState.feedbackEditingId : null,
@@ -1806,6 +1904,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
     },
     activate() {
       markRead("tasks", unreadWatermarks.tasks);
+      scope.listen(document, "mousedown", onTaskMousedown);
       scope.listen(document, "click", onTaskClick);
       scope.listen(document, "keydown", onTaskKeydown);
       scope.listen(document, "submit", onTaskSubmit);

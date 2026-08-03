@@ -1,5 +1,6 @@
 import { taskT } from "./tasks-i18n.js";
 import { canDeleteTaskForUser, canEditSubtaskTitle, canManageTaskSubtasks, isTaskCreator, isWaitingApproval, taskAssignee, taskSubtaskProgress } from "./tasks-model.js";
+import { taskFeedbackMentionCandidates } from "./tasks-mentions.js";
 
 function initials(name) {
   return String(name || "?").trim().slice(0, 1).toUpperCase();
@@ -206,6 +207,13 @@ function renderTaskFeedback(task, state, helpers) {
   const { escapeHtml, lang } = helpers;
   const tt = (key) => taskT(lang, key);
   const attachments = state.feedbackDraft.attachments ?? [];
+  const mentions = state.feedbackDraft.mentions ?? [];
+  const selectedUserIds = new Set(mentions.map((mention) => mention.userId));
+  const mentionCandidates = taskFeedbackMentionCandidates(state.members, state.currentUser)
+    .filter((member) => !selectedUserIds.has(member.userId));
+  const mentionMenu = state.feedbackDraft.mentionMenu ?? { open: false, query: "" };
+  const mentionQuery = String(mentionMenu.query || "").toLocaleLowerCase();
+  const visibleMentionCount = mentionCandidates.filter((member) => !mentionQuery || member.name.toLocaleLowerCase().includes(mentionQuery)).length;
   const writable = !state.liveReadOnly || state.liveTaskWrites;
   const disabled = !writable || state.writeBusy || Boolean(state.feedbackEditingId);
   return `<section class="task-detail__feedback" data-task-detail-panel="feedback" data-task-detail-sticky="feedback">
@@ -214,8 +222,18 @@ function renderTaskFeedback(task, state, helpers) {
       ? task.feedback.map((entry) => renderFeedbackEntry(entry, state, helpers)).join("")
       : `<p class="team-kanban-empty">${escapeHtml(tt("tasks.detail.feedbackEmpty"))}</p>`}</div>
     <form class="task-detail__composer" data-task-feedback-form>
-      <textarea name="message" aria-label="${escapeHtml(tt("tasks.detail.feedbackPlaceholder"))}" placeholder="${escapeHtml(tt("tasks.detail.feedbackPlaceholder"))}"${disabled ? " disabled" : ""}>${escapeHtml(state.feedbackDraft.message)}</textarea>
+      <div class="task-detail__mention-editor" data-task-feedback-mention-editor>
+        <textarea name="message" aria-label="${escapeHtml(tt("tasks.detail.feedbackPlaceholder"))}" placeholder="${escapeHtml(tt("tasks.detail.feedbackPlaceholder"))}" aria-autocomplete="list" aria-controls="task-feedback-mention-menu" aria-expanded="${mentionMenu.open === true}"${disabled ? " disabled" : ""}>${escapeHtml(state.feedbackDraft.message)}</textarea>
+        <div id="task-feedback-mention-menu" class="task-detail__mention-popover" data-task-feedback-mention-menu role="listbox" aria-label="${escapeHtml(tt("tasks.detail.mentionCandidates"))}"${mentionMenu.open === true ? "" : " hidden"}>
+          ${mentionCandidates.map((member) => {
+            const visible = !mentionQuery || member.name.toLocaleLowerCase().includes(mentionQuery);
+            return `<button type="button" role="option" aria-selected="false" data-task-feedback-mention-option="${escapeHtml(member.userId)}" data-task-feedback-mention-name="${escapeHtml(member.name)}"${visible ? "" : " hidden"}>${escapeHtml(member.name)}</button>`;
+          }).join("")}
+          <p data-task-feedback-mention-empty${visibleMentionCount ? " hidden" : ""}>${escapeHtml(tt("tasks.detail.mentionEmpty"))}</p>
+        </div>
+      </div>
       <input type="file" data-task-feedback-file multiple hidden${disabled ? " disabled" : ""}>
+      ${mentions.length ? `<div class="task-detail__mention-drafts">${mentions.map((mention) => `<span class="task-detail__mention-chip"><span>@${escapeHtml(mention.name)}</span><button type="button" data-task-feedback-mention-remove="${escapeHtml(mention.userId)}" aria-label="${escapeHtml(taskT(lang, "tasks.detail.removeMention", { name: mention.name }))}"${disabled ? " disabled" : ""}>×</button></span>`).join("")}</div>` : ""}
       ${attachments.length ? `<div class="task-detail__attachment-drafts">${attachments.map((attachment, index) => `<span class="task-detail__attachment-chip"><span title="${escapeHtml(attachment.name)}">${escapeHtml(attachment.name)}</span><button type="button" data-task-feedback-attachment-remove="${index}" aria-label="${escapeHtml(`${tt("tasks.detail.removeAttachment")}: ${attachment.name}`)}"${disabled ? " disabled" : ""}>×</button></span>`).join("")}</div>` : ""}
       ${state.feedbackError ? `<p class="task-detail__feedback-error" role="alert">${escapeHtml(tt(state.feedbackError))}</p>` : ""}
       <footer>

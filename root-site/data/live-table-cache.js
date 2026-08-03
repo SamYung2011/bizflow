@@ -9,10 +9,11 @@ const CACHE_DB_NAME = "tp-live-table-cache";
 const CACHE_DB_VERSION = 1;
 const CACHE_STORE_NAME = "rows";
 // Shape generations are deliberately local to affected snapshots. Customer
-// joins are embedded in these five payloads, so PILL-cache-1 rejects snapshots
-// that could have been rebuilt from stale pre-refresh customer rows.
+// joins are embedded in their affected payloads; members.json separately bumps
+// when its employee rows gain the auth user id required by task mentions.
 const SNAPSHOT_CONTRACT_GENERATIONS = new Map([
   ["home.json", 3],
+  ["members.json", 1],
   ["customers.json", 1],
   ["warranty.json", 2],
   ["orders.json", 1],

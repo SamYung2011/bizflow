@@ -498,11 +498,14 @@ export async function getTeamTaskData() {
         { name: "Honnmono", dept: "all", taskCount: statsOk ? ts.open : 0, active: true, badge: 0 },
         ...membersSnap.members.map((member) => ({
           id: member.id,
+          userId: member.userId,
           name: member.name,
           dept: "member",
           deptLabel: member.departments.join("、") || "—",
           taskCount: isNum(member.openTasks) ? member.openTasks : 0,
           badge: 0,
+          status: member.status,
+          employmentActive: member.status === "active",
           active: false
         }))
       ]
@@ -784,6 +787,7 @@ function loadMembersSnapshot() {
 
 function isR9Member(member) {
   return !!member && typeof member.id === "string" && typeof member.name === "string" &&
+    typeof member.userId === "string" &&
     typeof member.email === "string" && typeof member.phone === "string" && typeof member.position === "string" &&
     typeof member.roleName === "string" && ["active", "departed"].includes(member.status) &&
     Array.isArray(member.departments) && member.departments.every((name) => typeof name === "string") &&
