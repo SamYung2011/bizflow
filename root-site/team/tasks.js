@@ -19,6 +19,7 @@ import { createTaskBoardColumnReadObserver, createTaskBoardReadTracker } from ".
 import { consumeNavigationPreset, navigationPresetKeys } from "../components/navigation-presets.js";
 import { closeTaskFeedbackMention, createTaskFeedbackDraft, removeTaskFeedbackMention, selectTaskFeedbackMention, taskFeedbackMentionCandidates, updateTaskFeedbackMentionInput } from "./tasks-mentions.js";
 import { pastedTaskFeedbackImages, revokeTaskFeedbackAttachmentDrafts, taskFeedbackAttachmentDraft } from "./tasks-clipboard.js";
+import { buildTaskSubtaskEcho, createTaskSubmitSubtaskDraft, createTaskSubmitSubtasks, normalizeTaskSubmitSubtasks } from "./tasks-submit-subtasks.js";
 
 let data = null;
 let currentUser = null;
@@ -101,7 +102,7 @@ function createTaskState(nextData, historyState = null) {
     submitTaskId: null,
     submitOriginalDepartmentId: "",
     submitCanAssignOthers: permissions.canAssignOthers,
-    submitDraft: { ...nextData.form.defaults, memberIds: [], memberQuery: "", memberMenuOpen: false, attachments: [] },
+    submitDraft: { ...nextData.form.defaults, memberIds: [], memberQuery: "", memberMenuOpen: false, attachments: [], subtasks: [] },
     submitError: "",
     feedbackDraft: createTaskFeedbackDraft(),
     feedbackError: "",
@@ -117,6 +118,7 @@ function createTaskState(nextData, historyState = null) {
     attachmentPreview: null,
     writeBusy: false,
     writeError: "",
+    writeErrorValues: {},
     writeNotice: "",
     actionTaskId: null,
     boardUnreadTaskIds: new Set()
@@ -191,7 +193,7 @@ let currentHelpers = null;
 export function renderTaskManagement(helpers) {
   currentHelpers = helpers;
   const { icon, escapeHtml, lang } = helpers;
-  const tt = (key) => pageT(lang, key);
+  const tt = (key, values) => pageT(lang, key, values);
   const stats = [
     { title: tt("tasks.stat.total"), value: state.summary.total, tone: "" },
     { title: tt("tasks.stat.completed"), value: state.summary.completed, tone: "blue" },
@@ -219,7 +221,7 @@ export function renderTaskManagement(helpers) {
         : `<div class="team-kanban-grid">${renderTaskBoardGrid({ state, filterState, helpers })}</div>`;
   return `<div class="team-task-page${state.detailOpen ? " team-task-page--detail" : ""}" data-task-view="${escapeHtml(filterState.view)}" data-task-mode="${escapeHtml(state.mode)}" data-only-mine="${state.onlyMine}">
     <h1 class="team-task-title" title="${escapeHtml(tt("tasks.title"))}">${escapeHtml(tt("tasks.title"))}</h1>
-    ${state.writeError ? `<p class="team-task-write-error" role="alert">${escapeHtml(tt(state.writeError))}</p>` : ""}
+    ${state.writeError ? `<p class="team-task-write-error" role="alert">${escapeHtml(tt(state.writeError, state.writeErrorValues))}</p>` : ""}
     ${state.writeNotice ? `<p class="team-task-write-notice" role="status" aria-live="polite">${escapeHtml(tt(state.writeNotice))}</p>` : ""}
     <section class="team-task-stats">${stats.map((stat) => renderStatCard(stat, helpers)).join("")}</section>
     ${state.detailOpen ? "" : renderTaskToolbar({ state, filterState, members: state.members, featureAiBatch: data.featureAiBatch, helpers })}
@@ -246,7 +248,7 @@ function closeAllFilterMenus(except) {
   });
 }
 
-function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, focusFeedback = false, feedbackCursor = null, focusFeedbackMenuId = "", focusFeedbackEditId = "", focusSubmit = false, restoreSubmitFocus = false, focusFilterGroup = "", focusActionMenu = false, restoreActionTaskId = "", focusBoard = false, focusSubtaskId = "", focusSubtaskAdd = false, focusSubtaskEditId = "" } = {}) {
+function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, focusFeedback = false, feedbackCursor = null, focusFeedbackMenuId = "", focusFeedbackEditId = "", focusSubmit = false, focusSubmitSubtaskId = "", restoreSubmitFocus = false, focusFilterGroup = "", focusActionMenu = false, restoreActionTaskId = "", focusBoard = false, focusSubtaskId = "", focusSubtaskAdd = false, focusSubtaskEditId = "" } = {}) {
   taskDueDatePanel.close({ restoreFocus: false });
   taskStartDatePanel.close({ restoreFocus: false });
   const page = document.querySelector(".team-task-page");
@@ -264,6 +266,7 @@ function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, foc
   if (focusFeedbackMenuId) document.querySelector(`[data-task-feedback-menu-open="${CSS.escape(focusFeedbackMenuId)}"]`)?.focus();
   if (focusFeedbackEditId) document.querySelector(`[data-task-feedback-edit-form="${CSS.escape(focusFeedbackEditId)}"] textarea`)?.focus();
   if (focusSubmit) document.querySelector('[data-task-submit-form] input[name="title"]')?.focus();
+  if (focusSubmitSubtaskId) document.querySelector(`[data-task-submit-subtask-title="${CSS.escape(focusSubmitSubtaskId)}"]`)?.focus();
   if (restoreSubmitFocus) document.querySelector("[data-task-submit-open]")?.focus();
   if (focusFilterGroup) document.querySelector(`[data-filter-trigger][data-filter-group="${CSS.escape(focusFilterGroup)}"]`)?.focus();
   if (focusActionMenu) document.querySelector("[data-task-action-popover]")?.focus();
@@ -408,6 +411,8 @@ function reconcileTaskSubmitAssignees(departmentId) {
     .filter((id) => eligibleIds.has(id) && id !== ownerId);
   state.submitDraft.memberQuery = "";
   state.submitDraft.memberMenuOpen = false;
+  state.submitDraft.subtasks = (state.submitDraft.subtasks ?? []).map((subtask) =>
+    subtask.assigneeId && !eligibleIds.has(subtask.assigneeId) ? { ...subtask, assigneeId: "" } : subtask);
 }
 
 function focusTaskMemberQuery() {
@@ -476,6 +481,7 @@ function openTaskSubmit(priority = "") {
   state.submitCanAssignOthers = state.permissions.canAssignOthers;
   state.submitError = "";
   state.writeError = "";
+  state.writeErrorValues = {};
   state.writeNotice = "";
   state.submitDraft = {
     ...data.form.defaults,
@@ -485,6 +491,7 @@ function openTaskSubmit(priority = "") {
     memberQuery: "",
     memberMenuOpen: false,
     attachments: [],
+    subtasks: [],
     content: data.form.defaults.content ?? (data.form.defaults.contentKey ? pageT(currentHelpers.lang, data.form.defaults.contentKey) : "")
   };
   rerenderTaskPage({ focusSubmit: true });
@@ -513,6 +520,7 @@ function openTaskCopy(taskId) {
   state.submitCanAssignOthers = state.permissions.canAssignOthers;
   state.submitError = "";
   state.writeError = "";
+  state.writeErrorValues = {};
   state.writeNotice = "";
   state.submitDraft = {
     ...data.form.defaults,
@@ -526,7 +534,8 @@ function openTaskCopy(taskId) {
     memberQuery: "",
     memberMenuOpen: false,
     startDate: String(task.startDate || "").replaceAll("/", "-"),
-    attachments: []
+    attachments: [],
+    subtasks: []
   };
   rerenderTaskPage({ focusSubmit: true });
 }
@@ -544,6 +553,7 @@ function openTaskEdit(taskId) {
     state.currentUser.isAdminOfActive || state.permissions.canAssignOthers;
   state.submitError = "";
   state.writeError = "";
+  state.writeErrorValues = {};
   state.writeNotice = "";
   state.submitDraft = {
     title: task.title,
@@ -610,6 +620,25 @@ function adjustOpenTaskCounts(task, delta) {
       member.taskCount = Math.max(0, member.taskCount + delta);
     }
   });
+}
+
+function appendTaskSubmitSubtaskEcho(parent, createdEntry, index) {
+  const member = state.members.find((candidate) => candidate.id === createdEntry.subtask.assigneeId);
+  if (!member) throw new Error(`Created subtask assignee is unavailable: ${createdEntry.subtask.assigneeId}`);
+  const subtask = buildTaskSubtaskEcho({
+    parent,
+    subtask: createdEntry.subtask,
+    member,
+    result: createdEntry.result,
+    localId: `local-subtask-${parent.id}-${Date.now()}-${index}`,
+    timestamp: localTimestamp()
+  });
+  parent.subtasks.push(subtask);
+  state.tasks.push(subtask);
+  state.summary.total += 1;
+  state.summary.inProgress += 1;
+  adjustOpenTaskCounts(subtask, 1);
+  return subtask;
 }
 
 function decrementOpenTaskCounts(task) {
@@ -1123,6 +1152,24 @@ async function onTaskClick(event) {
     return;
   }
 
+  if (event.target.closest("[data-task-submit-subtask-add]")) {
+    if (state.submitMode === "edit" || state.writeBusy) return;
+    const subtask = createTaskSubmitSubtaskDraft();
+    state.submitDraft.subtasks = [...(state.submitDraft.subtasks ?? []), subtask];
+    rerenderTaskPage({ focusSubmitSubtaskId: subtask.id });
+    return;
+  }
+
+  const submitSubtaskRemove = event.target.closest("[data-task-submit-subtask-remove]");
+  if (submitSubtaskRemove) {
+    if (state.submitMode === "edit" || submitSubtaskRemove.disabled || state.writeBusy) return;
+    const subtaskId = submitSubtaskRemove.getAttribute("data-task-submit-subtask-remove");
+    state.submitDraft.subtasks = (state.submitDraft.subtasks ?? []).filter((subtask) => subtask.id !== subtaskId);
+    rerenderTaskPage();
+    activeScope?.animationFrame(() => document.querySelector("[data-task-submit-subtask-add]")?.focus());
+    return;
+  }
+
   const submitAttachmentRemove = event.target.closest("[data-task-submit-attachment-remove]");
   if (submitAttachmentRemove) {
     if (submitAttachmentRemove.disabled || state.writeBusy) return;
@@ -1498,6 +1545,15 @@ async function onTaskSubmit(event) {
     const due = String(values.get("due") || "");
     const requiresReview = values.get("requiresReview") === "yes";
     const assignedMembers = assignedRows.map((member) => member.name);
+    const subtaskEligibleMembers = state.submitCanAssignOthers
+      ? eligibleMembers
+      : eligibleMembers.filter((member) => member.id === state.currentUser.id);
+    const submitSubtasks = state.submitMode === "create"
+      ? normalizeTaskSubmitSubtasks(state.submitDraft.subtasks, {
+        parentAssigneeId: assignedRows[0]?.id,
+        eligibleMembers: subtaskEligibleMembers
+      })
+      : [];
     if (!due) {
       state.submitError = "tasks.submit.dueRequired";
       rerenderTaskPage({ focusSubmit: true });
@@ -1507,6 +1563,7 @@ async function onTaskSubmit(event) {
       state.writeBusy = true;
       state.submitError = "";
       state.writeError = "";
+      state.writeErrorValues = {};
       state.writeNotice = "";
       rerenderTaskPage();
       try {
@@ -1571,10 +1628,11 @@ async function onTaskSubmit(event) {
             files: state.submitDraft.attachments.map((attachment) => attachment.file).filter(Boolean)
           });
           if (!isCurrentTaskMount(mountId, scope)) return;
+          let newTask = null;
           try {
             const column = state.board.find((item) => item.key === priority) ?? state.board[0];
             const attachments = Array.isArray(result.attachments) ? result.attachments : [];
-            const newTask = {
+            newTask = {
               id: result.task.id,
               title,
               content,
@@ -1613,13 +1671,32 @@ async function onTaskSubmit(event) {
             // A committed create must never look failed: otherwise a retry creates a duplicate task.
             console.error("Task create persisted but local echo failed", echoError);
           }
+          const subtaskOutcome = await createTaskSubmitSubtasks({
+            parentTaskId: result.task.id,
+            subtasks: submitSubtasks,
+            createSubtask: createLiveSubtask
+          });
+          if (!isCurrentTaskMount(mountId, scope)) return;
+          if (newTask) {
+            subtaskOutcome.created.forEach((createdEntry, index) => {
+              try {
+                appendTaskSubmitSubtaskEcho(newTask, createdEntry, index);
+              } catch (echoError) {
+                console.error("Subtask create persisted but local echo failed", echoError);
+              }
+            });
+          }
+          if (subtaskOutcome.failure) {
+            console.warn(`Subtask create failed: ${subtaskOutcome.failure.subtask.title}`, subtaskOutcome.failure.error);
+            state.writeError = "tasks.write.subtaskCreatePartial";
+            state.writeErrorValues = { title: subtaskOutcome.failure.subtask.title };
+          }
           state.writeNotice = "tasks.write.created";
         }
         state.submitOpen = false;
         state.submitTaskId = null;
         state.submitOriginalDepartmentId = "";
         state.submitError = "";
-        state.writeError = "";
       } catch (error) {
         if (!isCurrentTaskMount(mountId, scope)) return;
         console.warn("Task save failed", error);
@@ -1671,6 +1748,12 @@ async function onTaskSubmit(event) {
     state.summary.total += 1;
     state.summary.inProgress += 1;
     adjustOpenTaskCounts(newTask, 1);
+    const mockSubtaskOutcome = await createTaskSubmitSubtasks({
+      parentTaskId: newTask.id,
+      subtasks: submitSubtasks,
+      createSubtask: async ({ title }) => ({ task: { title } })
+    });
+    mockSubtaskOutcome.created.forEach((createdEntry, index) => appendTaskSubmitSubtaskEcho(newTask, createdEntry, index));
     closeTaskSubmit();
     return;
   }
@@ -1786,6 +1869,13 @@ function onTaskInput(event) {
     filterTaskMemberCandidatesInPlace(memberQuery);
     return;
   }
+  const submitSubtaskTitle = event.target.closest("[data-task-submit-subtask-title]");
+  if (submitSubtaskTitle) {
+    const subtaskId = submitSubtaskTitle.getAttribute("data-task-submit-subtask-title");
+    const subtask = (state.submitDraft.subtasks ?? []).find((item) => item.id === subtaskId);
+    if (subtask) subtask.title = submitSubtaskTitle.value;
+    return;
+  }
   const form = event.target.closest("[data-task-submit-form]");
   if (form) syncTaskSubmitDraft(form);
 }
@@ -1813,6 +1903,13 @@ function onTaskChange(event) {
     state.submitDraft.attachments = [...(state.submitDraft.attachments ?? []), ...nextFiles];
     rerenderTaskPage();
     document.querySelector("[data-task-submit-attachment]")?.focus();
+    return;
+  }
+  const submitSubtaskAssignee = event.target.closest("[data-task-submit-subtask-assignee]");
+  if (submitSubtaskAssignee) {
+    const subtaskId = submitSubtaskAssignee.getAttribute("data-task-submit-subtask-assignee");
+    const subtask = (state.submitDraft.subtasks ?? []).find((item) => item.id === subtaskId);
+    if (subtask) subtask.assigneeId = submitSubtaskAssignee.value;
     return;
   }
   const form = event.target.closest("[data-task-submit-form]");
@@ -1865,7 +1962,8 @@ function hasTaskSubmitUnsavedChanges() {
   if (!state.submitOpen) return false;
   const draft = state.submitDraft;
   if (state.submitMode !== "edit") {
-    return Boolean(String(draft.title || "").trim() || String(draft.content || "").trim() || draft.attachments?.length);
+    return Boolean(String(draft.title || "").trim() || String(draft.content || "").trim() ||
+      draft.attachments?.length || draft.subtasks?.length);
   }
   const task = state.tasks.find((item) => item.id === state.submitTaskId);
   if (!task) return true;
@@ -1944,6 +2042,7 @@ function applyRealtimeTaskData(nextData) {
     subtaskEditOriginal: keepDetail ? currentState.subtaskEditOriginal : "",
     attachmentPreview: keepDetail ? currentState.attachmentPreview : null,
     writeError: currentState.writeError,
+    writeErrorValues: currentState.writeErrorValues,
     writeNotice: currentState.writeNotice,
     actionTaskId: nextTaskIds.has(actionTaskId) ? actionTaskId : null,
     boardUnreadTaskIds: currentState.boardUnreadTaskIds

@@ -3,6 +3,7 @@ import { canEditSubtaskTitle, canManageTaskSubtasks, isTaskCreator, isWaitingApp
 import { setSessionValue } from "../data/session-state.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
+import { buildTaskSubtaskEcho } from "./tasks-submit-subtasks.js";
 
 export function attachTaskDomainController({
   state,
@@ -293,34 +294,14 @@ export function attachTaskDomainController({
       rerender({ focusSubtaskAdd: true });
       return;
     }
-    const subtask = {
-      id: created?.task?.id || `local-subtask-${Date.now()}`,
-      title: String(created?.task?.title || title),
-      content: "",
-      owner: member.name,
-      members: [member.name],
-      priority: "low",
-      dbPriority: "none",
-      status: "inProgress",
-      done: false,
-      due: "",
-      startDate: "",
-      createdAt: localTimestamp(),
-      completedAt: "",
-      creator: parent.creator,
-      creatorId: parent.creatorId,
-      parentId: parent.id,
-      visibility: parent.visibility,
-      visibilityDepartment: parent.visibilityDepartment,
-      requiresReview: parent.requiresReview,
-      approvedAt: "",
-      approvedBy: "",
-      attachmentCount: 0,
-      countBadge: "",
-      assignees: [{ employeeId: member.id, name: member.name, completedAt: null, abandonedAt: null }],
-      feedback: [],
-      subtasks: []
-    };
+    const subtask = buildTaskSubtaskEcho({
+      parent,
+      subtask: { title },
+      member,
+      result: created,
+      localId: `local-subtask-${Date.now()}`,
+      timestamp: localTimestamp()
+    });
     parent.subtasks.push(subtask);
     state.tasks.push(subtask);
     state.summary.total += 1;

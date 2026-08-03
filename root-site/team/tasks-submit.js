@@ -70,6 +70,33 @@ function renderMemberEditor({ state, data, departmentId, helpers }) {
   </div>`;
 }
 
+function renderSubmitSubtasks({ state, owners, helpers }) {
+  if (state.submitMode === "edit") return "";
+  const { escapeHtml, lang } = helpers;
+  const tt = (key, values) => taskT(lang, key, values);
+  const items = Array.isArray(state.submitDraft.subtasks) ? state.submitDraft.subtasks : [];
+  const parentOwner = owners.find((member) => member.name === state.submitDraft.owner) ?? owners[0] ?? null;
+  const controlsDisabled = state.writeBusy;
+  const assigneeDisabled = controlsDisabled || !state.submitCanAssignOthers;
+  const rows = items.map((item, index) => {
+    const selectedAssigneeId = owners.some((member) => member.id === item.assigneeId) ? item.assigneeId : "";
+    const inheritedLabel = tt("tasks.submit.subtaskInherit", { name: parentOwner?.name || "—" });
+    return `<div class="form-task-submit__subtask-row" data-task-submit-subtask-row="${escapeHtml(item.id)}">
+      <span class="form-task-submit__subtask-index">${index + 1}</span>
+      <input type="text" data-task-submit-subtask-title="${escapeHtml(item.id)}" value="${escapeHtml(item.title || "")}" placeholder="${escapeHtml(tt("tasks.submit.subtaskTitle"))}" aria-label="${escapeHtml(tt("tasks.submit.subtaskTitle"))}"${controlsDisabled ? " disabled" : ""}>
+      <select data-task-submit-subtask-assignee="${escapeHtml(item.id)}" aria-label="${escapeHtml(tt("tasks.submit.subtaskAssignee"))}"${assigneeDisabled ? " disabled" : ""}>
+        <option value=""${selectedAssigneeId ? "" : " selected"}>${escapeHtml(inheritedLabel)}</option>
+        ${owners.map((member) => `<option value="${escapeHtml(member.id)}"${member.id === selectedAssigneeId ? " selected" : ""}>${escapeHtml(member.name)}</option>`).join("")}
+      </select>
+      <button type="button" class="form-task-submit__subtask-remove" data-task-submit-subtask-remove="${escapeHtml(item.id)}" aria-label="${escapeHtml(tt("tasks.submit.removeSubtask", { number: index + 1 }))}"${controlsDisabled ? " disabled" : ""}>×</button>
+    </div>`;
+  }).join("");
+  return `<section class="form-task-submit__subtasks" data-task-submit-subtasks>
+    <header><span>${escapeHtml(tt("tasks.submit.subtasks"))}${items.length ? `<small>${items.length}</small>` : ""}</span><button type="button" data-task-submit-subtask-add${controlsDisabled ? " disabled" : ""}>+ ${escapeHtml(tt("tasks.submit.addSubtask"))}</button></header>
+    ${rows ? `<div class="form-task-submit__subtask-list">${rows}</div>` : ""}
+  </section>`;
+}
+
 function renderSegment({ name, values, selected, disabled, helpers }) {
   const { escapeHtml, lang } = helpers;
   return `<div class="form-task-submit__segment">${values.map(({ value, key }) => `<label class="${value === selected ? "form-task-submit__segment--active" : ""}">
@@ -81,7 +108,7 @@ function renderSegment({ name, values, selected, disabled, helpers }) {
 export function renderTaskSubmitDialog({ state, data, helpers }) {
   if (!state.submitOpen) return "";
   const { escapeHtml, lang } = helpers;
-  const tt = (key) => taskT(lang, key);
+  const tt = (key, values) => taskT(lang, key, values);
   const draft = state.submitDraft;
   const attachments = draft.attachments ?? [];
   const departmentId = String(draft.departmentId || "");
@@ -145,13 +172,14 @@ export function renderTaskSubmitDialog({ state, data, helpers }) {
           <button type="button" class="date-panel-trigger" data-task-due-trigger aria-haspopup="dialog" aria-expanded="false"${busy}>${helpers.icon("icon-task-calendar", "icon")}<span class="date-panel-trigger__value">${escapeHtml(displayDateInput(draft.due) || tt("tasks.submit.selectDue"))}</span></button>
           <input type="hidden" name="due" value="${escapeHtml(draft.due)}">
         </label>
+        ${renderSubmitSubtasks({ state, owners, helpers })}
         <div class="form-task-submit__field">
           <span>${escapeHtml(tt("tasks.submit.attachments"))}</span>
           <input type="file" data-task-submit-file multiple hidden${busy}>
           ${attachments.length ? `<div class="form-task-submit__attachment-list" data-task-submit-attachment-list>${attachments.map((file, index) => `<span class="form-task-submit__attachment-chip"><span title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span><button type="button" data-task-submit-attachment-remove="${index}" aria-label="${escapeHtml(`${tt("tasks.submit.removeAttachment")}: ${file.name}`)}"${!writable || state.writeBusy ? " disabled" : ""}>×</button></span>`).join("")}</div>` : ""}
           <button type="button" class="form-task-submit__attachment" data-task-submit-attachment aria-label="${escapeHtml(tt("tasks.submit.addAttachment"))}"${!writable || state.writeBusy ? " disabled" : ""}>+ <span>${escapeHtml(tt("tasks.submit.attachments"))}</span></button>
         </div>
-        ${state.submitError ? `<p class="form-task-submit__error" role="alert">${escapeHtml(tt(state.submitError))}</p>` : ""}
+        ${state.submitError ? `<p class="form-task-submit__error" role="alert">${escapeHtml(tt(state.submitError, state.submitErrorValues))}</p>` : ""}
       </div>
       <footer class="form-task-submit__footer">
         <button type="button" class="form-task-submit__button form-task-submit__button--cancel" data-task-submit-close${busy}>${escapeHtml(tt("tasks.submit.cancel"))}</button>

@@ -1730,6 +1730,118 @@
   padding: var(--space-10);
 }
 
+.form-task-submit__subtasks {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-10);
+  padding-top: var(--space-10);
+  border-top: var(--task-submit-border-width) dashed var(--gray-15);
+}
+
+.form-task-submit__subtasks > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-10);
+  color: var(--gray-80);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-description-weight);
+}
+
+.form-task-submit__subtasks > header span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.form-task-submit__subtasks > header small {
+  display: inline-flex;
+  min-width: var(--space-20);
+  height: var(--space-20);
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-20);
+  background: var(--gray-10);
+  color: var(--gray-60);
+  font-size: var(--font-description-size);
+}
+
+.form-task-submit__subtasks > header button {
+  min-height: var(--space-30);
+  padding: 0 var(--space-10);
+  border: var(--task-submit-border-width) dashed var(--team-add-border);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  color: var(--blue);
+  font: inherit;
+  cursor: pointer;
+}
+
+.form-task-submit__subtask-list {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-10);
+}
+
+.form-task-submit__subtask-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: var(--space-20) minmax(0, 3fr) minmax(0, 2fr) var(--space-30);
+  align-items: center;
+  gap: var(--space-10);
+  padding: var(--space-10);
+  border: var(--task-submit-border-width) solid var(--gray-10);
+  border-radius: var(--radius-10);
+  background: var(--gray-5);
+}
+
+.form-task-submit__subtask-index {
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+  text-align: center;
+}
+
+.form-task-submit__subtask-row input,
+.form-task-submit__subtask-row select {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--task-submit-control-height);
+  padding: 0 var(--space-10);
+  border: var(--task-submit-border-width) solid transparent;
+  border-radius: var(--radius-10);
+  outline: 0;
+  background: var(--white);
+  color: var(--gray-60);
+  font: inherit;
+}
+
+.form-task-submit__subtask-row input:focus,
+.form-task-submit__subtask-row select:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 var(--task-submit-close-stroke) color-mix(in srgb, var(--blue) 12%, transparent);
+}
+
+.form-task-submit__subtask-remove {
+  width: var(--space-30);
+  height: var(--space-30);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-40);
+  background: transparent;
+  color: var(--gray-40);
+  font-size: var(--font-title-2-size);
+  cursor: pointer;
+}
+
+.form-task-submit__subtasks button:disabled,
+.form-task-submit__subtask-row select:disabled,
+.form-task-submit__subtask-row input:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
 .form-task-submit__segment {
   display: grid;
   grid-auto-columns: minmax(0, 1fr);
@@ -1891,6 +2003,14 @@
 @media (max-width: 768px) {
   .shell-app {
     min-width: 0;
+  }
+
+  .form-task-submit__subtask-row {
+    grid-template-columns: var(--space-20) minmax(0, 1fr) var(--space-30);
+  }
+
+  .form-task-submit__subtask-row select {
+    grid-column: 2 / 3;
   }
 
   .team-task-page {
