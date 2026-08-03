@@ -195,6 +195,18 @@
   white-space: nowrap;
 }
 
+.expense-payment-cell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+.expense-payment-cell small {
+  color: var(--gray-40);
+  white-space: nowrap;
+}
+
 .expense-status--pending {
   color: var(--yellow);
   background: color-mix(in srgb, var(--yellow) 12%, var(--white));
@@ -461,11 +473,45 @@
   margin-top: var(--space-10);
 }
 
+.expense-upload__progress {
+  margin: var(--space-10) 0 0;
+  color: var(--blue);
+  font-size: var(--font-description-size);
+}
+
+.expense-upload__statuses {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: var(--space-10) 0 0;
+  padding: 0;
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+  list-style: none;
+}
+
+.expense-upload__statuses li[data-expense-upload-result="uploaded"] {
+  color: var(--green);
+}
+
+.expense-upload__statuses li[data-expense-upload-result="failed"] {
+  color: var(--red);
+}
+
 .expense-preview-list figure {
   position: relative;
   width: var(--expense-receipt-size);
   height: var(--expense-receipt-size);
   margin: 0;
+}
+
+.expense-preview-list figure[data-expense-receipt-status="uploading"],
+.expense-preview-list figure[data-expense-receipt-status="queued"] {
+  opacity: .6;
+}
+
+.expense-preview-list figure[data-expense-receipt-status="failed"] img {
+  outline: var(--expense-border-width) solid var(--red);
 }
 
 .expense-preview-list img {

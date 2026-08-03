@@ -14,14 +14,18 @@ import {
 import {
   approveLiveExpense,
   createLiveExpense,
+  deleteLiveExpenseReceiptUploads,
   deleteLiveExpense,
   markLiveExpensePaid,
-  rejectLiveExpense
+  rejectLiveExpense,
+  updateLiveExpense,
+  uploadLiveExpenseReceipt
 } from "../data/live-expense-writes.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { createDateRangePanel } from "../components/date-range-panel.js";
 import { displayDateInput } from "../components/date-value.js";
+import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
 
 const copy = {
   zh: {
@@ -52,10 +56,13 @@ const copy = {
     approve: "通過",
     reject: "拒絕",
     markPaid: "標記已打款",
+    paidOn: "打款日 {date}",
+    edit: "編輯",
     remove: "刪除",
     deleteConfirm: "確認刪除這筆報銷？",
     rejectReason: "拒絕理由（選填）",
     modalTitle: "新增報銷",
+    editModalTitle: "編輯報銷",
     currency: "幣種",
     categoryFood: "餐飲",
     categoryTransport: "交通",
@@ -66,10 +73,17 @@ const copy = {
     descriptionPlaceholder: "選填，描述用途",
     receiptHint: "選擇收據圖片",
     receiptLocal: "僅本地預覽，不會上傳",
-    receiptUpload: "提交後上傳到報銷收據庫",
+    receiptUpload: "選檔後立即上傳到報銷收據庫",
+    receiptProgress: "上傳進度 {done}/{total}",
+    receiptStatusUploading: "{name} · 上傳中",
+    receiptStatusUploaded: "{name} · 已上傳",
+    receiptStatusFailed: "{name} · 上傳失敗",
+    receiptCleanupFailed: "清理本次新上傳收據失敗，請稍後重試",
+    saveFailedRolledBack: "保存失敗，本次新上傳收據已回滾，請重選後重試",
     removeReceipt: "移除收據",
     cancel: "取消",
     submit: "提交",
+    save: "保存",
     close: "關閉",
     dateRequired: "請選擇日期",
     amountRequired: "金額必須大於 0",
@@ -115,10 +129,13 @@ const copy = {
     approve: "Approve",
     reject: "Reject",
     markPaid: "Mark paid",
+    paidOn: "Paid on {date}",
+    edit: "Edit",
     remove: "Delete",
     deleteConfirm: "Delete this reimbursement?",
     rejectReason: "Rejection reason (optional)",
     modalTitle: "Add reimbursement",
+    editModalTitle: "Edit reimbursement",
     currency: "Currency",
     categoryFood: "Meals",
     categoryTransport: "Transport",
@@ -129,10 +146,17 @@ const copy = {
     descriptionPlaceholder: "Optional purpose description",
     receiptHint: "Choose receipt images",
     receiptLocal: "Local preview only. Nothing is uploaded.",
-    receiptUpload: "Uploaded to the receipt store on submit.",
+    receiptUpload: "Uploaded to the receipt store immediately after selection.",
+    receiptProgress: "Upload progress {done}/{total}",
+    receiptStatusUploading: "{name} · Uploading",
+    receiptStatusUploaded: "{name} · Uploaded",
+    receiptStatusFailed: "{name} · Upload failed",
+    receiptCleanupFailed: "Could not remove the newly uploaded receipts. Please try again.",
+    saveFailedRolledBack: "Save failed. Newly uploaded receipts were removed; select them again and retry.",
     removeReceipt: "Remove receipt",
     cancel: "Cancel",
     submit: "Submit",
+    save: "Save",
     close: "Close",
     dateRequired: "Select a date",
     amountRequired: "Amount must be greater than 0",
@@ -178,10 +202,13 @@ const copy = {
     approve: "Approuver",
     reject: "Refuser",
     markPaid: "Marquer payé",
+    paidOn: "Payé le {date}",
+    edit: "Modifier",
     remove: "Supprimer",
     deleteConfirm: "Supprimer ce remboursement ?",
     rejectReason: "Motif du refus (facultatif)",
     modalTitle: "Ajouter un remboursement",
+    editModalTitle: "Modifier le remboursement",
     currency: "Devise",
     categoryFood: "Repas",
     categoryTransport: "Transport",
@@ -192,10 +219,17 @@ const copy = {
     descriptionPlaceholder: "Description facultative de l'usage",
     receiptHint: "Choisir des images de reçus",
     receiptLocal: "Aperçu local uniquement. Aucun envoi.",
-    receiptUpload: "Envoyé au stockage des reçus lors de la soumission.",
+    receiptUpload: "Envoyé au stockage des reçus dès la sélection.",
+    receiptProgress: "Progression de l’envoi {done}/{total}",
+    receiptStatusUploading: "{name} · Envoi en cours",
+    receiptStatusUploaded: "{name} · Envoyé",
+    receiptStatusFailed: "{name} · Échec de l’envoi",
+    receiptCleanupFailed: "Impossible de supprimer les nouveaux reçus envoyés. Réessayez.",
+    saveFailedRolledBack: "Échec de l’enregistrement. Les nouveaux reçus ont été supprimés ; sélectionnez-les de nouveau.",
     removeReceipt: "Retirer le reçu",
     cancel: "Annuler",
     submit: "Envoyer",
+    save: "Enregistrer",
     close: "Fermer",
     dateRequired: "Sélectionnez une date",
     amountRequired: "Le montant doit être supérieur à 0",
@@ -223,6 +257,8 @@ let isAdmin = true;
 let liveReadOnly = false;
 let ownerKey = "";
 const currencySymbols = { RMB: "¥", HKD: "HK$", USD: "US$" };
+const EXPENSE_LIVE_SNAPSHOTS = ["expense.json"];
+const EXPENSE_LIVE_TABLES = ["expense_reimbursements"];
 
 let state = {
   rows: [],
@@ -230,12 +266,15 @@ let state = {
   draft: null,
   error: "",
   actionError: "",
-  writeBusy: false
+  writeBusy: false,
+  uploadBusy: false,
+  uploadProgress: null
 };
 
 let currentHelpers = null;
 let activeScope = null;
 let activeMountId = 0;
+let expenseLiveRefresh = null;
 const expenseDatePanel = createDateRangePanel();
 
 function isCurrentExpenseMount(mountId, scope = activeScope) {
@@ -259,7 +298,49 @@ function todayInHongKong() {
 }
 
 function blankDraft() {
-  return { date: todayInHongKong(), currency: "RMB", amount: "", category: "Food", description: "", receipts: [] };
+  return {
+    editingId: "",
+    date: todayInHongKong(),
+    currency: "RMB",
+    amount: "",
+    category: "Food",
+    description: "",
+    receipts: [],
+    original: null
+  };
+}
+
+function draftFromExpenseRow(row) {
+  const draft = {
+    editingId: row.id,
+    date: row.date,
+    currency: row.currency,
+    amount: String(row.amount),
+    category: row.category,
+    description: row.description,
+    receipts: row.receipts.map((receipt) => ({
+      ...receipt,
+      status: "uploaded",
+      path: "",
+      newlyUploaded: false,
+      showUploadStatus: false
+    }))
+  };
+  draft.original = expenseDraftComparable(draft);
+  return draft;
+}
+
+function expenseDraftComparable(draft) {
+  return {
+    date: String(draft.date || ""),
+    currency: String(draft.currency || ""),
+    amount: String(draft.amount || ""),
+    category: String(draft.category || ""),
+    description: String(draft.description || ""),
+    receiptUrls: draft.receipts
+      .filter((receipt) => receipt.status !== "failed" && receipt.status !== "uploading" && receipt.status !== "queued")
+      .map((receipt) => String(receipt.url || ""))
+  };
 }
 
 function formatAmount(value) {
@@ -300,18 +381,23 @@ function renderReceiptCell(row, helpers) {
 function renderActions(row, helpers) {
   const { escapeHtml, lang } = helpers;
   const pending = isAdmin && row.status === "pending";
+  const canEdit = row.employeeId === ownerKey && row.status === "pending";
   const canDelete = isAdmin || (row.employeeId === ownerKey && row.status === "pending");
-  if (!pending && !canDelete) return `<span class="expense-muted">—</span>`;
+  if (!pending && !canEdit && !canDelete) return `<span class="expense-muted">—</span>`;
   const writeAttributes = state.writeBusy ? ' disabled aria-disabled="true"' : "";
   return `<span class="expense-actions">
     ${pending ? `<button type="button" class="expense-action expense-action--approve" data-expense-approve="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "approve"))}</button><button type="button" class="expense-action expense-action--reject" data-expense-reject="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "reject"))}</button>` : ""}
+    ${canEdit ? `<button type="button" class="expense-action" data-expense-edit="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "edit"))}</button>` : ""}
     ${canDelete ? `<button type="button" class="expense-action expense-action--delete" data-expense-delete="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "remove"))}</button>` : ""}
   </span>`;
 }
 
 function renderPayment(row, helpers) {
   const { escapeHtml, lang } = helpers;
-  if (row.paid) return `<span class="expense-payment expense-payment--paid">${escapeHtml(t(lang, "paid"))}</span>`;
+  if (row.paid) {
+    const paidDate = displayDateInput(String(row.paidAt || "").slice(0, 10));
+    return `<span class="expense-payment-cell"><span class="expense-payment expense-payment--paid">${escapeHtml(t(lang, "paid"))}</span>${paidDate ? `<small>${escapeHtml(t(lang, "paidOn", { date: paidDate }))}</small>` : ""}</span>`;
+  }
   if (isAdmin && row.status === "approved") {
     const writeAttributes = state.writeBusy ? ' disabled aria-disabled="true"' : "";
     return `<button type="button" class="expense-action expense-action--pay" data-expense-pay="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "markPaid"))}</button>`;
@@ -358,11 +444,14 @@ function renderModal(helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const e = escapeHtml;
   const draft = state.draft;
-  const createWriteAttributes = state.writeBusy ? ' disabled aria-disabled="true"' : "";
+  const modalBusy = state.writeBusy || state.uploadBusy;
+  const createWriteAttributes = modalBusy ? ' disabled aria-disabled="true"' : "";
+  const titleKey = draft.editingId ? "editModalTitle" : "modalTitle";
   const options = (values, selected, label) => values.map((value) => `<option value="${e(value)}"${selected === value ? " selected" : ""}>${e(label(value))}</option>`).join("");
+  const uploadStatuses = draft.receipts.filter((receipt) => receipt.showUploadStatus);
   return `<div class="expense-overlay" data-expense-overlay>
-    <form class="expense-modal" data-expense-form role="dialog" aria-modal="true" aria-label="${e(t(lang, "modalTitle"))}">
-      <header><h2>${e(t(lang, "modalTitle"))}</h2><button type="button" data-expense-close data-expense-create-write aria-label="${e(t(lang, "close"))}"${createWriteAttributes}>×</button></header>
+    <form class="expense-modal" data-expense-form data-expense-editing-id="${e(draft.editingId)}" role="dialog" aria-modal="true" aria-label="${e(t(lang, titleKey))}">
+      <header><h2>${e(t(lang, titleKey))}</h2><button type="button" data-expense-close data-expense-create-write aria-label="${e(t(lang, "close"))}"${createWriteAttributes}>×</button></header>
       <div class="expense-modal__body">
         <div class="expense-form-grid">
           ${renderField("date", "date", `<button type="button" class="date-panel-trigger" data-expense-date-trigger data-expense-create-write aria-haspopup="dialog" aria-expanded="false"${createWriteAttributes}>${icon("icon-task-calendar", "icon")}<span class="date-panel-trigger__value">${e(displayDateInput(draft.date) || t(lang, "date"))}</span></button>`, helpers)}
@@ -375,11 +464,13 @@ function renderModal(helpers) {
         ${renderField("description", "description", `<textarea data-expense-field="description" data-expense-create-write placeholder="${e(t(lang, "descriptionPlaceholder"))}"${createWriteAttributes}>${e(draft.description)}</textarea>`, helpers)}
         <div class="expense-upload">
           <label class="expense-upload__trigger">${icon("icon-nav-file", "icon")}<span><strong>${e(t(lang, "receiptHint"))}</strong><small>${e(t(lang, authenticated ? "receiptUpload" : "receiptLocal"))}</small></span><input type="file" accept="image/*" multiple data-expense-receipts data-expense-create-write${createWriteAttributes}></label>
-          ${draft.receipts.length ? `<div class="expense-preview-list">${draft.receipts.map((receipt, index) => `<figure><img src="${e(receipt.url)}" alt="${e(receipt.name)}"><button type="button" data-expense-receipt-remove="${index}" data-expense-create-write aria-label="${e(t(lang, "removeReceipt"))}"${createWriteAttributes}>×</button></figure>`).join("")}</div>` : ""}
+          ${state.uploadProgress ? `<p class="expense-upload__progress" role="status">${e(t(lang, "receiptProgress", state.uploadProgress))}</p>` : ""}
+          ${draft.receipts.length ? `<div class="expense-preview-list">${draft.receipts.map((receipt, index) => `<figure data-expense-receipt-status="${e(receipt.status || "uploaded")}"><img src="${e(receipt.url)}" alt="${e(receipt.name)}"><button type="button" data-expense-receipt-remove="${index}" data-expense-create-write aria-label="${e(t(lang, "removeReceipt"))}"${createWriteAttributes}>×</button></figure>`).join("")}</div>` : ""}
+          ${uploadStatuses.length ? `<ul class="expense-upload__statuses" aria-live="polite">${uploadStatuses.map((receipt) => `<li data-expense-upload-result="${e(receipt.status)}"><span>${e(t(lang, receipt.status === "failed" ? "receiptStatusFailed" : receipt.status === "uploaded" ? "receiptStatusUploaded" : "receiptStatusUploading", { name: receipt.name }))}</span></li>`).join("")}</ul>` : ""}
         </div>
         ${state.error ? `<p class="expense-error" role="alert">${e(t(lang, state.error))}</p>` : ""}
       </div>
-      <footer><button type="button" class="expense-button expense-button--secondary" data-expense-close data-expense-create-write${createWriteAttributes}>${e(t(lang, "cancel"))}</button><button type="submit" class="expense-button" data-expense-create-write${createWriteAttributes}>${e(t(lang, "submit"))}</button></footer>
+      <footer><button type="button" class="expense-button expense-button--secondary" data-expense-close data-expense-create-write${createWriteAttributes}>${e(t(lang, "cancel"))}</button><button type="submit" class="expense-button" data-expense-create-write${createWriteAttributes}>${e(t(lang, draft.editingId ? "save" : "submit"))}</button></footer>
     </form>
   </div>`;
 }
@@ -414,17 +505,65 @@ function rerender() {
 
 function revokeReceipts(receipts) {
   receipts.forEach((receipt) => {
-    if (receipt.url.startsWith("blob:")) URL.revokeObjectURL(receipt.url);
+    if (String(receipt.url || "").startsWith("blob:")) URL.revokeObjectURL(receipt.url);
   });
 }
 
-function closeModal() {
-  if (state.writeBusy) return;
+function newDraftReceiptPaths(draft = state.draft) {
+  return (draft?.receipts ?? [])
+    .filter((receipt) => receipt.newlyUploaded && receipt.path)
+    .map((receipt) => receipt.path);
+}
+
+async function discardNewDraftReceipts(draft) {
+  const paths = newDraftReceiptPaths(draft);
+  if (!paths.length) return true;
+  await deleteLiveExpenseReceiptUploads(paths);
+  return true;
+}
+
+function isExpenseRefreshBlocked() {
+  return state.writeBusy || state.uploadBusy || Boolean(state.draft);
+}
+
+async function refreshExpenseRows(mountId = activeMountId, scope = activeScope) {
+  const nextSnapshot = await getExpenseData();
+  if (!isCurrentExpenseMount(mountId, scope)) return false;
+  snapshot = nextSnapshot;
+  state.rows = normalizeExpenseRows(nextSnapshot.reimbursements);
+  return true;
+}
+
+async function closeModal() {
+  if (state.writeBusy || state.uploadBusy) return;
+  const draft = state.draft;
+  if (!draft) return;
+  const mountId = activeMountId;
+  const scope = activeScope;
+  if (newDraftReceiptPaths(draft).length) {
+    state.uploadBusy = true;
+    state.error = "";
+    rerender();
+    try {
+      await discardNewDraftReceipts(draft);
+    } catch (error) {
+      if (!isCurrentExpenseMount(mountId, scope) || state.draft !== draft) return;
+      console.warn("Expense receipt cleanup failed", error);
+      state.uploadBusy = false;
+      state.error = "receiptCleanupFailed";
+      rerender();
+      return;
+    }
+  }
+  if (!isCurrentExpenseMount(mountId, scope) || state.draft !== draft) return;
   expenseDatePanel.close({ restoreFocus: false });
-  if (state.draft) revokeReceipts(state.draft.receipts);
+  revokeReceipts(draft.receipts);
   state.draft = null;
+  state.uploadBusy = false;
+  state.uploadProgress = null;
   state.error = "";
   rerender();
+  void expenseLiveRefresh?.flush();
 }
 
 function findExpenseRow(id) {
@@ -446,6 +585,11 @@ async function performLiveExpenseWrite(operation, applyResult) {
     const result = await operation();
     if (!isCurrentExpenseMount(mountId, scope)) return;
     applyResult(result);
+    try {
+      await refreshExpenseRows(mountId, scope);
+    } catch (error) {
+      if (isCurrentExpenseMount(mountId, scope)) console.warn("Expense refresh after action failed", error);
+    }
   } catch (error) {
     if (!isCurrentExpenseMount(mountId, scope)) return;
     console.warn("Expense action failed", error);
@@ -454,13 +598,14 @@ async function performLiveExpenseWrite(operation, applyResult) {
     if (!isCurrentExpenseMount(mountId, scope)) return;
     state.writeBusy = false;
     rerender();
+    await expenseLiveRefresh?.flush();
   }
 }
 
 async function onExpenseClick(event) {
   if (liveReadOnly && event.target.closest("[data-expense-write]")) return;
   if (state.writeBusy && event.target.closest("[data-expense-write]")) return;
-  if (state.writeBusy && event.target.closest("[data-expense-create-write]")) return;
+  if ((state.writeBusy || state.uploadBusy) && event.target.closest("[data-expense-create-write]")) return;
   const filter = event.target.closest("[data-expense-filter]");
   if (filter) {
     const value = filter.getAttribute("data-expense-filter");
@@ -470,6 +615,18 @@ async function onExpenseClick(event) {
   }
   if (event.target.closest("[data-expense-new]")) {
     state.draft = blankDraft();
+    state.uploadProgress = null;
+    state.error = "";
+    state.actionError = "";
+    rerender();
+    return;
+  }
+  const edit = event.target.closest("[data-expense-edit]");
+  if (edit) {
+    const row = findExpenseRow(edit.getAttribute("data-expense-edit"));
+    if (!row || row.employeeId !== ownerKey || row.status !== "pending") return;
+    state.draft = draftFromExpenseRow(row);
+    state.uploadProgress = null;
     state.error = "";
     state.actionError = "";
     rerender();
@@ -495,14 +652,35 @@ async function onExpenseClick(event) {
     return;
   }
   if (event.target.closest("[data-expense-close]") || event.target.matches("[data-expense-overlay]")) {
-    closeModal();
+    await closeModal();
     return;
   }
   const receiptRemove = event.target.closest("[data-expense-receipt-remove]");
   if (receiptRemove && state.draft) {
     const index = Number(receiptRemove.getAttribute("data-expense-receipt-remove"));
-    const [receipt] = state.draft.receipts.splice(index, 1);
-    if (receipt) revokeReceipts([receipt]);
+    const receipt = state.draft.receipts[index];
+    if (receipt?.newlyUploaded && receipt.path && authenticated) {
+      const draft = state.draft;
+      const mountId = activeMountId;
+      const scope = activeScope;
+      state.uploadBusy = true;
+      state.error = "";
+      rerender();
+      try {
+        await deleteLiveExpenseReceiptUploads([receipt.path]);
+      } catch (error) {
+        if (!isCurrentExpenseMount(mountId, scope) || state.draft !== draft) return;
+        console.warn("Expense receipt removal failed", error);
+        state.uploadBusy = false;
+        state.error = "receiptCleanupFailed";
+        rerender();
+        return;
+      }
+      if (!isCurrentExpenseMount(mountId, scope) || state.draft !== draft) return;
+      state.uploadBusy = false;
+    }
+    const [removedReceipt] = state.draft.receipts.splice(index, 1);
+    if (removedReceipt) revokeReceipts([removedReceipt]);
     rerender();
     return;
   }
@@ -573,16 +751,16 @@ async function onExpenseClick(event) {
 
 function onExpenseInput(event) {
   if (liveReadOnly && event.target.closest("[data-expense-write]")) return;
-  if (state.writeBusy && event.target.closest("[data-expense-create-write]")) return;
+  if ((state.writeBusy || state.uploadBusy) && event.target.closest("[data-expense-create-write]")) return;
   const field = event.target.closest("[data-expense-field]");
   if (!field || !state.draft) return;
   state.draft[field.getAttribute("data-expense-field")] = field.value;
   state.error = "";
 }
 
-function onExpenseChange(event) {
+async function onExpenseChange(event) {
   if (liveReadOnly && event.target.closest("[data-expense-write]")) return;
-  if (state.writeBusy && event.target.closest("[data-expense-create-write]")) return;
+  if ((state.writeBusy || state.uploadBusy) && event.target.closest("[data-expense-create-write]")) return;
   const field = event.target.closest("[data-expense-field]");
   if (field && state.draft) {
     state.draft[field.getAttribute("data-expense-field")] = field.value;
@@ -590,16 +768,68 @@ function onExpenseChange(event) {
   }
   const fileInput = event.target.closest("[data-expense-receipts]");
   if (!fileInput || !state.draft) return;
-  [...fileInput.files].filter((file) => file.type.startsWith("image/")).forEach((file) => {
-    state.draft.receipts.push({ file, url: URL.createObjectURL(file), name: file.name });
-  });
+  const files = [...fileInput.files].filter((file) => file.type.startsWith("image/"));
+  if (!files.length) return;
+  const draft = state.draft;
+  const mountId = activeMountId;
+  const scope = activeScope;
+  const receipts = files.map((file) => ({
+    file,
+    url: URL.createObjectURL(file),
+    name: file.name,
+    status: authenticated ? "queued" : "local",
+    path: "",
+    newlyUploaded: false,
+    showUploadStatus: authenticated
+  }));
+  draft.receipts.push(...receipts);
+  state.error = "";
+  if (!authenticated) {
+    rerender();
+    return;
+  }
+
+  state.uploadBusy = true;
+  state.uploadProgress = { done: 0, total: receipts.length };
+  rerender();
+  for (const [index, receipt] of receipts.entries()) {
+    if (!isCurrentExpenseMount(mountId, scope) || state.draft !== draft) break;
+    receipt.status = "uploading";
+    rerender();
+    try {
+      const uploaded = await uploadLiveExpenseReceipt(receipt.file);
+      if (!isCurrentExpenseMount(mountId, scope) || state.draft !== draft) {
+        try {
+          await deleteLiveExpenseReceiptUploads([uploaded.path]);
+        } catch (cleanupError) {
+          console.warn("Detached expense receipt cleanup failed", cleanupError);
+        }
+        break;
+      }
+      revokeReceipts([receipt]);
+      receipt.file = null;
+      receipt.url = uploaded.url;
+      receipt.path = uploaded.path;
+      receipt.newlyUploaded = true;
+      receipt.status = "uploaded";
+    } catch (error) {
+      if (!isCurrentExpenseMount(mountId, scope) || state.draft !== draft) break;
+      console.warn(`Expense receipt upload failed: ${receipt.name}`, error);
+      receipt.status = "failed";
+    }
+    state.uploadProgress = { done: index + 1, total: receipts.length };
+    rerender();
+  }
+  if (!isCurrentExpenseMount(mountId, scope) || state.draft !== draft) return;
+  state.uploadBusy = false;
+  state.uploadProgress = null;
   rerender();
 }
 
 async function onExpenseSubmit(event) {
   if (!event.target.matches("[data-expense-form]") || !state.draft) return;
   event.preventDefault();
-  if (state.writeBusy) return;
+  if (state.writeBusy || state.uploadBusy) return;
   const amount = Number(state.draft.amount);
   if (!state.draft.date) state.error = "dateRequired";
   else if (!Number.isFinite(amount) || amount <= 0) state.error = "amountRequired";
@@ -607,34 +837,68 @@ async function onExpenseSubmit(event) {
   else if (authenticated) {
     const mountId = activeMountId;
     const scope = activeScope;
+    const draft = state.draft;
+    const editingRow = draft.editingId ? findExpenseRow(draft.editingId) : null;
+    if (draft.editingId && (!editingRow || editingRow.employeeId !== ownerKey || editingRow.status !== "pending")) {
+      state.error = "actionFailed";
+      rerender();
+      return;
+    }
     state.writeBusy = true;
     state.error = "";
     rerender();
     try {
-      const result = await createLiveExpense({
+      const payload = {
         date: state.draft.date,
         amount,
         currency: state.draft.currency,
         category: expenseCategoryDbValues[state.draft.category],
         description: state.draft.description.trim(),
-        files: state.draft.receipts.map((receipt) => receipt.file).filter(Boolean)
-      });
+        receiptUrls: state.draft.receipts
+          .filter((receipt) => !["failed", "uploading", "queued"].includes(receipt.status))
+          .map((receipt) => receipt.url)
+          .filter(Boolean)
+      };
+      const result = draft.editingId
+        ? await updateLiveExpense(draft.editingId, payload)
+        : await createLiveExpense(payload);
       if (!isCurrentExpenseMount(mountId, scope)) return;
-      const row = normalizeExpenseRows([{ ...result.row, employee: currentUser.name }])[0];
-      revokeReceipts(state.draft.receipts);
-      state.rows.unshift(row);
-      state.filter = isAdmin ? "pending" : "mine";
+      if (draft.editingId) replaceExpenseRow(editingRow, result);
+      else {
+        const row = normalizeExpenseRows([{ ...result.row, employee: currentUser.name }])[0];
+        state.rows.unshift(row);
+        state.filter = isAdmin ? "pending" : "mine";
+      }
+      revokeReceipts(draft.receipts);
       state.draft = null;
       state.error = "";
+      try {
+        await refreshExpenseRows(mountId, scope);
+      } catch (error) {
+        if (isCurrentExpenseMount(mountId, scope)) console.warn("Expense refresh after save failed", error);
+      }
     } catch (error) {
       if (!isCurrentExpenseMount(mountId, scope)) return;
       console.warn("Expense submission failed", error);
-      state.error = "saveFailed";
+      const uploadedReceipts = draft.receipts.filter((receipt) => receipt.newlyUploaded && receipt.path);
+      if (uploadedReceipts.length) {
+        try {
+          await discardNewDraftReceipts(draft);
+          if (!isCurrentExpenseMount(mountId, scope) || state.draft !== draft) return;
+          draft.receipts = draft.receipts.filter((receipt) => !receipt.newlyUploaded);
+          state.error = "saveFailedRolledBack";
+        } catch (cleanupError) {
+          if (!isCurrentExpenseMount(mountId, scope) || state.draft !== draft) return;
+          console.warn("Expense receipt rollback failed", cleanupError);
+          state.error = "receiptCleanupFailed";
+        }
+      } else state.error = "saveFailed";
     } finally {
       if (!isCurrentExpenseMount(mountId, scope)) return;
       state.writeBusy = false;
     }
     rerender();
+    await expenseLiveRefresh?.flush();
     return;
   }
   else {
@@ -650,6 +914,7 @@ async function onExpenseSubmit(event) {
       receipts: state.draft.receipts.map((receipt) => ({ ...receipt })),
       status: "pending",
       paid: false,
+      paidAt: "",
       rejectReason: "",
       local: true
     });
@@ -661,11 +926,15 @@ async function onExpenseSubmit(event) {
 }
 
 function onExpenseKeydown(event) {
-  if (event.key === "Escape" && state.draft) closeModal();
+  if (event.key === "Escape" && state.draft) void closeModal();
 }
 
 function hasExpenseUnsavedChanges() {
   if (!state.draft) return false;
+  if (state.draft.original) {
+    if (state.draft.receipts.some((receipt) => ["queued", "uploading", "failed"].includes(receipt.status))) return true;
+    return JSON.stringify(expenseDraftComparable(state.draft)) !== JSON.stringify(state.draft.original);
+  }
   const blank = blankDraft();
   return state.draft.receipts.length > 0
     || ["date", "currency", "amount", "category", "description"]
@@ -691,7 +960,9 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
     draft: null,
     error: "",
     actionError: "",
-    writeBusy: false
+    writeBusy: false,
+    uploadBusy: false,
+    uploadProgress: null
   };
 
   return {
@@ -707,6 +978,23 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       scope.listen(document, "change", onExpenseChange);
       scope.listen(document, "submit", onExpenseSubmit);
       scope.listen(document, "keydown", onExpenseKeydown);
+      expenseLiveRefresh = attachLiveSnapshotRefresh({
+        scope,
+        snapshots: EXPENSE_LIVE_SNAPSHOTS,
+        tables: EXPENSE_LIVE_TABLES,
+        isBlocked: isExpenseRefreshBlocked,
+        async refresh({ defer, isCurrent }) {
+          const nextSnapshot = await getExpenseData();
+          if (!isCurrent()) return;
+          if (isExpenseRefreshBlocked()) {
+            defer();
+            return;
+          }
+          snapshot = nextSnapshot;
+          state.rows = normalizeExpenseRows(nextSnapshot.reimbursements);
+          rerender();
+        }
+      });
     },
     hasUnsavedChanges: hasExpenseUnsavedChanges,
     async canLeave() {
@@ -715,14 +1003,21 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
     },
     captureState: () => ({ filter: state.filter }),
     dispose() {
+      const draft = state.draft;
+      const cleanupPaths = newDraftReceiptPaths(draft);
+      if (authenticated && cleanupPaths.length) {
+        void deleteLiveExpenseReceiptUploads(cleanupPaths)
+          .catch((error) => console.warn("Expense receipt cleanup on leave failed", error));
+      }
       if (activeMountId === mountId) activeMountId += 1;
-      if (state.draft) revokeReceipts(state.draft.receipts);
+      if (draft) revokeReceipts(draft.receipts);
       state.rows.forEach((row) => revokeReceipts(row.receipts ?? []));
       snapshot = null;
       currentUser = null;
       unread = null;
       currentHelpers = null;
       if (activeScope === scope) activeScope = null;
+      expenseLiveRefresh = null;
       expenseDatePanel.close({ restoreFocus: false });
       state.draft = null;
     }

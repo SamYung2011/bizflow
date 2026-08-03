@@ -31,7 +31,21 @@ async function uploadReceipt(client, employeeId, file) {
   };
 }
 
-export async function createLiveExpense({ date, amount, currency, category, description, files = [] }) {
+export async function uploadLiveExpenseReceipt(file) {
+  const { client, currentUser } = await writeContext();
+  return uploadReceipt(client, currentUser.employeeId, file);
+}
+
+export async function deleteLiveExpenseReceiptUploads(paths = []) {
+  const cleanPaths = [...new Set(paths.map((path) => String(path || "").trim()).filter(Boolean))];
+  if (!cleanPaths.length) return [];
+  const { client } = await writeContext();
+  const result = await client.storage.from("expense-receipts").remove(cleanPaths);
+  throwIfError(result.error);
+  return cleanPaths;
+}
+
+export async function createLiveExpense({ date, amount, currency, category, description, files = [], receiptUrls = [] }) {
   const { client, currentUser } = await writeContext();
   const uploaded = [];
   try {
@@ -43,7 +57,10 @@ export async function createLiveExpense({ date, amount, currency, category, desc
       currency,
       category,
       description: description || null,
-      receipt_urls: uploaded.map((receipt) => receipt.url)
+      receipt_urls: [
+        ...receiptUrls.map((url) => String(url || "").trim()).filter(Boolean),
+        ...uploaded.map((receipt) => receipt.url)
+      ]
     }).select("*").single();
     throwIfError(result.error);
     await invalidateLiveTables("expense_reimbursements");
@@ -54,6 +71,27 @@ export async function createLiveExpense({ date, amount, currency, category, desc
     }
     throw error;
   }
+}
+
+export async function updateLiveExpense(expenseId, {
+  date,
+  amount,
+  currency,
+  category,
+  description,
+  receiptUrls = []
+}) {
+  const { client, currentUser } = await writeContext();
+  return updateExpenseRow(client, expenseId, {
+    expense_date: date,
+    amount,
+    currency,
+    category,
+    description: description || null,
+    receipt_urls: receiptUrls.map((url) => String(url || "").trim()).filter(Boolean)
+  }, (query) => query
+    .eq("employee_id", currentUser.employeeId)
+    .eq("status", "pending"));
 }
 
 async function updateExpenseRow(client, expenseId, patch, constrain = (query) => query) {
