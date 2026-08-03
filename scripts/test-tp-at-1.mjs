@@ -16,7 +16,7 @@ import {
 const members = [
   { id: "all", name: "Honnmono", dept: "all", userId: "all-user", status: "active" },
   { id: "helen", name: "Helen", dept: "member", userId: "user-helen", status: "active" },
-  { id: "jack", name: "Jack", dept: "member", userId: "user-jack", status: "active" },
+  { id: "jack", name: "Jack", dept: "member", userId: "user-jack", status: "active", kind: "task" },
   { id: "alice", name: "Alice", dept: "member", userId: "user-alice", status: "active" },
   { id: "sam", name: "Sam", dept: "member", userId: "user-sam", status: "departed" },
   { id: "guest", name: "Guest", dept: "member", userId: "", status: "active" }
@@ -26,8 +26,10 @@ const currentUser = { id: "helen", name: "Helen", userId: "user-helen" };
 assert.deepEqual(
   taskFeedbackMentionCandidates(members, currentUser).map((member) => member.name),
   ["Jack", "Alice"],
-  "candidates must be active, account-bound, company-scoped real members excluding the current user"
+  "candidates must include active company-bound task identities while excluding the current user"
 );
+assert.equal(taskFeedbackMentionCandidates(members, currentUser).find((member) => member.kind === "task")?.name, "Jack",
+  "kind=task is an identity label, not a member or mention permission filter");
 assert.deepEqual(findTaskFeedbackMention("請找 @ja", 6), { open: true, query: "ja", atIndex: 3, cursor: 6 });
 assert.equal(findTaskFeedbackMention("請找 @ja ck", 9), null, "whitespace between @ and the caret must close suggestions");
 assert.deepEqual(findTaskFeedbackMention("@old 已完成，再找 @Ja", 15), { open: true, query: "Ja", atIndex: 12, cursor: 15 },
@@ -116,11 +118,15 @@ const [snapshotSource, providerSource, cacheSource, tasksSource, writesSource, c
   readFile(new URL("../root-site/team/tasks-domain.css", import.meta.url), "utf8")
 ]);
 assert.match(snapshotSource, /userId: asText\(employee\.user_id\)/, "members snapshot must carry the auth account id");
+const memberSource = snapshotSource.slice(snapshotSource.indexOf("async function memberSourceData"), snapshotSource.indexOf("async function buildMembersSnapshot"));
+assert.match(memberSource, /const members = employees\.filter\(\(employee\) => memberIds\.has\(employee\.id\)\);/,
+  "company binding membership must be the complete member visibility predicate");
+assert.doesNotMatch(memberSource, /employee\.kind/, "member snapshot visibility must never depend on the identity kind label");
 assert.match(providerSource, /userId: member\.userId[\s\S]*?status: member\.status[\s\S]*?employmentActive: member\.status === "active"/,
   "task members must carry account id and employment status");
 assert.match(providerSource, /typeof member\.userId === "string"/, "old members snapshot shapes must fail validation");
-assert.match(cacheSource, /\["members\.json", 1\]/, "members snapshot cache contract must be bumped");
-assert.equal(liveSnapshotCacheVersion("members.json"), "0:1:0", "pre-release members cache entries must have a different version");
+assert.match(cacheSource, /\["members\.json", 2\]/, "members snapshot cache contract must be bumped");
+assert.equal(liveSnapshotCacheVersion("members.json"), "0:2:0", "pre-release members cache entries must have a different version");
 assert.match(tasksSource, /mentionedUserIds\s*=\s*\[\.\.\.new Set/);
 assert.match(tasksSource, /createLiveTaskFeedback\(\{[\s\S]*?parentFeedbackId: null,[\s\S]*?mentionedUserIds/);
 assert.match(tasksSource, /mentionedUserIds: result\.feedback\.mentioned_user_ids \?\? mentionedUserIds/);

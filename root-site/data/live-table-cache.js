@@ -10,10 +10,10 @@ const CACHE_DB_VERSION = 1;
 const CACHE_STORE_NAME = "rows";
 // Shape generations are deliberately local to affected snapshots. Customer
 // joins are embedded in their affected payloads; members.json separately bumps
-// when its employee rows gain the auth user id required by task mentions.
+// when member fields or company-bound identity visibility semantics change.
 const SNAPSHOT_CONTRACT_GENERATIONS = new Map([
   ["home.json", 3],
-  ["members.json", 1],
+  ["members.json", 2],
   ["customers.json", 1],
   ["warranty.json", 2],
   ["orders.json", 1],

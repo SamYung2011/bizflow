@@ -520,7 +520,7 @@ async function memberSourceData() {
   ]);
   const companyBindings = companyId ? bindings.filter((binding) => binding.company_id === companyId) : bindings;
   const memberIds = new Set(companyBindings.map((binding) => binding.employee_id));
-  const members = employees.filter((employee) => memberIds.has(employee.id) && employee.kind === "employee");
+  const members = employees.filter((employee) => memberIds.has(employee.id));
   return {
     currentUser,
     companyId,
