@@ -1,5 +1,5 @@
 import { taskT } from "./tasks-i18n.js";
-import { isTaskOwnedByMember, memberIdentity, taskMatchesMemberStatus } from "./tasks-model.js";
+import { isTaskVisibleToMember, memberIdentity, taskMatchesMemberStatus } from "./tasks-model.js";
 
 const STATIC_FILTER_OPTIONS = {
   status: [
@@ -93,7 +93,7 @@ export function filterTaskColumns(board, filterState, { mobile, members = [] }) 
     .map((column) => {
       const tasks = column.tasks.filter((task) => {
         if (!scopedMember) return selectedMember === "all" && statusMatches(task, filterState.status);
-        return isTaskOwnedByMember(task, scopedMember) && taskMatchesMemberStatus(task, scopedMember, filterState.status);
+        return isTaskVisibleToMember(task, scopedMember) && taskMatchesMemberStatus(task, scopedMember, filterState.status);
       });
       const count = tasks.length;
       return { ...column, tasks, count, taskCountBadge: String(count) };

@@ -42,6 +42,17 @@ export function isTaskAssignedTo(task, member) {
   return taskAssignee(task, member) !== null;
 }
 
+// Mirrors team/src/views/Tasks.jsx:329-342: a mention is a separate durable
+// inbox relation only when the target is not already an assignee. Ignore a
+// malformed/self-authored @ so it cannot create a notification for its author.
+export function isTaskMentionedForMember(task, member) {
+  const userId = String(member?.userId || "");
+  if (!userId || isTaskAssignedTo(task, member)) return false;
+  return (task?.feedback ?? []).some((entry) =>
+    entry?.authorUserId !== userId &&
+    (entry?.mentionedUserIds ?? []).some((mentionedUserId) => String(mentionedUserId) === userId));
+}
+
 // Mirrors bizflow_samyung/team/src/lib/taskHelpers.js:9-20 (empDoneFor/empAbandonedFor).
 export function taskDoneForMember(task, member) {
   const assignee = taskAssignee(task, member);
@@ -69,6 +80,10 @@ export function isTaskOwnedByMember(task, member) {
   return isTaskAssignedTo(task, member) || isTaskCreator(task, member);
 }
 
+export function isTaskVisibleToMember(task, member) {
+  return isTaskOwnedByMember(task, member) || isTaskMentionedForMember(task, member);
+}
+
 // Mirrors bizflow_samyung/team/src/views/Tasks.jsx:293-307 (showInOpen/showInDone/showInAb).
 export function taskMatchesMemberStatus(task, member, status) {
   const assigned = isTaskAssignedTo(task, member);
@@ -88,7 +103,7 @@ export function taskMatchesMemberStatus(task, member, status) {
 }
 
 export function isTaskRelated(task, currentUser) {
-  return isTaskOwnedByMember(task, currentUser);
+  return isTaskVisibleToMember(task, currentUser);
 }
 
 export function isWaitingApproval(task) {
@@ -111,12 +126,16 @@ export function scopedTopTasks(tasks, { onlyMine = false, currentUser, member = 
   const scoped = tasks.filter((task) => !onlyMine ||
     task.creatorId === currentId || normalizedName(task.creator) === currentName);
   return scoped.filter((task) => {
+    // A feedback @ on a child task is its own inbox entry. Keep it reachable
+    // even when the parent is already visible through assignment/creation.
+    const mentionTarget = member ?? currentUser;
+    if (task.parentId !== null && isTaskMentionedForMember(task, mentionTarget)) return true;
     if (!member) return task.parentId === null;
-    if (!isTaskOwnedByMember(task, member)) return false;
+    if (!isTaskVisibleToMember(task, member)) return false;
     if (task.parentId === null) return true;
     // Mirrors bizflow_samyung/team/src/views/Tasks.jsx:265-273: promote an orphan in this member scope.
     const parent = scoped.find((candidate) => candidate.id === task.parentId);
-    return !parent || !isTaskOwnedByMember(parent, member);
+    return !parent || !isTaskVisibleToMember(parent, member);
   });
 }
 
@@ -126,9 +145,13 @@ export function calendarRelatedTasks(tasks, { onlyMine = false, currentUser } = 
 }
 
 export function overviewForMember(member, tasks) {
-  const topTasks = tasks.filter((task) => task.parentId === null);
-  const rows = topTasks.map((task) => ({ task, assignee: taskAssignee(task, member) }))
-    .filter(({ task }) => isTaskOwnedByMember(task, member));
+  // Overview historically counts roots only. Mentions are the sole child-task
+  // exception so this feature does not change ordinary orphan-child totals.
+  const visibleTasks = tasks.filter((task) =>
+    task.parentId === null || isTaskMentionedForMember(task, member));
+  const rows = visibleTasks.map((task) => ({ task, assignee: taskAssignee(task, member) }))
+    .filter(({ task }) => isTaskVisibleToMember(task, member));
+  const mentioned = rows.filter(({ task }) => isTaskMentionedForMember(task, member));
   // Mirrors bizflow_samyung/team/src/views/Tasks.jsx:200-205 overview member counts.
   const open = rows.filter(({ task }) => isOpenTask(task) &&
     !taskDoneForMember(task, member) && !taskAbandonedForMember(task, member));
@@ -138,6 +161,7 @@ export function overviewForMember(member, tasks) {
       .localeCompare(String(a.assignee?.completedAt || a.task.completedAt || a.task.createdAt)));
   return {
     open,
+    mentioned,
     completedCount: completed.length,
     recentlyCompleted,
     groups: {

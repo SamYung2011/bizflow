@@ -105,6 +105,29 @@
   background: color-mix(in srgb, var(--blue) 9%, var(--white));
 }
 
+.task-mention-pill {
+  --task-mention-color: color-mix(in srgb, var(--blue) 62%, var(--red));
+
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  padding: var(--space-4) var(--space-10);
+  border-radius: var(--radius-20);
+  color: var(--task-mention-color);
+  background: color-mix(in srgb, var(--task-mention-color) 10%, var(--white));
+  font-size: var(--font-body-size);
+  font-style: normal;
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-tight);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.team-task-card__signals > .task-mention-pill {
+  color: var(--task-mention-color);
+  background: color-mix(in srgb, var(--task-mention-color) 10%, var(--white));
+}
+
 .team-task-card__approval {
   align-self: flex-start;
   color: color-mix(in srgb, var(--yellow) 65%, var(--black));

@@ -1,14 +1,15 @@
 import { taskT } from "./tasks-i18n.js";
 import { filterTaskColumns, renderTaskFilter } from "./tasks-filters.js";
 import { renderTaskActionPopover } from "./tasks-actions.js";
-import { isTaskCreator, isWaitingApproval, memberIdentity, scopedTopTasks, taskAssignee, taskSubtaskProgress } from "./tasks-model.js";
+import { isTaskCreator, isTaskMentionedForMember, isWaitingApproval, memberIdentity, scopedTopTasks, taskAssignee, taskSubtaskProgress } from "./tasks-model.js";
 
-function renderTaskCard(task, columnKey, state, helpers) {
+function renderTaskCard(task, columnKey, state, mentionMember, helpers) {
   const { escapeHtml, lang } = helpers;
   const actionOpen = state.actionTaskId === task.id;
   const hasBadge = task.countBadge !== "" && task.countBadge != null;
   const subtaskProgress = taskSubtaskProgress(task);
   const waitingApproval = isWaitingApproval(task);
+  const mentioned = isTaskMentionedForMember(task, mentionMember);
   const assignees = (task.assignees ?? []).length > 1
     ? task.assignees.map((assignee) => `<span class="${assignee.completedAt ? "is-completed" : ""}" title="${escapeHtml(assignee.completedAt || assignee.name)}">${assignee.completedAt ? "✓ " : ""}${escapeHtml(assignee.name)}</span>`).join("")
     : "";
@@ -24,6 +25,7 @@ function renderTaskCard(task, columnKey, state, helpers) {
         ${subtaskProgress.total ? `<span title="${escapeHtml(taskT(lang, "tasks.card.subtasks"))}">☑ ${subtaskProgress.done}/${subtaskProgress.total}</span>` : ""}
         ${task.attachmentCount > 0 ? `<span title="${escapeHtml(taskT(lang, "tasks.card.attachments"))}">📎 ${task.attachmentCount}</span>` : ""}
         ${task.feedback.length ? `<span title="${escapeHtml(taskT(lang, "tasks.card.feedback"))}">💬 ${task.feedback.length}</span>` : ""}
+        ${mentioned ? `<span class="task-mention-pill" data-task-mention="${escapeHtml(mentionMember.userId)}">${escapeHtml(taskT(lang, "tasks.card.mentioned"))}</span>` : ""}
         ${task.visibility === "department" ? `<span class="team-task-card__department">${escapeHtml(task.visibilityDepartment || taskT(lang, "tasks.card.department"))}</span>` : ""}
       </div>
       ${assignees ? `<div class="team-task-card__assignees">${assignees}</div>` : ""}
@@ -37,7 +39,7 @@ function renderTaskCard(task, columnKey, state, helpers) {
   </article>`;
 }
 
-function renderColumn(column, state, filterState, helpers) {
+function renderColumn(column, state, filterState, mentionMember, helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const title = taskT(lang, `tasks.priority.${column.key}`);
   const emptyKey = filterState.status === "completed"
@@ -49,7 +51,7 @@ function renderColumn(column, state, filterState, helpers) {
   const visibleTasks = expanded ? column.tasks : column.tasks.slice(0, 5);
   const hiddenCount = Math.max(0, column.tasks.length - visibleTasks.length);
   const body = visibleTasks.length
-    ? visibleTasks.map((task) => renderTaskCard(task, column.key, state, helpers)).join("")
+    ? visibleTasks.map((task) => renderTaskCard(task, column.key, state, mentionMember, helpers)).join("")
     : `<p class="team-kanban-empty">${escapeHtml(taskT(lang, emptyKey))}</p>`;
   const unreadCount = column.tasks.filter((task) => state.boardUnreadTaskIds?.has(task.id)).length;
   const unreadLabel = taskT(lang, "tasks.column.unreadChanges", { count: unreadCount });
@@ -80,7 +82,8 @@ export function renderTaskBoardGrid({ state, filterState, helpers }) {
     mobile: matchMedia("(max-width: 768px)").matches,
     members: state.members
   });
-  return columns.map((column) => renderColumn(column, state, filterState, helpers)).join("");
+  const mentionMember = scopedMember ?? state.currentUser;
+  return columns.map((column) => renderColumn(column, state, filterState, mentionMember, helpers)).join("");
 }
 
 export function renderTaskToolbar({ state, filterState, members, featureAiBatch, helpers }) {

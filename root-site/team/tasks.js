@@ -7,7 +7,7 @@ import { isTaskFilterGroup } from "./tasks-filters.js";
 import { renderTaskCalendar } from "./tasks-calendar.js";
 import { renderTaskOverview } from "./tasks-overview.js";
 import { renderTaskAiDialog } from "./tasks-ai.js";
-import { calendarRelatedTasks, canDeleteTaskForUser, isOpenTask, isTaskCreator, isWaitingApproval, memberIdentity, openAssignedTaskCount, taskAssignee } from "./tasks-model.js";
+import { calendarRelatedTasks, canDeleteTaskForUser, isOpenTask, isTaskCreator, isTaskMentionedForMember, isWaitingApproval, memberIdentity, openAssignedTaskCount, taskAssignee } from "./tasks-model.js";
 import { attachTaskDomainController } from "./tasks-domain-controller.js";
 import { renderTaskBoardGrid, renderTaskToolbar } from "./tasks-board.js";
 import { getSessionValue, setSessionValue } from "../data/session-state.js";
@@ -1202,7 +1202,7 @@ async function onTaskClick(event) {
     state.actionTaskId = null;
     state.selectedTaskId = detailTrigger.getAttribute("data-task-detail-open");
     state.detailOpen = true;
-    state.detailTab = "content";
+    state.detailTab = isTaskMentionedForMember(selectedTask(), state.currentUser) ? "feedback" : "content";
     state.attachmentPreview = null;
     state.feedbackDraft = createTaskFeedbackDraft();
     state.feedbackError = "";
