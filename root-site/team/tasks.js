@@ -85,6 +85,9 @@ function createTaskState(nextData, historyState = null) {
     boardExpandedPriorities: new Set(Array.isArray(restored.boardExpandedPriorities)
       ? restored.boardExpandedPriorities.filter((key) => ["high", "medium", "low"].includes(key))
       : []),
+    feedbackPanelExpandedTaskIds: new Set(Array.isArray(restored.feedbackPanelExpandedTaskIds)
+      ? restored.feedbackPanelExpandedTaskIds.map(String)
+      : []),
     onlyMine: typeof restored.onlyMine === "boolean" ? restored.onlyMine : getSessionValue("team-tasks-only-mine") === "1",
     calendarYear: Number.isInteger(restored.calendarYear) ? restored.calendarYear : now.getFullYear(),
     calendarMonth: Number.isInteger(restored.calendarMonth) ? restored.calendarMonth : now.getMonth(),
@@ -955,6 +958,16 @@ async function onTaskClick(event) {
     closeFeedbackMentionMenuInPlace();
   }
 
+  const feedbackPanelToggle = event.target.closest("[data-task-feedback-panel-toggle]");
+  if (feedbackPanelToggle) {
+    const taskId = feedbackPanelToggle.getAttribute("data-task-feedback-panel-toggle");
+    if (state.feedbackPanelExpandedTaskIds.has(taskId)) state.feedbackPanelExpandedTaskIds.delete(taskId);
+    else state.feedbackPanelExpandedTaskIds.add(taskId);
+    rerenderTaskPage();
+    activeScope?.animationFrame(() => document.querySelector(`[data-task-feedback-panel-toggle="${CSS.escape(taskId)}"]`)?.focus());
+    return;
+  }
+
   const columnExpand = event.target.closest("[data-task-column-expand]");
   if (columnExpand) {
     const priority = columnExpand.getAttribute("data-task-column-expand");
@@ -1259,6 +1272,7 @@ async function onTaskClick(event) {
     state.selectedTaskId = detailTrigger.getAttribute("data-task-detail-open");
     state.detailOpen = true;
     state.detailTab = isTaskMentionedForMember(selectedTask(), state.currentUser) ? "feedback" : "content";
+    if (detailTrigger.hasAttribute("data-task-feedback-panel-open")) state.detailTab = "feedback";
     state.attachmentPreview = null;
     resetFeedbackDraft();
     state.feedbackError = "";
@@ -1891,6 +1905,7 @@ function currentTaskViewState() {
     overviewExpanded: [...state.overviewExpanded],
     overviewCompletedExpanded: [...state.overviewCompletedExpanded],
     boardExpandedPriorities: [...state.boardExpandedPriorities],
+    feedbackPanelExpandedTaskIds: [...state.feedbackPanelExpandedTaskIds],
     onlyMine: state.onlyMine,
     calendarYear: state.calendarYear,
     calendarMonth: state.calendarMonth,
@@ -2057,6 +2072,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
         overviewExpanded: [...state.overviewExpanded],
         overviewCompletedExpanded: [...state.overviewCompletedExpanded],
         boardExpandedPriorities: [...state.boardExpandedPriorities],
+        feedbackPanelExpandedTaskIds: [...state.feedbackPanelExpandedTaskIds],
         onlyMine: state.onlyMine,
         calendarYear: state.calendarYear,
         calendarMonth: state.calendarMonth,
