@@ -10,6 +10,15 @@ const copy = {
     arranged: "已安排上門",
     measuring: "測量中",
     completed: "測量完成",
+    interested: "有意向",
+    installService: "安裝服務",
+    vehicle: "車型",
+    accessories: "配件",
+    address: "地址",
+    quotedFee: "安裝費報價",
+    referral: "推薦人",
+    submittedAt: "提交時間",
+    pendingMerge: "疑似老客戶待合併",
     search: "搜尋客戶 / 電話 / 地址",
     emptyRegistration: "暫無充電樁意向登記",
     emptyVisit: "暫無上門估價記錄"
@@ -23,6 +32,15 @@ const copy = {
     arranged: "Visit arranged",
     measuring: "Measuring",
     completed: "Measurement complete",
+    interested: "Interested",
+    installService: "Installation service",
+    vehicle: "Vehicle",
+    accessories: "Accessories",
+    address: "Address",
+    quotedFee: "Installation quote",
+    referral: "Referral",
+    submittedAt: "Submitted",
+    pendingMerge: "Possible existing customer · merge pending",
     search: "Search customer / phone / address",
     emptyRegistration: "No charger interest registrations",
     emptyVisit: "No on-site quotation records"
@@ -36,11 +54,22 @@ const copy = {
     arranged: "Visite planifiée",
     measuring: "Mesure en cours",
     completed: "Mesure terminée",
+    interested: "Intéressé",
+    installService: "Service d’installation",
+    vehicle: "Véhicule",
+    accessories: "Accessoires",
+    address: "Adresse",
+    quotedFee: "Devis d’installation",
+    referral: "Recommandation",
+    submittedAt: "Soumis le",
+    pendingMerge: "Client existant possible · fusion en attente",
     search: "Rechercher client / téléphone / adresse",
     emptyRegistration: "Aucune demande d'intérêt",
     emptyVisit: "Aucun devis sur place"
   }
 };
+
+export const chargerLeadDictionaries = copy;
 
 const state = { loaded: false, loading: false, leads: [], tab: "registration", status: "all", search: "" };
 let rerender = () => {};
@@ -105,14 +134,37 @@ function filteredLeads() {
   });
 }
 
-function renderLeadCards(leads, helpers) {
+export function renderChargerLeadCards(leads, helpers) {
   if (!leads.length) return "";
-  return leads.map((lead) => `<article class="charger-lead-card" data-charger-lead data-charger-lead-tab-value="${chargerLeadTab(lead)}" data-charger-lead-status-value="${helpers.escapeHtml(chargerLeadStatus(lead))}">
-    <strong>${helpers.escapeHtml(lead.customer || lead.name || "—")}</strong>
-    <span>${helpers.escapeHtml(lead.phone || "—")}</span>
-    <span>${helpers.escapeHtml(lead.address || "—")}</span>
-    ${state.tab === "visit" && chargerLeadStatus(lead) ? `<span class="charger-lead-card__status">${helpers.escapeHtml(t(helpers.lang, chargerLeadStatus(lead)))}</span>` : ""}
-  </article>`).join("");
+  const { escapeHtml: e, lang } = helpers;
+  return leads.map((lead) => {
+    const status = chargerLeadStatus(lead);
+    const phone = [lead.phone, lead.phone_mainland].map((value) => String(value || "").trim()).filter(Boolean).join(" · ");
+    const vehicle = [lead.car_make, lead.car_model].map((value) => String(value || "").trim()).filter(Boolean).join(" ");
+    const products = Array.isArray(lead.selected_products) ? lead.selected_products.filter(Boolean) : [];
+    const quotedFee = lead.quoted_fee == null || lead.quoted_fee === "" ? "" : `HK$ ${Number(lead.quoted_fee).toLocaleString("en-HK")}`;
+    const submittedAt = String(lead.created_at || "").slice(0, 16).replace("T", " ");
+    return `<article class="charger-lead-card" data-charger-lead data-charger-lead-tab-value="${chargerLeadTab(lead)}" data-charger-lead-status-value="${e(status)}">
+      <div class="charger-lead-card__head">
+        <strong>${e(lead.customer || lead.name || "—")}</strong>
+        ${phone ? `<span>${e(phone)}</span>` : ""}
+        ${status ? `<span class="charger-lead-card__status">${e(t(lang, status))}</span>` : ""}
+        ${lead.pending_merge_cid ? `<span class="charger-lead-card__merge">${e(t(lang, "pendingMerge"))}</span>` : ""}
+      </div>
+      <div class="charger-lead-card__facts">
+        ${lead.charger_model ? `<span class="charger-lead-card__model">${e(lead.charger_model)}</span>` : ""}
+        ${lead.install_service ? `<span><b>${e(t(lang, "installService"))}</b> ${e(lead.install_service)}</span>` : ""}
+        ${vehicle ? `<span><b>${e(t(lang, "vehicle"))}</b> ${e(vehicle)}</span>` : ""}
+      </div>
+      ${products.length ? `<div class="charger-lead-card__tags" aria-label="${e(t(lang, "accessories"))}">${products.map((product) => `<span>${e(product)}</span>`).join("")}</div>` : ""}
+      ${lead.address ? `<p class="charger-lead-card__address"><b>${e(t(lang, "address"))}</b> ${e(lead.address)}</p>` : ""}
+      ${quotedFee ? `<strong class="charger-lead-card__quote">${e(t(lang, "quotedFee"))}：${e(quotedFee)}</strong>` : ""}
+      <div class="charger-lead-card__foot">
+        ${submittedAt ? `<span><b>${e(t(lang, "submittedAt"))}</b> ${e(submittedAt)}</span>` : ""}
+        ${lead.referral ? `<span><b>${e(t(lang, "referral"))}</b> ${e(lead.referral)}</span>` : ""}
+      </div>
+    </article>`;
+  }).join("");
 }
 
 export function renderChargerLeads(helpers) {
@@ -128,7 +180,7 @@ export function renderChargerLeads(helpers) {
     ${state.tab === "visit" ? `<div class="charger-status-chips">${statuses.map((status) => `<button type="button" class="charger-status-chip${state.status === status ? " is-active" : ""}" data-charger-status="${status}">${escapeHtml(t(lang, status))} <span>${escapeHtml(String(counts[status]))}</span></button>`).join("")}</div>` : ""}
     <label class="charger-lead-search">${icon("icon-nav-search", "icon")}<input type="search" data-charger-lead-search value="${escapeHtml(state.search)}" placeholder="${escapeHtml(t(lang, "search"))}"></label>
     <div class="charger-lead-list">
-      ${renderLeadCards(leads, helpers)}
+      ${renderChargerLeadCards(leads, helpers)}
       ${!state.loading && !leads.length ? `<div class="orders-domain-empty">${icon("icon-nav-inventory", "icon")}<span>${escapeHtml(t(lang, state.tab === "visit" ? "emptyVisit" : "emptyRegistration"))}</span></div>` : ""}
     </div>
   </section>`;

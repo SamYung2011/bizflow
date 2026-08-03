@@ -16,9 +16,9 @@ const SNAPSHOT_CONTRACT_GENERATIONS = new Map([
   ["members.json", 2],
   ["team-extras.json", 1],
   ["team-update-logs.json", 1],
-  ["customers.json", 1],
+  ["customers.json", 2],
   ["warranty.json", 2],
-  ["orders.json", 1],
+  ["orders.json", 2],
   ["pending-deduction.json", 1]
 ]);
 

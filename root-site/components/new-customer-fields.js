@@ -1,3 +1,5 @@
+import { renderEmailSuggestion } from "./email-suggest.js";
+
 const fields = ["name", "phone", "email", "carModel", "imei"];
 
 const placeholders = {
@@ -49,6 +51,7 @@ export function renderNewCustomerFields({ lang, escapeHtml, label, idPrefix, dis
     return `<div class="form-new-customer__field">
       <label class="form-new-customer__label" for="${escapeHtml(id)}">${escapeHtml(label(key))}</label>
       <input class="form-new-customer__value" id="${escapeHtml(id)}" name="${escapeHtml(key)}" type="${inputType(key)}" autocomplete="${autocomplete(key)}" data-new-customer-field="${escapeHtml(key)}"${valueAttribute} placeholder="${escapeHtml(text[key])}"${disabledAttributes}>
+      ${key === "email" ? renderEmailSuggestion({ value: values[key], lang, escapeHtml, target: "new-customer" }) : ""}
     </div>`;
   };
   const [name, phone, ...stacked] = fields;

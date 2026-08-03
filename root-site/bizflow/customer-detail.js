@@ -3,6 +3,7 @@
 
 import { getCurrentUser, getCustomerDetailData, getCustomerMergeCandidates, getOrdersPageData, getUnread } from "../data/provider.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
+import { renderEmailSuggestion, suggestEmail } from "../components/email-suggest.js";
 import { renderManagementPager } from "../components/management-list.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import {
@@ -413,6 +414,7 @@ function renderEditInput(key, value, helpers, disabledAttributes = "") {
   return `<div class="form-new-customer__field">
     <label class="form-new-customer__label" for="customer-edit-${escapeHtml(key)}">${escapeHtml(pageT(lang, `customer.field.${key}`))}</label>
     <input id="customer-edit-${escapeHtml(key)}" class="form-new-customer__value" data-customer-edit-field="${escapeHtml(key)}" value="${escapeHtml(value)}"${disabledAttributes}>
+    ${key === "email" ? renderEmailSuggestion({ value, lang, escapeHtml, target: "edit-customer" }) : ""}
   </div>`;
 }
 
@@ -801,6 +803,16 @@ async function saveCustomerEdit() {
 
 async function onCustomerDetailClick(event) {
   if ((liveReadOnly || state.writeBusy) && event.target.closest("[data-customer-write]")) return;
+  const emailSuggestion = event.target.closest('[data-email-suggestion-target="edit-customer"]');
+  if (emailSuggestion && state.editModalOpen && !state.writeBusy) {
+    state.editDraft.email = emailSuggestion.getAttribute("data-email-suggestion") || "";
+    rerender();
+    const email = document.querySelector('[data-customer-edit-field="email"]');
+    email?.focus();
+    email?.setSelectionRange(email.value.length, email.value.length);
+    return;
+  }
+
   if (event.target.closest("[data-customer-actions-trigger]")) {
     state.actionMenuOpen = !state.actionMenuOpen;
     rerender();
@@ -905,7 +917,18 @@ function onCustomerDetailInput(event) {
   }
   const field = event.target.closest("[data-customer-edit-field]");
   if (!field || !state.editModalOpen || state.writeBusy) return;
-  state.editDraft[field.getAttribute("data-customer-edit-field")] = field.value;
+  const key = field.getAttribute("data-customer-edit-field");
+  state.editDraft[key] = field.value;
+  if (key === "email") {
+    const previousSuggestion = suggestEmail(field.defaultValue);
+    const nextSuggestion = suggestEmail(field.value);
+    if (previousSuggestion !== nextSuggestion) {
+      rerender();
+      const email = document.querySelector('[data-customer-edit-field="email"]');
+      email?.focus();
+      email?.setSelectionRange(email.value.length, email.value.length);
+    }
+  }
 }
 
 function onCustomerDetailKeydown(event) {

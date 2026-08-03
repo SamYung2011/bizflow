@@ -110,6 +110,13 @@
   background: var(--white);
 }
 
+.customers-list-summary {
+  margin: 0;
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+}
+
 .customers-search input {
   width: 100%;
   min-width: 0;
@@ -235,6 +242,26 @@
   max-width: 40%;
 }
 
+.customer-row__type {
+  flex: none;
+  padding: 2px var(--space-10);
+  border-radius: var(--radius-20);
+  background: var(--gray-10);
+  color: var(--gray-50);
+  font-size: var(--font-body-size);
+  font-weight: var(--font-title-3-weight);
+}
+
+.customer-row__type--lead {
+  background: color-mix(in srgb, var(--yellow) 14%, var(--white));
+  color: color-mix(in srgb, var(--yellow) 76%, var(--black));
+}
+
+.customer-row__type--vip {
+  background: color-mix(in srgb, var(--blue) 12%, var(--white));
+  color: var(--blue);
+}
+
 .customer-row__meta-line {
   display: flex;
   min-width: 0;
@@ -253,6 +280,13 @@
 
 .customer-row__date {
   flex: none;
+  white-space: nowrap;
+}
+
+.customer-row__imei {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -277,6 +311,17 @@
   font-size: var(--font-title-3-size);
   font-weight: var(--font-title-2-weight); /* Semi Bold(600) */
   line-height: var(--lh-tight);
+}
+
+.customer-row__spend {
+  flex: none;
+  padding: var(--space-4) var(--space-10);
+  border-radius: var(--radius-10);
+  background: color-mix(in srgb, var(--blue) 9%, var(--white));
+  color: var(--blue);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-title-3-weight);
+  white-space: nowrap;
 }
 
 .customer-row {
@@ -377,6 +422,10 @@
   .customer-row__source,
   .customer-row__date {
     flex: none;
+  }
+
+  .customer-row__spend {
+    display: none;
   }
 }
 
@@ -774,6 +823,24 @@
 .form-new-customer__address::placeholder {
   color: var(--gray-20);
   opacity: 1;
+}
+
+.email-suggestion {
+  align-self: flex-start;
+  padding: var(--space-4) var(--space-10);
+  border: 1px solid color-mix(in srgb, var(--yellow) 48%, var(--white));
+  border-radius: var(--radius-10);
+  background: color-mix(in srgb, var(--yellow) 16%, var(--white));
+  color: color-mix(in srgb, var(--yellow) 72%, var(--black));
+  font: inherit;
+  font-size: var(--font-body-size);
+  font-weight: var(--font-description-weight);
+  cursor: pointer;
+}
+
+.email-suggestion:hover,
+.email-suggestion:focus-visible {
+  border-color: var(--yellow);
 }
 
 .form-new-customer__address-label {

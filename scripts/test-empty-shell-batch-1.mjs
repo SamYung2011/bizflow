@@ -26,14 +26,14 @@ assert.doesNotMatch(addSubmit, /data-customers-modal-close/,
   "customer create submit must not share cancel/X close semantics");
 assert.match(customers, /data-customers-modal-close[\s\S]*?data-customers-modal-submit/,
   "customer create modal must retain separate close and submit controls");
-assert.match(customers, /state\.customerDraft\[customerField\.getAttribute\("data-new-customer-field"\)\] = customerField\.value;/,
+assert.match(customers, /const key = customerField\.getAttribute\("data-new-customer-field"\);\s*state\.customerDraft\[key\] = customerField\.value;/,
   "customer create fields must feed the live-write draft");
 
 assert.match(customerDetail, /import \{ updateLiveOrderCustomer \} from "\.\.\/data\/live-orders-writes\.js";/,
   "customer detail must reuse the approved live customer update helper");
 assert.match(customerDetail, /await updateLiveOrderCustomer\(detailData\.customer\.id, values, \{ preserveCarModel \}\)/,
   "customer detail submit must update the displayed live customer");
-assert.match(customerDetail, /state\.editDraft\[field\.getAttribute\("data-customer-edit-field"\)\] = field\.value;/,
+assert.match(customerDetail, /const key = field\.getAttribute\("data-customer-edit-field"\);\s*state\.editDraft\[key\] = field\.value;/,
   "customer detail inputs must update the saved draft");
 const editSubmit = customerDetail.match(/<button[^>]+data-customer-edit-submit[^>]*>/)?.[0] ?? "";
 assert.ok(editSubmit, "customer edit modal must expose a dedicated submit control");

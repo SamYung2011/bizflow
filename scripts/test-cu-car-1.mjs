@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { renderCustomerRow } from "../root-site/bizflow/customers.js";
+import { customerMatchesSearch, renderCustomerRow } from "../root-site/bizflow/customers.js";
 
 const escapeHtml = (value) => String(value ?? "")
   .replaceAll("&", "&amp;")
@@ -60,9 +60,11 @@ assert.match(liveSnapshotsSource, /carModel: `\$\{asText\(customer\.car_make\)\}
   "snapshot vehicle value must join only the non-empty make/model content");
 
 const filterFlow = customersSource.slice(customersSource.indexOf("function filteredCustomers"), customersSource.indexOf("function initials"));
-assert.match(filterFlow, /\[c\.name, c\.phone, c\.imei\]/);
-assert.doesNotMatch(filterFlow, /carModel|car_make|car_model/,
-  "CU-car-1 must not expand customer search to vehicle fields");
+assert.match(filterFlow, /customerMatchesSearch\(c, state\.search\)/);
+assert.equal(customerMatchesSearch(customer, "曾嘉欣"), true);
+assert.equal(customerMatchesSearch(customer, "90123987"), true);
+assert.equal(customerMatchesSearch(customer, "Toyota BZ3X"), true,
+  "NR-cust-1 intentionally expands customer search to the visible vehicle value");
 
 const captureFlow = customersSource.slice(customersSource.indexOf("captureState()"), customersSource.indexOf("dispose()"));
 for (const key of ["tab", "sort", "source", "imei", "search", "page", "dateFilter", "warranty"]) {
@@ -73,4 +75,4 @@ assert.match(warrantySource, /function renderWarrantyRow\(item, helpers\)/,
 assert.match(customerCss, /\.customer-row__car \{[\s\S]*?min-width: 0;[\s\S]*?text-overflow: ellipsis;[\s\S]*?white-space: nowrap;/,
   "vehicle metadata must stay secondary and truncate without widening the card");
 
-console.log("CU-car-1 contracts: PASS (vehicle value, empty compatibility, data columns, unchanged search/BF/warranty scope, trilingual render)");
+console.log("CU-car-1 contracts: PASS (vehicle value, empty compatibility, data columns, expanded search/BF/warranty scope, trilingual render)");

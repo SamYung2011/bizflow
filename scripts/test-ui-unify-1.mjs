@@ -65,7 +65,7 @@ for (const expected of [
 assert.match(orders, /--orders-status-selected:\s*var\(--blue\)/, "the audited order control blue must use the shared token")
 
 const customers = read("root-site/bizflow/customers.css")
-assert.equal((customers.match(/var\(--gray-50\)/g) || []).length, 3, "customer 5C text and cancel points must share gray-50")
+assert.equal((customers.match(/var\(--gray-50\)/g) || []).length, 4, "customer 5C text, type badge and cancel points must share gray-50")
 assert.match(customers, /background:\s*var\(--gray-11\);\s*\/\* Figma #E5E5E5/)
 assert.match(customers, /background:\s*var\(--gray-6\);\s*\/\* Figma #F5F5F5/)
 assert.match(customers, /background:\s*var\(--gray-70\);\s*\/\* Figma #2E2F30/)

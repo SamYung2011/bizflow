@@ -15,6 +15,7 @@ import { renderSegment } from "../components/segment.js";
 import { consumeNavigationPreset, navigationPresetKeys } from "../components/navigation-presets.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { renderNewCustomerFields } from "../components/new-customer-fields.js";
+import { suggestEmail } from "../components/email-suggest.js";
 import { copyPhoneNumber } from "../components/phone-copy.js";
 import { createLiveOrderCustomer } from "../data/live-orders-writes.js";
 import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
@@ -36,11 +37,12 @@ import {
   renderWarranty,
   restoreWarrantyState,
   setWarrantyRenewalMonths,
+  setWarrantyBucket,
   setWarrantySearch,
   submitWarrantyRenewal
 } from "./customers-warranty.js";
 
-const dict = {
+export const customerDictionaries = {
   zh: {
     "customers.title": "客戶管理",
     "customers.tab.list": "客戶列表",
@@ -61,7 +63,10 @@ const dict = {
     "customers.source.shopify": "Shopify",
     "customers.source.framer": "Framer",
     "customers.source.other": "其他",
+    "customers.count": "共 {count} 位客戶",
     "customers.orderCount": "訂單數",
+    "customers.totalSpend": "累計消費",
+    "customers.imei": "IMEI",
     "customers.pager.prev": "上一頁",
     "customers.pager.next": "下一頁",
     "customers.empty": "暫無符合條件的客戶",
@@ -103,7 +108,10 @@ const dict = {
     "customers.source.shopify": "Shopify",
     "customers.source.framer": "Framer",
     "customers.source.other": "Other",
+    "customers.count": "{count} customers",
     "customers.orderCount": "Orders",
+    "customers.totalSpend": "Total spend",
+    "customers.imei": "IMEI",
     "customers.pager.prev": "Previous page",
     "customers.pager.next": "Next page",
     "customers.empty": "No customers match the filters",
@@ -145,7 +153,10 @@ const dict = {
     "customers.source.shopify": "Shopify",
     "customers.source.framer": "Framer",
     "customers.source.other": "Autre",
+    "customers.count": "{count} clients",
     "customers.orderCount": "Commandes",
+    "customers.totalSpend": "Dépense totale",
+    "customers.imei": "IMEI",
     "customers.pager.prev": "Page précédente",
     "customers.pager.next": "Page suivante",
     "customers.empty": "Aucun client ne correspond aux filtres",
@@ -170,7 +181,11 @@ const dict = {
 };
 
 function pageT(lang, key) {
-  return dict[lang]?.[key] ?? dict.zh[key] ?? key;
+  return customerDictionaries[lang]?.[key] ?? customerDictionaries.zh[key] ?? key;
+}
+
+function pageTf(lang, key, values) {
+  return Object.entries(values).reduce((text, [name, value]) => text.replace(`{${name}}`, String(value)), pageT(lang, key));
 }
 
 let data = null;
@@ -243,11 +258,26 @@ function restoreCustomersTextFocus(focus) {
   input.setSelectionRange(Math.min(focus.start ?? end, end), Math.min(focus.end ?? end, end));
 }
 
+export function customerMatchesSearch(customer, query) {
+  const term = String(query || "").trim().toLocaleLowerCase();
+  if (!term) return true;
+  const compactTerm = term.replace(/[\s-]+/g, "");
+  const values = [
+    customer.allNames, customer.allEmails, customer.allPhones, customer.allPhoneMainlands,
+    customer.imeiCodes, customer.allCarMakes, customer.allCarModels,
+    customer.name, customer.phone, customer.imei,
+    customer.detail?.email, customer.detail?.carMake, customer.detail?.carModelValue, customer.detail?.carModel
+  ].flat().filter((value) => value != null);
+  return values.some((value) => {
+    const text = String(value).toLocaleLowerCase();
+    return text.includes(term) || (compactTerm && text.replace(/[\s-]+/g, "").includes(compactTerm));
+  });
+}
+
 function filteredCustomers() {
-  const query = state.search.trim().toLocaleLowerCase();
   return data.customers.filter((c) => {
-    if (query && ![c.name, c.phone, c.imei]
-      .some((value) => String(value ?? "").toLocaleLowerCase().includes(query))) return false;
+    if (!c.hasEmail && !c.hasPhone && !c.hasImei) return false;
+    if (!customerMatchesSearch(c, state.search)) return false;
     if (state.source !== "all" && c.source !== state.source) return false;
     const hasImei = Boolean(String(c.imei ?? "").trim());
     if (state.imei === "has" && !hasImei) return false;
@@ -265,19 +295,26 @@ export function renderCustomerRow(customer, helpers) {
   const sourceLabel = pageT(lang, `customers.source.${customer.source}`);
   const countTitle = `${pageT(lang, "customers.orderCount")}：${customer.orderCount}`;
   const carModel = String(customer.detail?.carModel ?? "").trim();
+  const imei = String(customer.imeiCodes?.[0] || customer.imei || "").trim();
+  const type = String(customer.type || "Regular");
+  const totalAmount = Number(customer.detail?.totalAmount) || 0;
+  const totalLabel = `HKD$${totalAmount.toLocaleString("en-HK")}`;
   return `<a class="tp-component management-list__row management-list__row--customer customer-row" style="--component-height:60px" href="./customer-detail.html?id=${encodeURIComponent(customer.id)}" data-customer-row data-customer-id="${escapeHtml(customer.id)}">
     <span class="avatar--initial" style="--component-width:40px;--component-height:40px">${escapeHtml(initials(customer.name))}</span>
     <div class="customer-row__body">
       <div class="customer-row__name-line">
         <span class="customer-row__name" title="${escapeHtml(customer.name)}">${escapeHtml(customer.name)}</span>
+        <span class="customer-row__type customer-row__type--${escapeHtml(type.toLocaleLowerCase())}">${escapeHtml(type)}</span>
         <span class="customer-row__source" title="${escapeHtml(sourceLabel)}">${escapeHtml(sourceLabel)}</span>
       </div>
       <div class="customer-row__meta-line">
         <span class="customer-row__phone">${escapeHtml(customer.phone)}</span>
         <span class="customer-row__date">${escapeHtml(customer.joinedAt)}</span>
+        ${imei ? `<span class="customer-row__imei" title="${escapeHtml(`${pageT(lang, "customers.imei")}：${imei}`)}">${escapeHtml(pageT(lang, "customers.imei"))}：${escapeHtml(imei)}</span>` : ""}
         ${carModel ? `<span class="customer-row__car" title="${escapeHtml(carModel)}">${escapeHtml(carModel)}</span>` : ""}
       </div>
     </div>
+    <span class="customer-row__spend" title="${escapeHtml(pageT(lang, "customers.totalSpend"))}">${escapeHtml(totalLabel)}</span>
     <span class="customer-row__count" title="${escapeHtml(countTitle)}">${escapeHtml(String(customer.orderCount))}</span>
   </a>`;
 }
@@ -384,7 +421,8 @@ function renderCustomerList(helpers) {
     nextLabel: tt("customers.pager.next")
   });
 
-  return `${renderToolbar(helpers)}
+  return `<p class="customers-list-summary" data-customers-visible-count="${filtered.length}">${escapeHtml(pageTf(lang, "customers.count", { count: filtered.length }))}</p>
+    ${renderToolbar(helpers)}
     ${renderManagementList({ content: listHtml, pager: pagerHtml, paged: filtered.length > pageSize })}
     ${renderAddCustomerModal(helpers)}`;
 }
@@ -466,6 +504,17 @@ function fallbackCreatedCustomer(result) {
     source: "other",
     joinedAt: createdAt,
     imei: result.deviceConflicts.length || result.deviceError ? "" : String(state.customerDraft.imei || "").replace(/[\s-]+/g, ""),
+    imeiCodes: result.deviceConflicts.length || result.deviceError ? [] : [String(state.customerDraft.imei || "").replace(/[\s-]+/g, "")].filter(Boolean),
+    allNames: [customer.name || ""].filter(Boolean),
+    allEmails: [customer.email || ""].filter(Boolean),
+    allPhones: [customer.phone || ""].filter(Boolean),
+    allPhoneMainlands: [],
+    allCarMakes: [customer.car_make || ""].filter(Boolean),
+    allCarModels: [customer.car_model || ""].filter(Boolean),
+    type: customer.type || "Regular",
+    hasEmail: Boolean(String(customer.email || "").trim()),
+    hasPhone: Boolean(String(customer.phone || "").trim()),
+    hasImei: Boolean(!result.deviceConflicts.length && !result.deviceError && String(state.customerDraft.imei || "").trim()),
     orderCount: 0,
     detail: {
       totalAmount: 0,
@@ -520,6 +569,22 @@ async function submitLiveCustomer() {
 
 async function onCustomersClick(event) {
   if ((liveReadOnly || state.writeBusy) && event.target.closest("[data-customers-write]")) return;
+  const emailSuggestion = event.target.closest('[data-email-suggestion-target="new-customer"]');
+  if (emailSuggestion && state.modalOpen && !state.writeBusy) {
+    state.customerDraft.email = emailSuggestion.getAttribute("data-email-suggestion") || "";
+    rerenderCustomersPage();
+    const email = document.querySelector('[data-new-customer-field="email"]');
+    email?.focus();
+    email?.setSelectionRange(email.value.length, email.value.length);
+    return;
+  }
+
+  const warrantyBucket = event.target.closest("[data-warranty-bucket]");
+  if (warrantyBucket && state.tab === "warranty") {
+    if (setWarrantyBucket(warrantyBucket.getAttribute("data-warranty-bucket"))) rerenderCustomersPage();
+    return;
+  }
+
   const customerTab = event.target.closest("[data-customers-tab]");
   if (customerTab) {
     const scope = activeScope;
@@ -701,7 +766,18 @@ async function onCustomersContextMenu(event) {
 function onCustomersInput(event) {
   const customerField = event.target.closest("[data-customers-modal-overlay] [data-new-customer-field]");
   if (customerField) {
-    state.customerDraft[customerField.getAttribute("data-new-customer-field")] = customerField.value;
+    const key = customerField.getAttribute("data-new-customer-field");
+    state.customerDraft[key] = customerField.value;
+    if (key === "email") {
+      const previousSuggestion = suggestEmail(customerField.defaultValue);
+      const nextSuggestion = suggestEmail(customerField.value);
+      if (previousSuggestion !== nextSuggestion) {
+        rerenderCustomersPage();
+        const email = document.querySelector('[data-new-customer-field="email"]');
+        email?.focus();
+        email?.setSelectionRange(email.value.length, email.value.length);
+      }
+    }
     return;
   }
   const customerSearch = event.target.closest("[data-customers-search]");

@@ -13,6 +13,7 @@ const copy = {
     month: "30 天內",
     quarter: "90 天內",
     year: "一年內",
+    count: "共 {count} 件需跟進",
     search: "搜尋客戶、電話、產品或單號",
     purchaseRange: "購買日期",
     dateRange: "購買日期範圍",
@@ -59,6 +60,7 @@ const copy = {
     month: "Within 30 days",
     quarter: "Within 90 days",
     year: "Within 1 year",
+    count: "{count} items need follow-up",
     search: "Search customer, phone, product or order",
     purchaseRange: "Purchase date",
     dateRange: "Purchase date range",
@@ -105,6 +107,7 @@ const copy = {
     month: "Sous 30 jours",
     quarter: "Sous 90 jours",
     year: "Sous 1 an",
+    count: "{count} éléments à suivre",
     search: "Rechercher client, téléphone, produit ou commande",
     purchaseRange: "Date d'achat",
     dateRange: "Plage de dates d'achat",
@@ -145,8 +148,13 @@ const copy = {
   }
 };
 
+export const warrantyDictionaries = copy;
+
+const WARRANTY_BUCKETS = ["all", "expired", "week", "month", "quarter", "year"];
+
 const state = {
   items: null,
+  bucket: "all",
   search: "",
   dateFrom: "",
   dateTo: "",
@@ -248,11 +256,21 @@ export async function ensureWarrantyData({ scope = null, signal = scope?.signal 
     .filter((item) => item.bucket !== null && item.daysLeft >= -30 && validCustomerIds.has(String(item.customerId)));
 }
 
+export function warrantyBucketCounts(items) {
+  const counts = Object.fromEntries(WARRANTY_BUCKETS.map((bucket) => [bucket, 0]));
+  for (const item of items ?? []) {
+    counts.all += 1;
+    if (item.bucket in counts) counts[item.bucket] += 1;
+  }
+  return counts;
+}
+
 function filteredItems() {
   const term = state.search.trim().toLocaleLowerCase();
   const rangeFrom = dateValue(state.dateFrom);
   const rangeTo = dateValue(state.dateTo);
   return (state.items ?? []).filter((item) => {
+    if (state.bucket !== "all" && item.bucket !== state.bucket) return false;
     const purchaseDate = dateValue(item.purchaseDate);
     if (Number.isFinite(rangeFrom) && (!Number.isFinite(purchaseDate) || purchaseDate < rangeFrom)) return false;
     if (Number.isFinite(rangeTo) && (!Number.isFinite(purchaseDate) || purchaseDate > rangeTo)) return false;
@@ -358,6 +376,7 @@ export function renderWarranty(helpers) {
   }
 
   const filtered = filteredItems();
+  const counts = warrantyBucketCounts(state.items);
   const pageSize = managementPageSize();
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   state.page = Math.min(Math.max(state.page, 1), pages);
@@ -376,6 +395,10 @@ export function renderWarranty(helpers) {
   });
   return `<section class="warranty-panel" data-warranty-panel data-warranty-total="${state.items.length}" data-warranty-filtered="${filtered.length}">
     ${state.renewalNotice ? `<p class="customer-write-notice customer-write-notice--success" role="status">${escapeHtml(t(lang, state.renewalNotice.key, state.renewalNotice.values))}</p>` : ""}
+    <p class="warranty-summary">${escapeHtml(t(lang, "count", { count: state.items.length }))}</p>
+    <div class="warranty-buckets" role="group" aria-label="${escapeHtml(t(lang, "title"))}">
+      ${WARRANTY_BUCKETS.map((bucket) => `<button type="button" class="warranty-bucket${state.bucket === bucket ? " is-active" : ""}" data-warranty-bucket="${bucket}" aria-pressed="${state.bucket === bucket}"><span>${escapeHtml(t(lang, bucket))}</span><strong>${escapeHtml(String(counts[bucket]))}</strong></button>`).join("")}
+    </div>
     <div class="warranty-toolbar">
       <div class="warranty-toolbar__filters">
         ${renderDateRangeFilter(helpers)}
@@ -392,6 +415,13 @@ export function renderWarranty(helpers) {
 export function setWarrantySearch(value) {
   if (state.search === value) return false;
   state.search = value;
+  state.page = 1;
+  return true;
+}
+
+export function setWarrantyBucket(value) {
+  if (!WARRANTY_BUCKETS.includes(value) || state.bucket === value) return false;
+  state.bucket = value;
   state.page = 1;
   return true;
 }
@@ -542,6 +572,7 @@ export function moveWarrantyPage(direction) {
 
 export function captureWarrantyState() {
   return {
+    bucket: state.bucket,
     search: state.search,
     dateFrom: state.dateFrom,
     dateTo: state.dateTo,
@@ -551,6 +582,7 @@ export function captureWarrantyState() {
 
 export function restoreWarrantyState(value = null) {
   const next = value && typeof value === "object" ? value : {};
+  state.bucket = WARRANTY_BUCKETS.includes(next.bucket) ? next.bucket : "all";
   state.search = typeof next.search === "string" ? next.search : "";
   state.dateFrom = typeof next.dateFrom === "string" ? next.dateFrom : "";
   state.dateTo = typeof next.dateTo === "string" ? next.dateTo : "";
@@ -569,6 +601,7 @@ export function disposeWarrantyState() {
   renewalDatePanel.close({ restoreFocus: false });
   clearPhoneCopyNotice();
   state.items = null;
+  state.bucket = "all";
   state.renewal = null;
   state.renewalBusy = false;
   state.renewalError = "";

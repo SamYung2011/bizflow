@@ -299,6 +299,14 @@
   white-space: nowrap;
 }
 
+.order-card__number {
+  flex: none;
+  color: var(--blue);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-title-3-weight);
+  white-space: nowrap;
+}
+
 .order-card__phone {
   flex: none;
   padding: 0;
@@ -348,6 +356,31 @@ button.order-card__phone:focus-visible {
 .order-card__qty {
   min-width: 0;
   flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-card__salesperson {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--gray-50);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-card__line3,
+.order-card__note {
+  display: flex;
+  min-width: 0;
+  gap: var(--space-4);
+  color: var(--gray-40);
+  font-size: var(--font-body-size);
+  line-height: var(--lh-tight);
+}
+
+.order-card__second-item,
+.order-card__note {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -615,6 +648,12 @@ button.order-card__phone:focus-visible {
     text-overflow: ellipsis;
   }
 
+  .order-card__number {
+    max-width: 84px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   .order-card__phone {
     min-width: 0;
     flex: 1;
@@ -636,6 +675,12 @@ button.order-card__phone:focus-visible {
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .order-card__salesperson,
+  .order-card__line3,
+  .order-card__note {
+    display: none;
   }
 
   .order-card__qty {

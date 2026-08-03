@@ -69,6 +69,24 @@ function invoiceNumber(invoice) {
   return `#${invoice.invoice_number ?? asText(invoice.id).slice(0, 8)}`;
 }
 
+function dcInvoiceNumber(invoice) {
+  const raw = String(invoice.invoice_number || invoice.id || "");
+  const stripped = raw.replace(/^DC/i, "");
+  return `DC${/^\d+$/.test(stripped) ? stripped.padStart(5, "0") : stripped}`;
+}
+
+function visibleInvoiceNotes(notes) {
+  return asText(notes)
+    .replace(/__[A-Z_]+__(?::[\w-]+)?\s*/g, "")
+    .replace(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?Z/g, (_, year, month, day, hour, minute) => {
+      const utc = new Date(Date.UTC(+year, +month - 1, +day, +hour, +minute));
+      const hongKong = new Date(utc.getTime() + 8 * 60 * 60 * 1000);
+      const pad = (value) => String(value).padStart(2, "0");
+      return `${hongKong.getUTCFullYear()}-${pad(hongKong.getUTCMonth() + 1)}-${pad(hongKong.getUTCDate())} ${pad(hongKong.getUTCHours())}:${pad(hongKong.getUTCMinutes())}`;
+    })
+    .trim();
+}
+
 function invoiceChannel(invoice) {
   const notes = asText(invoice.notes);
   if (notes.includes("__FORMS_BUY__")) return "Framer";
@@ -140,6 +158,8 @@ function buildOrderRow(invoice, sources) {
     }));
   return {
     id: invoice.id,
+    invoiceNumber: String(invoice.invoice_number ?? invoice.id ?? ""),
+    dcNumber: dcInvoiceNumber(invoice),
     customerId: invoice.customer_id ?? null,
     status: invoice.status === "Paid" ? "completed" : "in-progress",
     customer: asText(customer.name, "—"),
@@ -157,6 +177,7 @@ function buildOrderRow(invoice, sources) {
       carrier: asText(invoice.carrier),
       trackingNo: asText(invoice.tracking_number),
       salesperson: asText(sources.employeeById.get(invoice.salesperson_id)?.name),
+      note: visibleInvoiceNotes(invoice.notes),
       salespersonId: invoice.salesperson_id ?? null,
       customerId: invoice.customer_id ?? null,
       paymentTotal: asNumber(invoice.total),
@@ -222,6 +243,12 @@ async function customerSourceData() {
     groupCids: group.allCids.slice(),
     hasEmail: group.allEmails.length > 0,
     hasPhone: group.allPhones.length > 0,
+    allNames: group.allNames.slice(),
+    allEmails: group.allEmails.slice(),
+    allPhones: group.allPhones.slice(),
+    allPhoneMainlands: group.allPhoneMainlands.slice(),
+    allCarMakes: group.allCarMakes.slice(),
+    allCarModels: group.allCarModels.slice(),
     name: asText(group.primary.name) || group.allNames[0] || "",
     phone: asText(group.primary.phone) || group.allPhones[0] || "",
     phone_mainland: group.allPhoneMainlands.join("\n") || asText(group.primary.phone_mainland),
@@ -240,11 +267,18 @@ async function customerSourceData() {
     invoicesByRoot.set(rootId, list);
   }
   const latestDeviceByRoot = new Map();
+  const imeiCodesByRoot = new Map();
   for (const device of devices) {
     const rootId = customerGroups.idToGroup.get(device.customer_id);
-    if (rootId && !latestDeviceByRoot.has(rootId)) latestDeviceByRoot.set(rootId, device);
+    if (!rootId) continue;
+    if (!latestDeviceByRoot.has(rootId)) latestDeviceByRoot.set(rootId, device);
+    const imei = asText(device.imei);
+    if (!imei) continue;
+    const codes = imeiCodesByRoot.get(rootId) ?? [];
+    if (!codes.includes(imei)) codes.push(imei);
+    imeiCodesByRoot.set(rootId, codes);
   }
-  return { roots, invoicesByRoot, latestDeviceByRoot };
+  return { roots, invoicesByRoot, latestDeviceByRoot, imeiCodesByRoot };
 }
 
 async function buildCustomersSnapshot() {
@@ -255,6 +289,7 @@ async function buildCustomersSnapshot() {
     const newest = invoices[0];
     const totalAmount = invoices.reduce((sum, invoice) => sum + asNumber(invoice.total), 0);
     const orders = invoices.map(customerOrder);
+    const imeiCodes = source.imeiCodesByRoot.get(customer.id) ?? [];
     return {
       id: customer.id,
       groupCids: customer.groupCids.slice(),
@@ -263,9 +298,17 @@ async function buildCustomersSnapshot() {
       source: customerSourceFromInvoices(invoices),
       joinedAt: formatDate(customer.created_at, { compact: true }),
       imei: asText(source.latestDeviceByRoot.get(customer.id)?.imei),
+      imeiCodes: imeiCodes.slice(),
+      allNames: customer.allNames.slice(),
+      allEmails: customer.allEmails.slice(),
+      allPhones: customer.allPhones.slice(),
+      allPhoneMainlands: customer.allPhoneMainlands.slice(),
+      allCarMakes: customer.allCarMakes.slice(),
+      allCarModels: customer.allCarModels.slice(),
+      type: asText(customer.type, "Regular") || "Regular",
       hasEmail: customer.hasEmail,
       hasPhone: customer.hasPhone,
-      hasImei: Boolean(asText(source.latestDeviceByRoot.get(customer.id)?.imei)),
+      hasImei: imeiCodes.length > 0,
       orderCount: invoices.length,
       detail: {
         totalAmount,

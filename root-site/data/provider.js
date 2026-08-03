@@ -1045,25 +1045,43 @@ function customerSnapshotGroups(customers) {
       .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
     const joinedAt = rows.map((customer) => customer.joinedAt).filter(Boolean)
       .sort((a, b) => Date.parse(a) - Date.parse(b))[0] ?? primary.joinedAt;
+    const unique = (values) => [...new Set(values.flat().map((value) => String(value || "").trim()).filter(Boolean))];
+    const allNames = unique(rows.map((customer) => customer.allNames ?? [customer.name]));
+    const allEmails = unique(rows.map((customer) => customer.allEmails ?? [customer.detail?.email]));
+    const allPhones = unique(rows.map((customer) => customer.allPhones ?? [customer.phone]));
+    const allPhoneMainlands = unique(rows.map((customer) => customer.allPhoneMainlands ?? []));
+    const allCarMakes = unique(rows.map((customer) => customer.allCarMakes ?? [customer.detail?.carMake]));
+    const allCarModels = unique(rows.map((customer) => customer.allCarModels ?? [customer.detail?.carModelValue, customer.detail?.carModel]));
+    const imeiCodes = unique(rows.map((customer) => customer.imeiCodes ?? [customer.imei]));
     return {
       ...primary,
       id: group.id,
       groupCids: group.allCids.slice(),
-      hasEmail: group.allEmails.length > 0,
-      hasPhone: group.allPhones.length > 0,
-      hasImei: rows.some((customer) => Boolean(String(customer.imei || "").trim())),
-      name: primary.name || group.allNames[0] || "",
-      phone: primary.phone || group.allPhones[0] || "",
+      hasEmail: allEmails.length > 0,
+      hasPhone: allPhones.length > 0,
+      hasImei: imeiCodes.length > 0,
+      allNames,
+      allEmails,
+      allPhones,
+      allPhoneMainlands,
+      allCarMakes,
+      allCarModels,
+      imeiCodes,
+      type: primary.type || "Regular",
+      name: primary.name || allNames[0] || "",
+      phone: primary.phone || allPhones[0] || "",
       source: customerSourceFromInvoices(orders, { normalized: true }),
       joinedAt,
-      imei: rows.find((customer) => customer.imei)?.imei || "",
+      imei: imeiCodes[0] || "",
       orderCount: orders.length,
       detail: {
         ...primary.detail,
         totalAmount: rows.reduce((sum, customer) => sum + (Number(customer.detail?.totalAmount) || 0), 0),
         firstOrderDate: orders.at(-1)?.date || primary.detail?.firstOrderDate || "",
-        email: primary.detail?.email || group.allEmails[0] || "",
-        carModel: primary.detail?.carModel || group.allCarModels[0] || null,
+        email: primary.detail?.email || allEmails[0] || "",
+        carMake: primary.detail?.carMake || allCarMakes[0] || "",
+        carModelValue: primary.detail?.carModelValue || allCarModels[0] || "",
+        carModel: primary.detail?.carModel || [allCarMakes[0], allCarModels[0]].filter(Boolean).join(" ") || null,
         shippingAddress: primary.detail?.shippingAddress || group.allAddresses[0] || "",
         order: orders[0] ?? null,
         orders
@@ -1299,7 +1317,7 @@ export async function getHomeOrderMetricRows() {
 function isOrdersPageSnapshot(source) {
   return !!source && typeof source === "object" && !Array.isArray(source) &&
     Array.isArray(source.orders) && (source.__live === true || source.orders.length > 0) && source.orders.every((row) =>
-      isOrderRow(row) && isValidOrderDetail(row.detail)) &&
+      isOrderRow(row) && typeof row.invoiceNumber === "string" && typeof row.dcNumber === "string" && isValidOrderDetail(row.detail)) &&
     !!source.dateRange && typeof source.dateRange.from === "string" && typeof source.dateRange.to === "string" &&
     Array.isArray(source.sources) && (source.__live === true || source.sources.length > 0) && source.sources.every((value) => typeof value === "string");
 }
@@ -1347,6 +1365,7 @@ const orderDetailSample = {
   },
   paymentTotal: 2154,
   salesperson: "",
+  note: "",
   email: "234234@gmail.com",
   carModel: "tesla model 3",
   shippingAddress: "一鳴路, 粉嶺, 新界 香港特別行政區",
@@ -1356,7 +1375,7 @@ const orderDetailSample = {
 
 function isValidOrderDetail(detail) {
   const textKeys = ["orderNo", "time", "shippingStatus"];
-  const nullableTextKeys = ["carrier", "trackingNo", "salesperson", "email", "shippingAddress"];
+  const nullableTextKeys = ["carrier", "trackingNo", "salesperson", "note", "email", "shippingAddress"];
   const feeKeys = ["shipping", "deposit", "discount", "service"];
   return !!detail && textKeys.every((key) => typeof detail[key] === "string") &&
     nullableTextKeys.every((key) => isNullableString(detail[key])) &&

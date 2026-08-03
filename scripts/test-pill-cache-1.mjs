@@ -106,9 +106,9 @@ assert.match(tableCacheSource, /export const LIVE_TABLE_CACHE_TTL_MS = 10 \* 60_
 
 for (const [snapshot, generation] of [
   ["home.json", 3],
-  ["customers.json", 1],
+  ["customers.json", 2],
   ["warranty.json", 2],
-  ["orders.json", 1],
+  ["orders.json", 2],
   ["pending-deduction.json", 1]
 ]) {
   assert.match(tableCacheSource, new RegExp(`\\["${snapshot.replace(".", "\\.")}", ${generation}\\]`),

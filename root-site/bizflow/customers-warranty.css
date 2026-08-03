@@ -5,6 +5,45 @@
   gap: var(--space-20);
 }
 
+.warranty-summary {
+  margin: 0;
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+}
+
+.warranty-buckets {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: var(--space-10);
+}
+
+.warranty-bucket {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: var(--space-4);
+  padding: 0 var(--space-10);
+  border: 1px solid var(--gray-15);
+  border-radius: var(--radius-20);
+  background: var(--white);
+  color: var(--gray-50);
+  font: inherit;
+  font-size: var(--font-description-size);
+  cursor: pointer;
+}
+
+.warranty-bucket strong {
+  font-weight: var(--font-title-3-weight);
+}
+
+.warranty-bucket.is-active {
+  border-color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 9%, var(--white));
+  color: var(--blue);
+}
+
 .warranty-toolbar {
   display: flex;
   min-width: 0;

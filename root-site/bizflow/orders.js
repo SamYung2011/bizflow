@@ -44,6 +44,8 @@ const dict = {
     "orders.nextPage": "下一頁",
     "orders.empty": "此條件暫無訂單",
     "orders.search": "搜索單號、客戶或產品",
+    "orders.salesperson": "負責銷售",
+    "orders.note": "備註",
     "orders.shipping.all": "全部",
     "orders.shipping.pending": "待發貨",
     "orders.shipping.in_transit": "運送中",
@@ -70,6 +72,8 @@ const dict = {
     "orders.nextPage": "Next page",
     "orders.empty": "No orders match the filters",
     "orders.search": "Search order, customer or product",
+    "orders.salesperson": "Salesperson",
+    "orders.note": "Note",
     "orders.shipping.all": "All",
     "orders.shipping.pending": "Pending shipment",
     "orders.shipping.in_transit": "In transit",
@@ -96,6 +100,8 @@ const dict = {
     "orders.nextPage": "Page suivante",
     "orders.empty": "Aucune commande ne correspond",
     "orders.search": "Rechercher commande, client ou produit",
+    "orders.salesperson": "Commercial",
+    "orders.note": "Remarque",
     "orders.shipping.all": "Tous",
     "orders.shipping.pending": "À expédier",
     "orders.shipping.in_transit": "En transit",
@@ -108,6 +114,8 @@ const dict = {
     "orders.leaveUnsaved": "Des modifications de véhicules vers le nord ne sont pas enregistrées. Quitter cette page ?"
   }
 };
+
+export const orderDictionaries = dict;
 
 let data = null;
 let unreadWatermarks = null;
@@ -171,14 +179,22 @@ const STATUS_CLASS = {
   "in-progress": "order-status--progress",
   "cancelled": "order-status--cancelled"
 };
+export function orderMatchesSearch(order, query) {
+  const term = String(query || "").trim().toLocaleLowerCase();
+  if (!term) return true;
+  return [
+    order.dcNumber, order.invoiceNumber, order.detail?.orderNo,
+    order.customer, order.phone, order.product, order.detail?.salesperson,
+    order.detail?.note, order.detail?.trackingNo,
+    ...(Array.isArray(order.detail?.items) ? order.detail.items.map((item) => item?.name) : [])
+  ].some((value) => String(value || "").toLocaleLowerCase().includes(term));
+}
+
 function ordersBeforeShipping() {
-  const term = state.search.trim().toLocaleLowerCase();
   return data.orders.filter((order) => {
     if (state.source !== "all" && order.channel !== state.source) return false;
     if (!dateFilter.matches(order.date)) return false;
-    if (!term) return true;
-    return [order.detail?.orderNo, order.customer, order.phone, order.product]
-      .some((value) => String(value || "").toLocaleLowerCase().includes(term));
+    return orderMatchesSearch(order, state.search);
   });
 }
 
@@ -204,17 +220,22 @@ function currentPageOrders(orders = filteredOrders(), pageSize = currentPageSize
   return orders.slice(start, start + pageSize);
 }
 
-function renderOrderCard(order, helpers) {
+export function renderOrderCard(order, helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const e = escapeHtml;
   const cancelled = order.status === "cancelled";
   const phone = String(order.phone || "").trim();
+  const dcNumber = String(order.dcNumber || order.detail?.orderNo || "").replace(/^#/, "");
+  const salesperson = String(order.detail?.salesperson || "").trim();
+  const note = String(order.detail?.note || "").trim();
+  const secondItem = Array.isArray(order.detail?.items) ? order.detail.items[1] : null;
   const statusLabel = pageT(lang, STATUS_KEY[order.status] ?? "orders.status.completed");
   return `<article class="management-list__row order-card" data-order-card data-order-id="${e(order.id)}"${phone ? ` data-order-phone="${e(phone)}"` : ""} tabindex="0" role="link" title="${e(order.customer)}">
     <div class="order-card__lead">
       <span class="order-status ${STATUS_CLASS[order.status] ?? "order-status--completed"}" role="img" aria-label="${e(statusLabel)}" title="${e(statusLabel)}">${statusMark(order.status)}</span>
       <div class="order-card__text">
         <div class="order-card__line1">
+          ${dcNumber ? `<span class="order-card__number">${e(dcNumber)}</span>` : ""}
           <span class="order-card__name" title="${e(order.customer)}">${e(order.customer)}</span>
           ${phone
             ? `<button type="button" class="order-card__phone" data-order-phone-copy="${e(phone)}" title="${e(phoneCopyLabel(phone, lang))}" aria-label="${e(phoneCopyLabel(phone, lang))}">${e(phone)}</button>`
@@ -224,7 +245,10 @@ function renderOrderCard(order, helpers) {
         <div class="order-card__line2">
           <span class="order-card__product" title="${e(order.product)}">${e(order.product)}</span>
           <span class="order-card__qty">${e(order.qty)}</span>
+          ${salesperson ? `<span class="order-card__salesperson" title="${e(`${pageT(lang, "orders.salesperson")}：${salesperson}`)}">${e(pageT(lang, "orders.salesperson"))}：${e(salesperson)}</span>` : ""}
         </div>
+        ${secondItem ? `<div class="order-card__line3"><span class="order-card__second-item" title="${e(secondItem.name)}">${e(secondItem.name)}</span><span>×${e(String(secondItem.quantity))}</span></div>` : ""}
+        ${note ? `<div class="order-card__note" title="${e(note)}">${e(pageT(lang, "orders.note"))}：${e(note)}</div>` : ""}
       </div>
     </div>
     <div class="order-card__tail">
