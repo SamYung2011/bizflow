@@ -992,6 +992,16 @@
       { id: "team", labelKey: "nav.team", icon: "icon-nav-user", canonicalHref: "/team/members.html" }
     ])
   });
+  function createSectionMenu(section, { activeId = "", resolveHref = (href) => href } = {}) {
+    return (SECTION_MENU_ITEMS[section] ?? []).map(({ id, labelKey, icon: icon3, canonicalHref, unreadKey, adminOnly }) => ({
+      key: labelKey,
+      icon: icon3,
+      href: resolveHref(canonicalHref),
+      ...unreadKey ? { unreadKey } : {},
+      ...adminOnly === true ? { adminOnly: true } : {},
+      active: id === activeId
+    }));
+  }
 
   // root-site/spa/route-menu.js
   var skeleton = (kind, stats = 0) => Object.freeze({ kind, stats });
@@ -1017,21 +1027,7 @@
   function createRouteMenu(pathname) {
     const currentRoute = routeMenuEntries[String(pathname || "")];
     if (!currentRoute) return [];
-    return (SECTION_MENU_ITEMS[currentRoute.section] ?? []).map(({
-      id,
-      labelKey,
-      icon: icon3,
-      canonicalHref,
-      unreadKey,
-      adminOnly
-    }) => ({
-      key: labelKey,
-      icon: icon3,
-      href: canonicalHref,
-      ...unreadKey ? { unreadKey } : {},
-      ...adminOnly === true ? { adminOnly: true } : {},
-      active: id === currentRoute.menuKey
-    }));
+    return createSectionMenu(currentRoute.section, { activeId: currentRoute.menuKey });
   }
 
   // root-site/components/quick-create.js
@@ -1170,20 +1166,49 @@
     } });
   }
 
+  // root-site/data/language-preference.js
+  var LANGUAGE_STORAGE_KEY = "bizflow-lang";
+  var LANGUAGE_CODES = Object.freeze(["zh", "en", "fr"]);
+  function isLanguageCode(value) {
+    return LANGUAGE_CODES.includes(String(value || ""));
+  }
+  function resolveLanguagePreference({ search = "", storage } = {}) {
+    const queryLanguage = new URLSearchParams(search).get("lang");
+    if (isLanguageCode(queryLanguage)) return queryLanguage;
+    try {
+      const preferenceStorage = storage === void 0 ? globalThis.localStorage : storage;
+      const storedLanguage = preferenceStorage?.getItem(LANGUAGE_STORAGE_KEY);
+      if (isLanguageCode(storedLanguage)) return storedLanguage;
+    } catch {
+    }
+    return "zh";
+  }
+  function persistLanguagePreference(language, storage) {
+    if (!isLanguageCode(language)) return false;
+    try {
+      const preferenceStorage = storage === void 0 ? globalThis.localStorage : storage;
+      if (!preferenceStorage) return false;
+      preferenceStorage.setItem(LANGUAGE_STORAGE_KEY, language);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   // root-site/shell/shell.js
   var iconsUrl2 = "../assets/icons/icons.svg";
   var root = document.getElementById("shell-root");
   var mobileViewport = window.matchMedia?.("(max-width: 768px)") ?? null;
   var mode = mobileViewport ? mobileViewport.matches ? "mobile" : "desktop" : document.body.dataset.shellMode === "mobile" ? "mobile" : "desktop";
-  var initialLang = new URLSearchParams(window.location.search).get("lang");
-  var langs = ["zh", "en", "fr"];
+  var langs = LANGUAGE_CODES;
+  var initialLang = resolveLanguagePreference({ search: window.location.search });
   var companies = [
     { key: "honnmono", labelKey: "shell.company" },
     // 品牌名称固定使用官方字面量，不参与界面语言本地化。
     { key: "driver-ez", label: "Driver EZ" }
   ];
   var state2 = {
-    lang: langs.includes(initialLang) ? initialLang : "zh",
+    lang: initialLang,
     company: companies[0].key,
     drawerOpen: false,
     profileUser: null,
@@ -1630,6 +1655,7 @@
       onSelectLang(code) {
         if (langs.includes(code)) {
           state2.lang = code;
+          persistLanguagePreference(code);
           render();
         }
       },

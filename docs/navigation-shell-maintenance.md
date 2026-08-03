@@ -13,7 +13,7 @@ MENU-unify-1 收口后的原则是：菜单、用户面板各自只有一个手�
 - `unreadKey`（需要红点时）
 - `adminOnly`（仅管理员入口）
 
-`root-site/components/bizflow-menu.js` 只把 canonical URL 适配成 BizFlow 页面需要的相对 URL；`root-site/spa/route-menu.js` 只生成 SPA 的绝对 URL、active 状态与 loading frame。两个 adapter 都不得再声明本地菜单数组。
+`navigation-registry.js` 的 `createSectionMenu()` 统一完成菜单字段投影与 active 状态；`root-site/components/bizflow-menu.js` 只传入 BizFlow 相对 URL 适配器，`root-site/spa/route-menu.js` 只选择当前 route/section 并生成 loading frame。两个 adapter 都不得再声明本地菜单数组或复制字段投影。
 
 修改后运行：
 
@@ -21,6 +21,10 @@ MENU-unify-1 收口后的原则是：菜单、用户面板各自只有一个手�
 node scripts/test-menu-registry.mjs
 node scripts/test-spa-p1.mjs
 ```
+
+## 首屏占位策略
+
+Shell 启动阶段保留 topbar 操作位，并用 `shell-boot__fab` 明确占住侧栏快速新增按钮的位置。这里选择视觉 skeleton，不改认证初始化或渲染时序；它只覆盖认证网络返回前的空位，避免引入 auth 生命周期风险。
 
 ## 用户面板唯一手写源
 

@@ -54,6 +54,16 @@ export async function createTeamUpdateComment({ updateLogId, authorName, body })
   return finishWrite(result, "team_update_log_comments");
 }
 
+export async function updateTeamUpdateComment(id, body) {
+  const normalizedBody = String(body || "").trim();
+  const { client } = await writeContext();
+  const result = await client.from("team_update_log_comments").update({
+    body: normalizedBody,
+    updated_at: new Date().toISOString()
+  }).eq("id", id).select("*").single();
+  return finishWrite(result, "team_update_log_comments");
+}
+
 export async function deleteTeamUpdateComment(id) {
   const { client } = await writeContext();
   const result = await client.from("team_update_log_comments").delete().eq("id", id).select("id").single();

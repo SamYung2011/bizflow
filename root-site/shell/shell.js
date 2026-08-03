@@ -5,6 +5,7 @@ import { attachGlobalSearch, renderGlobalSearch } from "./shell-search.js";
 import { READ_STATE_STORAGE_KEY } from "../data/read-state.js";
 import { createRouteMenu } from "../spa/route-menu.js";
 import { attachQuickCreate, availableQuickCreateActions } from "../components/quick-create.js";
+import { LANGUAGE_CODES, persistLanguagePreference, resolveLanguagePreference } from "../data/language-preference.js";
 
 const iconsUrl = "../assets/icons/icons.svg";
 const root = document.getElementById("shell-root");
@@ -12,15 +13,15 @@ const mobileViewport = window.matchMedia?.("(max-width: 768px)") ?? null;
 let mode = mobileViewport
   ? (mobileViewport.matches ? "mobile" : "desktop")
   : (document.body.dataset.shellMode === "mobile" ? "mobile" : "desktop");
-const initialLang = new URLSearchParams(window.location.search).get("lang");
-const langs = ["zh", "en", "fr"];
+const langs = LANGUAGE_CODES;
+const initialLang = resolveLanguagePreference({ search: window.location.search });
 let companies = [
   { key: "honnmono", labelKey: "shell.company" },
   // 品牌名称固定使用官方字面量，不参与界面语言本地化。
   { key: "driver-ez", label: "Driver EZ" }
 ];
 const state = {
-  lang: langs.includes(initialLang) ? initialLang : "zh",
+  lang: initialLang,
   company: companies[0].key,
   drawerOpen: false,
   profileUser: null,
@@ -546,6 +547,7 @@ function attachShellBehaviors() {
   onSelectLang(code) {
     if (langs.includes(code)) {
       state.lang = code;
+      persistLanguagePreference(code);
       render();
     }
   },

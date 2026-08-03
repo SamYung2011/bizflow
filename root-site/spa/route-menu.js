@@ -1,4 +1,5 @@
 import { SECTION_MENU_ITEMS } from "../components/navigation-registry.js";
+import { createSectionMenu } from "../components/navigation-registry.js";
 
 const skeleton = (kind, stats = 0) => Object.freeze({ kind, stats });
 
@@ -29,21 +30,7 @@ export function routeMenuKey(pathname) {
 export function createRouteMenu(pathname) {
   const currentRoute = routeMenuEntries[String(pathname || "")];
   if (!currentRoute) return [];
-  return (SECTION_MENU_ITEMS[currentRoute.section] ?? []).map(({
-    id,
-    labelKey,
-    icon,
-    canonicalHref,
-    unreadKey,
-    adminOnly
-  }) => ({
-    key: labelKey,
-    icon,
-    href: canonicalHref,
-    ...(unreadKey ? { unreadKey } : {}),
-    ...(adminOnly === true ? { adminOnly: true } : {}),
-    active: id === currentRoute.menuKey
-  }));
+  return createSectionMenu(currentRoute.section, { activeId: currentRoute.menuKey });
 }
 
 export function createRouteFrame(pathname) {

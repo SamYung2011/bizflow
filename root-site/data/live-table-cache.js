@@ -14,6 +14,8 @@ const CACHE_STORE_NAME = "rows";
 const SNAPSHOT_CONTRACT_GENERATIONS = new Map([
   ["home.json", 3],
   ["members.json", 2],
+  ["team-extras.json", 1],
+  ["team-update-logs.json", 1],
   ["customers.json", 1],
   ["warranty.json", 2],
   ["orders.json", 1],

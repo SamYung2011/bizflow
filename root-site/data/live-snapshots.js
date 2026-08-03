@@ -642,22 +642,36 @@ function mapTeamUpdateLogs(logs, comments, employees) {
     list.push(comment);
     commentsByLog.set(comment.update_log_id, list);
   }
-  return logs.map((log) => ({
-    id: log.id,
-    author: asText(employeeByUserId.get(log.author_user_id)?.name, "—"),
-    summary: asText(log.summary),
-    detail: asText(log.detail),
-    createdAt: formatDateTime(log.created_at),
-    edited: timestamp(log.updated_at) > timestamp(log.created_at) + 60_000,
-    comments: (commentsByLog.get(log.id) ?? []).map((comment) => ({
-      id: comment.id,
-      authorUserId: asText(comment.author_user_id) || null,
-      author: asText(comment.author_name, "—"),
-      body: asText(comment.body),
-      parentId: comment.parent_comment_id ?? null,
-      time: formatDateTime(comment.created_at)
-    }))
-  }));
+  return logs.map((log) => {
+    const edited = timestamp(log.updated_at) > timestamp(log.created_at);
+    return {
+      id: log.id,
+      author: asText(employeeByUserId.get(log.author_user_id)?.name, "—"),
+      summary: asText(log.summary),
+      detail: asText(log.detail),
+      createdAt: formatDateTime(log.created_at),
+      updatedAt: edited ? formatDateTime(log.updated_at) : null,
+      edited,
+      comments: (commentsByLog.get(log.id) ?? [])
+        .slice()
+        .sort((left, right) => timestamp(left.created_at) - timestamp(right.created_at))
+        .map((comment) => {
+          const commentEdited = timestamp(comment.updated_at) > timestamp(comment.created_at);
+          const createdAt = formatDateTime(comment.created_at);
+          return {
+            id: comment.id,
+            authorUserId: asText(comment.author_user_id) || null,
+            author: asText(comment.author_name, "—"),
+            body: asText(comment.body),
+            parentId: comment.parent_comment_id ?? null,
+            createdAt,
+            time: createdAt,
+            updatedAt: commentEdited ? formatDateTime(comment.updated_at) : null,
+            edited: commentEdited
+          };
+        })
+    };
+  });
 }
 
 async function buildTeamUpdateLogsSnapshot() {

@@ -22,3 +22,14 @@ export const SECTION_MENU_ITEMS = Object.freeze({
     { id: "team", labelKey: "nav.team", icon: "icon-nav-user", canonicalHref: "/team/members.html" }
   ])
 });
+
+export function createSectionMenu(section, { activeId = "", resolveHref = (href) => href } = {}) {
+  return (SECTION_MENU_ITEMS[section] ?? []).map(({ id, labelKey, icon, canonicalHref, unreadKey, adminOnly }) => ({
+    key: labelKey,
+    icon,
+    href: resolveHref(canonicalHref),
+    ...(unreadKey ? { unreadKey } : {}),
+    ...(adminOnly === true ? { adminOnly: true } : {}),
+    active: id === activeId
+  }));
+}

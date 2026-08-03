@@ -172,7 +172,8 @@
 }
 
 .member-update-form label,
-.member-update-comment-form label {
+.member-update-comment-form label,
+.member-update-comment__edit label {
   display: grid;
   min-width: 0;
   gap: var(--space-10);
@@ -182,7 +183,8 @@
 
 .member-update-form input,
 .member-update-form textarea,
-.member-update-comment-form input {
+.member-update-comment-form input,
+.member-update-comment__edit textarea {
   width: 100%;
   min-width: 0;
   padding: var(--space-10);
@@ -201,7 +203,8 @@
 
 .member-update-form input:focus,
 .member-update-form textarea:focus,
-.member-update-comment-form input:focus {
+.member-update-comment-form input:focus,
+.member-update-comment__edit textarea:focus {
   border-color: var(--blue);
 }
 
@@ -263,7 +266,7 @@
 }
 
 .member-update-card__actions button,
-.member-update-comment > button {
+.member-update-comment__actions button {
   display: inline-flex;
   width: var(--space-40);
   height: var(--space-40);
@@ -276,7 +279,7 @@
 }
 
 .member-update-card__actions button:last-child,
-.member-update-comment > button {
+.member-update-comment__actions [data-update-comment-delete] {
   color: var(--red);
 }
 
@@ -295,7 +298,8 @@
   color: var(--gray-80);
 }
 
-.member-update-card__meta span {
+.member-update-card__meta span,
+.member-update-comment > div > span {
   padding: var(--space-4) var(--space-10);
   border-radius: var(--radius-10);
   background: var(--gray-5);
@@ -306,18 +310,37 @@
   gap: var(--space-10);
 }
 
+.member-update-comments__heading {
+  color: var(--gray-40);
+  font-size: var(--font-body-size);
+  font-weight: var(--font-body-weight);
+}
+
 .member-update-comment {
   position: relative;
   min-width: 0;
-  padding: var(--space-10) calc(var(--space-40) + var(--space-10)) var(--space-10) var(--space-10);
+  padding: var(--space-10) calc(var(--space-40) * 2 + var(--space-20)) var(--space-10) var(--space-10);
   border-radius: var(--radius-10);
   background: var(--gray-5);
 }
 
-.member-update-comment > button {
+.member-update-comment__actions {
   position: absolute;
   top: var(--space-10);
   right: var(--space-10);
+  display: flex;
+  gap: var(--space-4);
+}
+
+.member-update-comment__edit {
+  display: grid;
+  gap: var(--space-10);
+  margin-top: var(--space-10);
+}
+
+.member-update-comment__edit textarea {
+  min-height: calc(var(--space-40) * 2);
+  resize: vertical;
 }
 
 .member-update-comment-form {
@@ -326,6 +349,10 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
   gap: var(--space-10);
+}
+
+.member-update-load-more {
+  justify-self: center;
 }
 
 .member-review-domain,

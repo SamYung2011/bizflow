@@ -63,6 +63,9 @@ function createMemberState(initialTab) {
     comments: entry.comments.map((comment) => ({ ...comment }))
   })),
   editingUpdateId: null,
+  editingUpdateCommentId: null,
+  editingUpdateCommentDraft: "",
+  updateLogsVisibleCount: 20,
   updateLogUser: {
     id: session?.user?.id || currentUser?.userId || "",
     name: currentUser?.name || data.currentUserName || ""
@@ -122,6 +125,10 @@ function mergeMemberData(nextData, { members, extras }) {
       ...entry,
       comments: entry.comments.map((comment) => ({ ...comment }))
     }));
+    if (!state.updateLogs.some((entry) => entry.comments.some((comment) => comment.id === state.editingUpdateCommentId))) {
+      state.editingUpdateCommentId = null;
+      state.editingUpdateCommentDraft = "";
+    }
     state.companies = nextData.companies.map((company) => ({ ...company }));
   }
 }
@@ -693,6 +700,7 @@ function hasMemberUnsavedChanges() {
     || formHasValue("[data-update-create-form]")
     || formHasValue("[data-update-edit-form]")
     || formHasValue("[data-update-comment-form]")
+    || formHasValue("[data-update-comment-edit-form]")
     || formHasValue("[data-company-create-form]")
     || formHasValue("[data-company-name-form]");
 }

@@ -70,9 +70,16 @@ body {
 }
 
 .shell-boot__select,
-.shell-boot__nav-row {
+.shell-boot__nav-row,
+.shell-boot__fab {
   width: 280px;
   height: var(--space-40);
+}
+
+.shell-boot__fab {
+  box-sizing: border-box;
+  border: 1px dashed var(--gray-15);
+  background: var(--gray-5);
 }
 
 .shell-boot__title {

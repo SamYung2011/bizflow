@@ -9,6 +9,7 @@ import {
   updatePassword,
   verifyRecoveryOtp
 } from "../data/auth.js";
+import { LANGUAGE_CODES, persistLanguagePreference, resolveLanguagePreference } from "../data/language-preference.js";
 
 (function () {
   const dictionaries = {
@@ -178,14 +179,14 @@ import {
 
   const views = ["login", "register", "forgot"];
   const forgotStages = ["request", "verify", "password"];
-  const langs = ["zh", "en", "fr"];
+  const langs = LANGUAGE_CODES;
   const RESEND_DELAY_SECONDS = 60;
   const params = new URLSearchParams(window.location.search);
   const recoveryHint = params.get("recovery") === "1" || window.location.hash.includes("type=recovery");
   const initialView = recoveryHint ? "forgot" : params.get("view");
-  const initialLang = params.get("lang");
+  const initialLang = resolveLanguagePreference({ search: window.location.search });
   const state = {
-    lang: langs.includes(initialLang) ? initialLang : "zh",
+    lang: initialLang,
     view: views.includes(initialView) ? initialView : "login",
     authConfigured: false,
     authReady: false,
@@ -474,7 +475,9 @@ import {
 
     const langButton = event.target.closest("[data-lang]");
     if (langButton) {
+      if (!langs.includes(langButton.dataset.lang)) return;
       state.lang = langButton.dataset.lang;
+      persistLanguagePreference(state.lang);
       renderLanguage();
     }
   });

@@ -21,7 +21,7 @@
       <aside class="shell-sidebar">
         ${block("shell-boot__select")}
         <nav class="shell-nav">${Array.from({ length: navRows }, () => block("shell-boot__nav-row")).join("")}</nav>
-        ${block("shell-boot__nav-row")}
+        ${block("shell-boot__fab")}
       </aside>
       <main class="shell-main">
         <div class="shell-page-inner">
