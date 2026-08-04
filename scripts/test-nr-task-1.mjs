@@ -15,6 +15,7 @@ import {
   terminalTasksForMember
 } from "../root-site/team/tasks-model.js";
 import { renderTaskSubmitDialog } from "../root-site/team/tasks-submit.js";
+import { memberPendingBadge } from "../root-site/team/tasks.js";
 
 globalThis.matchMedia = () => ({ matches: false });
 
@@ -298,10 +299,11 @@ assert.doesNotMatch(expandedTerminalHtml, /data-task-card="old-root"/,
 assert.doesNotMatch(expandedTerminalHtml, /data-task-card="duplicate-child"/,
   "a terminal child whose parent is not open must still be suppressed");
 
-const [tasksSource, writesSource, snapshotsSource] = await Promise.all([
+const [tasksSource, writesSource, snapshotsSource, memberProviderSource] = await Promise.all([
   readFile(new URL("../root-site/team/tasks.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/live-task-writes.js", import.meta.url), "utf8"),
-  readFile(new URL("../root-site/data/live-snapshots.js", import.meta.url), "utf8")
+  readFile(new URL("../root-site/data/live-snapshots.js", import.meta.url), "utf8"),
+  readFile(new URL("../root-site/data/provider.js", import.meta.url), "utf8")
 ]);
 assert.match(tasksSource, /scope\.listen\(document, "paste", onTaskPaste\)/);
 assert.match(tasksSource, /event\.key === "Enter" && \(event\.metaKey \|\| event\.ctrlKey\)/);
@@ -372,6 +374,19 @@ const abandonedCreatorHtml = renderTaskActionPopover({ task: abandonedCreatorTas
 assert.match(abandonedCreatorHtml, /data-task-action-uncomplete="menu-abandoned-creator"[^>]*disabled/,
   "a non-self-assigned creator's wholeTask toggle stays blocked on an abandoned task — same canToggle gate the old checkbox honored");
 
+// G-task-16 (2026-08-04 Figma 对稿拆除令,件3): member rail right-side badge caps at 99+ and
+// hides at 0 (Figma 271:720's red count-badge), and the gray role label reads employees.role
+// (member.position, threaded through provider.js) instead of fabricating a department fallback.
+assert.equal(memberPendingBadge(0), "", "0 pending tasks must not render a badge at all");
+assert.equal(memberPendingBadge(1), "1");
+assert.equal(memberPendingBadge(99), "99");
+assert.equal(memberPendingBadge(100), "99+", "counts over 99 must cap at the 99+ label");
+assert.equal(memberPendingBadge(2400), "99+");
+assert.match(tasksSource, /const role = member\.dept === "all" \? \(member\.deptLabel \?\? pageT\(lang, `tasks\.dept\.\$\{member\.dept\}`\)\) : \(member\.position \|\| ""\);/,
+  "regular members must read member.position (employees.role) and stay blank when absent — no department-enum fabrication; Honnmono all keeps its old deptLabel/enum fallback");
+assert.match(memberProviderSource, /position: member\.position,/,
+  "provider.js must forward the members-snapshot's already-computed employees.role (member.position) to the task-page member rail");
+
 for (const lang of ["zh", "en", "fr"]) {
   for (const key of [
     "tasks.card.assignedBy", "tasks.card.overdue", "tasks.card.dueSoon", "tasks.action.uncomplete",
@@ -383,4 +398,4 @@ for (const lang of ["zh", "en", "fr"]) {
   }
 }
 
-console.log("NR-task-1 contracts: PASS (paste, card info, initial view, metadata, start date, completion undo + assignee reset, terminal calendar/sections, card-menu 完成/取消完成 swap)");
+console.log("NR-task-1 contracts: PASS (paste, card info, initial view, metadata, start date, completion undo + assignee reset, terminal calendar/sections, card-menu 完成/取消完成 swap, member badge/role)");

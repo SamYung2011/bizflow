@@ -155,27 +155,42 @@ function renderStatCard({ title, value, tone }, { escapeHtml }) {
   </article>`;
 }
 
+// 件3 (2026-08-04 Figma 对稿拆除令): 成员卡右侧从「N 任務待完成」文本行为主,改为红色计数徽标
+// 为主(figma 271:720 圆头像+蓝名字+灰角色字+右侧红色计数徽标);数字沿用同一个 openCount,>99
+// 显 99+,0 不显徽标。Honnmono all 汇总行结构保留 —— 它是导航入口而非个人待办,右侧仍用既有
+// member.badge/箭头二选一(该字段恒 0,故恒显箭头,与稿一致)。
+export function memberPendingBadge(openCount) {
+  if (openCount > 99) return "99+";
+  if (openCount > 0) return String(openCount);
+  return "";
+}
+
 function renderMember(member, tasks, helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const memberKey = member.dept === "all" ? "all" : memberIdentity(member);
   const active = state.mode === "board" && filterState.member === memberKey ? " team-member-task--active" : "";
-  const dept = member.deptLabel ?? pageT(lang, `tasks.dept.${member.dept}`);
+  // 角色灰字 = employees.role(经 provider.js 的 member.position 透传);没有就留空不造,
+  // 不回落部门枚举——Honnmono all 例外,它的「all」本就来自既有 deptLabel/枚举 fallback。
+  const role = member.dept === "all" ? (member.deptLabel ?? pageT(lang, `tasks.dept.${member.dept}`)) : (member.position || "");
   const openCount = member.dept === "all"
     ? tasks.filter((task) => task.parentId === null && isOpenTask(task)).length
     : openAssignedTaskCount(member, tasks);
+  const pendingBadge = memberPendingBadge(openCount);
   return `<button type="button" class="team-member-task${active}" data-task-member="${escapeHtml(memberKey)}">
     <span class="avatar--initial team-member-task__avatar" style="--component-width:60px;--component-height:60px">${escapeHtml(initials(member.name))}</span>
     <div class="team-member-task__body">
       <div class="team-member-task__top">
         <span class="team-member-task__name" title="${escapeHtml(member.name)}">${escapeHtml(member.name)}</span>
-        <span class="team-member-task__dept" title="${escapeHtml(dept)}">${escapeHtml(dept)}</span>
+        ${role ? `<span class="team-member-task__dept" title="${escapeHtml(role)}">${escapeHtml(role)}</span>` : ""}
       </div>
       <div class="team-member-task__meta">
         <span>${escapeHtml(openCount)}</span>
         <span title="${escapeHtml(pageT(lang, "tasks.member.pending"))}">${escapeHtml(pageT(lang, "tasks.member.pending"))}</span>
       </div>
     </div>
-    ${member.badge ? countBadge(member.badge) : icon("icon-arrow-right", "icon team-member-task__arrow")}
+    ${member.dept === "all"
+      ? (member.badge ? countBadge(member.badge) : icon("icon-arrow-right", "icon team-member-task__arrow"))
+      : (pendingBadge ? countBadge(pendingBadge) : "")}
   </button>`;
 }
 

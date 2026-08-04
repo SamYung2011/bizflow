@@ -177,6 +177,10 @@
   white-space: nowrap;
 }
 
+.team-member-task__dept {
+  color: var(--gray-40); /* Figma 271:720 角色灰字(件3);此前继承 .team-member-task 的 --black */
+}
+
 .team-member-task__meta {
   font-weight: var(--font-description-weight); /* Figma 271:720「任務待完成」12 Medium。 */
 }

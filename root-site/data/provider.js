@@ -490,7 +490,10 @@ export async function getTeamTaskData() {
     : { ...teamTaskMock.summary };
 
   // 成员栏:home 快照真成员 + openTasks(真·个人未完成数;快照没带该字段就显 0,宁缺毋假);
-  // badge=未读数,库里无按人未读概念 => 一律 0(红点宁灭不假亮)。首项 Honnmono 为全员汇总。
+  // badge=未读数,库里无按人未读概念 => 一律 0(红点宁灭不假亮,Honnmono all 行仍用它决定圆钮/徽标)。
+  // position=employees.role 透传(件3,2026-08-04):成员快照 buildMembersSnapshot 早已算好
+  // asText(employee.role),只是先前没转发给任务页;没有就是空字符串,tasks.js renderMember 端
+  // 空值不落回部门枚举,原样留空("没有就留空不造")。首项 Honnmono 为全员汇总。
   // 只有 home 快照真的载入且成员字段合法才走真数据;否则整栏回退 teamTaskMock 离线样例
   const r9Members = isR9MembersSnapshot(membersSnap);
   const realMembers = !!homeSnap && validators.members(homeSnap.members) && homeSnap.members.length > 0;
@@ -504,6 +507,7 @@ export async function getTeamTaskData() {
           name: member.name,
           dept: "member",
           deptLabel: member.departments.join("、") || "—",
+          position: member.position,
           taskCount: isNum(member.openTasks) ? member.openTasks : 0,
           badge: 0,
           status: member.status,
