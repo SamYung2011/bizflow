@@ -15,7 +15,7 @@ import { renderSegment } from "../components/segment.js";
 import { consumeNavigationPreset, navigationPresetKeys } from "../components/navigation-presets.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { renderNewCustomerFields } from "../components/new-customer-fields.js";
-import { suggestEmail } from "../components/email-suggest.js";
+import { safeSetSelectionRange, suggestEmail } from "../components/email-suggest.js";
 import { copyPhoneNumber } from "../components/phone-copy.js";
 import { createLiveOrderCustomer } from "../data/live-orders-writes.js";
 import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
@@ -575,7 +575,7 @@ async function onCustomersClick(event) {
     rerenderCustomersPage();
     const email = document.querySelector('[data-new-customer-field="email"]');
     email?.focus();
-    email?.setSelectionRange(email.value.length, email.value.length);
+    safeSetSelectionRange(email);
     return;
   }
 
@@ -775,7 +775,7 @@ function onCustomersInput(event) {
         rerenderCustomersPage();
         const email = document.querySelector('[data-new-customer-field="email"]');
         email?.focus();
-        email?.setSelectionRange(email.value.length, email.value.length);
+        safeSetSelectionRange(email);
       }
     }
     return;

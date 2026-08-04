@@ -50,3 +50,16 @@ export function renderEmailSuggestion({ value, lang = "zh", escapeHtml, target }
   const label = (copy[lang] ?? copy.zh).replace("{email}", suggestion);
   return `<button type="button" class="email-suggestion" data-email-suggestion="${escapeHtml(suggestion)}" data-email-suggestion-target="${escapeHtml(target)}">${escapeHtml(label)}</button>`;
 }
+
+// Input types whose HTML spec-defined "selection direction" is non-null, i.e. setSelectionRange()
+// is allowed. type="email" (along with number/date/... ) throws InvalidStateError instead — see
+// https://html.spec.whatwg.org/#do-not-apply. Both customer forms re-render then restore the caret
+// after an email-suggestion swap, so that restore must always go through this guard rather than
+// calling setSelectionRange() on the field directly (G-cus-1, 2026-08-04 nightrun cust-1 FAIL).
+const SELECTION_RANGE_INPUT_TYPES = new Set(["text", "search", "url", "tel", "password"]);
+
+export function safeSetSelectionRange(input, start = input?.value.length, end = start) {
+  if (!input || typeof input.setSelectionRange !== "function") return;
+  if (!SELECTION_RANGE_INPUT_TYPES.has(input.type)) return;
+  input.setSelectionRange(start, end);
+}

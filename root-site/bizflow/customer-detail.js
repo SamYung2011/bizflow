@@ -3,7 +3,7 @@
 
 import { getCurrentUser, getCustomerDetailData, getCustomerMergeCandidates, getOrdersPageData, getUnread } from "../data/provider.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
-import { renderEmailSuggestion, suggestEmail } from "../components/email-suggest.js";
+import { renderEmailSuggestion, safeSetSelectionRange, suggestEmail } from "../components/email-suggest.js";
 import { renderManagementPager } from "../components/management-list.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import {
@@ -809,7 +809,7 @@ async function onCustomerDetailClick(event) {
     rerender();
     const email = document.querySelector('[data-customer-edit-field="email"]');
     email?.focus();
-    email?.setSelectionRange(email.value.length, email.value.length);
+    safeSetSelectionRange(email);
     return;
   }
 
@@ -926,7 +926,7 @@ function onCustomerDetailInput(event) {
       rerender();
       const email = document.querySelector('[data-customer-edit-field="email"]');
       email?.focus();
-      email?.setSelectionRange(email.value.length, email.value.length);
+      safeSetSelectionRange(email);
     }
   }
 }

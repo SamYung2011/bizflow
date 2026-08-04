@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { renderEmailSuggestion, suggestEmail } from "../root-site/components/email-suggest.js";
+import { renderEmailSuggestion, safeSetSelectionRange, suggestEmail } from "../root-site/components/email-suggest.js";
 import { renderNewCustomerFields } from "../root-site/components/new-customer-fields.js";
 import {
   customerDictionaries,
@@ -45,6 +45,24 @@ const newFields = renderNewCustomerFields({
 });
 assert.match(newFields, /data-email-suggestion="person@gmail\.com"/);
 assert.match(newFields, /data-email-suggestion-target="new-customer"/);
+
+// G-cus-1 regression (2026-08-04 nightrun cust-1 FAIL): <input type="email"> does not support
+// setSelectionRange() and throws InvalidStateError; safeSetSelectionRange must skip it instead of
+// calling through, while still restoring the caret on input types that do support selection.
+{
+  const calls = [];
+  const mockInput = (type, value) => ({
+    type,
+    value,
+    setSelectionRange: (start, end) => calls.push([type, start, end])
+  });
+  safeSetSelectionRange(mockInput("email", "person@gmail.com"));
+  safeSetSelectionRange(mockInput("number", "123"));
+  safeSetSelectionRange(mockInput("text", "hello"));
+  safeSetSelectionRange(mockInput("search", "abc"), 1, 2);
+  safeSetSelectionRange(null);
+  assert.deepEqual(calls, [["text", 5, 5], ["search", 1, 2]], "safeSetSelectionRange must skip email/number inputs and no-op on null, but still restore the caret on text/search inputs");
+}
 
 const customer = {
   id: "customer-1",
@@ -161,10 +179,19 @@ assert.match(customersUi, /!c\.hasEmail && !c\.hasPhone && !c\.hasImei/);
 assert.match(customersUi, /data-customers-visible-count/);
 assert.match(customerDetailUi, /data-email-suggestion-target="edit-customer"/);
 assert.match(warrantyUi, /data-warranty-bucket=/);
+
+// G-cus-1 static guard: the email field's caret restore must always go through the type-aware
+// helper, never call setSelectionRange on the email input directly (that's what threw
+// InvalidStateError in the 2026-08-04 nightrun cust-1 verify round).
+assert.doesNotMatch(customersUi, /email\?\.setSelectionRange\(/, "customers.js must not call setSelectionRange directly on the email input");
+assert.doesNotMatch(customerDetailUi, /email\?\.setSelectionRange\(/, "customer-detail.js must not call setSelectionRange directly on the email input");
+const safeSelectionCallCount = (source) => (source.match(/safeSetSelectionRange\(email\)/g) ?? []).length;
+assert.equal(safeSelectionCallCount(customersUi), 2, "customers.js should route both email caret restores (click suggestion + input) through safeSetSelectionRange");
+assert.equal(safeSelectionCallCount(customerDetailUi), 2, "customer-detail.js should route both email caret restores (click suggestion + input) through safeSetSelectionRange");
 for (const field of ["allNames", "allEmails", "allPhones", "allPhoneMainlands", "allCarMakes", "allCarModels", "imeiCodes", "type"]) assert.match(snapshots, new RegExp(`${field}:`), `snapshot missing ${field}`);
 for (const field of ["invoiceNumber", "dcNumber", "note"]) assert.match(snapshots, new RegExp(`${field}:`), `order snapshot missing ${field}`);
 assert.match(cache, /\["customers\.json", 2\]/);
 assert.match(cache, /\["orders\.json", 2\]/);
 assert.match(provider, /typeof row\.invoiceNumber === "string" && typeof row\.dcNumber === "string"/);
 
-console.log("NR-cust-1 contracts: PASS (email suggestion, customer search/rows, warranty buckets, lead/order information, cache generations)");
+console.log("NR-cust-1 contracts: PASS (email suggestion, customer search/rows, warranty buckets, lead/order information, cache generations, email selectionrange safety)");
