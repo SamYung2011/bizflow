@@ -14,7 +14,7 @@ import {
   getLiveOcppUsersData,
   LIVE_OCPP_MISS
 } from "./live-ocpp.js";
-import { getReadState, rememberUnreadWatermarks } from "./read-state.js";
+import { getReadState, rememberUnreadWatermarks, setReadStateAccount } from "./read-state.js";
 import { buildCustomerGroups } from "./customer-groups.js";
 import { customerSourceFromInvoices } from "./customer-source.js";
 
@@ -238,10 +238,32 @@ function latestTimestamp(items, readWatermark, getTimestamp) {
   };
 }
 
+// 件1 (2026-08-04 批4「红点是跟登录账号走的」煊煊拍板): read-state.js 的账号命名空间只认 auth.js
+// 的真实登录身份(session 存在时的 employee.id),不用下面 getCurrentUser() 那份静态演示兜底——那份
+// 没有真实账号概念,不该在多账号隔离里占一个位置。这里直接调 getSession()/getAuthCurrentUser()
+// (与 getCurrentUser() 已登录分支用的是同一份、同一次网络请求/缓存),不经过那个函数本身,避免
+// 触发它未登录时的快照兜底链路。任何解析失败都吞掉退回"无账号"——不读不写不亮要优雅降级,不能让
+// 一次鉴权抖动打穿 getUnread()/getUnreadWatermarks() 的整条 Promise 链。
+async function syncReadStateAccount() {
+  try {
+    const session = await getSession();
+    const account = session ? await getAuthCurrentUser() : null;
+    setReadStateAccount(account?.id || null);
+  } catch {
+    setReadStateAccount(null);
+  }
+}
+
 let unreadStateMemoKey = "";
 let unreadStatePromise = null;
 
-function buildUnreadState() {
+// 件1: 改成 async 函数,在读 getReadState()/算未读之前先 await 账号身份解析完——不依赖调用方恰好
+// 把 getCurrentUser() 和 getUnread()/getUnreadWatermarks() 放进同一个 Promise.all 就"顺带"先后
+// 有序那种脆弱假设(它们目前确实总是同框,但这里独立兜底一次,谁调用 buildUnreadState 都不会因为
+// 时序踩坑读到上一个账号或空账号的水位)。返回类型不变:调用方一直是 await buildUnreadState(),
+// sync 函数返回 promise 与 async 函数本身在调用方视角完全等价。
+async function buildUnreadState() {
+  await syncReadStateAccount();
   const read = getReadState();
   const memoKey = `${providerSnapshotRevision()}:${JSON.stringify(read)}`;
   if (unreadStatePromise && unreadStateMemoKey === memoKey) return unreadStatePromise;

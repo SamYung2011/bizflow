@@ -78,6 +78,30 @@ export function taskBoardFingerprint(task) {
   return JSON.stringify(taskFingerprintValue(task));
 }
 
+// 件1 (2026-08-04 批4「红点是跟登录账号走的」煊煊拍板): 这套指纹基线原先是单一全局 localStorage
+// key,内部按 scopeKey(company:employeeId)拆子对象区分账号。现在物理 key 本身也按账号拆开——多
+// 账号同机时连"同一个 key 下不同子对象共用一次读写"这层都不留,直接是两把互不相干的锁,不依赖内部
+// scopes 分区不出错。accountId 缺失(未登录/身份未就绪)时返回 null,调用方(createTaskBoardReadTracker)
+// 据此把整个 tracker 惰性化——这个函数本身保持纯函数,不猜测身份、不读写任何东西。
+function accountScopedStorageKey(accountId) {
+  return accountId ? `${TASK_BOARD_READ_STATE_STORAGE_KEY}:acct:${accountId}` : null;
+}
+
+// 旧全局 key 不做数据搬迁——冷启即空基线,是 refresh() 里 baseline===null 分支本来就有的"无基线=
+// 暂不算未读"语义,不是这次改动新造的行为。只在账号命名空间的新 key 第一次写入成功后,顺手删一次
+// 旧 key;每个 accountId 只删一次,不是每次 markSeen/refresh 都删。
+const legacyPurgeDoneForAccount = new Set();
+
+function purgeLegacyTaskBoardKeyOnce(storage, accountId) {
+  if (!storage || legacyPurgeDoneForAccount.has(accountId)) return;
+  legacyPurgeDoneForAccount.add(accountId);
+  try {
+    storage.removeItem(TASK_BOARD_READ_STATE_STORAGE_KEY);
+  } catch {
+    // Privacy mode or storage denial: nothing to clean up this session.
+  }
+}
+
 function normalizedStoredRoot(value) {
   if (!value || typeof value !== "object" || Array.isArray(value) || value.version !== STORAGE_VERSION) {
     return { version: STORAGE_VERSION, scopes: {} };
@@ -88,16 +112,16 @@ function normalizedStoredRoot(value) {
   return { version: STORAGE_VERSION, scopes: { ...scopes } };
 }
 
-function readStoredRoot(storage) {
+function readStoredRoot(storage, storageKey) {
   try {
-    return normalizedStoredRoot(JSON.parse(storage?.getItem(TASK_BOARD_READ_STATE_STORAGE_KEY) || "null"));
+    return normalizedStoredRoot(JSON.parse(storage?.getItem(storageKey) || "null"));
   } catch {
     return normalizedStoredRoot(null);
   }
 }
 
-function readBaseline(storage, scopeKey) {
-  const scope = readStoredRoot(storage).scopes[scopeKey];
+function readBaseline(storage, storageKey, scopeKey) {
+  const scope = readStoredRoot(storage, storageKey).scopes[scopeKey];
   if (!scope || typeof scope !== "object" || Array.isArray(scope)) return null;
   const signatures = scope.signatures;
   if (!signatures || typeof signatures !== "object" || Array.isArray(signatures)) return null;
@@ -107,12 +131,13 @@ function readBaseline(storage, scopeKey) {
   };
 }
 
-function writeBaseline(storage, scopeKey, signatures) {
-  if (!storage) return;
-  const root = readStoredRoot(storage);
+function writeBaseline(storage, storageKey, accountId, scopeKey, signatures) {
+  if (!storage || !storageKey) return;
+  const root = readStoredRoot(storage, storageKey);
   root.scopes[scopeKey] = { complete: true, signatures: { ...signatures } };
   try {
-    storage.setItem(TASK_BOARD_READ_STATE_STORAGE_KEY, JSON.stringify(root));
+    storage.setItem(storageKey, JSON.stringify(root));
+    purgeLegacyTaskBoardKeyOnce(storage, accountId);
   } catch {
     // Privacy mode or storage denial: the in-memory baseline remains usable for this mount.
   }
@@ -144,12 +169,14 @@ function defaultStorage() {
 
 export function createTaskBoardReadTracker({
   scopeKey,
+  accountId = null,
   storage = defaultStorage(),
   schedule = defaultSchedule,
   cancel = defaultCancel,
   onUnreadChange = () => {}
 }) {
-  const storedBaseline = readBaseline(storage, scopeKey);
+  const storageKey = accountScopedStorageKey(accountId);
+  const storedBaseline = storageKey ? readBaseline(storage, storageKey, scopeKey) : null;
   let baseline = storedBaseline?.signatures ?? null;
   let baselineComplete = storedBaseline?.complete === true;
   let currentSignatures = {};
@@ -167,6 +194,20 @@ export function createTaskBoardReadTracker({
     const refreshGeneration = generation;
     cancel(scheduled);
     scheduled = null;
+    // 件1: 没有账号身份就没有"我看过没看过"这件事——不读、不算、不亮,交白卷式地保持空未读,而不是
+    // "当没登录时假装全部未读"那种更吵的默认态(那是 read-state.js 那套水位系统自己的冷启语义,两套
+    // 系统的"缺省"含义本来就不同,这里不强行对齐)。仍然走 schedule() 异步一拍,保持与正常路径同样
+    // 的"onUnreadChange 总是异步到达"契约,调用方不用为这一种情况特殊处理时序。
+    if (!storageKey) {
+      scheduled = schedule(() => {
+        scheduled = null;
+        if (disposed || refreshGeneration !== generation) return;
+        currentSignatures = {};
+        unreadIds = new Set();
+        emit();
+      });
+      return;
+    }
     const roots = (Array.isArray(tasks) ? tasks : []).filter((task) => task?.parentId == null && task?.id);
     const nextSignatures = {};
     let index = 0;
@@ -191,7 +232,7 @@ export function createTaskBoardReadTracker({
         baseline = { ...currentSignatures };
         baselineComplete = true;
         unreadIds = new Set();
-        writeBaseline(storage, scopeKey, baseline);
+        writeBaseline(storage, storageKey, accountId, scopeKey, baseline);
         emit();
         return;
       }
@@ -202,7 +243,7 @@ export function createTaskBoardReadTracker({
       const removedStaleRows = Object.keys(retainedBaseline).length !== Object.keys(baseline).length;
       baseline = retainedBaseline;
       unreadIds = new Set(Object.keys(currentSignatures).filter((id) => baseline[id] !== currentSignatures[id]));
-      if (removedStaleRows) writeBaseline(storage, scopeKey, baseline);
+      if (removedStaleRows) writeBaseline(storage, storageKey, accountId, scopeKey, baseline);
       emit();
     };
 
@@ -210,6 +251,7 @@ export function createTaskBoardReadTracker({
   }
 
   function markSeen(taskIds) {
+    if (!storageKey) return false;
     let changed = false;
     for (const rawId of taskIds ?? []) {
       const id = String(rawId || "");
@@ -220,7 +262,7 @@ export function createTaskBoardReadTracker({
       changed = true;
     }
     if (!changed) return false;
-    writeBaseline(storage, scopeKey, baseline);
+    writeBaseline(storage, storageKey, accountId, scopeKey, baseline);
     emit();
     return true;
   }

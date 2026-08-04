@@ -15,7 +15,8 @@ import {
   terminalTasksForMember
 } from "../root-site/team/tasks-model.js";
 import { renderTaskSubmitDialog } from "../root-site/team/tasks-submit.js";
-import { memberRelevantUnreadTaskIds, memberUnreadBadge, memberUnreadCount } from "../root-site/team/tasks.js";
+import { memberRelevantUnreadTaskIds, memberUnreadBadge, memberUnreadCount, viewerRelevantUnreadTaskIds } from "../root-site/team/tasks.js";
+import { createTaskBoardReadTracker } from "../root-site/team/task-board-read-state.js";
 
 globalThis.matchMedia = () => ({ matches: false });
 
@@ -407,14 +408,16 @@ assert.match(tasksSource, /const role = member\.dept === "all" \? \(member\.dept
 assert.match(memberProviderSource, /position: member\.position,/,
   "provider.js must forward the members-snapshot's already-computed employees.role (member.position) to the task-page member rail");
 
-// G-task-17 (2026-08-04 件2, ead797e; comment corrected 2026-08-04 批3 件3+5 — the underlying
-// isTaskVisibleToMember reuse this originally described was replaced by a narrower relevance rule,
-// see G-task-19 below): the badge's source — memberUnreadCount aggregates the existing
-// tp-task-board-read-v1 fingerprint output (boardUnreadTaskIds, the same Set the column-header
-// "N 項未讀變更" badge already reads) per member. Coverage here is the source-agnostic plumbing
-// (subtask exclusion, empty/missing Set) that doesn't depend on which relevance rule is used.
+// G-task-17 (2026-08-04 件2, ead797e; comment corrected 2026-08-04 批3 件3+5, then again 2026-08-04
+// 批4 — see G-task-20 below for the viewer-subject pivot itself): the badge's source —
+// memberUnreadCount aggregates the existing tp-task-board-read-v1 fingerprint output
+// (boardUnreadTaskIds, the same Set the column-header "N 項未讀變更" badge already reads) per member,
+// gated through a viewer. Coverage here is the source-agnostic plumbing (subtask exclusion,
+// empty/missing Set, missing viewer) that doesn't depend on which relevance rule is used.
 // creator pinned to a neutral third party (mirrors G-task-9's `parent` fixture) so relevance
 // below comes purely from the explicit assignees list, not the task() factory's jack-creator default.
+// viewer = helen throughout this block (viewing her own row), so the row-relevance gate and the
+// viewer-relevance gate collapse into the same check — G-task-20 below is where they diverge.
 const unreadVisible = task("unread-visible-to-helen", {
   creator: "Other", creatorId: "employee-other",
   assignees: [{ employeeId: helen.id, name: helen.name, completedAt: null, abandonedAt: null }]
@@ -434,14 +437,18 @@ const readAlready = task("read-already-visible-to-helen", {
 });
 const unreadFixtureTasks = [unreadVisible, unreadNotVisible, unreadSubtaskChild, readAlready];
 const unreadTaskIds = new Set([unreadVisible.id, unreadNotVisible.id, unreadSubtaskChild.id]);
-assert.equal(memberUnreadCount(helen, unreadFixtureTasks, unreadTaskIds), 1,
+assert.equal(memberUnreadCount(helen, unreadFixtureTasks, unreadTaskIds, helen), 1,
   "only the root task both (a) fingerprinted-unread and (b) visible to this member counts — not jack's task, not the subtask, not the already-read one");
-assert.equal(memberUnreadCount(jack, unreadFixtureTasks, unreadTaskIds), 1,
-  "the same Set scoped to a different member counts only what's visible to *that* member (jack's own task)");
-assert.equal(memberUnreadCount(helen, unreadFixtureTasks, new Set()), 0, "an empty unread Set must yield 0, not throw");
-assert.equal(memberUnreadCount(helen, unreadFixtureTasks, null), 0, "a missing unread Set must yield 0, not throw");
-assert.match(tasksSource, /const unreadBadge = member\.dept === "all" \? "" : memberUnreadBadge\(memberUnreadCount\(member, tasks, state\.boardUnreadTaskIds\)\);/,
-  "the member-row badge must be wired to the unread aggregator, not to openCount");
+assert.equal(memberUnreadCount(jack, unreadFixtureTasks, unreadTaskIds, jack), 1,
+  "the same Set scoped to a different member/viewer pair counts only what's visible to *that* member (jack's own task, viewed by jack himself)");
+assert.equal(memberUnreadCount(helen, unreadFixtureTasks, new Set(), helen), 0, "an empty unread Set must yield 0, not throw");
+assert.equal(memberUnreadCount(helen, unreadFixtureTasks, null, helen), 0, "a missing unread Set must yield 0, not throw");
+assert.equal(memberUnreadCount(helen, unreadFixtureTasks, unreadTaskIds, null), 0,
+  "a missing viewer must yield 0 too — with nobody identified as \"currently looking\", nothing can be \"relevant to the current account\", so no row may show a badge (不读不写不亮 extended to an unresolved viewer)");
+assert.equal(memberUnreadCount(helen, unreadFixtureTasks, unreadTaskIds, jack), 0,
+  "jack (viewer) has no relation to unreadVisible (helen-only assignee) — it must not count on helen's row when jack is the one looking");
+assert.match(tasksSource, /const unreadBadge = member\.dept === "all" \? "" : memberUnreadBadge\(memberUnreadCount\(member, tasks, state\.boardUnreadTaskIds, state\.currentUser\)\);/,
+  "the member-row badge must be wired to the unread aggregator gated by the current viewer (state.currentUser), not to openCount and not ungated");
 
 // G-task-19 (2026-08-04 煊煊拍板批3 件3+5, 截图批注「朝哥任务只有 2 个红点为什么 5」「人人一个 5」
 // 「点击之后不会消失」「完全不知道数据从哪算出来」): the relevance rule was tightened from
@@ -467,17 +474,60 @@ const creatorOnlyIrrelevant = task("creator-only-irrelevant", {
 });
 const relevanceFixtureTasks = [relevantAssignee, relevantMentionOnly, creatorOnlyIrrelevant];
 const relevanceUnreadIds = new Set([relevantAssignee.id, relevantMentionOnly.id, creatorOnlyIrrelevant.id]);
-assert.deepEqual(new Set(memberRelevantUnreadTaskIds(helen, relevanceFixtureTasks, relevanceUnreadIds)),
+// viewer = helen: she's both the row subject and the one looking, so this block still isolates the
+// underlying assignee-or-mention predicate itself (件2 批4's viewer gate is covered separately below
+// in G-task-20, where member and viewer are different people).
+assert.deepEqual(new Set(memberRelevantUnreadTaskIds(helen, relevanceFixtureTasks, relevanceUnreadIds, helen)),
   new Set([relevantAssignee.id, relevantMentionOnly.id]),
   "assignee-hit and mention-hit both count; creator-only (not assigned, not mentioned) must not — that's the exact ead797e-era over-count the redo fixes");
-assert.equal(memberUnreadCount(helen, relevanceFixtureTasks, relevanceUnreadIds), 2,
+assert.equal(memberUnreadCount(helen, relevanceFixtureTasks, relevanceUnreadIds, helen), 2,
   "memberUnreadCount is just the length of the same relevance set, not a second parallel tally");
 // 0 隐藏: 与他完全无关的那条(仅创建人,未指派、未被 @)即便在未读指纹集里,也不该让徽标露出来。
 assert.equal(
-  memberUnreadBadge(memberUnreadCount(helen, [creatorOnlyIrrelevant], new Set([creatorOnlyIrrelevant.id]))),
+  memberUnreadBadge(memberUnreadCount(helen, [creatorOnlyIrrelevant], new Set([creatorOnlyIrrelevant.id]), helen)),
   "",
   "creator-only relevance yields a 0 count, and 0 must render no badge at all (the 99+/hide-at-0 formatter is unchanged)"
 );
+
+// G-task-20 (2026-08-04 批4 煊煊 18:01 拍板「红点的逻辑是跟着账号走的啊。别的号未读的但是跟现在登录
+// 的账号无关的信息为什么要有红点？」): the viewer-subject pivot itself. Three tasks, all fingerprint-
+// unread: one relevant only to helen, one relevant only to jack, one relevant to both (mirrors a
+// real all-hands/shared-assignee task like 港車北上). viewer = helen throughout — jack's row must
+// only light up for the *shared* task, never for jack's own private task, because helen (the one
+// currently logged in) has no relationship to it at all.
+const helenOnlyTask = task("viewer-helen-only", {
+  creator: "Other", creatorId: "employee-other",
+  assignees: [{ employeeId: helen.id, name: helen.name, completedAt: null, abandonedAt: null }]
+});
+const jackOnlyTask = task("viewer-jack-only", {
+  creator: "Other", creatorId: "employee-other",
+  assignees: [{ employeeId: jack.id, name: jack.name, completedAt: null, abandonedAt: null }]
+});
+const sharedBothTask = task("viewer-shared-both", {
+  creator: "Other", creatorId: "employee-other",
+  assignees: [
+    { employeeId: helen.id, name: helen.name, completedAt: null, abandonedAt: null },
+    { employeeId: jack.id, name: jack.name, completedAt: null, abandonedAt: null }
+  ]
+});
+const viewerFixtureTasks = [helenOnlyTask, jackOnlyTask, sharedBothTask];
+const viewerUnreadIds = new Set(viewerFixtureTasks.map((item) => item.id));
+assert.deepEqual(new Set(viewerRelevantUnreadTaskIds(helen, viewerFixtureTasks, viewerUnreadIds)),
+  new Set([helenOnlyTask.id, sharedBothTask.id]),
+  "helen's own unread-and-relevant set: her private task and the shared one — never jack's private task");
+// jack's ROW, viewed by helen: only the task that is *also* relevant to helen may show — jackOnlyTask
+// is real, unread, and correctly attributed to jack's row-membership, but helen (viewer) has nothing
+// to do with it, so it must not produce a red dot anywhere in helen's session.
+assert.deepEqual(new Set(memberRelevantUnreadTaskIds(jack, viewerFixtureTasks, viewerUnreadIds, helen)),
+  new Set([sharedBothTask.id]),
+  "jack's row only lights up for the task both assigned to jack AND relevant to the current viewer — jack's own private task stays dark when helen is looking");
+assert.equal(memberUnreadCount(jack, viewerFixtureTasks, viewerUnreadIds, helen), 1);
+// helen's own row, same viewer: her private task plus the shared one both count normally.
+assert.equal(memberUnreadCount(helen, viewerFixtureTasks, viewerUnreadIds, helen), 2);
+// Flip the viewer to jack: now helen's row only shows the shared task, and jack's own row shows both.
+assert.equal(memberUnreadCount(helen, viewerFixtureTasks, viewerUnreadIds, jack), 1,
+  "symmetric check: with jack as viewer, helen's row only shows what's relevant to jack (the shared task)");
+assert.equal(memberUnreadCount(jack, viewerFixtureTasks, viewerUnreadIds, jack), 2);
 
 // 点视图消灯 (截图批注"点击之后不会消失"): navigating into a member's board view must mark their
 // relevant unread fingerprints seen through the existing tp-task-board-read-v1 tracker, not leave
@@ -491,8 +541,8 @@ const markMemberBoardSeenBlock = tasksSource.slice(
   tasksSource.indexOf("function markMemberBoardSeen(memberKey)"),
   tasksSource.indexOf("function renderMember(")
 );
-assert.match(markMemberBoardSeenBlock, /memberRelevantUnreadTaskIds\(member, state\.tasks, state\.boardUnreadTaskIds\)/,
-  "the navigate-to-member mark-seen path must reuse the exact same relevance function the badge count uses, not a second parallel filter that could drift out of sync");
+assert.match(markMemberBoardSeenBlock, /memberRelevantUnreadTaskIds\(member, state\.tasks, state\.boardUnreadTaskIds, state\.currentUser\)/,
+  "the navigate-to-member mark-seen path must reuse the exact same viewer-gated relevance function the badge count uses (including state.currentUser as viewer), not a second parallel filter that could drift out of sync");
 assert.match(markMemberBoardSeenBlock, /taskBoardReadTracker\.markSeen\(/,
   "must clear through the existing tp-task-board-read-v1 tracker's markSeen, not a new parallel read-state store");
 assert.match(markMemberBoardSeenBlock, /memberKey === "all"/,
@@ -503,6 +553,65 @@ assert.match(taskControllerSource, /markMemberBoardSeen,/,
   "tasks-domain-controller.js must accept markMemberBoardSeen as a dependency");
 assert.match(taskControllerSource, /setSessionValue\("team-tasks-view-mode", "board"\);[\s\S]*?markMemberBoardSeen\?\.\(nextMember\);\s*\n\s*rerender\(\);/,
   "clicking a member row (memberTrigger) must call the mark-seen callback for that member in the same handler pass that rerenders, so the badge updates immediately, not on some later render");
+
+// 件1 (2026-08-04 批4「存储按账号隔离」) source contract: the board tracker's account id must come
+// from read-state.js's own resolved identity (the same source markRead("tasks", …) uses), not a
+// re-derivation from state.currentUser.id (which can be a demo/mock member id with no real account
+// behind it in the unauthenticated fallback path).
+assert.match(tasksSource, /import \{ getReadStateAccount, markRead \} from "\.\.\/data\/read-state\.js";/,
+  "tasks.js must import getReadStateAccount alongside markRead — one identity source for both read-state systems");
+assert.match(tasksSource, /accountId: getReadStateAccount\(\),/,
+  "createTaskBoardReadTracker must receive the real resolved account id, not state.currentUser.id");
+
+// 件3 (2026-08-04 批4, real executable proof — not just a source contract — that 720b742's known
+// cross-account boundary case auto-resolves once storage is account-scoped): two different accounts
+// (not two rows viewed by the same person — two actually-different logged-in identities, e.g. Helen
+// and 朝哥 on the same machine) both relevant to one shared task. One account marking it seen through
+// markSeen (mirroring what markMemberBoardSeen does) must have zero effect on the other account's
+// unread state — they now live under physically separate localStorage keys, not just separate
+// sub-scopes inside one shared blob.
+{
+  function fakeAccountStorage() {
+    const values = new Map();
+    return { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)), removeItem: (key) => values.delete(key) };
+  }
+  const immediate = (callback) => { callback({ didTimeout: true, timeRemaining: () => 8 }); return null; };
+  const sharedBrowserStorage = fakeAccountStorage(); // simulates the SAME machine's localStorage
+  const sharedAllHandsTask = task("cross-account-shared-task", {
+    creator: "Other", creatorId: "employee-other",
+    assignees: [
+      { employeeId: helen.id, name: helen.name, completedAt: null, abandonedAt: null },
+      { employeeId: jack.id, name: jack.name, completedAt: null, abandonedAt: null }
+    ]
+  });
+  let helenUnread = new Set();
+  const helenTracker = createTaskBoardReadTracker({
+    scopeKey: "honnmono:employee-helen", accountId: "employee-helen", storage: sharedBrowserStorage,
+    schedule: immediate, cancel: () => {}, onUnreadChange: (next) => { helenUnread = next; }
+  });
+  let jackUnread = new Set();
+  const jackTracker = createTaskBoardReadTracker({
+    scopeKey: "honnmono:employee-jack", accountId: "employee-jack", storage: sharedBrowserStorage,
+    schedule: immediate, cancel: () => {}, onUnreadChange: (next) => { jackUnread = next; }
+  });
+  helenTracker.refresh([sharedAllHandsTask]);
+  jackTracker.refresh([sharedAllHandsTask]);
+  assert.deepEqual([...helenUnread], [], "first run establishes each account's own zero-unread baseline");
+  assert.deepEqual([...jackUnread], []);
+  const editedTask = { ...sharedAllHandsTask, title: "港車北上 (updated)" };
+  helenTracker.refresh([editedTask]);
+  jackTracker.refresh([editedTask]);
+  assert.deepEqual([...helenUnread], [sharedAllHandsTask.id], "the edit shows up as unread independently for each account");
+  assert.deepEqual([...jackUnread], [sharedAllHandsTask.id]);
+  helenTracker.markSeen([sharedAllHandsTask.id]); // mirrors clicking into a member row that surfaces this task
+  assert.deepEqual([...helenUnread], [], "helen's own unread clears");
+  assert.deepEqual([...jackUnread], [sharedAllHandsTask.id],
+    "跨账号零影响: jack's unread for the SAME shared task must be completely untouched by helen marking it seen — this is the exact 720b742-era boundary case, now resolved by per-account storage keys rather than a shared scopes blob");
+  assert.notEqual(sharedBrowserStorage.getItem("tp-task-board-read-v1:acct:employee-helen"), sharedBrowserStorage.getItem("tp-task-board-read-v1:acct:employee-jack"),
+    "the two accounts' persisted baselines are physically different storage entries, not two views of one shared value");
+  helenTracker.dispose();
+  jackTracker.dispose();
+}
 
 // G-task-18 (rewritten 2026-08-04, 煊煊拍板批3 件4, 截图批注"两个功能完全重复,保留一个即可"):
 // 51d9c6d only unified the two rail rows onto one click path (both fired the same memberTrigger
@@ -545,4 +654,4 @@ for (const lang of ["zh", "en", "fr"]) {
   }
 }
 
-console.log("NR-task-1 contracts: PASS (paste, card info, initial view, metadata, start date, completion undo + assignee reset, terminal calendar/sections, card-menu 完成/取消完成 swap, member badge/role, action-popover height, unread-relevance redo + mark-seen wiring, 任務總覽 row removal)");
+console.log("NR-task-1 contracts: PASS (paste, card info, initial view, metadata, start date, completion undo + assignee reset, terminal calendar/sections, card-menu 完成/取消完成 swap, member badge/role, action-popover height, unread-relevance redo + mark-seen wiring, 任務總覽 row removal, viewer-subject badge pivot, cross-account mark-seen isolation)");

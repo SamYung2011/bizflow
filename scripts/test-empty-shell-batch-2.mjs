@@ -104,11 +104,19 @@ assert.equal(taskBoardFingerprint(volatileTask), taskBoardFingerprint({
   assignees: [...volatileTask.assignees].reverse()
 }), "derived assignee order and rotating signed-URL query params must not create false unread");
 
+// 2026-08-04 批4 (件1「红点跟账号走」): createTaskBoardReadTracker 现在要求 accountId 才会真正
+// 读写 storage(没有 accountId 时整个 tracker 惰性化,见下面新增的 inert 断言)——这里的 fixtures
+// 全部补一个占位账号 id,继续覆盖这个文件本来要测的 idle 分片/指纹 diff/legacy baseline 行为,不是
+// 在测账号隔离本身(账号隔离的专项断言在 test-reddot-1.mjs)。
+const testAccountId = "acct-batch2-test";
+const scopedStorageKey = `${TASK_BOARD_READ_STATE_STORAGE_KEY}:acct:${testAccountId}`;
+
 const storage = memoryStorage();
 const queue = idleQueue();
 let unreadIds = new Set(["unexpected"]);
 const tracker = createTaskBoardReadTracker({
   scopeKey: "company:employee",
+  accountId: testAccountId,
   storage,
   schedule: queue.schedule.bind(queue),
   cancel: queue.cancel,
@@ -121,7 +129,25 @@ queue.runOne();
 assert.equal(queue.length, 1, "50 tasks must yield after the first 24-task idle chunk");
 queue.runAll();
 assert.deepEqual([...unreadIds], [], "first run establishes a zero-unread baseline");
-assert.ok(storage.value(TASK_BOARD_READ_STATE_STORAGE_KEY)?.includes("task-49"));
+assert.ok(storage.value(scopedStorageKey)?.includes("task-49"), "signatures persist under the account-scoped key, not the bare base key");
+assert.equal(storage.value(TASK_BOARD_READ_STATE_STORAGE_KEY), null, "the old unsuffixed global key must never be written by an account-scoped tracker");
+
+// 件1 新增: 没有账号身份(accountId 缺失/未登录/身份未就绪)时 tracker 必须整个惰性化——不读、不算、
+// 不亮,而不是退回旧的无账号共享 key 或猜一个默认身份。
+const inertQueue = idleQueue();
+let inertUnread = new Set(["unexpected"]);
+const inertTracker = createTaskBoardReadTracker({
+  scopeKey: "company:employee",
+  storage,
+  schedule: inertQueue.schedule.bind(inertQueue),
+  cancel: inertQueue.cancel,
+  onUnreadChange: (next) => { inertUnread = next; }
+});
+inertTracker.refresh(initialTasks);
+inertQueue.runAll();
+assert.deepEqual([...inertUnread], [], "an accountId-less tracker must report zero unread, never a guessed default");
+assert.equal(inertTracker.markSeen(["task-0"]), false, "markSeen must no-op (return false) without an account identity");
+inertTracker.dispose();
 
 const changedTasks = initialTasks.map((task, index) => index === 1 ? { ...task, title: "Changed title" } : task);
 changedTasks[2] = {
@@ -172,6 +198,7 @@ const reloadQueue = idleQueue();
 let reloadUnread = new Set(["unexpected"]);
 const reloadTracker = createTaskBoardReadTracker({
   scopeKey: "company:employee",
+  accountId: testAccountId,
   storage,
   schedule: reloadQueue.schedule.bind(reloadQueue),
   cancel: reloadQueue.cancel,
@@ -183,8 +210,14 @@ assert.deepEqual([...reloadUnread], [], "a reload must retain the visible-column
 reloadTracker.dispose();
 tracker.dispose();
 
+// "legacy" here names an incomplete-baseline *scope* fixture (a stored scope object missing the
+// complete:true marker, e.g. from an older code version) — unrelated to today's old-global-key
+// cleanup. It's still seeded under this account's own scoped storage key, since that's the only
+// key an account-scoped tracker ever reads.
+const legacyAccountId = "acct-legacy-baseline-test";
+const legacyScopedStorageKey = `${TASK_BOARD_READ_STATE_STORAGE_KEY}:acct:${legacyAccountId}`;
 const legacyStorage = memoryStorage();
-legacyStorage.setItem(TASK_BOARD_READ_STATE_STORAGE_KEY, JSON.stringify({
+legacyStorage.setItem(legacyScopedStorageKey, JSON.stringify({
   version: 1,
   scopes: { legacy: { signatures: { "task-0": taskBoardFingerprint(initialTasks[0]) } } }
 }));
@@ -192,6 +225,7 @@ const legacyQueue = idleQueue();
 let legacyUnread = new Set(["unexpected"]);
 const legacyTracker = createTaskBoardReadTracker({
   scopeKey: "legacy",
+  accountId: legacyAccountId,
   storage: legacyStorage,
   schedule: legacyQueue.schedule.bind(legacyQueue),
   cancel: legacyQueue.cancel,
@@ -200,7 +234,7 @@ const legacyTracker = createTaskBoardReadTracker({
 legacyTracker.refresh(initialTasks.slice(0, 2));
 legacyQueue.runAll();
 assert.deepEqual([...legacyUnread], [], "an incomplete/legacy baseline must absorb missing task fingerprints as first-seen");
-assert.equal(JSON.parse(legacyStorage.value(TASK_BOARD_READ_STATE_STORAGE_KEY)).scopes.legacy.complete, true);
+assert.equal(JSON.parse(legacyStorage.value(legacyScopedStorageKey)).scopes.legacy.complete, true);
 legacyTracker.refresh(initialTasks.slice(0, 3));
 legacyQueue.runAll();
 assert.deepEqual([...legacyUnread], ["task-2"], "a task missing from a completed baseline is a real new unread task");

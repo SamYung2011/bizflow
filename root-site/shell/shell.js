@@ -2,7 +2,7 @@ import { dictionaries } from "./shell-i18n.js";
 import { mountIconSprite } from "../assets/icons/inline-sprite.js";
 import { renderLanguageMenu, renderUserPanel, attachMenuBehaviors } from "../components/menus.js";
 import { attachGlobalSearch, renderGlobalSearch } from "./shell-search.js";
-import { READ_STATE_STORAGE_KEY } from "../data/read-state.js";
+import { getActiveReadStateStorageKey } from "../data/read-state.js";
 import { createRouteMenu } from "../spa/route-menu.js";
 import { attachQuickCreate, availableQuickCreateActions } from "../components/quick-create.js";
 import { LANGUAGE_CODES, persistLanguagePreference, resolveLanguagePreference } from "../data/language-preference.js";
@@ -516,8 +516,12 @@ function attachShellBehaviors() {
     }
   });
   window.addEventListener("tp:unread-change", refreshUnreadIndicators);
+  // 件1 (2026-08-04 批4「红点跟账号走」): 按当前这个 tab 自己的账号命名空间 key 精确匹配,不是旧的
+  // 固定全局 key。getActiveReadStateStorageKey() 每次都现查(账号可能在这次事件之前才刚解析出来),
+  // 没有活跃账号时恒返回 null,天然匹配不上任何真实 storage 事件——别的账号在别的 tab 写它自己的
+  // key,这个 tab 的 event.key 永远对不上,不会触发无谓重算,也不会误读别人的已读状态。
   window.addEventListener("storage", (event) => {
-    if (event.key !== READ_STATE_STORAGE_KEY) return;
+    if (!event.key || event.key !== getActiveReadStateStorageKey()) return;
     window.dispatchEvent(new CustomEvent("tp:unread-change"));
   });
 

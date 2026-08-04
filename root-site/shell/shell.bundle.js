@@ -967,6 +967,13 @@
 
   // root-site/data/read-state.js
   var READ_STATE_STORAGE_KEY = "tp-read-state-v1";
+  var activeAccountId = null;
+  function accountStorageKey(accountId) {
+    return `${READ_STATE_STORAGE_KEY}:acct:${accountId}`;
+  }
+  function getActiveReadStateStorageKey() {
+    return activeAccountId ? accountStorageKey(activeAccountId) : null;
+  }
 
   // root-site/components/navigation-registry.js
   function freezeItems(items) {
@@ -1628,7 +1635,7 @@
     });
     window.addEventListener("tp:unread-change", refreshUnreadIndicators);
     window.addEventListener("storage", (event) => {
-      if (event.key !== READ_STATE_STORAGE_KEY) return;
+      if (!event.key || event.key !== getActiveReadStateStorageKey()) return;
       window.dispatchEvent(new CustomEvent("tp:unread-change"));
     });
     if (mobileViewport) {

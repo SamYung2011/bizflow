@@ -1,5 +1,5 @@
 import { getTeamTaskData, getCurrentUser, getUnread, getUnreadWatermarks } from "../data/provider.js";
-import { markRead } from "../data/read-state.js";
+import { getReadStateAccount, markRead } from "../data/read-state.js";
 import { taskT as pageT } from "./tasks-i18n.js";
 import { renderTaskDetail } from "./tasks-detail.js";
 import { availableTaskDepartments, renderTaskSubmitDialog, taskMembersForDepartment } from "./tasks-submit.js";
@@ -172,6 +172,20 @@ export function memberUnreadBadge(unreadCount) {
   return "";
 }
 
+// 件2 (2026-08-04 批4 煊煊 18:01 拍板「红点的逻辑是跟着账号走的啊。别的号未读的但是跟现在登录的
+// 账号无关的信息为什么要有红点？」): 主语从"成员行本身"改成"当前登录账号"。当前账号的未读集 =
+// 指纹未看(boardUnreadTaskIds,现在这份本身已经是按账号隔离存储算出来的,见 task-board-read-state.js
+// 件1)AND 与当前账号相关——当前账号是 assignee、或被 @(同一套 isTaskAssignedTo/isTaskMentionedForMember
+// 身份判定,只是主语从"某一行的成员"换成"当前 viewer")。这是任何一行红点存在的前提:跟当前账号毫无
+// 关系的未读,不管挂在哪个人名下,哪一行都不该亮。
+export function viewerRelevantUnreadTaskIds(viewer, tasks, unreadTaskIds) {
+  if (!viewer || !unreadTaskIds || !unreadTaskIds.size) return [];
+  return tasks
+    .filter((task) => task.parentId === null && unreadTaskIds.has(task.id) &&
+      (isTaskAssignedTo(task, viewer) || isTaskMentionedForMember(task, viewer)))
+    .map((task) => task.id);
+}
+
 // 件3+5 (2026-08-04 煊煊拍板批3,截图批注「朝哥任务只有 2 个红点为什么 5」「人人一个 5」「点击之后
 // 不会消失」「完全不知道数据从哪算出来」): 上面 ead797e 版用 isTaskVisibleToMember 判定"可见"——
 // assignee/creator/mention 任一命中就算,创建人身份和泛可见性混进了"这是不是他的事"里,是"人人一个
@@ -180,28 +194,37 @@ export function memberUnreadBadge(unreadCount) {
 // isTaskMentionedForMember)才算——不算创建人身份,不算"全员可见但与他无关"。抽成独立函数而不是
 // 内联在 memberUnreadCount 里:下面 markMemberBoardSeen(消灯)要标记的必须是同一批 id,数一遍口径、
 // 消一遍口径必须是同一份,不是两处各自维护、恰好数字对得上。
-export function memberRelevantUnreadTaskIds(member, tasks, unreadTaskIds) {
-  if (!unreadTaskIds || !unreadTaskIds.size) return [];
+//
+// 件2 续 (2026-08-04 批4): 上面这份"该成员相关"只回答"这条未读该挂在哪一行"——决定"要不要显示"
+// 还得再过一遍 viewerRelevantUnreadTaskIds 这道当前账号关卡。两个关卡都过(挂在这个成员名下 AND
+// 与当前登录账号相关)才计入这一行的数字。member === viewer(自己那一行)时两道关卡实质重合;
+// member !== viewer(比如看朝哥那一行)时,只挂在朝哥名下但跟当前账号毫无关系的未读不会让他的行
+// 冒红点——这正是这次要收紧的地方。
+export function memberRelevantUnreadTaskIds(member, tasks, unreadTaskIds, viewer) {
+  const viewerUnread = new Set(viewerRelevantUnreadTaskIds(viewer, tasks, unreadTaskIds));
+  if (!viewerUnread.size) return [];
   return tasks
-    .filter((task) => task.parentId === null && unreadTaskIds.has(task.id) &&
+    .filter((task) => task.parentId === null && viewerUnread.has(task.id) &&
       (isTaskAssignedTo(task, member) || isTaskMentionedForMember(task, member)))
     .map((task) => task.id);
 }
 
-export function memberUnreadCount(member, tasks, unreadTaskIds) {
-  return memberRelevantUnreadTaskIds(member, tasks, unreadTaskIds).length;
+export function memberUnreadCount(member, tasks, unreadTaskIds, viewer) {
+  return memberRelevantUnreadTaskIds(member, tasks, unreadTaskIds, viewer).length;
 }
 
-// 点进某个成员的看板视角 = 看过他相关的未读了:把 memberRelevantUnreadTaskIds 算出的子集标记已读,
-// 复用既有 tp-task-board-read-v1 的 markSeen(与列头 IntersectionObserver 滚入视口自动已读同一套
-// 存储/去重逻辑,见 task-board-read-state.js),只消这一个成员相关的那一份指纹,不是全局清空,不
-// 会误清跟他无关或其他成员的未读。Honnmono all 是导航入口不是具体某个人,没有"与他相关"这个概念
+// 点进某个成员的看板视角 = 看过他相关的未读了:把 memberRelevantUnreadTaskIds 算出的子集(现在已经
+// 是"挂在他名下 AND 与当前账号相关"的交集)标记已读,复用既有 tp-task-board-read-v1 的 markSeen
+// (与列头 IntersectionObserver 滚入视口自动已读同一套存储/去重逻辑,见 task-board-read-state.js),
+// 只消这一份指纹,不是全局清空。这一步只会写当前登录账号自己的命名空间(taskBoardReadTracker 创建
+// 时已经按账号切了物理 storage key,见下面 activate() 的 accountId 接线)——跨账号零影响,别的账号
+// 的已读/未读不会被这次点击动到。Honnmono all 是导航入口不是具体某个人,没有"与他相关"这个概念
 // (ead797e 就已经把它的徽标排除在外了),这里同样排除,点它不消任何指纹。
 function markMemberBoardSeen(memberKey) {
   if (!taskBoardReadTracker || !state || memberKey === "all") return;
   const member = state.members.find((candidate) => memberIdentity(candidate) === memberKey);
   if (!member) return;
-  const relevantIds = memberRelevantUnreadTaskIds(member, state.tasks, state.boardUnreadTaskIds);
+  const relevantIds = memberRelevantUnreadTaskIds(member, state.tasks, state.boardUnreadTaskIds, state.currentUser);
   if (relevantIds.length) taskBoardReadTracker.markSeen(relevantIds);
 }
 
@@ -215,7 +238,7 @@ function renderMember(member, tasks, helpers) {
   const openCount = member.dept === "all"
     ? tasks.filter((task) => task.parentId === null && isOpenTask(task)).length
     : openAssignedTaskCount(member, tasks);
-  const unreadBadge = member.dept === "all" ? "" : memberUnreadBadge(memberUnreadCount(member, tasks, state.boardUnreadTaskIds));
+  const unreadBadge = member.dept === "all" ? "" : memberUnreadBadge(memberUnreadCount(member, tasks, state.boardUnreadTaskIds, state.currentUser));
   return `<button type="button" class="team-member-task${active}" data-task-member="${escapeHtml(memberKey)}">
     <span class="avatar--initial team-member-task__avatar" style="--component-width:60px;--component-height:60px">${escapeHtml(initials(member.name))}</span>
     <div class="team-member-task__body">
@@ -2212,8 +2235,13 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
         scope
       });
       const readScopeKey = `${currentUser.activeCompanyId || "demo"}:${state.currentUser.id || "anonymous"}`;
+      // 件1 (2026-08-04 批4): accountId 直接问 read-state.js 要——跟 markRead("tasks", …) 那套 flat
+      // 水位系统用同一个身份源(都是 provider.js 的 buildUnreadState() 在这次页面数据 Promise.all
+      // 里已经 await 解析好的那个账号),不是 state.currentUser.id(那个演示态下可能只是个 mock 成员
+      // id,不是真账号)。两套存储的账号隔离口径必须对齐,不能各查各的。
       const readTracker = createTaskBoardReadTracker({
         scopeKey: readScopeKey,
+        accountId: getReadStateAccount(),
         onUnreadChange(nextUnreadIds) {
           if (!scope.isCurrent() || !state) return;
           const previous = state.boardUnreadTaskIds;
