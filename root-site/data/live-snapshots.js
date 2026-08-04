@@ -1,6 +1,7 @@
 import { getCurrentUser, RBAC_KEYS } from "./auth.js";
 import {
   buildAliasesSnapshot,
+  buildExpenseSnapshot,
   buildNorthboundSnapshot,
   buildShopifyLinksSnapshot,
   buildSimpleRowsSnapshot,
@@ -933,7 +934,7 @@ const builders = {
   "aliases.json": buildAliasesSnapshot,
   "shopify-links.json": buildShopifyLinksSnapshot,
   "suppliers.json": () => buildSimpleRowsSnapshot("suppliers", "suppliers"),
-  "expense.json": () => buildSimpleRowsSnapshot("expense_reimbursements", "reimbursements"),
+  "expense.json": buildExpenseSnapshot,
   "whatsapp.json": buildWhatsappSnapshot,
   "pending-deduction.json": buildPendingDeductionSnapshot
 };

@@ -37,7 +37,7 @@ const SNAPSHOT_TABLES = Object.freeze({
   "aliases.json": ["line_item_aliases", "products"],
   "shopify-links.json": ["shopify_variant_links", "products"],
   "suppliers.json": ["suppliers"],
-  "expense.json": ["expense_reimbursements"],
+  "expense.json": ["expense_reimbursements", "employees"],
   [WHATSAPP_SNAPSHOT]: WHATSAPP_SNAPSHOT_TABLES,
   "pending-deduction.json": ["invoices", "customers", "inventory_movements"]
 });

@@ -73,6 +73,28 @@ export async function buildSimpleRowsSnapshot(table, key) {
   return { generated_at: new Date().toISOString(), scope: `RLS-visible ${table}`, [key]: rows.map((row) => ({ ...row })) };
 }
 
+// G-exp-6: expense_reimbursements only stores employee_id; the admin "員工"
+// column needs the name, so join employees here (same employeeById pattern
+// as buildTasksSnapshot/buildMembersSnapshot in live-snapshots.js) instead of
+// widening buildSimpleRowsSnapshot for every other caller. employee_name is
+// left null (not "") when the employee row is missing so expense-model.js's
+// existing `item.employee_name ?? "—"` fallback chain still applies.
+export async function buildExpenseSnapshot() {
+  const [rows, employees] = await Promise.all([
+    allRows("expense_reimbursements", "created_at", false),
+    allRows("employees", "created_at")
+  ]);
+  const employeeById = new Map(employees.map((employee) => [employee.id, employee]));
+  return {
+    generated_at: new Date().toISOString(),
+    scope: "RLS-visible expense_reimbursements",
+    reimbursements: rows.map((row) => ({
+      ...row,
+      employee_name: employeeById.get(row.employee_id)?.name ?? null
+    }))
+  };
+}
+
 const SAFE_WHATSAPP_SETTINGS = [
   "claude_mode", "openai_base_url", "model", "max_replies_per_min", "reply_delay_base",
   "cooldown_minutes", "bot_phone", "bot_name", "boss_chat_name", "daily_report_hour",

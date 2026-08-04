@@ -19,7 +19,8 @@ const SNAPSHOT_CONTRACT_GENERATIONS = new Map([
   ["customers.json", 2],
   ["warranty.json", 2],
   ["orders.json", 2],
-  ["pending-deduction.json", 1]
+  ["pending-deduction.json", 1],
+  ["expense.json", 1] // G-exp-6: rows now carry employee_name from an employees join.
 ]);
 
 export const LIVE_TABLE_CACHE_TTL_MS = 10 * 60_000;
