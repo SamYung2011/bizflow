@@ -226,12 +226,15 @@
   color: var(--gray-60);
   font-size: var(--font-title-3-size);
   font-weight: var(--font-title-3-weight);
+  line-height: var(--lh-tight);
   cursor: pointer;
 }
 
-.task-terminal-group > summary span {
-  margin-left: var(--space-4);
-  color: var(--gray-40);
+.task-terminal-group > summary .team-count-badge {
+  margin-left: var(--space-10);
+  background: var(--gray-11);
+  color: var(--gray-60);
+  vertical-align: middle;
 }
 
 .task-terminal-group > div {

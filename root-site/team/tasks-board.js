@@ -66,7 +66,7 @@ function renderTerminalGroup(kind, tasks, state, mentionMember, helpers) {
   const { escapeHtml, lang } = helpers;
   const label = taskT(lang, `tasks.detail.status.${kind}`);
   return `<details class="task-terminal-group task-terminal-group--${kind}" data-task-terminal-group="${kind}">
-    <summary>${escapeHtml(label)} <span>${tasks.length}</span></summary>
+    <summary>${escapeHtml(label)} <span class="team-count-badge">${tasks.length}</span></summary>
     <div>${tasks.map((task) => renderTaskCard(task, task.priority, state, mentionMember, helpers)).join("")}</div>
   </details>`;
 }
