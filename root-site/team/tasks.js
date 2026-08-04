@@ -1279,8 +1279,11 @@ async function onTaskClick(event) {
   if (feedbackMentionRemove) {
     if (feedbackMentionRemove.disabled || state.writeBusy) return;
     const userId = feedbackMentionRemove.getAttribute("data-task-feedback-mention-remove");
-    state.feedbackDraft = removeTaskFeedbackMention(state.feedbackDraft, userId);
-    rerenderTaskPage({ focusFeedback: true });
+    // 2026-08-04 件2: 删 chip 现在会改写正文(见 tasks-mentions.js),返回形状是 {draft,cursor} ——
+    // 光标落回被删 token 原来的位置,和 selectTaskFeedbackMention 的 chooseFeedbackMention 用法对齐。
+    const removal = removeTaskFeedbackMention(state.feedbackDraft, userId);
+    state.feedbackDraft = removal.draft;
+    rerenderTaskPage({ focusFeedback: true, feedbackCursor: removal.cursor });
     return;
   }
 

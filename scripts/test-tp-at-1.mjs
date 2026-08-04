@@ -44,9 +44,35 @@ assert.deepEqual(selected.draft.mentions, [{ userId: "user-jack", name: "Jack" }
 draft = updateTaskFeedbackMentionInput(selected.draft, `${selected.draft.message}@j`, selected.draft.message.length + 2);
 selected = selectTaskFeedbackMention(draft, members[2]);
 assert.equal(selected.draft.mentions.length, 1, "the selected auth user id must be deduplicated");
-const removed = removeTaskFeedbackMention(selected.draft, "user-jack");
-assert.equal(removed.mentions.length, 0);
-assert.match(removed.message, /@Jack/, "removing a chip must not rewrite the feedback body");
+// 2026-08-04 煊煊拍板批3件2(截图批注"点击删除@的人之后名字仍然卡在对话框内,应该跟着一起删除"):
+// 原断言"移除 chip 不得改写正文"在此正当翻转——现在必须把正文里所有 "@Jack" token 一并删掉。上面
+// 第二轮 selectTaskFeedbackMention 已经让"@Jack "在正文里出现了两次(mentions 数组本身去重到 1
+// 条,但正文文本插入了两次),这里顺带验证"多次出现全删"。返回形状也从裸 draft 改成
+// {draft, cursor},与 selectTaskFeedbackMention 的返回形状对齐。
+const removal = removeTaskFeedbackMention(selected.draft, "user-jack");
+assert.equal(removal.draft.mentions.length, 0);
+assert.doesNotMatch(removal.draft.message, /@Jack/, "removing a chip must strip every matching @Name token from the feedback body");
+assert.equal(removal.draft.message, "請找 後文", "both @Jack tokens (and their one trailing space each) are gone; surrounding text is untouched");
+assert.equal(removal.cursor, 3, "cursor lands where the first stripped token used to start, so typing continues naturally");
+
+// Edge cases the brief called out explicitly: exact-token matching only.
+const jackMention = [{ userId: "user-jack", name: "Jack" }];
+const closedMenu = { open: false, query: "", atIndex: -1, cursor: 0 };
+assert.equal(
+  removeTaskFeedbackMention({ message: "cc @Jackson please review", attachments: [], mentions: jackMention, mentionMenu: closedMenu }, "user-jack").draft.message,
+  "cc @Jackson please review",
+  "a longer name that merely starts with @Jack (e.g. @Jackson) must not be truncated into @Jack's removal"
+);
+assert.equal(
+  removeTaskFeedbackMention({ message: "cc @Jack, thanks", attachments: [], mentions: jackMention, mentionMenu: closedMenu }, "user-jack").draft.message,
+  "cc , thanks",
+  "no trailing space to fold in (punctuation follows instead) — only the token itself is removed"
+);
+assert.equal(
+  removeTaskFeedbackMention({ message: "ask Jack directly, not @Jack", attachments: [], mentions: jackMention, mentionMenu: closedMenu }, "user-jack").draft.message,
+  "ask Jack directly, not ",
+  "hand-typed plain-text \"Jack\" with no @ prefix must survive untouched — only the @-prefixed token is stripped"
+);
 
 const escapeHtml = (value) => String(value ?? "")
   .replaceAll("&", "&amp;")
