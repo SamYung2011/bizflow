@@ -47,21 +47,41 @@ assert.match(newFields, /data-email-suggestion="person@gmail\.com"/);
 assert.match(newFields, /data-email-suggestion-target="new-customer"/);
 
 // G-cus-1 regression (2026-08-04 nightrun cust-1 FAIL): <input type="email"> does not support
-// setSelectionRange() and throws InvalidStateError; safeSetSelectionRange must skip it instead of
-// calling through, while still restoring the caret on input types that do support selection.
+// setSelectionRange() and throws InvalidStateError, so safeSetSelectionRange must never call
+// through to it for type=email. It must still restore the caret to the end there too (todo #259:
+// previously a silent no-op left the caret at index 0 after a suggestion-click re-render, so the
+// next keystroke inserted at the front instead of the end) via the value-reassignment technique —
+// asserted here at the mock level as "wrote value to '' then back to the original", which is the
+// technique's observable signature, not full browser caret semantics (those are covered by a live
+// Chrome check during implementation, see email-suggest.js comment). number stays a true no-op,
+// unchanged from before. text/search still go straight through setSelectionRange, unchanged.
 {
-  const calls = [];
-  const mockInput = (type, value) => ({
-    type,
-    value,
-    setSelectionRange: (start, end) => calls.push([type, start, end])
-  });
-  safeSetSelectionRange(mockInput("email", "person@gmail.com"));
+  const rangeCalls = [];
+  const valueWritesByType = {};
+  const mockInput = (type, value) => {
+    const record = { type };
+    let current = value;
+    Object.defineProperty(record, "value", {
+      get: () => current,
+      set: (next) => {
+        current = next;
+        (valueWritesByType[type] ??= []).push(next);
+      }
+    });
+    record.setSelectionRange = (start, end) => rangeCalls.push([type, start, end]);
+    return record;
+  };
+  const emailInput = mockInput("email", "person@gmail.com");
+  safeSetSelectionRange(emailInput);
   safeSetSelectionRange(mockInput("number", "123"));
   safeSetSelectionRange(mockInput("text", "hello"));
   safeSetSelectionRange(mockInput("search", "abc"), 1, 2);
   safeSetSelectionRange(null);
-  assert.deepEqual(calls, [["text", 5, 5], ["search", 1, 2]], "safeSetSelectionRange must skip email/number inputs and no-op on null, but still restore the caret on text/search inputs");
+
+  assert.deepEqual(rangeCalls, [["text", 5, 5], ["search", 1, 2]], "safeSetSelectionRange must call setSelectionRange only for text/search (email would throw InvalidStateError; number stays a no-op)");
+  assert.deepEqual(valueWritesByType.email, ["", "person@gmail.com"], "safeSetSelectionRange must move the caret to the end on type=email via the value-reassignment technique (blank then restore) since setSelectionRange is unusable there");
+  assert.equal(emailInput.value, "person@gmail.com", "the value-reassignment technique must round-trip the original value intact, not lose or corrupt it");
+  assert.equal(valueWritesByType.number, undefined, "type=number stays out of scope for todo #259 and must remain untouched, same as before");
 }
 
 const customer = {
