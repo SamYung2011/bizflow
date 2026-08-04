@@ -12,6 +12,23 @@
   font-weight: var(--font-description-weight);
 }
 
+.warranty-toprow {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-20);
+}
+
+.warranty-toprow > .warranty-buckets {
+  flex: 1 1 auto;
+}
+
+.warranty-toprow > .warranty-toolbar {
+  flex: none;
+}
+
 .warranty-buckets {
   display: flex;
   min-width: 0;
@@ -410,6 +427,11 @@
 }
 
 @media (max-width: 980px) {
+  .warranty-toprow {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .warranty-toolbar {
     align-items: stretch;
     flex-direction: column;

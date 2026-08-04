@@ -396,16 +396,18 @@ export function renderWarranty(helpers) {
   return `<section class="warranty-panel" data-warranty-panel data-warranty-total="${state.items.length}" data-warranty-filtered="${filtered.length}">
     ${state.renewalNotice ? `<p class="customer-write-notice customer-write-notice--success" role="status">${escapeHtml(t(lang, state.renewalNotice.key, state.renewalNotice.values))}</p>` : ""}
     <p class="warranty-summary">${escapeHtml(t(lang, "count", { count: state.items.length }))}</p>
-    <div class="warranty-buckets" role="group" aria-label="${escapeHtml(t(lang, "title"))}">
-      ${WARRANTY_BUCKETS.map((bucket) => `<button type="button" class="warranty-bucket${state.bucket === bucket ? " is-active" : ""}" data-warranty-bucket="${bucket}" aria-pressed="${state.bucket === bucket}"><span>${escapeHtml(t(lang, bucket))}</span><strong>${escapeHtml(String(counts[bucket]))}</strong></button>`).join("")}
-    </div>
-    <div class="warranty-toolbar">
-      <div class="warranty-toolbar__filters">
-        ${renderDateRangeFilter(helpers)}
-        <label class="warranty-search">
-          ${icon("icon-nav-search", "icon")}
-          <input type="search" data-warranty-search value="${escapeHtml(state.search)}" placeholder="${escapeHtml(t(lang, "search"))}" aria-label="${escapeHtml(t(lang, "search"))}">
-        </label>
+    <div class="warranty-toprow">
+      <div class="warranty-buckets" role="group" aria-label="${escapeHtml(t(lang, "title"))}">
+        ${WARRANTY_BUCKETS.map((bucket) => `<button type="button" class="warranty-bucket${state.bucket === bucket ? " is-active" : ""}" data-warranty-bucket="${bucket}" aria-pressed="${state.bucket === bucket}"><span>${escapeHtml(t(lang, bucket))}</span><strong>${escapeHtml(String(counts[bucket]))}</strong></button>`).join("")}
+      </div>
+      <div class="warranty-toolbar">
+        <div class="warranty-toolbar__filters">
+          ${renderDateRangeFilter(helpers)}
+          <label class="warranty-search">
+            ${icon("icon-nav-search", "icon")}
+            <input type="search" data-warranty-search value="${escapeHtml(state.search)}" placeholder="${escapeHtml(t(lang, "search"))}" aria-label="${escapeHtml(t(lang, "search"))}">
+          </label>
+        </div>
       </div>
     </div>
     ${renderManagementList({ content, pager, paged: filtered.length > pageSize })}
