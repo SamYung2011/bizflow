@@ -2,7 +2,6 @@ import { taskT } from "./tasks-i18n.js";
 import { filterTaskColumns, renderTaskFilter } from "./tasks-filters.js";
 import { renderTaskActionPopover } from "./tasks-actions.js";
 import { isTaskCreator, isTaskMentionedForMember, isWaitingApproval, memberIdentity, scopedTopTasks, taskAssignee, taskCompletionForMember, taskDuePresentation, taskSubtaskProgress, terminalTasksForMember } from "./tasks-model.js";
-import { renderTaskFeedbackPanel } from "./tasks-feedback-panel.js";
 
 function renderTaskDue(task, helpers) {
   const { escapeHtml, lang } = helpers;
@@ -115,19 +114,12 @@ export function renderTaskBoardGrid({ state, filterState, helpers }) {
   const mentionMember = scopedMember ?? state.currentUser;
   const columnsHtml = columns.map((column) => renderColumn(column, state, filterState, mentionMember, helpers)).join("");
   if (filterState.status !== "inProgress") return columnsHtml;
-  const memberBoardTasks = state.onlyMine
+  const terminalSource = state.onlyMine
     ? state.tasks.filter((task) => isTaskCreator(task, state.currentUser))
     : state.tasks;
-  const feedbackPanelHtml = scopedMember ? renderTaskFeedbackPanel({
-    member: scopedMember,
-    tasks: memberBoardTasks,
-    expandedTaskIds: state.feedbackPanelExpandedTaskIds,
-    helpers
-  }) : "";
-  const terminal = terminalTasksForMember(mentionMember, memberBoardTasks);
+  const terminal = terminalTasksForMember(mentionMember, terminalSource);
   const terminalHtml = `${renderTerminalGroup("abandoned", terminal.abandoned, state, mentionMember, helpers)}${renderTerminalGroup("completed", terminal.completed, state, mentionMember, helpers)}`;
-  const terminalGroupsHtml = terminalHtml ? `<section class="task-terminal-groups" data-task-terminal-groups>${terminalHtml}</section>` : "";
-  return `${columnsHtml}${feedbackPanelHtml}${terminalGroupsHtml}`;
+  return terminalHtml ? `${columnsHtml}<section class="task-terminal-groups" data-task-terminal-groups>${terminalHtml}</section>` : columnsHtml;
 }
 
 export function renderTaskToolbar({ state, filterState, members, featureAiBatch, helpers }) {
