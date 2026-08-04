@@ -15,7 +15,7 @@ import {
   terminalTasksForMember
 } from "../root-site/team/tasks-model.js";
 import { renderTaskSubmitDialog } from "../root-site/team/tasks-submit.js";
-import { memberUnreadBadge, memberUnreadCount } from "../root-site/team/tasks.js";
+import { memberRelevantUnreadTaskIds, memberUnreadBadge, memberUnreadCount } from "../root-site/team/tasks.js";
 
 globalThis.matchMedia = () => ({ matches: false });
 
@@ -305,13 +305,14 @@ assert.doesNotMatch(expandedTerminalHtml, /data-task-card="old-root"/,
 assert.doesNotMatch(expandedTerminalHtml, /data-task-card="duplicate-child"/,
   "a terminal child whose parent is not open must still be suppressed");
 
-const [tasksSource, writesSource, snapshotsSource, memberProviderSource, tasksCssSource, domainCssSource] = await Promise.all([
+const [tasksSource, writesSource, snapshotsSource, memberProviderSource, tasksCssSource, domainCssSource, taskControllerSource] = await Promise.all([
   readFile(new URL("../root-site/team/tasks.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/live-task-writes.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/live-snapshots.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/provider.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/team/tasks.css", import.meta.url), "utf8"),
-  readFile(new URL("../root-site/team/tasks-domain.css", import.meta.url), "utf8")
+  readFile(new URL("../root-site/team/tasks-domain.css", import.meta.url), "utf8"),
+  readFile(new URL("../root-site/team/tasks-domain-controller.js", import.meta.url), "utf8")
 ]);
 assert.match(tasksSource, /scope\.listen\(document, "paste", onTaskPaste\)/);
 assert.match(tasksSource, /event\.key === "Enter" && \(event\.metaKey \|\| event\.ctrlKey\)/);
@@ -406,11 +407,13 @@ assert.match(tasksSource, /const role = member\.dept === "all" \? \(member\.dept
 assert.match(memberProviderSource, /position: member\.position,/,
   "provider.js must forward the members-snapshot's already-computed employees.role (member.position) to the task-page member rail");
 
-// G-task-17 (2026-08-04 件2): the badge's new source — memberUnreadCount aggregates the existing
+// G-task-17 (2026-08-04 件2, ead797e; comment corrected 2026-08-04 批3 件3+5 — the underlying
+// isTaskVisibleToMember reuse this originally described was replaced by a narrower relevance rule,
+// see G-task-19 below): the badge's source — memberUnreadCount aggregates the existing
 // tp-task-board-read-v1 fingerprint output (boardUnreadTaskIds, the same Set the column-header
-// "N 項未讀變更" badge already reads) per member, reusing isTaskVisibleToMember's exact visibility
-// rule (the same one a member's own board view is scoped by) instead of a parallel read system.
-// creator pinned to a neutral third party (mirrors G-task-9's `parent` fixture) so visibility
+// "N 項未讀變更" badge already reads) per member. Coverage here is the source-agnostic plumbing
+// (subtask exclusion, empty/missing Set) that doesn't depend on which relevance rule is used.
+// creator pinned to a neutral third party (mirrors G-task-9's `parent` fixture) so relevance
 // below comes purely from the explicit assignees list, not the task() factory's jack-creator default.
 const unreadVisible = task("unread-visible-to-helen", {
   creator: "Other", creatorId: "employee-other",
@@ -439,6 +442,67 @@ assert.equal(memberUnreadCount(helen, unreadFixtureTasks, new Set()), 0, "an emp
 assert.equal(memberUnreadCount(helen, unreadFixtureTasks, null), 0, "a missing unread Set must yield 0, not throw");
 assert.match(tasksSource, /const unreadBadge = member\.dept === "all" \? "" : memberUnreadBadge\(memberUnreadCount\(member, tasks, state\.boardUnreadTaskIds\)\);/,
   "the member-row badge must be wired to the unread aggregator, not to openCount");
+
+// G-task-19 (2026-08-04 煊煊拍板批3 件3+5, 截图批注「朝哥任务只有 2 个红点为什么 5」「人人一个 5」
+// 「点击之后不会消失」「完全不知道数据从哪算出来」): the relevance rule was tightened from
+// isTaskVisibleToMember (assignee/creator/mention — any hit counts) to assignee-or-mention only.
+// creator-only is the exact delta: G-task-17's fixtures above never had a creator-only task (their
+// creator was always pinned to a neutral third party), so they can't tell the two rules apart —
+// this is the fixture that does.
+const relevantAssignee = task("relevant-assignee-only", {
+  creator: "Other", creatorId: "employee-other",
+  assignees: [{ employeeId: helen.id, name: helen.name, completedAt: null, abandonedAt: null }]
+});
+const relevantMentionOnly = task("relevant-mention-only", {
+  creator: "Other", creatorId: "employee-other",
+  assignees: [],
+  feedback: [{
+    id: "fb-relevant-mention", author: "Other", authorUserId: "user-other",
+    message: "@Helen please check", mentionedUserIds: [helen.userId], attachments: []
+  }]
+});
+const creatorOnlyIrrelevant = task("creator-only-irrelevant", {
+  creator: helen.name, creatorId: helen.id,
+  assignees: []
+});
+const relevanceFixtureTasks = [relevantAssignee, relevantMentionOnly, creatorOnlyIrrelevant];
+const relevanceUnreadIds = new Set([relevantAssignee.id, relevantMentionOnly.id, creatorOnlyIrrelevant.id]);
+assert.deepEqual(new Set(memberRelevantUnreadTaskIds(helen, relevanceFixtureTasks, relevanceUnreadIds)),
+  new Set([relevantAssignee.id, relevantMentionOnly.id]),
+  "assignee-hit and mention-hit both count; creator-only (not assigned, not mentioned) must not — that's the exact ead797e-era over-count the redo fixes");
+assert.equal(memberUnreadCount(helen, relevanceFixtureTasks, relevanceUnreadIds), 2,
+  "memberUnreadCount is just the length of the same relevance set, not a second parallel tally");
+// 0 隐藏: 与他完全无关的那条(仅创建人,未指派、未被 @)即便在未读指纹集里,也不该让徽标露出来。
+assert.equal(
+  memberUnreadBadge(memberUnreadCount(helen, [creatorOnlyIrrelevant], new Set([creatorOnlyIrrelevant.id]))),
+  "",
+  "creator-only relevance yields a 0 count, and 0 must render no badge at all (the 99+/hide-at-0 formatter is unchanged)"
+);
+
+// 点视图消灯 (截图批注"点击之后不会消失"): navigating into a member's board view must mark their
+// relevant unread fingerprints seen through the existing tp-task-board-read-v1 tracker, not leave
+// them stuck until the column-header IntersectionObserver happens to scroll them into view. This
+// needs a live taskBoardReadTracker/DOM click cycle this repo's node scripts don't spin up (same
+// reason TP-at-1/TP-at-2/reddot-1's provider-facing pieces fall back to source-text contracts) —
+// so the wiring is locked at the source level instead of executed end-to-end.
+assert.match(tasksSource, /function markMemberBoardSeen\(memberKey\)/,
+  "tasks.js must own a dedicated mark-seen-on-navigate function (mirrors refreshTaskBoardReadState's existing closure over taskBoardReadTracker)");
+const markMemberBoardSeenBlock = tasksSource.slice(
+  tasksSource.indexOf("function markMemberBoardSeen(memberKey)"),
+  tasksSource.indexOf("function renderMember(")
+);
+assert.match(markMemberBoardSeenBlock, /memberRelevantUnreadTaskIds\(member, state\.tasks, state\.boardUnreadTaskIds\)/,
+  "the navigate-to-member mark-seen path must reuse the exact same relevance function the badge count uses, not a second parallel filter that could drift out of sync");
+assert.match(markMemberBoardSeenBlock, /taskBoardReadTracker\.markSeen\(/,
+  "must clear through the existing tp-task-board-read-v1 tracker's markSeen, not a new parallel read-state store");
+assert.match(markMemberBoardSeenBlock, /memberKey === "all"/,
+  "the Honnmono-all nav row has no personal-relevance concept and must be excluded from mark-seen, the same carve-out ead797e already applied to its badge");
+assert.match(tasksSource, /refreshTaskBoardReadState: \(\) => taskBoardReadTracker\?\.refresh\(state\.tasks\),\s*\n\s*markMemberBoardSeen,/,
+  "markMemberBoardSeen must actually be threaded into attachTaskDomainController's dependency object");
+assert.match(taskControllerSource, /markMemberBoardSeen,/,
+  "tasks-domain-controller.js must accept markMemberBoardSeen as a dependency");
+assert.match(taskControllerSource, /setSessionValue\("team-tasks-view-mode", "board"\);[\s\S]*?markMemberBoardSeen\?\.\(nextMember\);\s*\n\s*rerender\(\);/,
+  "clicking a member row (memberTrigger) must call the mark-seen callback for that member in the same handler pass that rerenders, so the badge updates immediately, not on some later render");
 
 // G-task-18 (rewritten 2026-08-04, 煊煊拍板批3 件4, 截图批注"两个功能完全重复,保留一个即可"):
 // 51d9c6d only unified the two rail rows onto one click path (both fired the same memberTrigger
@@ -481,4 +545,4 @@ for (const lang of ["zh", "en", "fr"]) {
   }
 }
 
-console.log("NR-task-1 contracts: PASS (paste, card info, initial view, metadata, start date, completion undo + assignee reset, terminal calendar/sections, card-menu 完成/取消完成 swap, member badge/role)");
+console.log("NR-task-1 contracts: PASS (paste, card info, initial view, metadata, start date, completion undo + assignee reset, terminal calendar/sections, card-menu 完成/取消完成 swap, member badge/role, action-popover height, unread-relevance redo + mark-seen wiring, 任務總覽 row removal)");

@@ -20,6 +20,7 @@ export function attachTaskDomainController({
   updateSubtaskTitle,
   deleteSubtask,
   refreshTaskBoardReadState,
+  markMemberBoardSeen,
   approveTask,
   refreshLiveData,
   isLiveRefreshBlocked,
@@ -61,6 +62,10 @@ export function attachTaskDomainController({
       filterState.member = nextMember;
       filterState.view = "board";
       setSessionValue("team-tasks-view-mode", "board");
+      // 件3+5 (2026-08-04 煊煊拍板批3,截图批注"点击之后不会消失"): 切到这个成员的看板视角 = 看过
+      // 他相关的未读了,当场把这批指纹消掉(与徽标计数同一份口径),不用等列头 IntersectionObserver
+      // 滚入视口才灭——rerender() 在下面同一轮里跑,徽标当场归零。
+      markMemberBoardSeen?.(nextMember);
       rerender();
       return;
     }

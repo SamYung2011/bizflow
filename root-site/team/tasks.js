@@ -7,7 +7,7 @@ import { isTaskFilterGroup } from "./tasks-filters.js";
 import { renderTaskCalendar } from "./tasks-calendar.js";
 import { renderTaskOverview } from "./tasks-overview.js";
 import { renderTaskAiDialog } from "./tasks-ai.js";
-import { calendarRelatedTasks, canDeleteTaskForUser, defaultTaskViewForUser, isOpenTask, isTaskCreator, isTaskMentionedForMember, isTaskVisibleToMember, isWaitingApproval, memberIdentity, openAssignedTaskCount, taskAssignee, taskCompletionForMember } from "./tasks-model.js";
+import { calendarRelatedTasks, canDeleteTaskForUser, defaultTaskViewForUser, isOpenTask, isTaskAssignedTo, isTaskCreator, isTaskMentionedForMember, isWaitingApproval, memberIdentity, openAssignedTaskCount, taskAssignee, taskCompletionForMember } from "./tasks-model.js";
 import { attachTaskDomainController } from "./tasks-domain-controller.js";
 import { renderTaskBoardGrid, renderTaskToolbar } from "./tasks-board.js";
 import { getSessionValue, setSessionValue } from "../data/session-state.js";
@@ -172,12 +172,37 @@ export function memberUnreadBadge(unreadCount) {
   return "";
 }
 
-// 只数根任务(与 boardUnreadTaskIds 本身的口径一致,见 task-board-read-state.js 的 refresh()),
-// 按 isTaskVisibleToMember 判定"这条任务在该成员的看板视角下可见"——与切到该成员视图时
-// filterTaskColumns/scopedTopTasks 实际会展示的任务集合同一套口径。
+// 件3+5 (2026-08-04 煊煊拍板批3,截图批注「朝哥任务只有 2 个红点为什么 5」「人人一个 5」「点击之后
+// 不会消失」「完全不知道数据从哪算出来」): 上面 ead797e 版用 isTaskVisibleToMember 判定"可见"——
+// assignee/creator/mention 任一命中就算,创建人身份和泛可见性混进了"这是不是他的事"里,是"人人一个
+// 数字"的根因之一。收紧为「与该成员直接相关」:只数根任务(与 boardUnreadTaskIds 本身的口径一致,
+// 见 task-board-read-state.js 的 refresh()),该成员是 assignee 之一、或被 @ 提及(TP-at-2 的
+// isTaskMentionedForMember)才算——不算创建人身份,不算"全员可见但与他无关"。抽成独立函数而不是
+// 内联在 memberUnreadCount 里:下面 markMemberBoardSeen(消灯)要标记的必须是同一批 id,数一遍口径、
+// 消一遍口径必须是同一份,不是两处各自维护、恰好数字对得上。
+export function memberRelevantUnreadTaskIds(member, tasks, unreadTaskIds) {
+  if (!unreadTaskIds || !unreadTaskIds.size) return [];
+  return tasks
+    .filter((task) => task.parentId === null && unreadTaskIds.has(task.id) &&
+      (isTaskAssignedTo(task, member) || isTaskMentionedForMember(task, member)))
+    .map((task) => task.id);
+}
+
 export function memberUnreadCount(member, tasks, unreadTaskIds) {
-  if (!unreadTaskIds || !unreadTaskIds.size) return 0;
-  return tasks.filter((task) => task.parentId === null && unreadTaskIds.has(task.id) && isTaskVisibleToMember(task, member)).length;
+  return memberRelevantUnreadTaskIds(member, tasks, unreadTaskIds).length;
+}
+
+// 点进某个成员的看板视角 = 看过他相关的未读了:把 memberRelevantUnreadTaskIds 算出的子集标记已读,
+// 复用既有 tp-task-board-read-v1 的 markSeen(与列头 IntersectionObserver 滚入视口自动已读同一套
+// 存储/去重逻辑,见 task-board-read-state.js),只消这一个成员相关的那一份指纹,不是全局清空,不
+// 会误清跟他无关或其他成员的未读。Honnmono all 是导航入口不是具体某个人,没有"与他相关"这个概念
+// (ead797e 就已经把它的徽标排除在外了),这里同样排除,点它不消任何指纹。
+function markMemberBoardSeen(memberKey) {
+  if (!taskBoardReadTracker || !state || memberKey === "all") return;
+  const member = state.members.find((candidate) => memberIdentity(candidate) === memberKey);
+  if (!member) return;
+  const relevantIds = memberRelevantUnreadTaskIds(member, state.tasks, state.boardUnreadTaskIds);
+  if (relevantIds.length) taskBoardReadTracker.markSeen(relevantIds);
 }
 
 function renderMember(member, tasks, helpers) {
@@ -2180,6 +2205,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
         updateSubtaskTitle: updateSubtaskTitleWrite,
         deleteSubtask: deleteSubtaskWrite,
         refreshTaskBoardReadState: () => taskBoardReadTracker?.refresh(state.tasks),
+        markMemberBoardSeen,
         approveTask: approveWaitingTask,
         refreshLiveData: refreshLiveTaskSnapshot,
         isLiveRefreshBlocked: hasTaskRealtimeRefreshBlock,
