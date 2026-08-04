@@ -86,6 +86,10 @@ function createTaskState(nextData, historyState = null) {
     boardExpandedPriorities: new Set(Array.isArray(restored.boardExpandedPriorities)
       ? restored.boardExpandedPriorities.filter((key) => ["high", "medium", "low"].includes(key))
       : []),
+    // 件2 (2026-08-04): 每列终态(完成/放弃)⌄ 折叠态,与 boardExpandedPriorities 同款持久化/重置规则。
+    boardExpandedTerminalPriorities: new Set(Array.isArray(restored.boardExpandedTerminalPriorities)
+      ? restored.boardExpandedTerminalPriorities.filter((key) => ["high", "medium", "low"].includes(key))
+      : []),
     onlyMine: typeof restored.onlyMine === "boolean" ? restored.onlyMine : getSessionValue("team-tasks-only-mine") === "1",
     calendarYear: Number.isInteger(restored.calendarYear) ? restored.calendarYear : now.getFullYear(),
     calendarMonth: Number.isInteger(restored.calendarMonth) ? restored.calendarMonth : now.getMonth(),
@@ -1012,6 +1016,19 @@ async function onTaskClick(event) {
     return;
   }
 
+  // 件2 (2026-08-04 Figma 对稿拆除令): 每个优先级列底部的终态(完成/放弃)⌄ 折叠开关。
+  const columnTerminalToggle = event.target.closest("[data-task-column-terminal-toggle]");
+  if (columnTerminalToggle) {
+    if (columnTerminalToggle.disabled) return;
+    const priority = columnTerminalToggle.getAttribute("data-task-column-terminal-toggle");
+    if (!["high", "medium", "low"].includes(priority)) return;
+    if (state.boardExpandedTerminalPriorities.has(priority)) state.boardExpandedTerminalPriorities.delete(priority);
+    else state.boardExpandedTerminalPriorities.add(priority);
+    rerenderTaskPage();
+    activeScope?.animationFrame(() => document.querySelector(`[data-task-column-terminal-toggle="${CSS.escape(priority)}"]`)?.focus());
+    return;
+  }
+
   const columnAdd = event.target.closest("[data-task-column-add]");
   if (columnAdd) {
     if (columnAdd.disabled) return;
@@ -1376,6 +1393,7 @@ async function onTaskClick(event) {
       if (filterState[group] !== value) {
         filterState[group] = value;
         state.boardExpandedPriorities.clear();
+        state.boardExpandedTerminalPriorities.clear();
       }
       if (group === "member") state.mode = "board";
       if (group === "view") setSessionValue("team-tasks-view-mode", value);
@@ -2007,6 +2025,7 @@ function currentTaskViewState() {
     overviewExpanded: [...state.overviewExpanded],
     overviewCompletedExpanded: [...state.overviewCompletedExpanded],
     boardExpandedPriorities: [...state.boardExpandedPriorities],
+    boardExpandedTerminalPriorities: [...state.boardExpandedTerminalPriorities],
     onlyMine: state.onlyMine,
     calendarYear: state.calendarYear,
     calendarMonth: state.calendarMonth,
@@ -2174,6 +2193,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
         overviewExpanded: [...state.overviewExpanded],
         overviewCompletedExpanded: [...state.overviewCompletedExpanded],
         boardExpandedPriorities: [...state.boardExpandedPriorities],
+    boardExpandedTerminalPriorities: [...state.boardExpandedTerminalPriorities],
         onlyMine: state.onlyMine,
         calendarYear: state.calendarYear,
         calendarMonth: state.calendarMonth,

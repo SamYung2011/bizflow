@@ -63,7 +63,10 @@ export function attachTaskDomainController({
       leaveTaskDetailForNavigation();
       state.mode = "board";
       const nextMember = memberTrigger.getAttribute("data-task-member") || "all";
-      if (filterState.member !== nextMember) state.boardExpandedPriorities.clear();
+      if (filterState.member !== nextMember) {
+        state.boardExpandedPriorities.clear();
+        state.boardExpandedTerminalPriorities.clear();
+      }
       filterState.member = nextMember;
       filterState.view = "board";
       setSessionValue("team-tasks-view-mode", "board");
@@ -331,7 +334,10 @@ export function attachTaskDomainController({
       return;
     }
     if (!event.target.matches("[data-task-only-mine]")) return;
-    if (state.onlyMine !== event.target.checked) state.boardExpandedPriorities.clear();
+    if (state.onlyMine !== event.target.checked) {
+      state.boardExpandedPriorities.clear();
+      state.boardExpandedTerminalPriorities.clear();
+    }
     state.onlyMine = event.target.checked;
     setSessionValue("team-tasks-only-mine", state.onlyMine ? "1" : "0");
     rerender();

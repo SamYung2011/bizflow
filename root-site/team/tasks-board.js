@@ -27,6 +27,8 @@ function renderTaskCard(task, columnKey, state, mentionMember, helpers) {
   const waitingApproval = isWaitingApproval(task);
   const mentioned = isTaskMentionedForMember(task, mentionMember);
   const completion = taskCompletionForMember(task, state.currentUser);
+  // 终态卡 ✓ 前缀:与 tasks-calendar.js taskCalendarLabel 的既有终态标记同源(件2,沿用现有终态卡样式)。
+  const titlePrefix = completion.checked ? "✓ " : "";
   const parent = task.parentId ? state.tasks.find((candidate) => candidate.id === task.parentId) : null;
   const assignedBy = task.creator && !isTaskCreator(task, mentionMember);
   const assignees = (task.assignees ?? []).length > 1
@@ -38,7 +40,7 @@ function renderTaskCard(task, columnKey, state, mentionMember, helpers) {
   return `<article class="team-task-card team-task-card--${columnKey}${completion.checked ? " team-task-card--completed" : ""}${task.status === "abandoned" ? " team-task-card--abandoned" : ""}${actionOpen ? " team-task-card--action-open" : ""}" data-task-card="${escapeHtml(task.id)}">
     <button type="button" class="team-task-card__body" data-task-detail-open="${escapeHtml(task.id)}" aria-label="${escapeHtml(`${taskT(lang, "tasks.detail.open")}: ${task.title}`)}">
       ${parent ? `<span class="team-task-card__parent" title="${escapeHtml(parent.title)}">↳ ${escapeHtml(parent.title)}</span>` : ""}
-      <h3 class="team-task-card__title" title="${escapeHtml(task.title)}">${escapeHtml(task.title)}</h3>
+      <h3 class="team-task-card__title" title="${escapeHtml(task.title)}">${titlePrefix}${escapeHtml(task.title)}</h3>
       <div class="team-task-card__meta"><span>${escapeHtml(taskT(lang, "tasks.due"))}</span>${renderTaskDue(task, helpers)}</div>
       <div class="team-task-card__meta"><span>${escapeHtml(taskT(lang, "tasks.owner"))}</span><span title="${escapeHtml(task.owner)}">${escapeHtml(task.owner)}</span></div>
       <div class="team-task-card__signals">
@@ -60,17 +62,16 @@ function renderTaskCard(task, columnKey, state, mentionMember, helpers) {
   </article>`;
 }
 
-function renderTerminalGroup(kind, tasks, state, mentionMember, helpers) {
-  if (!tasks.length) return "";
-  const { escapeHtml, lang } = helpers;
-  const label = taskT(lang, `tasks.detail.status.${kind}`);
-  return `<details class="task-terminal-group task-terminal-group--${kind}" data-task-terminal-group="${kind}">
-    <summary>${escapeHtml(label)} <span class="team-count-badge">${tasks.length}</span></summary>
-    <div>${tasks.map((task) => renderTaskCard(task, task.priority, state, mentionMember, helpers)).join("")}</div>
-  </details>`;
+// 件2 (2026-08-04 Figma 对稿拆除令): .task-terminal-groups 两条杠拆除,改为每个优先级列底部一个
+// ⌄ 圆钮——沿用现有终态卡样式(renderTaskCard 本身已带 ✓ 前缀/删除线),按列归并 放弃+完成。
+function renderColumnTerminalTasks(terminal, columnKey, state, mentionMember, helpers) {
+  const cards = [...terminal.abandoned, ...terminal.completed]
+    .map((task) => renderTaskCard(task, columnKey, state, mentionMember, helpers))
+    .join("");
+  return cards ? `<div class="team-kanban-column__terminal-tasks">${cards}</div>` : "";
 }
 
-function renderColumn(column, state, filterState, mentionMember, helpers) {
+function renderColumn(column, state, filterState, mentionMember, helpers, terminalByColumn) {
   const { escapeHtml, icon, lang } = helpers;
   const title = taskT(lang, `tasks.priority.${column.key}`);
   const emptyKey = filterState.status === "completed"
@@ -86,11 +87,21 @@ function renderColumn(column, state, filterState, mentionMember, helpers) {
     : `<p class="team-kanban-empty">${escapeHtml(taskT(lang, emptyKey))}</p>`;
   const unreadCount = column.tasks.filter((task) => state.boardUnreadTaskIds?.has(task.id)).length;
   const unreadLabel = taskT(lang, "tasks.column.unreadChanges", { count: unreadCount });
+  // 只在「进行中任务」状态筛选下出现:切到「已完成/已放弃」等状态筛选时,列本身已经在展示对应
+  // 终态任务,不需要再叠一层折叠入口(与旧 .task-terminal-groups 的可见性判定一致)。
+  const showTerminalToggle = filterState.status === "inProgress";
+  const terminal = terminalByColumn?.[column.key] ?? { completed: [], abandoned: [] };
+  const terminalCount = terminal.completed.length + terminal.abandoned.length;
+  const terminalExpanded = state.boardExpandedTerminalPriorities?.has(column.key) === true;
+  const terminalLabel = taskT(lang, terminalExpanded ? "tasks.column.terminalCollapse" : "tasks.column.terminalExpand", { count: terminalCount });
+  const terminalTasksHtml = terminalExpanded ? renderColumnTerminalTasks(terminal, column.key, state, mentionMember, helpers) : "";
   return `<section class="team-kanban-column team-kanban-column--${column.key}" data-task-column="${column.key}" data-column-count="${column.count}">
     <header class="team-kanban-column__head" data-task-column-read="${column.key}"><div class="team-kanban-column__title"><span title="${escapeHtml(title)}">${escapeHtml(title)}</span><span>${column.count}</span></div>${unreadCount > 0 ? `<span class="team-count-badge team-count-badge--unread" data-task-column-unread="${unreadCount}" aria-label="${escapeHtml(unreadLabel)}" title="${escapeHtml(unreadLabel)}">${unreadCount}</span>` : ""}</header>
     <div class="team-kanban-column__tasks">${body}</div>
+    ${terminalTasksHtml}
     <div class="team-kanban-column__footer">
       ${column.tasks.length > 5 ? `<button type="button" class="team-column-expand${expanded ? " team-column-expand--open" : ""}" data-task-column-expand="${column.key}" aria-expanded="${expanded}" aria-label="${escapeHtml(taskT(lang, expanded ? "tasks.column.collapse" : "tasks.column.expand", { count: hiddenCount }))}" title="${escapeHtml(taskT(lang, expanded ? "tasks.column.collapse" : "tasks.column.expand", { count: hiddenCount }))}">${icon("icon-arrow-down")}${icon("icon-arrow-down")}</button>` : ""}
+      ${showTerminalToggle ? `<button type="button" class="team-column-terminal-toggle${terminalExpanded ? " team-column-terminal-toggle--open" : ""}" data-task-column-terminal-toggle="${column.key}" aria-expanded="${terminalExpanded}" aria-label="${escapeHtml(terminalLabel)}" title="${escapeHtml(terminalLabel)}"${terminalCount === 0 ? " disabled aria-disabled=\"true\"" : ""}>${icon("icon-arrow-down")}</button>` : ""}
       ${state.permissions.canCreate ? `<button type="button" class="team-column-add" data-task-column-add="${column.key}" aria-label="${escapeHtml(taskT(lang, "tasks.column.add", { priority: title }))}" title="${escapeHtml(taskT(lang, "tasks.column.add", { priority: title }))}"${state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites) ? " disabled aria-disabled=\"true\"" : ""}>${icon("icon-add-surface-add")}</button>` : ""}
     </div>
   </section>`;
@@ -114,14 +125,20 @@ export function renderTaskBoardGrid({ state, filterState, helpers }) {
     members: state.members
   });
   const mentionMember = scopedMember ?? state.currentUser;
-  const columnsHtml = columns.map((column) => renderColumn(column, state, filterState, mentionMember, helpers)).join("");
-  if (filterState.status !== "inProgress") return columnsHtml;
-  const terminalSource = state.onlyMine
-    ? state.tasks.filter((task) => isTaskCreator(task, state.currentUser))
-    : state.tasks;
-  const terminal = terminalTasksForMember(mentionMember, terminalSource);
-  const terminalHtml = `${renderTerminalGroup("abandoned", terminal.abandoned, state, mentionMember, helpers)}${renderTerminalGroup("completed", terminal.completed, state, mentionMember, helpers)}`;
-  return terminalHtml ? `${columnsHtml}<section class="task-terminal-groups" data-task-terminal-groups>${terminalHtml}</section>` : columnsHtml;
+  // 每列各自的终态(完成+放弃)任务,180 天窗口 + 父任务未 open 不显终态子任务两条语义全部挪用
+  // terminalTasksForMember 现有实现(见 tasks-model.js),只是按 column.key 重新分桶给各列的 ⌄ 用。
+  let terminalByColumn = {};
+  if (filterState.status === "inProgress") {
+    const terminalSource = state.onlyMine
+      ? state.tasks.filter((task) => isTaskCreator(task, state.currentUser))
+      : state.tasks;
+    const terminal = terminalTasksForMember(mentionMember, terminalSource);
+    terminalByColumn = Object.fromEntries(state.board.map((column) => [column.key, {
+      completed: terminal.completed.filter((task) => task.priority === column.key),
+      abandoned: terminal.abandoned.filter((task) => task.priority === column.key)
+    }]));
+  }
+  return columns.map((column) => renderColumn(column, state, filterState, mentionMember, helpers, terminalByColumn)).join("");
 }
 
 export function renderTaskToolbar({ state, filterState, members, featureAiBatch, helpers }) {

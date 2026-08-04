@@ -265,19 +265,38 @@ const duplicateChild = task("duplicate-child", {
 const terminal = terminalTasksForMember(helen, [recentRoot, oldRoot, oldRecentlyAbandonedRoot, terminalParent, duplicateChild, abandonedTask]);
 assert.deepEqual(terminal.completed.map((row) => row.id), [recentRoot.id, terminalParent.id]);
 assert.deepEqual(terminal.abandoned.map((row) => row.id), [abandonedTask.id]);
-const terminalBoardHtml = renderTaskBoardGrid({
-  state: {
-    ...boardState,
-    tasks: [recentRoot, oldRoot, terminalParent, duplicateChild, abandonedTask],
-    board: boardState.board
-  },
-  filterState: { status: "inProgress", priority: "all", member: helen.id, view: "board" },
+const terminalBoardState = {
+  ...boardState,
+  tasks: [recentRoot, oldRoot, terminalParent, duplicateChild, abandonedTask],
+  board: boardState.board
+};
+const terminalFilterState = { status: "inProgress", priority: "all", member: helen.id, view: "board" };
+const terminalBoardHtml = renderTaskBoardGrid({ state: terminalBoardState, filterState: terminalFilterState, helpers });
+// 2026-08-04 Figma 对稿拆除令 (件2): .task-terminal-groups 两条杠拆除,改为每个优先级列底部
+// 一个 ⌄ 圆钮(data-task-column-terminal-toggle),折叠展示该列自己的终态(完成+放弃)任务。
+assert.doesNotMatch(terminalBoardHtml, /data-task-terminal-group=/,
+  "the old two-bar completed/abandoned disclosure sections must be gone");
+assert.match(terminalBoardHtml, /data-task-column-terminal-toggle="medium"(?![^>]*disabled)/,
+  "the medium column (every fixture task above is medium-priority) gets an enabled ⌄ toggle");
+assert.match(terminalBoardHtml, /data-task-column-terminal-toggle="high"[^>]*disabled/,
+  "a column with zero terminal tasks still renders the ⌄ (Figma: always-shown circular button) but disabled");
+assert.doesNotMatch(terminalBoardHtml, /data-task-card="recent-root"/,
+  "collapsed by default: terminal cards are not in the markup until the ⌄ is expanded");
+
+const expandedTerminalHtml = renderTaskBoardGrid({
+  state: { ...terminalBoardState, boardExpandedTerminalPriorities: new Set(["medium"]) },
+  filterState: terminalFilterState,
   helpers
 });
-assert.match(terminalBoardHtml, /data-task-terminal-group="abandoned"/);
-assert.match(terminalBoardHtml, /data-task-terminal-group="completed"/);
-assert.doesNotMatch(terminalBoardHtml, /data-task-card="old-root"/);
-assert.doesNotMatch(terminalBoardHtml, /data-task-card="duplicate-child"/);
+assert.match(expandedTerminalHtml, /data-task-column-terminal-toggle="medium" aria-expanded="true"/);
+assert.match(expandedTerminalHtml, /✓ Task recent-root/,
+  "a completed terminal card keeps its ✓ prefix (existing terminal-card style, reused from tasks-calendar.js)");
+assert.match(expandedTerminalHtml, /data-task-card="terminal-parent"/);
+assert.match(expandedTerminalHtml, /data-task-card="abandoned"/);
+assert.doesNotMatch(expandedTerminalHtml, /data-task-card="old-root"/,
+  "the 180-day window must still exclude a completed task older than 180 days");
+assert.doesNotMatch(expandedTerminalHtml, /data-task-card="duplicate-child"/,
+  "a terminal child whose parent is not open must still be suppressed");
 
 const [tasksSource, writesSource, snapshotsSource] = await Promise.all([
   readFile(new URL("../root-site/team/tasks.js", import.meta.url), "utf8"),
@@ -356,6 +375,7 @@ assert.match(abandonedCreatorHtml, /data-task-action-uncomplete="menu-abandoned-
 for (const lang of ["zh", "en", "fr"]) {
   for (const key of [
     "tasks.card.assignedBy", "tasks.card.overdue", "tasks.card.dueSoon", "tasks.action.uncomplete",
+    "tasks.column.terminalExpand", "tasks.column.terminalCollapse",
     "tasks.detail.publishedBy", "tasks.detail.createdAt", "tasks.detail.completedAt", "tasks.detail.abandonedAt",
     "tasks.detail.titleEditedAt", "tasks.submit.startAt", "tasks.submit.selectStart"
   ]) {

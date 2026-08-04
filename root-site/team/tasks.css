@@ -718,6 +718,48 @@
   margin-block: -3px;
 }
 
+/* 件2 (2026-08-04 Figma 对稿拆除令): 每列终态(完成/放弃)⌄ 折叠入口,替换 .task-terminal-groups
+   两条杠。视觉与 .team-column-expand 同族圆钮,但单箭头(稿里 271:720 是常显圆形单 ⌄),
+   与「>5 常规任务分页」的 team-column-expand 各自独立、互不影响。 */
+.team-kanban-column__terminal-tasks {
+  display: grid;
+  gap: var(--space-20);
+}
+
+.team-column-terminal-toggle {
+  display: flex;
+  width: 40px;
+  height: 40px;
+  align-self: center;
+  justify-self: center;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-40);
+  background: var(--white);
+  color: var(--gray-60);
+  box-shadow: 0 4px 5px rgba(0, 0, 0, .1);
+}
+
+.team-column-terminal-toggle--open {
+  transform: rotate(180deg);
+}
+
+.team-column-terminal-toggle:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.team-column-terminal-toggle:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+.team-column-terminal-toggle .icon {
+  width: 14px;
+  height: 14px;
+}
+
 .team-kanban--detail {
   min-height: 0;
 }
