@@ -1,7 +1,8 @@
 // team 站团队成员桌面屏(Figma 443:5035)。成员与统计只读 provider 契约,不直写样板数据。
 
-import { getTeamMembersData, getCurrentUser, getUnread } from "../data/provider.js";
+import { getTeamMembersData, getCurrentUser, getUnread, getUnreadWatermarks } from "../data/provider.js";
 import { getSession } from "../data/auth.js";
+import { markRead } from "../data/read-state.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { memberT as pageT } from "./members-i18n.js";
@@ -21,6 +22,7 @@ const MEMBER_EXTRAS_TABS = new Set(["reviews", "commission", "updates", "compani
 let currentUser = null;
 let session = null;
 let unread = null;
+let unreadWatermarks = null;
 let authenticated = false;
 let memberAccess = null;
 let visibleTabKeys = new Set(MEMBER_TAB_ORDER);
@@ -34,6 +36,15 @@ let activeMountId = 0;
 
 function isCurrentMemberMount(mountId, scope = activeScope) {
   return mountId === activeMountId && Boolean(scope?.isCurrent());
+}
+
+// 件5b (2026-08-04): 「更新日誌」tab 的紅標与 tasks/orders/inventory 侧栏红点同一套 markRead 水位
+// 机制(read-state.js),但驱动的是本页内部 tab 徽标(renderTab),不是侧栏——所以除了 markRead 落盘,
+// 还要把本模块自己缓存的 unread.updates 就地清零并重渲,不能干等 shell 的 tp:unread-change 监听
+// (那条链路只管侧栏 DOM,不知道这个页面内部还有个 tab 徽标要同步)。
+function markUpdatesTabRead() {
+  markRead("updates", unreadWatermarks?.updates ?? "");
+  unread = { ...unread, updates: 0 };
 }
 
 function createMemberState(initialTab) {
@@ -167,7 +178,16 @@ function renderTab(tab, helpers) {
   const { escapeHtml, lang, redDot } = helpers;
   const text = pageT(lang, `members.tab.${tab.key}`);
   const active = tab.key === state.activeTab;
-  const update = tab.key === "reviews" ? state.reviews.length + state.joinPending.length > 0 : tab.update;
+  // 件5b (2026-08-04, REDDOT-SURVEY 异常 #6): 「更新日誌」tab 原本硬编码 update:false,恒不亮。
+  // 与相邻「審核」tab 同机制——一个真实动态布尔覆盖 provider.js 的静态占位值,只是数据源换成
+  // unread.updates(read-state.js 时间水位,见 computeUnreadState),而不是 state 里当场算的计数,
+  // 因为 updateLogs 只在真正切进该 tab 时才懒加载(ensureMemberTabData),初次落地在别的 tab 上时
+  // state.updateLogs 可能还是空的,不能拿它判断"有没有新动态"。
+  const update = tab.key === "reviews"
+    ? state.reviews.length + state.joinPending.length > 0
+    : tab.key === "updates"
+      ? (unread?.updates ?? 0) > 0
+      : tab.update;
   const mod = active ? " team-members-tab--active" : "";
   return `<button type="button" class="team-members-tab${mod}" data-members-tab="${escapeHtml(tab.key)}" role="tab" aria-selected="${active}" title="${escapeHtml(text)}">
     <span>${escapeHtml(text)}</span>
@@ -366,6 +386,7 @@ async function onMembersClick(event) {
     if (!isCurrentMemberMount(activeMountId, scope)) return;
     state.activeTab = nextTab;
     if (nextTab === "members") state.departmentFilter = null;
+    if (nextTab === "updates") markUpdatesTabRead();
     rerenderMembers();
     document.querySelector(`[data-members-tab="${state.activeTab}"]`)?.focus();
     return;
@@ -734,11 +755,14 @@ function buildMemberAccess() {
 export async function mountPage({ scope, signal, historyState = null } = {}) {
   const mountId = ++activeMountId;
   activeScope = scope;
-  const [nextCurrentUser, nextSession, nextUnread] = await Promise.all([getCurrentUser(), getSession(), getUnread()]);
+  const [nextCurrentUser, nextSession, nextUnread, nextUnreadWatermarks] = await Promise.all([
+    getCurrentUser(), getSession(), getUnread(), getUnreadWatermarks()
+  ]);
   throwIfPageAborted(signal, scope);
   currentUser = nextCurrentUser;
   session = nextSession;
   unread = nextUnread;
+  unreadWatermarks = nextUnreadWatermarks;
   authenticated = typeof currentUser?.hasPermission === "function";
   buildMemberAccess();
   const restoredTab = visibleTabKeys.has(historyState?.activeTab) ? historyState.activeTab : null;
@@ -773,6 +797,11 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       title: memberDocumentTitle(memberAccess)
     },
     activate() {
+      // 件5b (2026-08-04): 受限员工(仅 canWriteUpdates 类账号)默认直接落地在"updates" tab
+      // (buildMemberAccess 的 visibleTabKeys 只给他们这一项),这种情况点击切换 tab 的分支永远不会
+      // 跑到——落地即"看过",要在 activate 里也补一次,与 tasks.js activate() 里无条件
+      // markRead("tasks", ...) 同一节奏,只是这里要看 activeTab 是不是 updates 才落。
+      if (state.activeTab === "updates") markUpdatesTabRead();
       scope.listen(document, "click", onMembersClick);
       scope.listen(document, "submit", onMembersSubmit);
       scope.listen(document, "input", onMembersInput);
@@ -802,6 +831,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       currentUser = null;
       session = null;
       unread = null;
+      unreadWatermarks = null;
       data = null;
       visibleTabs = [];
       currentHelpers = null;

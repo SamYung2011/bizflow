@@ -40,7 +40,8 @@ async function fetchSnapshot(url, snapshot, fallback) {
 
 const mock = {
   // 未读语义(煊煊:红点=有未读才亮;顶栏消息钮=快跳 team 未读入口)
-  unread: { tasks: 4, orders: 2, inventory: 1, messages: 3 },
+  // updates(件5b,2026-08-04):团队成员页「更新日誌」tab 紅標,同一套水位机制第五个分类。
+  unread: { tasks: 4, orders: 2, inventory: 1, messages: 3, updates: 1 },
   stats: [
     { key: "orders", tone: "", value: 143 },
     { key: "customers", tone: "blue", value: 98 },
@@ -257,11 +258,12 @@ function buildUnreadState() {
 }
 
 async function computeUnreadState(read) {
-  const [tasksSnapshot, orderMetricRows, homeSnapshot, inventorySnapshot] = await Promise.all([
+  const [tasksSnapshot, orderMetricRows, homeSnapshot, inventorySnapshot, teamUpdateLogsSnapshot] = await Promise.all([
     loadTasksSnapshot(),
     getHomeOrderMetricRows(),
     loadSnapshot(),
-    loadInventorySnapshot()
+    loadInventorySnapshot(),
+    loadTeamUpdateLogsSnapshot()
   ]);
 
   const taskRows = Array.isArray(tasksSnapshot?.tasks) ? tasksSnapshot.tasks : null;
@@ -300,11 +302,23 @@ async function computeUnreadState(read) {
     warnProviderFallback("inventory.json", "zero inventory unread");
   }
 
+  // 件5b (2026-08-04): 團隊成員頁「更新日誌」tab 紅標,與 tasks/orders/messages 同一套時間水位機制
+  // (READ_KEYS 新增 "updates",见 read-state.js),数据源 = team_update_logs.created_at。窄快照
+  // loadTeamUpdateLogsSnapshot() 与 getTeamMembersData({extrasScope:"updates"}) 复用同一份
+  // provider-snapshot-cache 记忆缓存,不重复拉表。
+  const updateLogRows = Array.isArray(teamUpdateLogsSnapshot?.teamUpdateLogs) ? teamUpdateLogsSnapshot.teamUpdateLogs : null;
+  const updateLogDatesValid = updateLogRows && updateLogRows.every((entry) => Number.isFinite(parseHongKongDate(entry?.createdAt, true)));
+  if (teamUpdateLogsSnapshot && !updateLogDatesValid) warnProviderFallback("team-update-logs.json:teamUpdateLogs.createdAt", "zero update-log unread");
+  const updates = updateLogDatesValid
+    ? latestTimestamp(updateLogRows, read.updates, (entry) => parseHongKongDate(entry.createdAt, true))
+    : { count: 0, watermark: "" };
+
   const watermarks = {
     tasks: tasks.watermark,
     orders: orders.watermark,
     messages: messages.watermark,
-    inventory: inventoryFingerprint
+    inventory: inventoryFingerprint,
+    updates: updates.watermark
   };
   rememberUnreadWatermarks(watermarks);
   return {
@@ -312,7 +326,8 @@ async function computeUnreadState(read) {
       tasks: tasks.count,
       orders: orders.count,
       messages: messages.count,
-      inventory: inventoryCount
+      inventory: inventoryCount,
+      updates: updates.count
     },
     watermarks
   };
