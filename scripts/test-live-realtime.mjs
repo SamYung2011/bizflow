@@ -75,7 +75,8 @@ assert.deepEqual(visibleRealtimeTables(teamUser), [
   "employees",
   "employee_departments"
 ]);
-assert.deepEqual(visibleRealtimeTables({ ...teamUser, bizflowMainAccess: true }), [
+const nonAdminBizflowUser = { ...teamUser, bizflowMainAccess: true };
+assert.deepEqual(visibleRealtimeTables(nonAdminBizflowUser), [
   "employee_tasks",
   "task_assignees",
   "employee_task_feedbacks",
@@ -93,9 +94,22 @@ assert.deepEqual(visibleRealtimeTables({ ...teamUser, bizflowMainAccess: true })
   "shopify_catalog_bindings",
   "shopify_variant_links",
   "shopify_resource_mappings",
+  "expense_reimbursements",
   ...WHATSAPP_REALTIME_TABLES
 ]);
 assert.deepEqual(visibleRealtimeTables(null), []);
+
+// G-exp-8/E4 regression guard: "我的報銷" is a self-view every bizflow-main-access
+// employee uses (not just isBfAdmin), and RLS (migration 088) requires
+// has_bizflow_main_access() for a reimbursement row to exist at all -- so a
+// non-admin submitter (isBfAdmin: false, bizflowMainAccess: true) must be
+// subscribed to expense_reimbursements or their own cross-tab edits never
+// arrive. See VERIFY-ROUND-B.md E4.
+assert.equal(nonAdminBizflowUser.isBfAdmin, false, "fixture must stay non-admin to guard the E4 regression");
+assert.ok(visibleRealtimeTables(nonAdminBizflowUser).includes("expense_reimbursements"),
+  "non-admin bizflowMainAccess users must be subscribed to expense_reimbursements (G-exp-8/E4)");
+assert.ok(!visibleRealtimeTables(teamUser).includes("expense_reimbursements"),
+  "users without bizflow main access must not subscribe to expense_reimbursements");
 
 const clock = scheduler();
 const client = fakeClient();

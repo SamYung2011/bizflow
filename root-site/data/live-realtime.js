@@ -22,6 +22,13 @@ const BIZFLOW_TABLES = Object.freeze([
   "shopify_catalog_bindings",
   "shopify_variant_links",
   "shopify_resource_mappings",
+  // expense_reimbursements: RLS (migration 088) requires has_bizflow_main_access()
+  // for every row (own-row select for the submitter, or can_admin_expenses() for
+  // reviewers) -- identical to this list's own isBfAdmin||bizflowMainAccess gate,
+  // so every possible row owner already qualifies for this push. Fixes G-exp-8/E4:
+  // non-admin reimbursement submitters were never subscribed, so their own
+  // "我的報銷" edits never crossed tabs. See VERIFY-ROUND-B.md E4.
+  "expense_reimbursements",
   ...WHATSAPP_REALTIME_TABLES
 ]);
 const INVALIDATION_DELAY_MS = 250;
