@@ -281,12 +281,27 @@ const [tasksSource, writesSource, snapshotsSource] = await Promise.all([
 ]);
 assert.match(tasksSource, /scope\.listen\(document, "paste", onTaskPaste\)/);
 assert.match(tasksSource, /event\.key === "Enter" && \(event\.metaKey \|\| event\.ctrlKey\)/);
+
+// G-task-14 (todo #260, 2026-08-04, 煊煊 approved "可以"): creator wholeTask uncheck must reset
+// every assignee's local completedAt too (mirrors completeWholeTask's fan-out, but for undo), while
+// an assignee reopening the task via their own row toggle must leave everyone else's row alone.
+const toggleWrite = tasksSource.slice(tasksSource.indexOf("function reopenWholeTask"), tasksSource.indexOf("async function approveWaitingTask"));
+assert.match(toggleWrite, /function reopenWholeTask\(task, \{ resetAssignees = false \} = \{\}\)/);
+const resetAssigneesCalls = toggleWrite.match(/reopenWholeTask\(task, \{ resetAssignees: true \}\)/g) ?? [];
+assert.equal(resetAssigneesCalls.length, 2, "both creator wholeTask-uncheck call sites (live-write + local-only) must pass resetAssignees: true");
+const bareReopenCalls = toggleWrite.match(/else if \(!completed\) reopenWholeTask\(task\);/g) ?? [];
+assert.equal(bareReopenCalls.length, 2, "an assignee's own-row uncheck must keep calling reopenWholeTask without resetAssignees, unchanged");
+
 assert.match(writesSource, /start_date: startDate \|\| null/g);
 const completionWrite = writesSource.slice(writesSource.indexOf("export async function completeLiveTask"), writesSource.indexOf("export async function approveLiveTask"));
 assert.match(completionWrite, /if \(!completed\)[\s\S]*?status: "open", completed_at: null, approved_at: null, approved_by: null/);
-assert.match(completionWrite, /Keep every task_assignees completion row intact/);
-const creatorUndoWrite = completionWrite.slice(completionWrite.indexOf("if (!completed)"), completionWrite.indexOf("const assigneeResult"));
-assert.doesNotMatch(creatorUndoWrite, /client\.from\("task_assignees"\)/);
+// Flipped 2026-08-04 (todo #260): the old contract asserted creator undo left task_assignees alone
+// (assert.doesNotMatch(...task_assignees...)); 煊煊 approved the opposite semantics, so this now
+// asserts the reset positively instead of just deleting the coverage.
+assert.match(completionWrite, /creator uncheck now resets the whole task AND every[\s\S]*?task_assignees completion row together/);
+const creatorUndoWrite = completionWrite.slice(completionWrite.indexOf("if (!completed)"), completionWrite.indexOf("taskDone: false"));
+assert.match(creatorUndoWrite, /client\.from\("task_assignees"\)\s*\n\s*\.update\(\{ completed_at: null \}\)/, "creator wholeTask uncheck must reset task_assignees.completed_at to null");
+assert.doesNotMatch(creatorUndoWrite, /\.eq\("employee_id"/, "the reset must apply to every assignee row on the task (no .eq(\"employee_id\", ...) scoping to a single row)");
 assert.match(completionWrite, /targetEmployeeId[\s\S]*?currentUser\.employeeId/);
 assert.match(snapshotsSource, /titleEditedBy:[\s\S]*?titleEditedAt:/);
 
@@ -300,4 +315,4 @@ for (const lang of ["zh", "en", "fr"]) {
   }
 }
 
-console.log("NR-task-1 contracts: PASS (paste, card info, initial view, metadata, start date, completion undo, terminal calendar/sections)");
+console.log("NR-task-1 contracts: PASS (paste, card info, initial view, metadata, start date, completion undo + assignee reset, terminal calendar/sections)");

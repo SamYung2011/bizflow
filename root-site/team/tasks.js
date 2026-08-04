@@ -661,8 +661,17 @@ function completeWholeTask(task, completedAt) {
   }
 }
 
-function reopenWholeTask(task) {
+function reopenWholeTask(task, { resetAssignees = false } = {}) {
   const wasComplete = task.done === true || task.status === "completed";
+  if (resetAssignees) {
+    // 2026-08-04 (todo #260): mirrors completeWholeTask's assignee fan-out above, but for undo — the
+    // creator's own wholeTask uncheck resets every assignee's completion state, not just the task's.
+    // Only passed from the wholeTask call sites below; an assignee reopening the task via their own
+    // row toggle must not touch anyone else's completedAt, so those call sites omit this option.
+    task.assignees.forEach((assignee) => {
+      assignee.completedAt = null;
+    });
+  }
   task.done = false;
   task.status = "inProgress";
   task.completedAt = "";
@@ -702,7 +711,7 @@ async function toggleTaskCompletion(taskId, { forceComplete = false } = {}) {
       if (!isCurrentTaskMount(mountId, scope)) return;
       if (completion.wholeTask) {
         if (completed) completeWholeTask(task, result.completedAt);
-        else reopenWholeTask(task);
+        else reopenWholeTask(task, { resetAssignees: true });
       } else {
         targetAssignee.completedAt = result.completedAt;
         targetAssignee.abandonedAt = null;
@@ -718,7 +727,7 @@ async function toggleTaskCompletion(taskId, { forceComplete = false } = {}) {
     }
   } else if (completion.wholeTask) {
     if (completed) completeWholeTask(task, localTimestamp());
-    else reopenWholeTask(task);
+    else reopenWholeTask(task, { resetAssignees: true });
   } else {
     targetAssignee.completedAt = completed ? localTimestamp() : null;
     targetAssignee.abandonedAt = null;

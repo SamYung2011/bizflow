@@ -279,15 +279,27 @@ export async function completeLiveTask({ taskId, targetEmployeeId, wholeTask, ne
   const completedAt = completed ? new Date().toISOString() : null;
   if (wholeTask) {
     if (!completed) {
-      // Creator undo mirrors old Tasks.jsx: clear only the task terminal state.
-      // Keep every task_assignees completion row intact.
+      // 2026-08-04 (todo #260, 煊煊 approved): creator uncheck now resets the whole task AND every
+      // task_assignees completion row together, so an assignee row can't be left showing "done"
+      // under a task the creator just marked incomplete. Supersedes the 8-3 NR-task-1 port of the
+      // old Tasks.jsx semantics (which cleared only the task's own terminal state and left every
+      // assignee completion row untouched) — see test-nr-task-1.mjs for the flipped contract.
+      // RLS: migration 082's task_assignees_update_manage lets a task's creator update any assignee
+      // row on it (can_manage_task_assignees -> creator_employee_id = current_employee_id()), so
+      // this bulk update needs no new policy. Unconditional across all rows (matches "every" above);
+      // abandoned rows already carry completed_at: null (setLiveTaskParticipation clears it when
+      // abandoning), so re-writing null there is a harmless no-op.
+      const assigneeResult = await client.from("task_assignees")
+        .update({ completed_at: null })
+        .eq("task_id", taskId);
+      throwIfError(assigneeResult.error);
       const taskResult = await client.from("employee_tasks")
         .update({ status: "open", completed_at: null, approved_at: null, approved_by: null })
         .eq("id", taskId)
         .select("*")
         .single();
       throwIfError(taskResult.error);
-      await invalidateTaskReads("employee_tasks");
+      await invalidateTaskReads("employee_tasks", "task_assignees");
       return { completedAt: null, wholeTask: true, taskDone: false };
     }
     const assigneeResult = await client.from("task_assignees")
