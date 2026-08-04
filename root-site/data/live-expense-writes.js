@@ -128,12 +128,40 @@ export async function rejectLiveExpense(expenseId, rejectReason = "") {
   }, (query) => query.eq("status", "pending"));
 }
 
+// G-exp-5: admin-only withdraw. Only an approved-and-unpaid row may revert to
+// pending; an already-paid row must go through unmarkLiveExpensePaid first,
+// one state transition per action like approve/reject/markPaid above. The
+// .eq guards double as an optimistic-concurrency check: a stale row (already
+// paid, or no longer approved) yields zero matched rows and updateExpenseRow
+// throws instead of silently applying an unintended transition.
+export async function revertLiveExpenseToPending(expenseId) {
+  const { client } = await writeContext();
+  return updateExpenseRow(client, expenseId, {
+    status: "pending",
+    reviewed_by: null,
+    reviewed_at: null,
+    reject_reason: null,
+    paid: false,
+    paid_at: null
+  }, (query) => query.eq("status", "approved").eq("paid", false));
+}
+
 export async function markLiveExpensePaid(expenseId) {
   const { client } = await writeContext();
   return updateExpenseRow(client, expenseId, {
     paid: true,
     paid_at: new Date().toISOString()
   }, (query) => query.eq("status", "approved").eq("paid", false));
+}
+
+// G-exp-1: admin-only undo. Mirrors markLiveExpensePaid's guard in reverse;
+// leaves status/reviewed_by untouched since the approval itself still stands.
+export async function unmarkLiveExpensePaid(expenseId) {
+  const { client } = await writeContext();
+  return updateExpenseRow(client, expenseId, {
+    paid: false,
+    paid_at: null
+  }, (query) => query.eq("status", "approved").eq("paid", true));
 }
 
 export async function deleteLiveExpense(expenseId) {

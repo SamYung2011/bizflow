@@ -18,6 +18,8 @@ import {
   deleteLiveExpense,
   markLiveExpensePaid,
   rejectLiveExpense,
+  revertLiveExpenseToPending,
+  unmarkLiveExpensePaid,
   updateLiveExpense,
   uploadLiveExpenseReceipt
 } from "../data/live-expense-writes.js";
@@ -59,6 +61,10 @@ const copy = {
     paidOn: "打款日 {date}",
     edit: "編輯",
     remove: "刪除",
+    revert: "撤回",
+    revertConfirm: "確認撤回審批，重置為待審批？",
+    unpay: "撤銷打款",
+    unpayConfirm: "確認撤銷打款，重置為未打款？",
     deleteConfirm: "確認刪除這筆報銷？",
     rejectReason: "拒絕理由（選填）",
     modalTitle: "新增報銷",
@@ -132,6 +138,10 @@ const copy = {
     paidOn: "Paid on {date}",
     edit: "Edit",
     remove: "Delete",
+    revert: "Revert to pending",
+    revertConfirm: "Withdraw approval and reset this reimbursement to pending?",
+    unpay: "Undo payment",
+    unpayConfirm: "Undo this payment and mark the reimbursement as unpaid?",
     deleteConfirm: "Delete this reimbursement?",
     rejectReason: "Rejection reason (optional)",
     modalTitle: "Add reimbursement",
@@ -205,6 +215,10 @@ const copy = {
     paidOn: "Payé le {date}",
     edit: "Modifier",
     remove: "Supprimer",
+    revert: "Repasser en attente",
+    revertConfirm: "Retirer l'approbation et remettre ce remboursement en attente ?",
+    unpay: "Annuler le paiement",
+    unpayConfirm: "Annuler ce paiement et remettre le remboursement en non payé ?",
     deleteConfirm: "Supprimer ce remboursement ?",
     rejectReason: "Motif du refus (facultatif)",
     modalTitle: "Ajouter un remboursement",
@@ -381,12 +395,16 @@ function renderReceiptCell(row, helpers) {
 function renderActions(row, helpers) {
   const { escapeHtml, lang } = helpers;
   const pending = isAdmin && row.status === "pending";
+  // G-exp-5: withdraw only reaches an approved row that has not been paid yet;
+  // a paid row must be unpaid first (see renderPayment's canUnpay button).
+  const canRevert = isAdmin && row.status === "approved" && !row.paid;
   const canEdit = row.employeeId === ownerKey && row.status === "pending";
   const canDelete = isAdmin || (row.employeeId === ownerKey && row.status === "pending");
-  if (!pending && !canEdit && !canDelete) return `<span class="expense-muted">—</span>`;
+  if (!pending && !canRevert && !canEdit && !canDelete) return `<span class="expense-muted">—</span>`;
   const writeAttributes = state.writeBusy ? ' disabled aria-disabled="true"' : "";
   return `<span class="expense-actions">
     ${pending ? `<button type="button" class="expense-action expense-action--approve" data-expense-approve="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "approve"))}</button><button type="button" class="expense-action expense-action--reject" data-expense-reject="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "reject"))}</button>` : ""}
+    ${canRevert ? `<button type="button" class="expense-action" data-expense-revert="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "revert"))}</button>` : ""}
     ${canEdit ? `<button type="button" class="expense-action" data-expense-edit="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "edit"))}</button>` : ""}
     ${canDelete ? `<button type="button" class="expense-action expense-action--delete" data-expense-delete="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "remove"))}</button>` : ""}
   </span>`;
@@ -394,12 +412,14 @@ function renderActions(row, helpers) {
 
 function renderPayment(row, helpers) {
   const { escapeHtml, lang } = helpers;
+  const writeAttributes = state.writeBusy ? ' disabled aria-disabled="true"' : "";
   if (row.paid) {
     const paidDate = displayDateInput(String(row.paidAt || "").slice(0, 10));
-    return `<span class="expense-payment-cell"><span class="expense-payment expense-payment--paid">${escapeHtml(t(lang, "paid"))}</span>${paidDate ? `<small>${escapeHtml(t(lang, "paidOn", { date: paidDate }))}</small>` : ""}</span>`;
+    // G-exp-1: undo payment lives alongside the paid badge, symmetric with markPaid below.
+    const canUnpay = isAdmin && row.status === "approved";
+    return `<span class="expense-payment-cell"><span class="expense-payment expense-payment--paid">${escapeHtml(t(lang, "paid"))}</span>${paidDate ? `<small>${escapeHtml(t(lang, "paidOn", { date: paidDate }))}</small>` : ""}${canUnpay ? `<button type="button" class="expense-action" data-expense-unpay="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "unpay"))}</button>` : ""}</span>`;
   }
   if (isAdmin && row.status === "approved") {
-    const writeAttributes = state.writeBusy ? ' disabled aria-disabled="true"' : "";
     return `<button type="button" class="expense-action expense-action--pay" data-expense-pay="${escapeHtml(row.id)}" data-expense-write${writeAttributes}>${escapeHtml(t(lang, "markPaid"))}</button>`;
   }
   return `<span class="expense-payment">${escapeHtml(t(lang, "unpaid"))}</span>`;
@@ -717,6 +737,25 @@ async function onExpenseClick(event) {
     }
     return;
   }
+  const revert = event.target.closest("[data-expense-revert]");
+  if (revert) {
+    const row = findExpenseRow(revert.getAttribute("data-expense-revert"));
+    const canRevert = row && isAdmin && row.status === "approved" && !row.paid;
+    if (canRevert && await confirmInPage(t(currentHelpers?.lang ?? "zh", "revertConfirm"))) {
+      if (!activeScope?.isCurrent()) return;
+      if (authenticated) {
+        await performLiveExpenseWrite(() => revertLiveExpenseToPending(row.id), (result) => replaceExpenseRow(row, result));
+      } else {
+        state.actionError = "";
+        row.status = "pending";
+        row.rejectReason = "";
+        row.paid = false;
+        row.paidAt = "";
+        rerender();
+      }
+    }
+    return;
+  }
   const pay = event.target.closest("[data-expense-pay]");
   if (pay) {
     const row = findExpenseRow(pay.getAttribute("data-expense-pay"));
@@ -726,6 +765,23 @@ async function onExpenseClick(event) {
       } else {
         state.actionError = "";
         row.paid = true;
+        rerender();
+      }
+    }
+    return;
+  }
+  const unpay = event.target.closest("[data-expense-unpay]");
+  if (unpay) {
+    const row = findExpenseRow(unpay.getAttribute("data-expense-unpay"));
+    const canUnpay = row && isAdmin && row.status === "approved" && row.paid;
+    if (canUnpay && await confirmInPage(t(currentHelpers?.lang ?? "zh", "unpayConfirm"))) {
+      if (!activeScope?.isCurrent()) return;
+      if (authenticated) {
+        await performLiveExpenseWrite(() => unmarkLiveExpensePaid(row.id), (result) => replaceExpenseRow(row, result));
+      } else {
+        state.actionError = "";
+        row.paid = false;
+        row.paidAt = "";
         rerender();
       }
     }
