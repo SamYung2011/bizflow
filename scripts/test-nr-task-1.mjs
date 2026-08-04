@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { pastedTaskFeedbackImages } from "../root-site/team/tasks-clipboard.js";
 import { renderTaskBoardGrid } from "../root-site/team/tasks-board.js";
 import { renderTaskCalendar, taskDateRange } from "../root-site/team/tasks-calendar.js";
+import { renderTaskActionPopover } from "../root-site/team/tasks-actions.js";
 import { renderTaskDetail } from "../root-site/team/tasks-detail.js";
 import { taskDictionaries } from "../root-site/team/tasks-i18n.js";
 import {
@@ -118,7 +119,11 @@ const boardHtml = renderTaskBoardGrid({
   filterState: { status: "inProgress", priority: "all", member: helen.id, view: "board" },
   helpers
 });
-assert.match(boardHtml, /data-task-card="child"[\s\S]*?data-task-completion-toggle="child"/);
+// 2026-08-04 Figma 对稿拆除令 (件1): inline card checkbox was torn down; completion now
+// lives in the card's … menu (data-task-action-complete / data-task-action-uncomplete).
+assert.match(boardHtml, /data-task-card="child"/);
+assert.doesNotMatch(boardHtml, /data-task-completion-toggle/,
+  "the inline .team-task-card__completion checkbox must be gone — rendering, styles and events all torn down");
 assert.match(boardHtml, /team-task-card__parent[^>]*>↳ Task parent<\/span>/);
 assert.match(boardHtml, /task-assigned-pill[^>]*>Jack 分配<\/span>/);
 assert.match(boardHtml, /team-task-card__due--overdue/);
@@ -305,9 +310,52 @@ assert.doesNotMatch(creatorUndoWrite, /\.eq\("employee_id"/, "the reset must app
 assert.match(completionWrite, /targetEmployeeId[\s\S]*?currentUser\.employeeId/);
 assert.match(snapshotsSource, /titleEditedBy:[\s\S]*?titleEditedAt:/);
 
+// G-task-15 (2026-08-04 Figma 对稿拆除令,件1): card checkbox torn down; the … menu now carries
+// completion, swapping 完成/取消完成 off the exact same taskCompletionForMember judgment the old
+// checkbox used (canToggle/checked/wholeTask), so creator/assignee permission boundaries hold.
+const menuState = {
+  currentUser: helen,
+  permissions: { canCreate: false, canEditOthers: false, canDeleteOthers: false },
+  liveReadOnly: true,
+  liveTaskWrites: true,
+  writeBusy: false,
+  actionTaskId: null
+};
+const openMenuTask = task("menu-open", { creator: helen.name, creatorId: helen.id, assignees: [] });
+const openMenuHtml = renderTaskActionPopover({ task: openMenuTask, open: true, state: menuState, helpers });
+assert.match(openMenuHtml, /data-task-action-complete="menu-open"/, "an open task's creator menu keeps the existing 完成 action, untouched");
+assert.doesNotMatch(openMenuHtml, /data-task-action-uncomplete/);
+
+const doneMenuTask = task("menu-done", {
+  creator: helen.name,
+  creatorId: helen.id,
+  status: "completed",
+  done: true,
+  completedAt: dateOffset(-1, true),
+  assignees: []
+});
+const doneMenuHtml = renderTaskActionPopover({ task: doneMenuTask, open: true, state: menuState, helpers });
+assert.match(doneMenuHtml, /data-task-action-uncomplete="menu-done"/, "a completed task's creator menu swaps to 取消完成");
+assert.doesNotMatch(doneMenuHtml, /data-task-action-complete="menu-done"/);
+
+const abandonedAssigneeTask = task("menu-abandoned-assignee", {
+  creator: jack.name,
+  creatorId: jack.id,
+  status: "abandoned",
+  assignees: [{ employeeId: helen.id, name: helen.name, completedAt: null, abandonedAt: dateOffset(-1, true) }]
+});
+const abandonedAssigneeHtml = renderTaskActionPopover({ task: abandonedAssigneeTask, open: true, state: menuState, helpers });
+assert.match(abandonedAssigneeHtml, /data-task-action-uncomplete="menu-abandoned-assignee"(?![^>]*disabled)/,
+  "an abandoned task's own-row assignee gets an enabled 取消完成 (assignee canToggle is unconditional, unchanged)");
+
+const abandonedCreatorTask = task("menu-abandoned-creator", { creator: helen.name, creatorId: helen.id, status: "abandoned", assignees: [] });
+const abandonedCreatorHtml = renderTaskActionPopover({ task: abandonedCreatorTask, open: true, state: menuState, helpers });
+assert.match(abandonedCreatorHtml, /data-task-action-uncomplete="menu-abandoned-creator"[^>]*disabled/,
+  "a non-self-assigned creator's wholeTask toggle stays blocked on an abandoned task — same canToggle gate the old checkbox honored");
+
 for (const lang of ["zh", "en", "fr"]) {
   for (const key of [
-    "tasks.card.assignedBy", "tasks.card.overdue", "tasks.card.dueSoon", "tasks.card.toggleComplete",
+    "tasks.card.assignedBy", "tasks.card.overdue", "tasks.card.dueSoon", "tasks.action.uncomplete",
     "tasks.detail.publishedBy", "tasks.detail.createdAt", "tasks.detail.completedAt", "tasks.detail.abandonedAt",
     "tasks.detail.titleEditedAt", "tasks.submit.startAt", "tasks.submit.selectStart"
   ]) {
@@ -315,4 +363,4 @@ for (const lang of ["zh", "en", "fr"]) {
   }
 }
 
-console.log("NR-task-1 contracts: PASS (paste, card info, initial view, metadata, start date, completion undo + assignee reset, terminal calendar/sections)");
+console.log("NR-task-1 contracts: PASS (paste, card info, initial view, metadata, start date, completion undo + assignee reset, terminal calendar/sections, card-menu 完成/取消完成 swap)");

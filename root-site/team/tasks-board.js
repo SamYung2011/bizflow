@@ -36,7 +36,6 @@ function renderTaskCard(task, columnKey, state, mentionMember, helpers) {
   const assigned = taskAssignee(task, state.currentUser) !== null;
   const canOpenActions = ownTask || assigned || state.permissions.canCreate || state.permissions.canEditOthers || state.permissions.canDeleteOthers;
   return `<article class="team-task-card team-task-card--${columnKey}${completion.checked ? " team-task-card--completed" : ""}${task.status === "abandoned" ? " team-task-card--abandoned" : ""}${actionOpen ? " team-task-card--action-open" : ""}" data-task-card="${escapeHtml(task.id)}">
-    <input type="checkbox" class="team-task-card__completion" data-task-completion-toggle="${escapeHtml(task.id)}" aria-label="${escapeHtml(taskT(lang, "tasks.card.toggleComplete", { title: task.title }))}"${completion.checked ? " checked" : ""}${!completion.canToggle || state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites) ? " disabled" : ""}>
     <button type="button" class="team-task-card__body" data-task-detail-open="${escapeHtml(task.id)}" aria-label="${escapeHtml(`${taskT(lang, "tasks.detail.open")}: ${task.title}`)}">
       ${parent ? `<span class="team-task-card__parent" title="${escapeHtml(parent.title)}">↳ ${escapeHtml(parent.title)}</span>` : ""}
       <h3 class="team-task-card__title" title="${escapeHtml(task.title)}">${escapeHtml(task.title)}</h3>

@@ -684,14 +684,18 @@ function reopenWholeTask(task, { resetAssignees = false } = {}) {
   }
 }
 
-async function toggleTaskCompletion(taskId, { forceComplete = false } = {}) {
+async function toggleTaskCompletion(taskId, { forceComplete = false, forceUncomplete = false } = {}) {
   if (state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites)) return;
   const task = state.tasks.find((item) => item.id === taskId);
   if (!task) return;
   const completion = taskCompletionForMember(task, state.currentUser);
   if (!completion.canToggle) return;
-  const completed = forceComplete ? true : !completion.checked;
+  const completed = forceComplete ? true : forceUncomplete ? false : !completion.checked;
   if (forceComplete && completion.checked) return;
+  // 2026-08-04(件1): 「取消完成」菜单项在 done/放弃卡上都要能把任务拉回 open,不能像自动翻转那样
+  // 在 checked=false 时误判成"去完成"——forceUncomplete 恒定朝 completed:false 走,配合下面
+  // completeLiveTask 的 wholeTask 反勾路径(e821c45)或 assignee 行 completed_at/abandoned_at 双清。
+  if (forceUncomplete && !completion.checked && task.status !== "abandoned") return;
   const targetAssignee = completion.wholeTask ? null : taskAssignee(task, state.currentUser);
   if (!completion.wholeTask && !targetAssignee) return;
   const mountId = activeMountId;
@@ -775,6 +779,10 @@ async function performTaskAction(taskId, action) {
   if (state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites)) return;
   if (action === "complete") {
     await toggleTaskCompletion(taskId, { forceComplete: true });
+    return;
+  }
+  if (action === "uncomplete") {
+    await toggleTaskCompletion(taskId, { forceUncomplete: true });
     return;
   }
   const mountId = activeMountId;
@@ -1016,17 +1024,18 @@ async function onTaskClick(event) {
     return;
   }
 
-  const completionToggle = event.target.closest("[data-task-completion-toggle]");
-  if (completionToggle) {
-    if (completionToggle.disabled) return;
-    await toggleTaskCompletion(completionToggle.getAttribute("data-task-completion-toggle"));
-    return;
-  }
-
   const completeAction = event.target.closest("[data-task-action-complete]");
   if (completeAction) {
     if (completeAction.disabled || (state.liveReadOnly && !state.liveTaskWrites)) return;
     await performTaskAction(completeAction.getAttribute("data-task-action-complete"), "complete");
+    return;
+  }
+
+  // 2026-08-04 Figma 对稿拆除令(件1): 卡片勾选框拆除后,「取消完成」菜单项接过反勾职责。
+  const uncompleteAction = event.target.closest("[data-task-action-uncomplete]");
+  if (uncompleteAction) {
+    if (uncompleteAction.disabled || (state.liveReadOnly && !state.liveTaskWrites)) return;
+    await performTaskAction(uncompleteAction.getAttribute("data-task-action-uncomplete"), "uncomplete");
     return;
   }
 
