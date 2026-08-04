@@ -305,12 +305,13 @@ assert.doesNotMatch(expandedTerminalHtml, /data-task-card="old-root"/,
 assert.doesNotMatch(expandedTerminalHtml, /data-task-card="duplicate-child"/,
   "a terminal child whose parent is not open must still be suppressed");
 
-const [tasksSource, writesSource, snapshotsSource, memberProviderSource, taskControllerSource] = await Promise.all([
+const [tasksSource, writesSource, snapshotsSource, memberProviderSource, taskControllerSource, tasksCssSource] = await Promise.all([
   readFile(new URL("../root-site/team/tasks.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/live-task-writes.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/live-snapshots.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/provider.js", import.meta.url), "utf8"),
-  readFile(new URL("../root-site/team/tasks-domain-controller.js", import.meta.url), "utf8")
+  readFile(new URL("../root-site/team/tasks-domain-controller.js", import.meta.url), "utf8"),
+  readFile(new URL("../root-site/team/tasks.css", import.meta.url), "utf8")
 ]);
 assert.match(tasksSource, /scope\.listen\(document, "paste", onTaskPaste\)/);
 assert.match(tasksSource, /event\.key === "Enter" && \(event\.metaKey \|\| event\.ctrlKey\)/);
@@ -380,6 +381,14 @@ const abandonedCreatorTask = task("menu-abandoned-creator", { creator: helen.nam
 const abandonedCreatorHtml = renderTaskActionPopover({ task: abandonedCreatorTask, open: true, state: menuState, helpers });
 assert.match(abandonedCreatorHtml, /data-task-action-uncomplete="menu-abandoned-creator"[^>]*disabled/,
   "a non-self-assigned creator's wholeTask toggle stays blocked on an abandoned task — same canToggle gate the old checkbox honored");
+
+// 件1 of 2026-08-04 煊煊拍板批3 (截图批注"空这么多准备开航母吗"): the action popover's height must
+// track its actual item count (1~4 depending on permission/status), not a fixed value calibrated
+// for the 2-item case. Locks the CSS fix so a future edit can't reintroduce a fixed min-height.
+assert.doesNotMatch(tasksCssSource, /min-height:\s*var\(--task-action-height\)/,
+  "the popover must size to its real content (flex column + fixed row height + gap/padding already do this), not a fixed min-height calibrated for one specific item count");
+assert.doesNotMatch(tasksCssSource, /--task-action-height/,
+  "the now-unused height custom property must be removed too, not left as dead CSS");
 
 // G-task-16 (2026-08-04 Figma 对稿拆除令,件3): member rail right-side badge caps at 99+ and
 // hides at 0 (Figma 271:720's red count-badge), and the gray role label reads employees.role

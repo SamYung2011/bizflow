@@ -564,17 +564,19 @@
 
 .task-action-popover {
   --task-action-width: 280px; /* Figma 582:27478 任务操作弹层实测宽，无对应 token。 */
-  --task-action-height: 108px; /* Figma 582:27478 任务操作弹层实测高，无对应 token。 */
   --task-action-row-height: 39px; /* Figma 582:27478 弹层选项实测高，无对应 token。 */
   --task-action-border-width: 1px; /* Figma 操作弹层描边宽，无对应 token。 */
 
+  /* 2026-08-04 煊煊拍板批3件1(截图批注"空这么多准备开航母吗"): 原先固定 min-height:108px 是按
+     两项菜单校准的，只剩一项(如「複製任務」单权限场景)时内容只有 59px，底部空出近 50px。改成
+     纯内容撑高——flex column + button 固定行高(39px) + gap(10px) + padding(10px×2) 本来就能精确
+     算出任意项数(1~4)的高度，不需要再校准一个跟实际项数脱钩的固定值。 */
   position: absolute;
   top: calc(var(--space-10) * -1);
   right: 0;
   z-index: 70;
   display: flex;
   width: min(var(--task-action-width), calc(100vw - var(--space-40)));
-  min-height: var(--task-action-height);
   flex-direction: column;
   gap: var(--space-10);
   padding: var(--space-10);
