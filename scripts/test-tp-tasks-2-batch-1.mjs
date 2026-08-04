@@ -120,8 +120,20 @@ assert.match(tasksSource, /function canEditTask\(task\)[\s\S]*?isTaskCreator\(ta
   "submit guard must authorize the creator independently of edit-others permission");
 assert.match(tasksSource, /updateLiveTask\(task\.id, \{[\s\S]*?title,/,
   "edit submit must persist the title through updateLiveTask");
-assert.ok((controllerSource.match(/leaveTaskDetailForNavigation\(\);/g) ?? []).length >= 2,
-  "overview and member navigation must both leave task detail before switching");
+// 2026-08-04 (件3 of the 煊煊拍板批次, "Honnmono总览和任务总览是一个东西一个功能"): 任務總覽 was
+// torn out as an independent data-task-overview-open branch and now shares the exact same
+// data-task-member="all" trigger/branch as the Honnmono-all row (see scripts/test-nr-task-1.mjs
+// G-task-18) — so the old "count >= 2 call sites" proxy for "both entry points leave task detail"
+// no longer holds: there is now exactly one call site, shared by both rows, not two duplicated
+// ones. The underlying requirement is unchanged (still verified below), only the count flips.
+assert.equal((controllerSource.match(/leaveTaskDetailForNavigation\(\);/g) ?? []).length, 1,
+  "任務總覽 and Honnmono-all now share one memberTrigger branch, so this is called from a single shared site instead of being duplicated per entry point");
+const memberTriggerBlock = controllerSource.slice(
+  controllerSource.indexOf('const memberTrigger = event.target.closest("[data-task-member]");'),
+  controllerSource.indexOf("const overviewToggle")
+);
+assert.match(memberTriggerBlock, /leaveTaskDetailForNavigation\(\);/,
+  "the shared data-task-member branch (both 任務總覽 and Honnmono-all route through it) must still leave task detail before switching");
 assert.match(rlsSource, /OLD\.creator_employee_id = public\.current_employee_id\(\)/,
   "field hardening trigger must grant full edits to the creator");
 assert.match(rlsSource, /creator_employee_id = public\.current_employee_id\(\)/,

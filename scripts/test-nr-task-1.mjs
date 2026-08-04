@@ -305,11 +305,12 @@ assert.doesNotMatch(expandedTerminalHtml, /data-task-card="old-root"/,
 assert.doesNotMatch(expandedTerminalHtml, /data-task-card="duplicate-child"/,
   "a terminal child whose parent is not open must still be suppressed");
 
-const [tasksSource, writesSource, snapshotsSource, memberProviderSource] = await Promise.all([
+const [tasksSource, writesSource, snapshotsSource, memberProviderSource, taskControllerSource] = await Promise.all([
   readFile(new URL("../root-site/team/tasks.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/live-task-writes.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/live-snapshots.js", import.meta.url), "utf8"),
-  readFile(new URL("../root-site/data/provider.js", import.meta.url), "utf8")
+  readFile(new URL("../root-site/data/provider.js", import.meta.url), "utf8"),
+  readFile(new URL("../root-site/team/tasks-domain-controller.js", import.meta.url), "utf8")
 ]);
 assert.match(tasksSource, /scope\.listen\(document, "paste", onTaskPaste\)/);
 assert.match(tasksSource, /event\.key === "Enter" && \(event\.metaKey \|\| event\.ctrlKey\)/);
@@ -429,6 +430,19 @@ assert.equal(memberUnreadCount(helen, unreadFixtureTasks, new Set()), 0, "an emp
 assert.equal(memberUnreadCount(helen, unreadFixtureTasks, null), 0, "a missing unread Set must yield 0, not throw");
 assert.match(tasksSource, /const unreadBadge = member\.dept === "all" \? "" : memberUnreadBadge\(memberUnreadCount\(member, tasks, state\.boardUnreadTaskIds\)\);/,
   "the member-row badge must be wired to the unread aggregator, not to openCount");
+
+// G-task-18 (2026-08-04 煊煊拍板「Honnmono总览和任务总览是一个东西一个功能」,件3): 「任務總覽」行
+// 不再点出独立的 state.mode="overview" 分支——它现在和「Honnmono all」行共用同一个 data-task-member
+// ="all" 触发点/同一个 memberTrigger 分支(tasks-domain-controller.js),点击行为逐字节相同,而不是
+// 两份各自维护、恰好结果一致。选中态判定也改用同一条件字符串,与 renderMember 的 active 判定同族。
+assert.doesNotMatch(taskControllerSource, /data-task-overview-open/,
+  "the old standalone overview-open branch (state.mode = \"overview\") must be gone from the click handler");
+assert.match(tasksSource, /data-task-member="all">\s*<span class="team-member-task__overview-icon">/,
+  "renderOverviewEntry's button must carry the same data-task-member=\"all\" trigger the Honnmono-all row uses, not a separate data-task-overview-open marker");
+assert.match(tasksSource, /const active = state\.mode === "board" && filterState\.member === "all" \? " team-member-task--active" : "";\s*\n\s*return `<button type="button" class="team-member-task team-member-task--overview\$\{active\}"/,
+  "任務總覽's active-state predicate must be textually identical to the Honnmono-all row's (state.mode===\"board\" && filterState.member===\"all\"), not a separate mode===\"overview\" check");
+assert.doesNotMatch(tasksSource, /state\.mode === "overview" \? " team-member-task--active"/,
+  "the old mode===\"overview\"-driven active class on the 任務總覽 row must be gone");
 
 for (const lang of ["zh", "en", "fr"]) {
   for (const key of [
