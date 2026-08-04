@@ -277,12 +277,17 @@ const terminalBoardHtml = renderTaskBoardGrid({ state: terminalBoardState, filte
 // 一个 ⌄ 圆钮(data-task-column-terminal-toggle),折叠展示该列自己的终态(完成+放弃)任务。
 assert.doesNotMatch(terminalBoardHtml, /data-task-terminal-group=/,
   "the old two-bar completed/abandoned disclosure sections must be gone");
+// 2026-08-04 煊煊拍板 (件1,"已完成怎么会出现在列表里？很乱...我宁愿你搞个分界线"): 67532b1 的
+// 常显圆形 ⌄(含 disabled 态)整个拆掉,换成活任务下方的分界线,只在该列真有终态任务时才渲染——
+// 下面两条断言据此翻转:原先"零终态列仍渲染 disabled 按钮"现在改成"零终态列完全不渲染分界线"。
 assert.match(terminalBoardHtml, /data-task-column-terminal-toggle="medium"(?![^>]*disabled)/,
-  "the medium column (every fixture task above is medium-priority) gets an enabled ⌄ toggle");
-assert.match(terminalBoardHtml, /data-task-column-terminal-toggle="high"[^>]*disabled/,
-  "a column with zero terminal tasks still renders the ⌄ (Figma: always-shown circular button) but disabled");
+  "the medium column (every fixture task above is medium-priority) gets a divider toggle");
+assert.doesNotMatch(terminalBoardHtml, /data-task-column-terminal-toggle="high"/,
+  "a column with zero terminal tasks renders no divider at all (no more always-shown circular button)");
+assert.match(terminalBoardHtml, /已完成 2 · 已放棄 1/,
+  "the divider's visible label breaks completed/abandoned out separately (2 completed + terminal-parent, 1 abandoned)");
 assert.doesNotMatch(terminalBoardHtml, /data-task-card="recent-root"/,
-  "collapsed by default: terminal cards are not in the markup until the ⌄ is expanded");
+  "collapsed by default: terminal cards are not in the markup until the divider is expanded");
 
 const expandedTerminalHtml = renderTaskBoardGrid({
   state: { ...terminalBoardState, boardExpandedTerminalPriorities: new Set(["medium"]) },
@@ -290,6 +295,7 @@ const expandedTerminalHtml = renderTaskBoardGrid({
   helpers
 });
 assert.match(expandedTerminalHtml, /data-task-column-terminal-toggle="medium" aria-expanded="true"/);
+assert.match(expandedTerminalHtml, /team-column-terminal-divider--open/, "the divider itself carries an open-state class once expanded");
 assert.match(expandedTerminalHtml, /✓ Task recent-root/,
   "a completed terminal card keeps its ✓ prefix (existing terminal-card style, reused from tasks-calendar.js)");
 assert.match(expandedTerminalHtml, /data-task-card="terminal-parent"/);
@@ -390,7 +396,7 @@ assert.match(memberProviderSource, /position: member\.position,/,
 for (const lang of ["zh", "en", "fr"]) {
   for (const key of [
     "tasks.card.assignedBy", "tasks.card.overdue", "tasks.card.dueSoon", "tasks.action.uncomplete",
-    "tasks.column.terminalExpand", "tasks.column.terminalCollapse",
+    "tasks.column.terminalExpand", "tasks.column.terminalCollapse", "tasks.column.terminalSummary",
     "tasks.detail.publishedBy", "tasks.detail.createdAt", "tasks.detail.completedAt", "tasks.detail.abandonedAt",
     "tasks.detail.titleEditedAt", "tasks.submit.startAt", "tasks.submit.selectStart"
   ]) {

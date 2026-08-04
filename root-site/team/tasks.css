@@ -722,46 +722,51 @@
   margin-block: -3px;
 }
 
-/* 件2 (2026-08-04 Figma 对稿拆除令): 每列终态(完成/放弃)⌄ 折叠入口,替换 .task-terminal-groups
-   两条杠。视觉与 .team-column-expand 同族圆钮,但单箭头(稿里 271:720 是常显圆形单 ⌄),
-   与「>5 常规任务分页」的 team-column-expand 各自独立、互不影响。 */
+/* 件1 (2026-08-04 煊煊拍板「已完成怎么会出现在列表里？很乱...我宁愿你搞个分界线。点击分界线才
+   显示已完成」): 拆掉 67532b1 的列底圆形 ⌄ 按钮,改成活任务下方一条分界线——细线两端 + 居中小字
+   「已完成 N · 已放棄 N」,只在该列有终态任务时渲染;点击展开线下方终态卡(renderTaskCard 自带的
+   ✓ 前缀/删除线样式沿用),与「>5 常规任务分页」的 team-column-expand 各自独立、互不影响。 */
 .team-kanban-column__terminal-tasks {
   display: grid;
   gap: var(--space-20);
 }
 
-.team-column-terminal-toggle {
+.team-column-terminal-divider {
   display: flex;
-  width: 40px;
-  height: 40px;
-  align-self: center;
-  justify-self: center;
+  width: 100%;
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: var(--radius-40);
-  background: var(--white);
+  background: transparent;
+  padding: var(--space-10) 0;
+  cursor: pointer;
+}
+
+.team-column-terminal-divider::before,
+.team-column-terminal-divider::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--gray-15);
+}
+
+.team-column-terminal-divider__label {
+  flex: 0 0 auto;
+  padding-inline: var(--space-10);
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  white-space: nowrap;
+}
+
+.team-column-terminal-divider:hover .team-column-terminal-divider__label,
+.team-column-terminal-divider--open .team-column-terminal-divider__label {
   color: var(--gray-60);
-  box-shadow: 0 4px 5px rgba(0, 0, 0, .1);
 }
 
-.team-column-terminal-toggle--open {
-  transform: rotate(180deg);
-}
-
-.team-column-terminal-toggle:disabled {
-  opacity: .5;
-  cursor: not-allowed;
-}
-
-.team-column-terminal-toggle:focus-visible {
+.team-column-terminal-divider:focus-visible {
   outline: 2px solid var(--blue);
   outline-offset: 2px;
-}
-
-.team-column-terminal-toggle .icon {
-  width: 14px;
-  height: 14px;
 }
 
 .team-kanban--detail {

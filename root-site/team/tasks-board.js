@@ -71,6 +71,23 @@ function renderColumnTerminalTasks(terminal, columnKey, state, mentionMember, he
   return cards ? `<div class="team-kanban-column__terminal-tasks">${cards}</div>` : "";
 }
 
+// 件1 (2026-08-04 煊煊拍板「已完成怎么会出现在列表里？很乱...我宁愿你搞个分界线。点击分界线才
+// 显示已完成」): 拆掉 67532b1 的列底圆形 ⌄ 按钮,改成活任务下方一条分界线(细线+居中「已完成 N ·
+// 已放棄 N」),只在该列真有终态任务时才渲染;点击展开线下方终态卡,再点收起,复用既有
+// boardExpandedTerminalPriorities 状态,不新增并行状态。
+function renderColumnTerminalDivider(terminal, column, terminalExpanded, helpers) {
+  const { escapeHtml, lang } = helpers;
+  const completedCount = terminal.completed.length;
+  const abandonedCount = terminal.abandoned.length;
+  const terminalCount = completedCount + abandonedCount;
+  if (terminalCount === 0) return "";
+  const summary = taskT(lang, "tasks.column.terminalSummary", { completed: completedCount, abandoned: abandonedCount });
+  const actionLabel = taskT(lang, terminalExpanded ? "tasks.column.terminalCollapse" : "tasks.column.terminalExpand", { count: terminalCount });
+  return `<button type="button" class="team-column-terminal-divider${terminalExpanded ? " team-column-terminal-divider--open" : ""}" data-task-column-terminal-toggle="${escapeHtml(column.key)}" aria-expanded="${terminalExpanded}" aria-label="${escapeHtml(actionLabel)}" title="${escapeHtml(actionLabel)}">
+    <span class="team-column-terminal-divider__label">${escapeHtml(summary)}</span>
+  </button>`;
+}
+
 function renderColumn(column, state, filterState, mentionMember, helpers, terminalByColumn) {
   const { escapeHtml, icon, lang } = helpers;
   const title = taskT(lang, `tasks.priority.${column.key}`);
@@ -91,17 +108,16 @@ function renderColumn(column, state, filterState, mentionMember, helpers, termin
   // 终态任务,不需要再叠一层折叠入口(与旧 .task-terminal-groups 的可见性判定一致)。
   const showTerminalToggle = filterState.status === "inProgress";
   const terminal = terminalByColumn?.[column.key] ?? { completed: [], abandoned: [] };
-  const terminalCount = terminal.completed.length + terminal.abandoned.length;
   const terminalExpanded = state.boardExpandedTerminalPriorities?.has(column.key) === true;
-  const terminalLabel = taskT(lang, terminalExpanded ? "tasks.column.terminalCollapse" : "tasks.column.terminalExpand", { count: terminalCount });
+  const terminalDividerHtml = showTerminalToggle ? renderColumnTerminalDivider(terminal, column, terminalExpanded, helpers) : "";
   const terminalTasksHtml = terminalExpanded ? renderColumnTerminalTasks(terminal, column.key, state, mentionMember, helpers) : "";
   return `<section class="team-kanban-column team-kanban-column--${column.key}" data-task-column="${column.key}" data-column-count="${column.count}">
     <header class="team-kanban-column__head" data-task-column-read="${column.key}"><div class="team-kanban-column__title"><span title="${escapeHtml(title)}">${escapeHtml(title)}</span><span>${column.count}</span></div>${unreadCount > 0 ? `<span class="team-count-badge team-count-badge--unread" data-task-column-unread="${unreadCount}" aria-label="${escapeHtml(unreadLabel)}" title="${escapeHtml(unreadLabel)}">${unreadCount}</span>` : ""}</header>
     <div class="team-kanban-column__tasks">${body}</div>
+    ${terminalDividerHtml}
     ${terminalTasksHtml}
     <div class="team-kanban-column__footer">
       ${column.tasks.length > 5 ? `<button type="button" class="team-column-expand${expanded ? " team-column-expand--open" : ""}" data-task-column-expand="${column.key}" aria-expanded="${expanded}" aria-label="${escapeHtml(taskT(lang, expanded ? "tasks.column.collapse" : "tasks.column.expand", { count: hiddenCount }))}" title="${escapeHtml(taskT(lang, expanded ? "tasks.column.collapse" : "tasks.column.expand", { count: hiddenCount }))}">${icon("icon-arrow-down")}${icon("icon-arrow-down")}</button>` : ""}
-      ${showTerminalToggle ? `<button type="button" class="team-column-terminal-toggle${terminalExpanded ? " team-column-terminal-toggle--open" : ""}" data-task-column-terminal-toggle="${column.key}" aria-expanded="${terminalExpanded}" aria-label="${escapeHtml(terminalLabel)}" title="${escapeHtml(terminalLabel)}"${terminalCount === 0 ? " disabled aria-disabled=\"true\"" : ""}>${icon("icon-arrow-down")}</button>` : ""}
       ${state.permissions.canCreate ? `<button type="button" class="team-column-add" data-task-column-add="${column.key}" aria-label="${escapeHtml(taskT(lang, "tasks.column.add", { priority: title }))}" title="${escapeHtml(taskT(lang, "tasks.column.add", { priority: title }))}"${state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites) ? " disabled aria-disabled=\"true\"" : ""}>${icon("icon-add-surface-add")}</button>` : ""}
     </div>
   </section>`;

@@ -1031,10 +1031,10 @@ async function onTaskClick(event) {
     return;
   }
 
-  // 件2 (2026-08-04 Figma 对稿拆除令): 每个优先级列底部的终态(完成/放弃)⌄ 折叠开关。
+  // 件1 (2026-08-04 煊煊拍板): 活任务下方的终态(完成/放弃)分界线,点击展开/收起线下方的终态卡。
+  // 分界线只在该列有终态任务时才渲染(renderColumnTerminalDivider),故这里不再需要 disabled 判断。
   const columnTerminalToggle = event.target.closest("[data-task-column-terminal-toggle]");
   if (columnTerminalToggle) {
-    if (columnTerminalToggle.disabled) return;
     const priority = columnTerminalToggle.getAttribute("data-task-column-terminal-toggle");
     if (!["high", "medium", "low"].includes(priority)) return;
     if (state.boardExpandedTerminalPriorities.has(priority)) state.boardExpandedTerminalPriorities.delete(priority);
