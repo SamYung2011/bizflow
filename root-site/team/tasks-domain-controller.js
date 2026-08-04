@@ -49,9 +49,6 @@ export function attachTaskDomainController({
   }
 
   scope.listen(document, "click", async (event) => {
-    // 件3 (2026-08-04 煊煊拍板): 「任務總覽」行不再是独立分支——它的按钮现在也带
-    // data-task-member="all"(见 tasks.js renderOverviewEntry),和「Honnmono all」行走同一个
-    // memberTrigger 分支,点击行为逐字节相同(不是两份逻辑对齐出的相同,是同一份逻辑)。
     const memberTrigger = event.target.closest("[data-task-member]");
     if (memberTrigger) {
       leaveTaskDetailForNavigation();

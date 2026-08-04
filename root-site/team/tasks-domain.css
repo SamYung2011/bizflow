@@ -51,31 +51,6 @@
   text-align: left;
 }
 
-.team-member-task--overview {
-  min-height: 60px;
-}
-
-.team-member-task__overview-icon {
-  display: grid;
-  width: 40px;
-  height: 40px;
-  flex: none;
-  place-items: center;
-  border-radius: var(--radius-10);
-  color: var(--blue);
-  background: color-mix(in srgb, var(--blue) 9%, var(--white));
-}
-
-.team-member-task__overview-icon .icon {
-  width: 20px;
-  height: 20px;
-}
-
-.team-member-task--active .team-member-task__overview-icon {
-  color: var(--white);
-  background: color-mix(in srgb, var(--white) 18%, transparent);
-}
-
 .team-task-card__signals,
 .team-task-card__assignees {
   display: flex;

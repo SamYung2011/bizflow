@@ -209,21 +209,6 @@ function renderMember(member, tasks, helpers) {
   </button>`;
 }
 
-// 件3 (2026-08-04 煊煊拍板「Honnmono总览和任务总览是一个东西一个功能」): 「任務總覽」行改接
-// data-task-member="all" ——与「Honnmono all」行同一个 data 属性、同一条 tasks-domain-controller.js
-// memberTrigger 分支,点击=完全同一行为(mode="board" + member="all",同步清同一份展开态),不是
-// 两份逻辑各自维护再对齐。选中态判定也改用同一条件(state.mode==="board" && filterState.member
-// ==="all"),与 renderMember 的 active 判定同族同源。两行都保留——她原话"她拍的都留"。
-function renderOverviewEntry(helpers) {
-  const { escapeHtml, icon, lang } = helpers;
-  const active = state.mode === "board" && filterState.member === "all" ? " team-member-task--active" : "";
-  return `<button type="button" class="team-member-task team-member-task--overview${active}" data-task-member="all">
-    <span class="team-member-task__overview-icon">${icon("icon-task-list", "icon")}</span>
-    <span class="team-member-task__body"><span class="team-member-task__name">${escapeHtml(pageT(lang, "tasks.overview.title"))}</span><span class="team-member-task__meta">${escapeHtml(String(state.members.length - 1))}</span></span>
-    ${icon("icon-arrow-right", "icon team-member-task__arrow")}
-  </button>`;
-}
-
 // shell 每次重渲染都会调本函数(带最新 lang);捕获 helpers 供筛选联动就地重渲用
 let currentHelpers = null;
 
@@ -264,7 +249,7 @@ export function renderTaskManagement(helpers) {
     ${state.detailOpen ? "" : renderTaskToolbar({ state, filterState, members: state.members, featureAiBatch: data.featureAiBatch, helpers })}
     <section class="team-board${calendarView ? " team-board--calendar" : ""}">
       ${calendarView ? "" : `<aside class="team-member-rail">
-        <div class="team-member-list">${renderOverviewEntry(helpers)}${state.members.map((member) => renderMember(member, scopedTasks, helpers)).join("")}</div>
+        <div class="team-member-list">${state.members.map((member) => renderMember(member, scopedTasks, helpers)).join("")}</div>
         ${state.permissions.canManageEmployees ? `<button type="button" class="team-member-add" data-task-members-manage aria-label="${escapeHtml(tt("tasks.members.manage"))}" title="${escapeHtml(tt("tasks.members.manage"))}">${icon("icon-add-surface-add")}</button>` : ""}
       </aside>`}
       <main class="team-kanban${state.detailOpen ? " team-kanban--detail" : ""}">

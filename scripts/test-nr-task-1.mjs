@@ -305,13 +305,13 @@ assert.doesNotMatch(expandedTerminalHtml, /data-task-card="old-root"/,
 assert.doesNotMatch(expandedTerminalHtml, /data-task-card="duplicate-child"/,
   "a terminal child whose parent is not open must still be suppressed");
 
-const [tasksSource, writesSource, snapshotsSource, memberProviderSource, taskControllerSource, tasksCssSource] = await Promise.all([
+const [tasksSource, writesSource, snapshotsSource, memberProviderSource, tasksCssSource, domainCssSource] = await Promise.all([
   readFile(new URL("../root-site/team/tasks.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/live-task-writes.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/live-snapshots.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/provider.js", import.meta.url), "utf8"),
-  readFile(new URL("../root-site/team/tasks-domain-controller.js", import.meta.url), "utf8"),
-  readFile(new URL("../root-site/team/tasks.css", import.meta.url), "utf8")
+  readFile(new URL("../root-site/team/tasks.css", import.meta.url), "utf8"),
+  readFile(new URL("../root-site/team/tasks-domain.css", import.meta.url), "utf8")
 ]);
 assert.match(tasksSource, /scope\.listen\(document, "paste", onTaskPaste\)/);
 assert.match(tasksSource, /event\.key === "Enter" && \(event\.metaKey \|\| event\.ctrlKey\)/);
@@ -440,18 +440,35 @@ assert.equal(memberUnreadCount(helen, unreadFixtureTasks, null), 0, "a missing u
 assert.match(tasksSource, /const unreadBadge = member\.dept === "all" \? "" : memberUnreadBadge\(memberUnreadCount\(member, tasks, state\.boardUnreadTaskIds\)\);/,
   "the member-row badge must be wired to the unread aggregator, not to openCount");
 
-// G-task-18 (2026-08-04 煊煊拍板「Honnmono总览和任务总览是一个东西一个功能」,件3): 「任務總覽」行
-// 不再点出独立的 state.mode="overview" 分支——它现在和「Honnmono all」行共用同一个 data-task-member
-// ="all" 触发点/同一个 memberTrigger 分支(tasks-domain-controller.js),点击行为逐字节相同,而不是
-// 两份各自维护、恰好结果一致。选中态判定也改用同一条件字符串,与 renderMember 的 active 判定同族。
-assert.doesNotMatch(taskControllerSource, /data-task-overview-open/,
-  "the old standalone overview-open branch (state.mode = \"overview\") must be gone from the click handler");
-assert.match(tasksSource, /data-task-member="all">\s*<span class="team-member-task__overview-icon">/,
-  "renderOverviewEntry's button must carry the same data-task-member=\"all\" trigger the Honnmono-all row uses, not a separate data-task-overview-open marker");
-assert.match(tasksSource, /const active = state\.mode === "board" && filterState\.member === "all" \? " team-member-task--active" : "";\s*\n\s*return `<button type="button" class="team-member-task team-member-task--overview\$\{active\}"/,
-  "任務總覽's active-state predicate must be textually identical to the Honnmono-all row's (state.mode===\"board\" && filterState.member===\"all\"), not a separate mode===\"overview\" check");
-assert.doesNotMatch(tasksSource, /state\.mode === "overview" \? " team-member-task--active"/,
-  "the old mode===\"overview\"-driven active class on the 任務總覽 row must be gone");
+// G-task-18 (rewritten 2026-08-04, 煊煊拍板批3 件4, 截图批注"两个功能完全重复,保留一个即可"):
+// 51d9c6d only unified the two rail rows onto one click path (both fired the same memberTrigger
+// branch); today's screenshot says that stopped short — 「任務總覽」row must be gone entirely,
+// keeping only 「Honnmono all」. Deleted: renderOverviewEntry and its call site (渲染), plus
+// .team-member-task--overview and the icon-only rules it dragged in (样式). No further change was
+// needed in tasks-domain-controller.js's memberTrigger branch itself (触发路径) — 51d9c6d had
+// already made it fully generic, so deleting the button leaves nothing row-specific behind there;
+// only its now-stale explanatory comment (which named renderOverviewEntry) was cleaned up.
+assert.doesNotMatch(tasksSource, /function renderOverviewEntry/,
+  "renderOverviewEntry must be deleted outright, not just made unreachable");
+assert.doesNotMatch(tasksSource, /renderOverviewEntry\(/,
+  "its call site in the member rail must be gone too");
+assert.doesNotMatch(tasksSource, /team-member-task--overview/,
+  "the row's render-time CSS hook must be gone from tasks.js's output");
+assert.doesNotMatch(domainCssSource, /\.team-member-task--overview/,
+  "the dead .team-member-task--overview rule must be removed from tasks-domain.css, not left orphaned");
+assert.doesNotMatch(domainCssSource, /team-member-task__overview-icon/,
+  "the icon-square rule (and its --active variant) was only ever used by the deleted row; it must go with it");
+assert.match(tasksSource, /<div class="team-member-list">\$\{state\.members\.map\(\(member\) => renderMember\(member, scopedTasks, helpers\)\)\.join\(""\)\}<\/div>/,
+  "the member rail must render only ordinary renderMember rows now — Honnmono all is included in that list already (it's a normal state.members entry with dept===\"all\"), no separate nav button alongside it");
+// Explicit boundary, not a regression this commit causes: the admin default-landing screen
+// (tasks-overview.js, reached only via defaultTaskViewForUser's initial { mode: "overview" } for
+// admins — see G-task-10 above, still unchanged) stays. Only its now-redundant manual nav row is
+// gone; there's simply no click path back to it once you leave, which is the accepted tradeoff of
+// keeping exactly one rail entry point instead of two that did the same thing.
+assert.match(tasksSource, /import \{ renderTaskOverview \} from "\.\/tasks-overview\.js";/,
+  "the overview screen module import must survive — it still serves the admin landing case");
+assert.match(tasksSource, /state\.mode === "overview"\s*\n\s*\? renderTaskOverview\(/,
+  "the overview render branch itself must be untouched");
 
 for (const lang of ["zh", "en", "fr"]) {
   for (const key of [
