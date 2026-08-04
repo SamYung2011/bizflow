@@ -7,7 +7,7 @@ import { isTaskFilterGroup } from "./tasks-filters.js";
 import { renderTaskCalendar } from "./tasks-calendar.js";
 import { renderTaskOverview } from "./tasks-overview.js";
 import { renderTaskAiDialog } from "./tasks-ai.js";
-import { calendarRelatedTasks, canDeleteTaskForUser, defaultTaskViewForUser, isOpenTask, isTaskCreator, isTaskMentionedForMember, isWaitingApproval, memberIdentity, openAssignedTaskCount, taskAssignee, taskCompletionForMember } from "./tasks-model.js";
+import { calendarRelatedTasks, canDeleteTaskForUser, defaultTaskViewForUser, isOpenTask, isTaskCreator, isTaskMentionedForMember, isTaskVisibleToMember, isWaitingApproval, memberIdentity, openAssignedTaskCount, taskAssignee, taskCompletionForMember } from "./tasks-model.js";
 import { attachTaskDomainController } from "./tasks-domain-controller.js";
 import { renderTaskBoardGrid, renderTaskToolbar } from "./tasks-board.js";
 import { getSessionValue, setSessionValue } from "../data/session-state.js";
@@ -156,13 +156,28 @@ function renderStatCard({ title, value, tone }, { escapeHtml }) {
 }
 
 // 件3 (2026-08-04 Figma 对稿拆除令): 成员卡右侧从「N 任務待完成」文本行为主,改为红色计数徽标
-// 为主(figma 271:720 圆头像+蓝名字+灰角色字+右侧红色计数徽标);数字沿用同一个 openCount,>99
-// 显 99+,0 不显徽标。Honnmono all 汇总行结构保留 —— 它是导航入口而非个人待办,右侧仍用既有
-// member.badge/箭头二选一(该字段恒 0,故恒显箭头,与稿一致)。
-export function memberPendingBadge(openCount) {
-  if (openCount > 99) return "99+";
-  if (openCount > 0) return String(openCount);
+// 为主(figma 271:720 圆头像+蓝名字+灰角色字+右侧红色计数徽标)。Honnmono all 汇总行结构保留 ——
+// 它是导航入口而非个人待办,右侧仍用既有 member.badge/箭头二选一(该字段恒 0,故恒显箭头,与稿
+// 一致)。>99 显 99+,0 不显徽標——这份格式化规则与来源数字无关,下面件2 复用不改。
+//
+// 件2 (2026-08-04 煊煊拍板「3个任务就显示3个红点是什么逻辑？一点没看懂」): a8c17fd 曾把徽标数字
+// 直接塞成 openCount,和同一行的「N 任務待完成」文字完全重复——原话吐槽的正是这个。改回未读语义:
+// 徽标 = 该成员视角下有新动静未看的任务数,复用既有 tp-task-board-read-v1 指纹系统的输出
+// (state.boardUnreadTaskIds,任务看板列头「N 項未讀變更」同一份数据),按成员聚合,不新造并行存储。
+// 「N 任務待完成」文字行不受影响,仍是 openCount。Honnmono all 行的徽标语义/数据源不在本次范围
+// 内,继续用 member.badge(见上,保持不动)。
+export function memberUnreadBadge(unreadCount) {
+  if (unreadCount > 99) return "99+";
+  if (unreadCount > 0) return String(unreadCount);
   return "";
+}
+
+// 只数根任务(与 boardUnreadTaskIds 本身的口径一致,见 task-board-read-state.js 的 refresh()),
+// 按 isTaskVisibleToMember 判定"这条任务在该成员的看板视角下可见"——与切到该成员视图时
+// filterTaskColumns/scopedTopTasks 实际会展示的任务集合同一套口径。
+export function memberUnreadCount(member, tasks, unreadTaskIds) {
+  if (!unreadTaskIds || !unreadTaskIds.size) return 0;
+  return tasks.filter((task) => task.parentId === null && unreadTaskIds.has(task.id) && isTaskVisibleToMember(task, member)).length;
 }
 
 function renderMember(member, tasks, helpers) {
@@ -175,7 +190,7 @@ function renderMember(member, tasks, helpers) {
   const openCount = member.dept === "all"
     ? tasks.filter((task) => task.parentId === null && isOpenTask(task)).length
     : openAssignedTaskCount(member, tasks);
-  const pendingBadge = memberPendingBadge(openCount);
+  const unreadBadge = member.dept === "all" ? "" : memberUnreadBadge(memberUnreadCount(member, tasks, state.boardUnreadTaskIds));
   return `<button type="button" class="team-member-task${active}" data-task-member="${escapeHtml(memberKey)}">
     <span class="avatar--initial team-member-task__avatar" style="--component-width:60px;--component-height:60px">${escapeHtml(initials(member.name))}</span>
     <div class="team-member-task__body">
@@ -190,7 +205,7 @@ function renderMember(member, tasks, helpers) {
     </div>
     ${member.dept === "all"
       ? (member.badge ? countBadge(member.badge) : icon("icon-arrow-right", "icon team-member-task__arrow"))
-      : (pendingBadge ? countBadge(pendingBadge) : "")}
+      : (unreadBadge ? countBadge(unreadBadge) : "")}
   </button>`;
 }
 

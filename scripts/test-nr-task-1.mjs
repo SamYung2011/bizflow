@@ -15,7 +15,7 @@ import {
   terminalTasksForMember
 } from "../root-site/team/tasks-model.js";
 import { renderTaskSubmitDialog } from "../root-site/team/tasks-submit.js";
-import { memberPendingBadge } from "../root-site/team/tasks.js";
+import { memberUnreadBadge, memberUnreadCount } from "../root-site/team/tasks.js";
 
 globalThis.matchMedia = () => ({ matches: false });
 
@@ -383,15 +383,52 @@ assert.match(abandonedCreatorHtml, /data-task-action-uncomplete="menu-abandoned-
 // G-task-16 (2026-08-04 Figma 对稿拆除令,件3): member rail right-side badge caps at 99+ and
 // hides at 0 (Figma 271:720's red count-badge), and the gray role label reads employees.role
 // (member.position, threaded through provider.js) instead of fabricating a department fallback.
-assert.equal(memberPendingBadge(0), "", "0 pending tasks must not render a badge at all");
-assert.equal(memberPendingBadge(1), "1");
-assert.equal(memberPendingBadge(99), "99");
-assert.equal(memberPendingBadge(100), "99+", "counts over 99 must cap at the 99+ label");
-assert.equal(memberPendingBadge(2400), "99+");
+// 2026-08-04 (件2, 煊煊「3个任务就显示3个红点是什么逻辑？一点没看懂」): the cap/hide format helper
+// itself is untouched (still 99+/blank at 0), only renamed since its input is no longer the
+// "N 任務待完成" duplicate — see memberUnreadCount below for the new unread-count source.
+assert.equal(memberUnreadBadge(0), "", "0 unread must not render a badge at all");
+assert.equal(memberUnreadBadge(1), "1");
+assert.equal(memberUnreadBadge(99), "99");
+assert.equal(memberUnreadBadge(100), "99+", "counts over 99 must cap at the 99+ label");
+assert.equal(memberUnreadBadge(2400), "99+");
 assert.match(tasksSource, /const role = member\.dept === "all" \? \(member\.deptLabel \?\? pageT\(lang, `tasks\.dept\.\$\{member\.dept\}`\)\) : \(member\.position \|\| ""\);/,
   "regular members must read member.position (employees.role) and stay blank when absent — no department-enum fabrication; Honnmono all keeps its old deptLabel/enum fallback");
 assert.match(memberProviderSource, /position: member\.position,/,
   "provider.js must forward the members-snapshot's already-computed employees.role (member.position) to the task-page member rail");
+
+// G-task-17 (2026-08-04 件2): the badge's new source — memberUnreadCount aggregates the existing
+// tp-task-board-read-v1 fingerprint output (boardUnreadTaskIds, the same Set the column-header
+// "N 項未讀變更" badge already reads) per member, reusing isTaskVisibleToMember's exact visibility
+// rule (the same one a member's own board view is scoped by) instead of a parallel read system.
+// creator pinned to a neutral third party (mirrors G-task-9's `parent` fixture) so visibility
+// below comes purely from the explicit assignees list, not the task() factory's jack-creator default.
+const unreadVisible = task("unread-visible-to-helen", {
+  creator: "Other", creatorId: "employee-other",
+  assignees: [{ employeeId: helen.id, name: helen.name, completedAt: null, abandonedAt: null }]
+});
+const unreadNotVisible = task("unread-not-visible-to-helen", {
+  creator: "Other", creatorId: "employee-other",
+  assignees: [{ employeeId: jack.id, name: jack.name, completedAt: null, abandonedAt: null }]
+});
+const unreadSubtaskChild = task("unread-subtask-child", {
+  creator: "Other", creatorId: "employee-other",
+  parentId: "some-parent",
+  assignees: [{ employeeId: helen.id, name: helen.name, completedAt: null, abandonedAt: null }]
+});
+const readAlready = task("read-already-visible-to-helen", {
+  creator: "Other", creatorId: "employee-other",
+  assignees: [{ employeeId: helen.id, name: helen.name, completedAt: null, abandonedAt: null }]
+});
+const unreadFixtureTasks = [unreadVisible, unreadNotVisible, unreadSubtaskChild, readAlready];
+const unreadTaskIds = new Set([unreadVisible.id, unreadNotVisible.id, unreadSubtaskChild.id]);
+assert.equal(memberUnreadCount(helen, unreadFixtureTasks, unreadTaskIds), 1,
+  "only the root task both (a) fingerprinted-unread and (b) visible to this member counts — not jack's task, not the subtask, not the already-read one");
+assert.equal(memberUnreadCount(jack, unreadFixtureTasks, unreadTaskIds), 1,
+  "the same Set scoped to a different member counts only what's visible to *that* member (jack's own task)");
+assert.equal(memberUnreadCount(helen, unreadFixtureTasks, new Set()), 0, "an empty unread Set must yield 0, not throw");
+assert.equal(memberUnreadCount(helen, unreadFixtureTasks, null), 0, "a missing unread Set must yield 0, not throw");
+assert.match(tasksSource, /const unreadBadge = member\.dept === "all" \? "" : memberUnreadBadge\(memberUnreadCount\(member, tasks, state\.boardUnreadTaskIds\)\);/,
+  "the member-row badge must be wired to the unread aggregator, not to openCount");
 
 for (const lang of ["zh", "en", "fr"]) {
   for (const key of [
