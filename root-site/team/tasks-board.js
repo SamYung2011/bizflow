@@ -13,6 +13,9 @@ function renderTaskDue(task, helpers) {
   if (presentation.tone === "soon") {
     return `<span class="team-task-card__due team-task-card__due--soon">⏰ ${escapeHtml(due)} (${escapeHtml(taskT(lang, "tasks.card.dueSoon", { days: presentation.days }))})</span>`;
   }
+  if (presentation.tone === "none") {
+    return `<span class="team-task-card__due">${escapeHtml(due)}</span>`;
+  }
   return `<span class="team-task-card__due">⏰ ${escapeHtml(due)}</span>`;
 }
 

@@ -141,15 +141,43 @@
 }
 
 .team-task-card__completion {
-  width: 16px;
-  height: 16px;
+  --task-card-completion-size: 16px; /* 與卡片內其它小型控件同尺寸,無對應全局 token */
+  --task-card-completion-radius: 4px; /* 16px 方框適配的小圓角,radius-10 起步過圓,無對應全局 token */
+
+  display: inline-grid;
+  width: var(--task-card-completion-size);
+  height: var(--task-card-completion-size);
   flex: none;
+  place-content: center;
   margin: var(--space-4) 0 0;
-  accent-color: var(--blue);
+  border: 1px solid var(--gray-20);
+  border-radius: var(--task-card-completion-radius);
+  background: var(--white);
+  appearance: none;
   cursor: pointer;
 }
 
+.team-task-card__completion::before {
+  width: calc(var(--task-card-completion-size) * 0.5);
+  height: calc(var(--task-card-completion-size) * 0.5);
+  background-color: var(--white);
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+  content: "";
+  transform: scale(0);
+  transition: transform var(--transition-fast);
+}
+
+.team-task-card__completion:checked {
+  border-color: var(--blue);
+  background: var(--blue);
+}
+
+.team-task-card__completion:checked::before {
+  transform: scale(1);
+}
+
 .team-task-card__completion:disabled {
+  opacity: .5;
   cursor: not-allowed;
 }
 
