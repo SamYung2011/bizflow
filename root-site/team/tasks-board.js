@@ -1,7 +1,7 @@
 import { taskT } from "./tasks-i18n.js";
 import { filterTaskColumns, renderTaskFilter } from "./tasks-filters.js";
 import { renderTaskActionPopover } from "./tasks-actions.js";
-import { isTaskCreator, isTaskMentionedForMember, isWaitingApproval, memberIdentity, scopedTopTasks, taskAssignee, taskCompletionForMember, taskDuePresentation, taskSubtaskProgress, terminalTasksForMember } from "./tasks-model.js";
+import { isTaskCreator, isTaskMentionOnlyForMember, isTaskMentionedForMember, isWaitingApproval, memberIdentity, scopedTopTasks, taskAssignee, taskCompletionForMember, taskDuePresentation, taskReadFingerprintRootId, taskSubtaskProgress, terminalTasksForMember } from "./tasks-model.js";
 
 function renderTaskDue(task, helpers) {
   const { escapeHtml, lang } = helpers;
@@ -64,11 +64,19 @@ function renderTaskCard(task, columnKey, state, mentionMember, helpers) {
 
 // 件2 (2026-08-04 Figma 对稿拆除令): .task-terminal-groups 两条杠拆除,改为每个优先级列底部一个
 // ⌄ 圆钮——沿用现有终态卡样式(renderTaskCard 本身已带 ✓ 前缀/删除线),按列归并 放弃+完成。
-function renderColumnTerminalTasks(terminal, columnKey, state, mentionMember, helpers) {
-  const cards = [...terminal.abandoned, ...terminal.completed]
-    .map((task) => renderTaskCard(task, columnKey, state, mentionMember, helpers))
-    .join("");
+// (件A 2026-08-05: 卡片堆容器抽成通用函数,「僅提及」分界线下的卡片复用同一容器/样式。)
+function renderColumnCollapsedTasks(tasks, columnKey, state, mentionMember, helpers) {
+  const cards = tasks.map((task) => renderTaskCard(task, columnKey, state, mentionMember, helpers)).join("");
   return cards ? `<div class="team-kanban-column__terminal-tasks">${cards}</div>` : "";
+}
+
+// 895148a 分界线组件本体(细线+居中字+计数,点击开合),件A 起被终态分界线和「僅提及」分界线共用:
+// 同一套 .team-column-terminal-divider 样式,各自的 data 属性/开合状态/文案由调用方给。
+function renderColumnDivider({ toggleAttribute, columnKey, expanded, summary, actionLabel, helpers }) {
+  const { escapeHtml } = helpers;
+  return `<button type="button" class="team-column-terminal-divider${expanded ? " team-column-terminal-divider--open" : ""}" ${toggleAttribute}="${escapeHtml(columnKey)}" aria-expanded="${expanded}" aria-label="${escapeHtml(actionLabel)}" title="${escapeHtml(actionLabel)}">
+    <span class="team-column-terminal-divider__label">${escapeHtml(summary)}</span>
+  </button>`;
 }
 
 // 件1 (2026-08-04 煊煊拍板「已完成怎么会出现在列表里？很乱...我宁愿你搞个分界线。点击分界线才
@@ -76,16 +84,35 @@ function renderColumnTerminalTasks(terminal, columnKey, state, mentionMember, he
 // 已放棄 N」),只在该列真有终态任务时才渲染;点击展开线下方终态卡,再点收起,复用既有
 // boardExpandedTerminalPriorities 状态,不新增并行状态。
 function renderColumnTerminalDivider(terminal, column, terminalExpanded, helpers) {
-  const { escapeHtml, lang } = helpers;
+  const { lang } = helpers;
   const completedCount = terminal.completed.length;
   const abandonedCount = terminal.abandoned.length;
   const terminalCount = completedCount + abandonedCount;
   if (terminalCount === 0) return "";
-  const summary = taskT(lang, "tasks.column.terminalSummary", { completed: completedCount, abandoned: abandonedCount });
-  const actionLabel = taskT(lang, terminalExpanded ? "tasks.column.terminalCollapse" : "tasks.column.terminalExpand", { count: terminalCount });
-  return `<button type="button" class="team-column-terminal-divider${terminalExpanded ? " team-column-terminal-divider--open" : ""}" data-task-column-terminal-toggle="${escapeHtml(column.key)}" aria-expanded="${terminalExpanded}" aria-label="${escapeHtml(actionLabel)}" title="${escapeHtml(actionLabel)}">
-    <span class="team-column-terminal-divider__label">${escapeHtml(summary)}</span>
-  </button>`;
+  return renderColumnDivider({
+    toggleAttribute: "data-task-column-terminal-toggle",
+    columnKey: column.key,
+    expanded: terminalExpanded,
+    summary: taskT(lang, "tasks.column.terminalSummary", { completed: completedCount, abandoned: abandonedCount }),
+    actionLabel: taskT(lang, terminalExpanded ? "tasks.column.terminalCollapse" : "tasks.column.terminalExpand", { count: terminalCount }),
+    helpers
+  });
+}
+
+// 件A (2026-08-05 煊煊拍板): 「僅提及」分界线——mention-only(既非 assignee 也非 creator,只因被 @
+// 而可见)且按 tp-task-board-read-v1 指纹已「看过」的任务,像已完成一样收进线下,点击展开;没看过的
+// 照常留在上面的活任务列表里(分桶在 renderTaskBoardGrid)。零收纳时整条线不渲染,与终态分界线一致。
+function renderColumnMentionDivider(mentionTasks, column, mentionExpanded, helpers) {
+  const { lang } = helpers;
+  if (mentionTasks.length === 0) return "";
+  return renderColumnDivider({
+    toggleAttribute: "data-task-column-mention-toggle",
+    columnKey: column.key,
+    expanded: mentionExpanded,
+    summary: taskT(lang, "tasks.column.mentionSummary", { count: mentionTasks.length }),
+    actionLabel: taskT(lang, mentionExpanded ? "tasks.column.mentionCollapse" : "tasks.column.mentionExpand", { count: mentionTasks.length }),
+    helpers
+  });
 }
 
 function renderColumn(column, state, filterState, mentionMember, helpers, terminalByColumn) {
@@ -110,10 +137,21 @@ function renderColumn(column, state, filterState, mentionMember, helpers, termin
   const terminal = terminalByColumn?.[column.key] ?? { completed: [], abandoned: [] };
   const terminalExpanded = state.boardExpandedTerminalPriorities?.has(column.key) === true;
   const terminalDividerHtml = showTerminalToggle ? renderColumnTerminalDivider(terminal, column, terminalExpanded, helpers) : "";
-  const terminalTasksHtml = terminalExpanded ? renderColumnTerminalTasks(terminal, column.key, state, mentionMember, helpers) : "";
+  const terminalTasksHtml = terminalExpanded
+    ? renderColumnCollapsedTasks([...terminal.abandoned, ...terminal.completed], column.key, state, mentionMember, helpers)
+    : "";
+  // 件A: 「僅提及」分界线排在终态分界线上方——收纳的仍是进行中的任务,归活动区尾部;终态区保持最后。
+  const mentionTasks = column.mentionSeen ?? [];
+  const mentionExpanded = state.boardExpandedMentionPriorities?.has(column.key) === true;
+  const mentionDividerHtml = renderColumnMentionDivider(mentionTasks, column, mentionExpanded, helpers);
+  const mentionTasksHtml = mentionExpanded
+    ? renderColumnCollapsedTasks(mentionTasks, column.key, state, mentionMember, helpers)
+    : "";
   return `<section class="team-kanban-column team-kanban-column--${column.key}" data-task-column="${column.key}" data-column-count="${column.count}">
     <header class="team-kanban-column__head" data-task-column-read="${column.key}"><div class="team-kanban-column__title"><span title="${escapeHtml(title)}">${escapeHtml(title)}</span><span>${column.count}</span></div>${unreadCount > 0 ? `<span class="team-count-badge team-count-badge--unread" data-task-column-unread="${unreadCount}" aria-label="${escapeHtml(unreadLabel)}" title="${escapeHtml(unreadLabel)}">${unreadCount}</span>` : ""}</header>
     <div class="team-kanban-column__tasks">${body}</div>
+    ${mentionDividerHtml}
+    ${mentionTasksHtml}
     ${terminalDividerHtml}
     ${terminalTasksHtml}
     <div class="team-kanban-column__footer">
@@ -154,7 +192,22 @@ export function renderTaskBoardGrid({ state, filterState, helpers }) {
       abandoned: terminal.abandoned.filter((task) => task.priority === column.key)
     }]));
   }
-  return columns.map((column) => renderColumn(column, state, filterState, mentionMember, helpers, terminalByColumn)).join("");
+  // 件A (2026-08-05 煊煊拍板): 「僅提及」分桶——mention-only(与「@ 提到」pill 同一 mentionMember
+  // 视角)且按 tp-task-board-read-v1 指纹已看过(根指纹不在 boardUnreadTaskIds;子任务沿 parentId
+  // 回根取钥)的任务,从活任务列表抽出、收进「僅提及」分界线下;没看过的留在原位正常显示。只在
+  // 「进行中」状态筛选下分桶,与终态分界线的可见性判定一致;列计数随外面的列表走(收起的不占计数,
+  // 与已完成不占列计数同理)。boardUnreadTaskIds 只读不写——红点/列头未读的计数与消灯语义不动。
+  const mentionCollapsible = filterState.status === "inProgress";
+  const taskById = new Map(state.tasks.map((task) => [task.id, task]));
+  const bucketedColumns = columns.map((column) => {
+    if (!mentionCollapsible) return { ...column, mentionSeen: [] };
+    const mentionSeen = column.tasks.filter((task) => isTaskMentionOnlyForMember(task, mentionMember) &&
+      !(state.boardUnreadTaskIds?.has(taskReadFingerprintRootId(task, taskById)) === true));
+    if (!mentionSeen.length) return { ...column, mentionSeen: [] };
+    const kept = column.tasks.filter((task) => !mentionSeen.includes(task));
+    return { ...column, tasks: kept, count: kept.length, taskCountBadge: String(kept.length), mentionSeen };
+  });
+  return bucketedColumns.map((column) => renderColumn(column, state, filterState, mentionMember, helpers, terminalByColumn)).join("");
 }
 
 export function renderTaskToolbar({ state, filterState, members, featureAiBatch, helpers }) {

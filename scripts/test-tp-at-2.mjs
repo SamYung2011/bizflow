@@ -126,7 +126,11 @@ const boardState = {
   currentUser: jack,
   onlyMine: false,
   boardExpandedPriorities: new Set(),
-  boardUnreadTaskIds: new Set(),
+  // 件A (2026-08-05 僅提及分界线): a mention-only card sits in the open list only while its root
+  // fingerprint is still unread ("没看过的就显示"); once seen it collapses behind the 僅提及 divider
+  // (that side is pinned in test-task-mention-divider-1.mjs). These board fixtures model a FRESH @,
+  // so the root ids belong in the unread Set — the assertions below keep their original meaning.
+  boardUnreadTaskIds: new Set([baseTask.id]),
   actionTaskId: null,
   permissions: { canCreate: false, canEditOthers: false, canDeleteOthers: false },
   liveReadOnly: true,
@@ -143,6 +147,9 @@ const nestedBoardHtml = renderTaskBoardGrid({
   state: {
     ...boardState,
     tasks: nestedTasks,
+    // 件A: a promoted mention child keys its seen-state on the ROOT ancestor's fingerprint
+    // (children are not fingerprinted themselves), so the fresh-@ fixture marks the parent unread.
+    boardUnreadTaskIds: new Set([visibleParent.id]),
     board: boardState.board.map((column) => ({
       ...column,
       count: column.key === "medium" ? 2 : 0,

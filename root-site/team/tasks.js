@@ -7,7 +7,7 @@ import { isTaskFilterGroup } from "./tasks-filters.js";
 import { renderTaskCalendar } from "./tasks-calendar.js";
 import { renderTaskOverview } from "./tasks-overview.js";
 import { renderTaskAiDialog } from "./tasks-ai.js";
-import { calendarRelatedTasks, canDeleteTaskForUser, defaultTaskViewForUser, isOpenTask, isTaskAssignedTo, isTaskCreator, isTaskMentionedForMember, isWaitingApproval, memberIdentity, openAssignedTaskCount, taskAssignee, taskCompletionForMember } from "./tasks-model.js";
+import { calendarRelatedTasks, canDeleteTaskForUser, defaultTaskViewForUser, isOpenTask, isTaskAssignedTo, isTaskCreator, isTaskMentionedForMember, isWaitingApproval, memberIdentity, openAssignedTaskCount, taskAssignee, taskCompletionForMember, taskReadFingerprintRootId } from "./tasks-model.js";
 import { attachTaskDomainController } from "./tasks-domain-controller.js";
 import { renderTaskBoardGrid, renderTaskToolbar } from "./tasks-board.js";
 import { getSessionValue, setSessionValue } from "../data/session-state.js";
@@ -89,6 +89,10 @@ function createTaskState(nextData, historyState = null) {
     // 件2 (2026-08-04): 每列终态(完成/放弃)⌄ 折叠态,与 boardExpandedPriorities 同款持久化/重置规则。
     boardExpandedTerminalPriorities: new Set(Array.isArray(restored.boardExpandedTerminalPriorities)
       ? restored.boardExpandedTerminalPriorities.filter((key) => ["high", "medium", "low"].includes(key))
+      : []),
+    // 件A (2026-08-05): 每列「僅提及」分界线开合态,与上面两个 Set 同款持久化/重置规则。
+    boardExpandedMentionPriorities: new Set(Array.isArray(restored.boardExpandedMentionPriorities)
+      ? restored.boardExpandedMentionPriorities.filter((key) => ["high", "medium", "low"].includes(key))
       : []),
     onlyMine: typeof restored.onlyMine === "boolean" ? restored.onlyMine : getSessionValue("team-tasks-only-mine") === "1",
     calendarYear: Number.isInteger(restored.calendarYear) ? restored.calendarYear : now.getFullYear(),
@@ -1103,6 +1107,18 @@ async function onTaskClick(event) {
     return;
   }
 
+  // 件A (2026-08-05 煊煊拍板「僅提及」): 与上面终态分界线同款开合,各列各自记状态。
+  const columnMentionToggle = event.target.closest("[data-task-column-mention-toggle]");
+  if (columnMentionToggle) {
+    const priority = columnMentionToggle.getAttribute("data-task-column-mention-toggle");
+    if (!["high", "medium", "low"].includes(priority)) return;
+    if (state.boardExpandedMentionPriorities.has(priority)) state.boardExpandedMentionPriorities.delete(priority);
+    else state.boardExpandedMentionPriorities.add(priority);
+    rerenderTaskPage();
+    activeScope?.animationFrame(() => document.querySelector(`[data-task-column-mention-toggle="${CSS.escape(priority)}"]`)?.focus());
+    return;
+  }
+
   const columnAdd = event.target.closest("[data-task-column-add]");
   if (columnAdd) {
     if (columnAdd.disabled) return;
@@ -1417,6 +1433,12 @@ async function onTaskClick(event) {
     state.actionTaskId = null;
     state.selectedTaskId = detailTrigger.getAttribute("data-task-detail-open");
     state.detailOpen = true;
+    // 件A (2026-08-05): 打开详情 = 看过(规格「没看过的 = 被 @ 之后未打开过详情」)。当场用既有
+    // tp-task-board-read-v1 tracker 落这条根指纹(子任务沿 parentId 回根取钥),与列头
+    // IntersectionObserver / markMemberBoardSeen 同一份存储与去重,不造第二套 read-state。
+    // detailOpen 已置 true,onUnreadChange 的重渲守卫会跳过,收纳效果在回到看板的渲染里生效。
+    const openedRootId = taskReadFingerprintRootId(selectedTask(), new Map(state.tasks.map((task) => [task.id, task])));
+    if (openedRootId) taskBoardReadTracker?.markSeen([openedRootId]);
     state.detailTab = isTaskMentionedForMember(selectedTask(), state.currentUser) ? "feedback" : "content";
     state.attachmentPreview = null;
     resetFeedbackDraft();
@@ -1471,6 +1493,7 @@ async function onTaskClick(event) {
         filterState[group] = value;
         state.boardExpandedPriorities.clear();
         state.boardExpandedTerminalPriorities.clear();
+        state.boardExpandedMentionPriorities.clear();
       }
       if (group === "member") state.mode = "board";
       if (group === "view") setSessionValue("team-tasks-view-mode", value);
@@ -2103,6 +2126,7 @@ function currentTaskViewState() {
     overviewCompletedExpanded: [...state.overviewCompletedExpanded],
     boardExpandedPriorities: [...state.boardExpandedPriorities],
     boardExpandedTerminalPriorities: [...state.boardExpandedTerminalPriorities],
+    boardExpandedMentionPriorities: [...state.boardExpandedMentionPriorities],
     onlyMine: state.onlyMine,
     calendarYear: state.calendarYear,
     calendarMonth: state.calendarMonth,
@@ -2276,7 +2300,8 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
         overviewExpanded: [...state.overviewExpanded],
         overviewCompletedExpanded: [...state.overviewCompletedExpanded],
         boardExpandedPriorities: [...state.boardExpandedPriorities],
-    boardExpandedTerminalPriorities: [...state.boardExpandedTerminalPriorities],
+        boardExpandedTerminalPriorities: [...state.boardExpandedTerminalPriorities],
+        boardExpandedMentionPriorities: [...state.boardExpandedMentionPriorities],
         onlyMine: state.onlyMine,
         calendarYear: state.calendarYear,
         calendarMonth: state.calendarMonth,

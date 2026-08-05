@@ -99,6 +99,27 @@ export function isTaskVisibleToMember(task, member) {
   return isTaskOwnedByMember(task, member) || isTaskMentionedForMember(task, member);
 }
 
+// 件A (2026-08-05 煊煊拍板「选A吧？感觉可以多一条分界线，文案是：'仅提及'。如果看过的就像已完成
+// 一样收起，没看过的就显示。」): 「僅提及」任务 = 只因被 @ 提及而出现在这个成员视图里的任务。
+// isTaskMentionedForMember 本身已排除 assignee，这里再排除 creator——剩下的正是没有 @ 露出规则
+// 就不会在他视图里的那批。TP-at-2 的「@ 提到」pill 判定（isTaskMentionedForMember）保持原样不动。
+export function isTaskMentionOnlyForMember(task, member) {
+  return isTaskMentionedForMember(task, member) && !isTaskCreator(task, member);
+}
+
+// read-state 指纹只按根任务落钥（task-board-read-state.js 的 refresh 只收 parentId==null 的根），
+// 而被 @ 提升到成员看板的可以是子任务——判它「看过没」要沿 parentId 链回到根：@ 落在子任务反馈里
+// 同样会改根指纹（taskFingerprintValue 递归含 subtasks），根的 unread 正是这条 @ 的未读信号。
+export function taskReadFingerprintRootId(task, taskById) {
+  let current = task ?? null;
+  const visited = new Set();
+  while (current && current.parentId != null && !visited.has(current.id)) {
+    visited.add(current.id);
+    current = taskById.get(current.parentId) ?? null;
+  }
+  return current?.id ?? task?.id ?? null;
+}
+
 export function defaultTaskViewForUser(currentUser, currentMember) {
   const admin = currentUser?.isSuperAdmin === true || currentUser?.isAdminOfActive === true;
   return {

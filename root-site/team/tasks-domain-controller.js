@@ -58,6 +58,7 @@ export function attachTaskDomainController({
       if (filterState.member !== nextMember) {
         state.boardExpandedPriorities.clear();
         state.boardExpandedTerminalPriorities.clear();
+        state.boardExpandedMentionPriorities.clear();
       }
       filterState.member = nextMember;
       filterState.view = "board";
