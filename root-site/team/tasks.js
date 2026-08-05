@@ -744,12 +744,17 @@ function reopenWholeTask(task, { resetAssignees = false } = {}) {
     task.assignees.forEach((assignee) => {
       assignee.completedAt = null;
     });
+    // G-task-3 (2026-08-05): approval stamps only clear on this creator wholeTask-uncheck branch —
+    // its DB write resets approved_at/approved_by and the caller (creator) passes 082/083's
+    // prevent_task_field_hijack. The bare assignee reopen below must keep them: its DB patch is
+    // status/completed_at only (see completeLiveTask), matching old Tasks.jsx:381-383, so clearing
+    // the echo here would fake state the row never reached.
+    task.approvedAt = "";
+    task.approvedBy = "";
   }
   task.done = false;
   task.status = "inProgress";
   task.completedAt = "";
-  task.approvedAt = "";
-  task.approvedBy = "";
   if (wasComplete) {
     state.summary.completed = Math.max(0, state.summary.completed - 1);
     state.summary.inProgress += 1;

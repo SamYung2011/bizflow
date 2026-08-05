@@ -340,8 +340,17 @@ export async function completeLiveTask({ taskId, targetEmployeeId, wholeTask, ne
       .single();
     throwIfError(taskResult.error);
   } else if (!completed) {
+    // G-task-3 (2026-08-05): the assignee's own-row uncheck reopens the task with status/completed_at
+    // ONLY — no approved_at/approved_by clearing. Two reasons, both load-bearing:
+    // 1. RLS field guard: migration 082/083's prevent_task_field_hijack trigger limits a plain
+    //    assignee (not creator/admin/validator/can_edit_others) to status/completed_at on
+    //    employee_tasks; including approved_* in this patch makes the whole UPDATE raise on any
+    //    previously-approved task, after the assignee row was already cleared — a partial write.
+    // 2. Old-version parity: team/src/views/Tasks.jsx:381-383 wrote exactly
+    //    { status: 'open', completed_at: null } here. Approval stamps only reset on the creator's
+    //    wholeTask uncheck above (批2A/e821c45 semantics), where the trigger authorizes the caller.
     const taskResult = await client.from("employee_tasks")
-      .update({ status: "open", completed_at: null, approved_at: null, approved_by: null })
+      .update({ status: "open", completed_at: null })
       .eq("id", taskId)
       .select("id")
       .single();
