@@ -128,8 +128,10 @@ assert.match(completionWrite, /if \(String\(targetEmployeeId \|\| ""\) !== Strin
   "non-self targetEmployeeId must throw before any write");
 assert.match(completionWrite, /const rowsResult = await client\.from\("task_assignees"\)\.select\("completed_at,abandoned_at"\)\.eq\("task_id", taskId\);/,
   "allDone must be derived from a fresh row read");
-assert.match(completionWrite, /if \(allDone && !needsApproval\) \{/,
-  "auto-done only fires when every row is complete AND the task needs no approval (old Tasks.jsx:378-380)");
+// 批3件C (2026-08-05 80% 阈值) widened the auto-done gate from allDone-only to allDone-or-threshold;
+// both still require !needsApproval (needs_approval tasks keep routing through 核验, never auto-done).
+assert.match(completionWrite, /const taskDone = \(allDone \|\| thresholdDone\) && !needsApproval;/,
+  "auto-done fires on full completion OR the 80% threshold, never on a needs-approval task (old Tasks.jsx:378-380 + 批3件C)");
 
 // 3c. G-task-3 fix (2026-08-05): the assignee's own-row UNCHECK reopens the task with
 //     status/completed_at ONLY. Migration 082/083's prevent_task_field_hijack trigger

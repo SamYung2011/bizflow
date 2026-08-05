@@ -69,10 +69,18 @@ export function isTaskMentionedForMember(task, member) {
 }
 
 // Mirrors bizflow_samyung/team/src/lib/taskHelpers.js:9-20 (empDoneFor/empAbandonedFor).
+// 批3件C (2026-08-05 阈值完成): 「对这个成员算不算完成」从纯自己行扩成「自己行已勾 OR 任务级已完成」。
+// 阈值触发只写 employee_tasks 任务级字段(082 不许普通 assignee fan-out 其他行),没勾的行保持原状
+// ——若不扩,这种任务会从没勾成员的 进行中/已完成 两个桶同时消失,rail 还多一条幽灵待办。
+// 自己行已放棄的成员仍按放棄算(放棄优先,保持 terminalTasksForMember 完成/放棄两桶的互斥)。
 export function taskDoneForMember(task, member) {
   const assignee = taskAssignee(task, member);
-  if (assignee) return assignee.completedAt != null && assignee.abandonedAt == null;
-  return task.done === true || task.status === "completed";
+  const taskLevelDone = task.done === true || task.status === "completed";
+  if (assignee) {
+    if (assignee.abandonedAt != null) return false;
+    return assignee.completedAt != null || taskLevelDone;
+  }
+  return taskLevelDone;
 }
 
 export function taskAbandonedForMember(task, member) {

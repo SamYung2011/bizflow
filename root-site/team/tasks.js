@@ -16,6 +16,7 @@ import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { approveLiveTask, completeLiveTask, createLiveSubtask, createLiveTask, createLiveTaskFeedback, deleteLiveSubtask, deleteLiveTask, deleteLiveTaskFeedback, setLiveSubtaskCompletion, setLiveTaskParticipation, updateLiveSubtaskTitle, updateLiveTask, updateLiveTaskFeedback } from "../data/live-task-writes.js";
 import { createDateRangePanel } from "../components/date-range-panel.js";
 import { createTaskBoardColumnReadObserver, createTaskBoardReadTracker } from "./task-board-read-state.js";
+import { meetsTaskCompletionThreshold } from "../data/task-completion-threshold.js";
 import { consumeNavigationPreset, navigationPresetKeys } from "../components/navigation-presets.js";
 import { closeTaskFeedbackMention, createTaskFeedbackDraft, removeTaskFeedbackMention, selectTaskFeedbackMention, taskFeedbackMentionCandidates, updateTaskFeedbackMentionInput } from "./tasks-mentions.js";
 import { pastedTaskFeedbackImages, revokeTaskFeedbackAttachmentDrafts, taskFeedbackAttachmentDraft } from "./tasks-clipboard.js";
@@ -719,11 +720,17 @@ function decrementOpenTaskCounts(task) {
   adjustOpenTaskCounts(task, -1);
 }
 
-function completeWholeTask(task, completedAt) {
+// 批3件C (2026-08-05 80% 阈值): stampAssignees=false 用于 assignee 勾自己行触发的整单收口(全员 or
+// 阈值)——那条 DB 路径只写 employee_tasks 任务级字段,不动其他 assignee 行(082 不许普通 assignee
+// fan-out),回显必须同样不给别人的行伪造 ✓。全员完成时行本就全勾,不 stamp 也无差;阈值完成时没勾
+// 的行保持原状(诚实状态)。creator wholeTask 路径 DB 真的 stamp 了 pending 行,保持默认 true。
+function completeWholeTask(task, completedAt, { stampAssignees = true } = {}) {
   const wasComplete = task.done === true || task.status === "completed";
-  task.assignees.forEach((assignee) => {
-    if (assignee.completedAt == null && assignee.abandonedAt == null) assignee.completedAt = completedAt;
-  });
+  if (stampAssignees) {
+    task.assignees.forEach((assignee) => {
+      if (assignee.completedAt == null && assignee.abandonedAt == null) assignee.completedAt = completedAt;
+    });
+  }
   task.done = true;
   task.status = "completed";
   task.completedAt = completedAt;
@@ -801,7 +808,7 @@ async function toggleTaskCompletion(taskId, { forceComplete = false, forceUncomp
       } else {
         targetAssignee.completedAt = result.completedAt;
         targetAssignee.abandonedAt = null;
-        if (result.taskDone) completeWholeTask(task, result.completedAt);
+        if (result.taskDone) completeWholeTask(task, result.completedAt, { stampAssignees: false });
         else if (!completed) reopenWholeTask(task);
       }
     } catch (error) {
@@ -818,7 +825,10 @@ async function toggleTaskCompletion(taskId, { forceComplete = false, forceUncomp
     targetAssignee.completedAt = completed ? localTimestamp() : null;
     targetAssignee.abandonedAt = null;
     const allDone = task.assignees.length > 0 && task.assignees.every((assignee) => assignee.completedAt != null);
-    if (allDone && !task.requiresReview) completeWholeTask(task, targetAssignee.completedAt);
+    // 批3件C: 演示态与 live 写路径同一条 80% 阈值(共用 task-completion-threshold.js),先到先触发。
+    const thresholdDone = completed && meetsTaskCompletionThreshold(
+      task.assignees.filter((assignee) => assignee.completedAt != null).length, task.assignees.length);
+    if ((allDone || thresholdDone) && !task.requiresReview) completeWholeTask(task, targetAssignee.completedAt, { stampAssignees: false });
     else if (!completed) reopenWholeTask(task);
   }
   if (!isCurrentTaskMount(mountId, scope)) return;

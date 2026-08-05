@@ -1,5 +1,6 @@
 import { getCurrentUser, getSession, getSupabaseClient } from "./auth.js";
 import { invalidateLiveTables } from "./live-snapshot-utils.js";
+import { meetsTaskCompletionThreshold } from "./task-completion-threshold.js";
 
 async function writeContext() {
   const [client, session, currentUser] = await Promise.all([
@@ -331,8 +332,20 @@ export async function completeLiveTask({ taskId, targetEmployeeId, wholeTask, ne
   throwIfError(assigneeResult.error);
   const rowsResult = await client.from("task_assignees").select("completed_at,abandoned_at").eq("task_id", taskId);
   throwIfError(rowsResult.error);
-  const allDone = completed && (rowsResult.data ?? []).length > 0 && (rowsResult.data ?? []).every((row) => row.completed_at != null);
-  if (allDone && !needsApproval) {
+  const rows = rowsResult.data ?? [];
+  const allDone = completed && rows.length > 0 && rows.every((row) => row.completed_at != null);
+  // 批3件C (2026-08-05 煊煊拍板 11:43「嘶。如果设定了负责人，负责人超过80%勾选完成就全部完成吧。」
+  // + 11:52 追拍「那不坏菜了吗。按比例来！」): 勾完成行数 ≥ max(1, round(0.8×全部行数))(定义见
+  // task-completion-threshold.js;放棄行 completed_at 恒 null 不进分子、但留在分母)也收整单,
+  // 与既有全员完成规则并行、先到先触发,共用下面同一条任务收口 UPDATE,不造第二套。
+  // 只在勾完成方向生效(completed 守卫)——反勾方向哪怕剩 4/5 也走重开,触发后任一反勾重开整单不变。
+  // RLS: 触发者是普通 assignee,不 fan-out 其他 assignee 行(082 task_assignees_update_manage 只给
+  // creator/admin/can_assign_others)——整单完成只落任务级 status/completed_at(083 触发器 D 段白名单
+  // 恰好允许),其余 assignee 行保持原状(卡片上没勾的人无 ✓ 是诚实状态)。
+  const thresholdDone = completed && meetsTaskCompletionThreshold(
+    rows.filter((row) => row.completed_at != null).length, rows.length);
+  const taskDone = (allDone || thresholdDone) && !needsApproval;
+  if (taskDone) {
     const taskResult = await client.from("employee_tasks")
       .update({ status: "done", completed_at: completedAt })
       .eq("id", taskId)
@@ -357,7 +370,7 @@ export async function completeLiveTask({ taskId, targetEmployeeId, wholeTask, ne
     throwIfError(taskResult.error);
   }
   await invalidateTaskReads("employee_tasks", "task_assignees");
-  return { completedAt, wholeTask: false, taskDone: allDone && !needsApproval };
+  return { completedAt, wholeTask: false, taskDone };
 }
 
 export async function approveLiveTask(taskId) {
@@ -430,9 +443,14 @@ export async function setLiveSubtaskCompletion({ taskId, completed }) {
     .select("employee_id,completed_at,abandoned_at")
     .eq("task_id", taskId);
   throwIfError(rowsResult.error);
-  const activeRows = (rowsResult.data ?? []).filter((row) => row.abandoned_at == null);
+  const rows = rowsResult.data ?? [];
+  const activeRows = rows.filter((row) => row.abandoned_at == null);
   const allDone = activeRows.length > 0 && activeRows.every((row) => row.completed_at != null);
-  const taskDone = allDone && taskResult.data.needs_approval !== true;
+  // 批3件C (2026-08-05 80% 阈值): 子任务走同一条「assignee 勾自己那行」触发时机,同一份阈值定义
+  // (task-completion-threshold.js)。completed 守卫同上——uncheck 方向恒不触发,反勾重开语义不变。
+  const thresholdDone = completed && meetsTaskCompletionThreshold(
+    rows.filter((row) => row.completed_at != null).length, rows.length);
+  const taskDone = (allDone || thresholdDone) && taskResult.data.needs_approval !== true;
   const rowResult = await client.from("employee_tasks")
     .update({ status: taskDone ? "done" : "open", completed_at: taskDone ? completedAt : null })
     .eq("id", taskId)
