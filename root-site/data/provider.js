@@ -122,6 +122,7 @@ const teamTaskMock = {
       departmentId: "",
       owner: "",
       requiresReview: "no",
+      completionMode: "ratio",
       members: "",
       due: "2026-07-21"
     }
@@ -469,6 +470,7 @@ function normalizeFullTask(task, currentUserName, today) {
     visibility: task.visibility?.scope === "department" ? "department" : "team",
     visibilityDepartment: task.visibility?.department || "",
     requiresReview: task.needsApproval === true,
+    completionMode: task.completionMode === "strict" ? "strict" : "ratio",
     approvedAt: task.approvedAt || "",
     approvedBy: task.approvedBy || "",
     attachments: Array.isArray(task.attachments) ? task.attachments.map((attachment) => ({ ...attachment })) : [],
@@ -624,6 +626,7 @@ export async function getTeamTaskData() {
           departmentId: "",
           owner: "",
           requiresReview: "no",
+          completionMode: "ratio",
           members: "",
           startDate: "",
           due: today

@@ -475,6 +475,9 @@ async function buildTasksSnapshot() {
       titleEditedAt: formatDateTime(task.title_edited_at) || null,
       parentId: task.parent_task_id ?? null,
       needsApproval: task.needs_approval === true,
+      // 批3件D: 驗收方式(migration 101)。迁移前的行没有该列 -> undefined -> 归一成 'ratio',
+      // 与列 DEFAULT 'ratio' 的存量回填口径一致。allRows 全列拉取,无需改查询列清单。
+      completionMode: task.completion_mode === "strict" ? "strict" : "ratio",
       approvedAt: formatDateTime(task.approved_at) || null,
       approvedBy: asText(employeeById.get(task.approved_by)?.name) || null,
       departmentId: task.department_id ?? null,

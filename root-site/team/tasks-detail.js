@@ -199,6 +199,10 @@ function renderDetailContent(task, state, helpers) {
         ? `${tt("tasks.detail.visibility.department")}: ${task.visibilityDepartment}`
         : tt(`tasks.detail.visibility.${task.visibility}`))}</span>
     </label>
+    <div class="task-detail__field">
+      <span>${escapeHtml(tt("tasks.submit.completionMode"))}</span>
+      <span class="task-detail__control">${escapeHtml(tt(task.completionMode === "strict" ? "tasks.submit.completionStrict" : "tasks.submit.completionRatio"))}</span>
+    </div>
     <label class="task-detail__field">
       <span>${escapeHtml(tt("tasks.detail.assignee"))}</span>
       <span class="task-detail__control">${escapeHtml(task.owner)}</span>

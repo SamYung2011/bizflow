@@ -1,6 +1,11 @@
 import { getCurrentUser, getSession, getSupabaseClient } from "./auth.js";
 import { invalidateLiveTables } from "./live-snapshot-utils.js";
-import { meetsTaskCompletionThreshold } from "./task-completion-threshold.js";
+import { isStrictCompletionMode, meetsTaskCompletionThreshold } from "./task-completion-threshold.js";
+
+// 批3件D: 落库前归一驗收方式,任何非 'strict' 输入都写 'ratio'(与 migration 101 的 CHECK/DEFAULT 对齐)。
+function normalizedCompletionMode(value) {
+  return isStrictCompletionMode(value) ? "strict" : "ratio";
+}
 
 async function writeContext() {
   const [client, session, currentUser] = await Promise.all([
@@ -64,7 +69,7 @@ async function invalidateTaskReads(...tables) {
   }
 }
 
-export async function createLiveTask({ title, content, priority, startDate = null, due, requiresReview, assigneeIds, departmentId = null, files = [] }) {
+export async function createLiveTask({ title, content, priority, startDate = null, due, requiresReview, completionMode = "ratio", assigneeIds, departmentId = null, files = [] }) {
   const { client, currentUser } = await writeContext();
   const assigned = uniqueIds(assigneeIds);
   if (!assigned.length) throw new Error("Task requires an assignee");
@@ -75,6 +80,7 @@ export async function createLiveTask({ title, content, priority, startDate = nul
       employee_id: assigned[0],
       creator_employee_id: currentUser.employeeId,
       needs_approval: requiresReview === true,
+      completion_mode: normalizedCompletionMode(completionMode),
       title,
       priority: taskPriority(priority),
       note: content || null,
@@ -115,7 +121,7 @@ export async function createLiveTask({ title, content, priority, startDate = nul
   }
 }
 
-export async function updateLiveTask(taskId, { title, content, priority, startDate = null, due, requiresReview, assigneeIds, departmentId = null, originalTitle, trackTitleEdit, attachments }) {
+export async function updateLiveTask(taskId, { title, content, priority, startDate = null, due, requiresReview, completionMode = "ratio", assigneeIds, departmentId = null, originalTitle, trackTitleEdit, attachments }) {
   const { client, currentUser } = await writeContext();
   const assigned = uniqueIds(assigneeIds);
   if (!assigned.length) throw new Error("Task requires an assignee");
@@ -126,6 +132,7 @@ export async function updateLiveTask(taskId, { title, content, priority, startDa
     start_date: startDate || null,
     due_date: due || null,
     needs_approval: requiresReview === true,
+    completion_mode: normalizedCompletionMode(completionMode),
     department_id: departmentId || null
   };
   if (trackTitleEdit && title !== originalTitle) {
@@ -275,7 +282,7 @@ export async function deleteLiveTask(taskId) {
   return result.data;
 }
 
-export async function completeLiveTask({ taskId, targetEmployeeId, wholeTask, needsApproval, completed = true }) {
+export async function completeLiveTask({ taskId, targetEmployeeId, wholeTask, needsApproval, completionMode = "ratio", completed = true }) {
   const { client, currentUser } = await writeContext();
   const completedAt = completed ? new Date().toISOString() : null;
   if (wholeTask) {
@@ -342,7 +349,8 @@ export async function completeLiveTask({ taskId, targetEmployeeId, wholeTask, ne
   // RLS: 触发者是普通 assignee,不 fan-out 其他 assignee 行(082 task_assignees_update_manage 只给
   // creator/admin/can_assign_others)——整单完成只落任务级 status/completed_at(083 触发器 D 段白名单
   // 恰好允许),其余 assignee 行保持原状(卡片上没勾的人无 ✓ 是诚实状态)。
-  const thresholdDone = completed && meetsTaskCompletionThreshold(
+  // 批3件D: completion_mode='strict'(嚴格驗收)时阈值整段不生效,只剩全员规则;'ratio' 照件C 走。
+  const thresholdDone = !isStrictCompletionMode(completionMode) && completed && meetsTaskCompletionThreshold(
     rows.filter((row) => row.completed_at != null).length, rows.length);
   const taskDone = (allDone || thresholdDone) && !needsApproval;
   if (taskDone) {
@@ -415,7 +423,7 @@ export async function approveLiveTask(taskId) {
 export async function setLiveSubtaskCompletion({ taskId, completed }) {
   const { client, currentUser } = await writeContext();
   const taskResult = await client.from("employee_tasks")
-    .select("id,parent_task_id,needs_approval")
+    .select("id,parent_task_id,needs_approval,completion_mode")
     .eq("id", taskId)
     .single();
   throwIfError(taskResult.error);
@@ -448,7 +456,9 @@ export async function setLiveSubtaskCompletion({ taskId, completed }) {
   const allDone = activeRows.length > 0 && activeRows.every((row) => row.completed_at != null);
   // 批3件C (2026-08-05 80% 阈值): 子任务走同一条「assignee 勾自己那行」触发时机,同一份阈值定义
   // (task-completion-threshold.js)。completed 守卫同上——uncheck 方向恒不触发,反勾重开语义不变。
-  const thresholdDone = completed && meetsTaskCompletionThreshold(
+  // 批3件D: 驗收方式取子任务自己那行的 fresh completion_mode(上面 select 一并带出,零额外请求);
+  // strict 关阈值。094 的 create_employee_subtask RPC 不复制该列,子任务恒为列默认 'ratio'。
+  const thresholdDone = !isStrictCompletionMode(taskResult.data.completion_mode) && completed && meetsTaskCompletionThreshold(
     rows.filter((row) => row.completed_at != null).length, rows.length);
   const taskDone = (allDone || thresholdDone) && taskResult.data.needs_approval !== true;
   const rowResult = await client.from("employee_tasks")

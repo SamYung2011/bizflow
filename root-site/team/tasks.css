@@ -596,6 +596,16 @@
   line-height: var(--lh-body);
 }
 
+/* 批3件D 驗收方式注释行: Figma 稿无此控件,按稿内说明文字语言延展(description 字号 + --gray-40,
+   与分界线标签同一层级的辅助文本色),不引入新 token。 */
+.form-task-submit__hint {
+  margin: 0;
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+  font-weight: var(--font-description-weight);
+  line-height: var(--lh-body);
+}
+
 .team-task-write-notice {
   margin: 0;
   color: var(--green);

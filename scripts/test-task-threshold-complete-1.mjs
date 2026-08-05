@@ -188,9 +188,9 @@ const [writesSource, tasksSource, thresholdSource] = await Promise.all([
 assert.match(thresholdSource, /Math\.max\(1, Math\.round\(TASK_COMPLETION_THRESHOLD \* totalCount\)\)/,
   "the required count is max(1, Math.round(0.8 × total)) — 11:52 按比例 verbatim, standard rounding");
 assert.match(thresholdSource, /completedCount >= requiredCompletionCount\(totalCount\)/);
-assert.match(writesSource, /import \{ meetsTaskCompletionThreshold \} from "\.\/task-completion-threshold\.js";/,
-  "live-task-writes must consume the single shared threshold definition");
-assert.match(tasksSource, /import \{ meetsTaskCompletionThreshold \} from "\.\.\/data\/task-completion-threshold\.js";/,
+assert.match(writesSource, /import \{ isStrictCompletionMode, meetsTaskCompletionThreshold \} from "\.\/task-completion-threshold\.js";/,
+  "live-task-writes must consume the single shared threshold definition (件D adds the mode predicate from the same module)");
+assert.match(tasksSource, /import \{ isStrictCompletionMode, meetsTaskCompletionThreshold \} from "\.\.\/data\/task-completion-threshold\.js";/,
   "the demo-mode branch must consume the same definition — no second 0.8 anywhere");
 
 const completionWrite = writesSource.slice(
@@ -199,8 +199,9 @@ const completionWrite = writesSource.slice(
 );
 const assigneeBranch = completionWrite.slice(completionWrite.indexOf("if (String(targetEmployeeId"));
 // Trigger point: fresh rows, completion direction only, parallel with allDone, one shared close.
-assert.match(assigneeBranch, /const thresholdDone = completed && meetsTaskCompletionThreshold\(\s*\n\s*rows\.filter\(\(row\) => row\.completed_at != null\)\.length, rows\.length\);/,
-  "threshold reads the same fresh rowsResult as allDone and only fires on the completion direction");
+// 批3件D added the strict-mode gate in front; the fresh-rows + completion-direction shape is unchanged.
+assert.match(assigneeBranch, /const thresholdDone = !isStrictCompletionMode\(completionMode\) && completed && meetsTaskCompletionThreshold\(\s*\n\s*rows\.filter\(\(row\) => row\.completed_at != null\)\.length, rows\.length\);/,
+  "threshold reads the same fresh rowsResult as allDone, only fires on the completion direction, and only in ratio mode");
 assert.match(assigneeBranch, /const taskDone = \(allDone \|\| thresholdDone\) && !needsApproval;\s*\n\s*if \(taskDone\) \{/,
   "both rules share one gate and one close — needs_approval tasks keep routing through 核验");
 // RLS shape: the close writes task-level status/completed_at only (083 trigger D whitelist),
@@ -220,8 +221,8 @@ const subtaskWrite = writesSource.slice(
   writesSource.indexOf("export async function setLiveSubtaskCompletion"),
   writesSource.indexOf("export async function createLiveSubtask")
 );
-assert.match(subtaskWrite, /const thresholdDone = completed && meetsTaskCompletionThreshold\(/,
-  "setLiveSubtaskCompletion applies the threshold with the completion-direction guard");
+assert.match(subtaskWrite, /const thresholdDone = !isStrictCompletionMode\(taskResult\.data\.completion_mode\) && completed && meetsTaskCompletionThreshold\(/,
+  "setLiveSubtaskCompletion applies the threshold with the completion-direction guard, gated by the row's fresh completion_mode");
 assert.match(subtaskWrite, /const taskDone = \(allDone \|\| thresholdDone\) && taskResult\.data\.needs_approval !== true;/,
   "the existing active-rows all-done rule stays alongside, first trigger wins, approval still gates");
 

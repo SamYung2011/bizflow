@@ -159,6 +159,14 @@ export function renderTaskSubmitDialog({ state, data, helpers }) {
           ], helpers })}
         </div>
         <div class="form-task-submit__field">
+          <span>${escapeHtml(tt("tasks.submit.completionMode"))}</span>
+          ${renderSegment({ name: "completionMode", selected: draft.completionMode === "strict" ? "strict" : "ratio", disabled: state.writeBusy, values: [
+            { value: "strict", key: "tasks.submit.completionStrict" },
+            { value: "ratio", key: "tasks.submit.completionRatio" }
+          ], helpers })}
+          <p class="form-task-submit__hint">${escapeHtml(tt("tasks.submit.completionModeHint"))}</p>
+        </div>
+        <div class="form-task-submit__field">
           <span>${escapeHtml(tt("tasks.submit.members"))}</span>
           ${renderMemberEditor({ state, data, departmentId, helpers })}
         </div>

@@ -16,3 +16,12 @@ export function requiredCompletionCount(totalCount) {
 export function meetsTaskCompletionThreshold(completedCount, totalCount) {
   return totalCount > 0 && completedCount >= requiredCompletionCount(totalCount);
 }
+
+// 批3件D (2026-08-05 12:04 煊煊拍板逐字:「噢噢，那这样在发布任务的那个页面加上一个选项吧。可以选
+// "严格验收/宽松验收"然后放个注释说明：严格验收必须所有人全部勾选任务才会消失，宽松验收就按比例
+// 完成任务。」): completion_mode='strict' 关掉上面的比例阈值、只走既有全员规则;'ratio'(migration
+// 101 列默认)走阈值。任何非 'strict' 值(含迁移前快照里的 undefined legacy)都按寬鬆算——与列
+// DEFAULT 'ratio' 的存量回填口径一致(小屿默认,煊煊未修正)。
+export function isStrictCompletionMode(completionMode) {
+  return completionMode === "strict";
+}

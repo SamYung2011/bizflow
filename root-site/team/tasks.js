@@ -16,7 +16,7 @@ import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { approveLiveTask, completeLiveTask, createLiveSubtask, createLiveTask, createLiveTaskFeedback, deleteLiveSubtask, deleteLiveTask, deleteLiveTaskFeedback, setLiveSubtaskCompletion, setLiveTaskParticipation, updateLiveSubtaskTitle, updateLiveTask, updateLiveTaskFeedback } from "../data/live-task-writes.js";
 import { createDateRangePanel } from "../components/date-range-panel.js";
 import { createTaskBoardColumnReadObserver, createTaskBoardReadTracker } from "./task-board-read-state.js";
-import { meetsTaskCompletionThreshold } from "../data/task-completion-threshold.js";
+import { isStrictCompletionMode, meetsTaskCompletionThreshold } from "../data/task-completion-threshold.js";
 import { consumeNavigationPreset, navigationPresetKeys } from "../components/navigation-presets.js";
 import { closeTaskFeedbackMention, createTaskFeedbackDraft, removeTaskFeedbackMention, selectTaskFeedbackMention, taskFeedbackMentionCandidates, updateTaskFeedbackMentionInput } from "./tasks-mentions.js";
 import { pastedTaskFeedbackImages, revokeTaskFeedbackAttachmentDrafts, taskFeedbackAttachmentDraft } from "./tasks-clipboard.js";
@@ -609,6 +609,8 @@ function openTaskCopy(taskId) {
     memberQuery: "",
     memberMenuOpen: false,
     startDate: String(task.startDate || "").replaceAll("/", "-"),
+    // 批3件D: 复制不带源任务的驗收方式,回默认寬鬆——与 requiresReview 不复制同口径(小屿默认)。
+    completionMode: "ratio",
     attachments: [],
     subtasks: []
   };
@@ -638,6 +640,7 @@ function openTaskEdit(taskId) {
     departmentId: task.departmentId || "",
     owner: task.assignees[0]?.name || "",
     requiresReview: task.requiresReview ? "yes" : "no",
+    completionMode: task.completionMode === "strict" ? "strict" : "ratio",
     memberIds: task.assignees.slice(1).map((assignee) => assignee.employeeId).filter(Boolean),
     memberQuery: "",
     memberMenuOpen: false,
@@ -799,6 +802,7 @@ async function toggleTaskCompletion(taskId, { forceComplete = false, forceUncomp
         targetEmployeeId: targetAssignee?.employeeId,
         wholeTask: completion.wholeTask,
         needsApproval: task.requiresReview,
+        completionMode: task.completionMode,
         completed
       });
       if (!isCurrentTaskMount(mountId, scope)) return;
@@ -826,7 +830,8 @@ async function toggleTaskCompletion(taskId, { forceComplete = false, forceUncomp
     targetAssignee.abandonedAt = null;
     const allDone = task.assignees.length > 0 && task.assignees.every((assignee) => assignee.completedAt != null);
     // 批3件C: 演示态与 live 写路径同一条 80% 阈值(共用 task-completion-threshold.js),先到先触发。
-    const thresholdDone = completed && meetsTaskCompletionThreshold(
+    // 批3件D: 嚴格驗收(strict)关阈值,同 live 路径的模式闸。
+    const thresholdDone = !isStrictCompletionMode(task.completionMode) && completed && meetsTaskCompletionThreshold(
       task.assignees.filter((assignee) => assignee.completedAt != null).length, task.assignees.length);
     if ((allDone || thresholdDone) && !task.requiresReview) completeWholeTask(task, targetAssignee.completedAt, { stampAssignees: false });
     else if (!completed) reopenWholeTask(task);
@@ -1676,6 +1681,8 @@ async function onTaskSubmit(event) {
     const startDate = String(values.get("startDate") || "");
     const due = String(values.get("due") || "");
     const requiresReview = values.get("requiresReview") === "yes";
+    // 批3件D: 驗收方式两值一选,任何异常值归一寬鬆(与 migration 101 DEFAULT/CHECK 对齐)。
+    const completionMode = values.get("completionMode") === "strict" ? "strict" : "ratio";
     const assignedMembers = assignedRows.map((member) => member.name);
     const subtaskEligibleMembers = state.submitCanAssignOthers
       ? eligibleMembers
@@ -1711,6 +1718,7 @@ async function onTaskSubmit(event) {
             startDate,
             due,
             requiresReview,
+            completionMode,
             assigneeIds: assignedRows.map((member) => member.id),
             departmentId,
             originalTitle,
@@ -1730,6 +1738,7 @@ async function onTaskSubmit(event) {
             task.startDate = startDate;
             task.due = due;
             task.requiresReview = requiresReview;
+            task.completionMode = completionMode;
             task.departmentId = departmentId;
             task.visibility = departmentId ? "department" : "team";
             task.visibilityDepartment = taskSubmitDepartment(departmentId)?.name || "";
@@ -1755,6 +1764,7 @@ async function onTaskSubmit(event) {
             startDate,
             due,
             requiresReview,
+            completionMode,
             assigneeIds: assignedRows.map((member) => member.id),
             departmentId,
             files: state.submitDraft.attachments.map((attachment) => attachment.file).filter(Boolean)
@@ -1778,6 +1788,7 @@ async function onTaskSubmit(event) {
               departmentId,
               visibility: departmentId ? "department" : "team",
               requiresReview,
+              completionMode,
               members: assignedRows.map((member) => member.name),
               feedback: [],
               startDate,
@@ -1854,6 +1865,7 @@ async function onTaskSubmit(event) {
       departmentId,
       visibility: departmentId ? "department" : "team",
       requiresReview,
+      completionMode,
       members: assignedMembers,
       feedback: [],
       startDate,
@@ -1953,7 +1965,7 @@ async function onTaskSubmit(event) {
 
 function syncTaskSubmitDraft(form) {
   const values = new FormData(form);
-  for (const key of ["title", "content", "priority", "visibility", "departmentId", "owner", "requiresReview", "startDate", "due"]) {
+  for (const key of ["title", "content", "priority", "visibility", "departmentId", "owner", "requiresReview", "completionMode", "startDate", "due"]) {
     const value = values.get(key);
     if (value != null) state.submitDraft[key] = String(value);
   }
@@ -2111,6 +2123,7 @@ function hasTaskSubmitUnsavedChanges() {
     || String(draft.due || "") !== String(task.due || "")
     || String(draft.departmentId || "") !== String(task.departmentId || "")
     || String(draft.requiresReview || "no") !== (task.requiresReview ? "yes" : "no")
+    || (draft.completionMode === "strict" ? "strict" : "ratio") !== (task.completionMode === "strict" ? "strict" : "ratio")
     || JSON.stringify(draftMemberIds) !== JSON.stringify(taskMemberIds)
     || Boolean(draft.attachments?.some((attachment) => attachment.file));
 }
