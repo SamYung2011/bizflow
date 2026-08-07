@@ -325,7 +325,7 @@ function closeAllFilterMenus(except) {
   });
 }
 
-function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, focusFeedback = false, feedbackCursor = null, focusFeedbackMenuId = "", focusFeedbackEditId = "", focusSubmit = false, focusSubmitSubtaskId = "", restoreSubmitFocus = false, focusFilterGroup = "", focusActionMenu = false, restoreActionTaskId = "", focusBoard = false, focusSubtaskId = "", focusSubtaskAdd = false, focusSubtaskEditId = "", focusAi = false } = {}) {
+function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, focusFeedback = false, feedbackCursor = null, focusFeedbackMenuId = "", focusFeedbackEditId = "", focusSubmit = false, focusSubmitSubtaskId = "", restoreSubmitFocus = false, focusFilterGroup = "", focusActionMenu = false, restoreActionTaskId = "", focusBoard = false, focusSubtaskId = "", focusSubtaskAdd = false, focusSubtaskEditId = "", focusAi = false, focusAiCardId = "" } = {}) {
   taskDueDatePanel.close({ restoreFocus: false });
   taskStartDatePanel.close({ restoreFocus: false });
   const page = document.querySelector(".team-task-page");
@@ -352,7 +352,17 @@ function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, foc
   if (focusSubtaskId) document.querySelector(`[data-task-subtask-toggle="${CSS.escape(focusSubtaskId)}"]`)?.focus();
   if (focusSubtaskAdd) document.querySelector('[data-task-subtask-form] input[name="title"]')?.focus();
   if (focusSubtaskEditId) document.querySelector(`[data-task-subtask-edit-form="${CSS.escape(focusSubtaskEditId)}"] input[name="subtaskTitle"]`)?.focus();
-  if (focusAi) document.querySelector(state.ai.stage === "preview" ? "[data-task-ai-card] input[data-task-ai-field=\"title\"]" : "[data-task-ai-text]")?.focus();
+  if (focusAi) {
+    const card = focusAiCardId
+      ? [...document.querySelectorAll("[data-task-ai-card]")]
+        .find((element) => element.getAttribute("data-task-ai-card") === focusAiCardId)
+      : null;
+    const target = card?.querySelector('[data-task-ai-field="departmentId"]')
+      ?? document.querySelector(state.ai.stage === "preview"
+        ? "[data-task-ai-card] input[data-task-ai-field=\"title\"]"
+        : "[data-task-ai-text]");
+    target?.focus();
+  }
   activeScope?.animationFrame(observeTaskBoardUnreadColumns);
   if (taskLiveRefresh?.pending) queueMicrotask(() => void taskLiveRefresh.flush());
 }
@@ -2226,7 +2236,7 @@ function onTaskChange(event) {
     if (cardIndex < 0) return;
     if (field === "departmentId") {
       state.ai.cards[cardIndex] = updateTaskAiCardDepartment(state.ai.cards[cardIndex], aiField.value, taskAiContext());
-      rerenderTaskPage({ focusAi: true });
+      rerenderTaskPage({ focusAi: true, focusAiCardId: cardId });
       return;
     }
     if (["assigneeId", "due", "priority"].includes(field)) state.ai.cards[cardIndex][field] = aiField.value;

@@ -645,7 +645,11 @@ export async function getTeamTaskData() {
     departments,
     board,
     tasks: fullTasksOk ? normalizedTasks : board.flatMap((column) => column.tasks),
-    featureAiBatch: featureAiBatchForCompany(teamExtras?.companies, authUser?.activeCompanyId)
+    featureAiBatch: featureAiBatchForCompany(
+      teamExtras?.companies,
+      authUser?.activeCompanyId,
+      authUser?.bindings,
+    )
   };
 }
 

@@ -96,3 +96,25 @@ export function sanitizeParsedTasks(value, departmentNames = []) {
   if (tasks.length === 0) throw new TeamParseContractError("no_tasks");
   return tasks;
 }
+
+export function parsedTasksFailure(error) {
+  const diagnostic = error instanceof TeamParseContractError
+    ? error.code
+    : "invalid_ai_response";
+  return {
+    code: diagnostic === "no_tasks" ? "no_tasks" : "ai_invalid_response",
+    diagnostic,
+  };
+}
+
+export function departmentNamesForEmployee(
+  departments = [],
+  employeeDepartments = [],
+  unrestricted = false,
+) {
+  const allowedIds = new Set(employeeDepartments.map((row) => String(row?.department_id || "")));
+  return [...new Set(departments
+    .filter((department) => unrestricted || allowedIds.has(String(department?.id || "")))
+    .map((department) => String(department?.name || "").trim())
+    .filter(Boolean))];
+}

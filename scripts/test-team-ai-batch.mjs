@@ -3,8 +3,10 @@ import { readFile } from "node:fs/promises";
 
 import {
   buildTeamTaskPrompt,
+  departmentNamesForEmployee,
   isIsoDate,
   normalizeTeamParseInput,
+  parsedTasksFailure,
   sanitizeParsedTasks,
   TeamParseContractError,
 } from "../supabase/functions/team-parse-tasks/contract.mjs";
@@ -15,6 +17,7 @@ import {
   createTaskAiTasks,
   normalizeTaskAiCards,
   renderTaskAiDialog,
+  taskAiErrorKey,
   taskAiCardsReady,
   taskAiPublishItems,
   updateTaskAiCardDepartment,
@@ -75,13 +78,40 @@ assert.deepEqual(sanitized[1], {
 for (const payload of [{}, { tasks: [] }, { tasks: [{ title: "" }] }]) {
   assert.throws(() => sanitizeParsedTasks(payload, []), (error) => error instanceof TeamParseContractError);
 }
+assert.deepEqual(parsedTasksFailure(new TeamParseContractError("no_tasks")), {
+  code: "no_tasks",
+  diagnostic: "no_tasks",
+});
+assert.equal(taskAiErrorKey({ code: "no_tasks" }), "tasks.ai.error.noTasks");
+
+assert.deepEqual(departmentNamesForEmployee([
+  { id: "dept-tech", name: "技術" },
+  { id: "dept-sales", name: "銷售" },
+], [{ department_id: "dept-tech" }]), ["技術"]);
+assert.deepEqual(departmentNamesForEmployee([
+  { id: "dept-tech", name: "技術" },
+  { id: "dept-sales", name: "銷售" },
+], [], true), ["技術", "銷售"]);
 
 assert.equal(featureAiBatchForCompany([
   { id: "company-a", featureAiBatch: false },
   { id: "company-b", featureAiBatch: true },
-], "company-a"), false, "another visible company's flag must not enable the active company");
-assert.equal(featureAiBatchForCompany([{ id: "company-b", featureAiBatch: true }], "company-b"), true);
-assert.equal(featureAiBatchForCompany([{ id: "company-b", featureAiBatch: 1 }], "company-b"), false);
+], "company-a", [{ company_id: "company-a" }]), false, "another visible company's flag must not enable the active company");
+assert.equal(featureAiBatchForCompany(
+  [{ id: "company-b", featureAiBatch: true }],
+  "company-b",
+  [{ company_id: "company-b" }],
+), true);
+assert.equal(featureAiBatchForCompany(
+  [{ id: "company-b", featureAiBatch: true }],
+  "company-b",
+  [],
+), false, "an unbound super admin must not see an Edge-ineligible AI button");
+assert.equal(featureAiBatchForCompany(
+  [{ id: "company-b", featureAiBatch: 1 }],
+  "company-b",
+  [{ company_id: "company-b" }],
+), false);
 
 const departments = [
   { id: "dept-tech", name: "技術", memberIds: ["employee-helen", "employee-sam"] },
@@ -200,13 +230,20 @@ assert.match(edgeSource, /\.eq\("employee_id", employee\.id\)\s*\.eq\("company_i
   "the Edge Function must bind the caller to the exact requested company");
 assert.match(edgeSource, /\.from\("companies"\)[\s\S]*?\.eq\("id", input\.companyId\)/);
 assert.match(edgeSource, /companyResult\.data\?\.feature_ai_batch !== true/);
+assert.match(edgeSource, /departmentNamesForEmployee\([\s\S]*?unrestrictedDepartments/);
+assert.match(edgeSource, /detail\.code[\s\S]*?detail\.diagnostic/,
+  "no_tasks must be returned as the public Edge error code");
+assert.match(edgeSource, /\.eq\("user_id", userData\.user\.id\)\s*\.limit\(1\)/,
+  "duplicate employee rows must not make the Edge Function return 500");
 assert.match(edgeSource, /\.from\("wa_settings"\)[\s\S]*?\.select\("openai_api_key,openai_base_url,model"\)[\s\S]*?\.eq\("id", 1\)/);
 const featureFlow = providerSource.slice(providerSource.indexOf("export async function getTeamTaskData"), providerSource.indexOf("// team/團隊成員屏"));
-assert.match(featureFlow, /featureAiBatchForCompany\(teamExtras\?\.companies, authUser\?\.activeCompanyId\)/);
+assert.match(featureFlow, /featureAiBatchForCompany\([\s\S]*?authUser\?\.bindings/);
 assert.doesNotMatch(providerSource, /company\.name\s*===\s*"Honnmono"\s*&&\s*company\.featureAiBatch/);
 assert.match(boardSource, /featureAiBatch && state\.permissions\.canCreate/);
 assert.match(tasksSource, /createTaskAiTasks\([\s\S]*?createTask: createLiveTask/);
 assert.match(tasksSource, /state\.ai\.cards = state\.ai\.cards\.slice\(outcome\.created\.length\)/,
   "successful cards must leave the retry preview after a partial write failure");
+assert.match(tasksSource, /focusAiCardId: cardId/,
+  "department changes must restore focus to the edited AI card");
 
 console.log("team-ai-batch contracts: PASS (Edge sanitize/scope, active-company gate, preview mapping, permissions, fixed endpoint, sequential partial writes, i18n)");

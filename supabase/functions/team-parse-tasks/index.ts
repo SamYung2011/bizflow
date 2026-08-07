@@ -1,8 +1,10 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import {
   buildTeamTaskPrompt,
+  departmentNamesForEmployee,
   hongKongDate,
   normalizeTeamParseInput,
+  parsedTasksFailure,
   safeJson,
   sanitizeParsedTasks,
   TeamParseContractError,
@@ -109,16 +111,16 @@ Deno.serve(async (req) => {
 
   const employeeResult = await admin
     .from("employees")
-    .select("id,name")
+    .select("id,name,is_super_admin")
     .eq("user_id", userData.user.id)
-    .maybeSingle();
+    .limit(1);
   if (employeeResult.error) return failure("employee_lookup_failed", "Employee lookup failed", 500);
-  if (!employeeResult.data?.id) return failure("not_company_member", "Company membership required", 403);
-  const employee = employeeResult.data;
+  const employee = employeeResult.data?.[0];
+  if (!employee?.id) return failure("not_company_member", "Company membership required", 403);
 
   const membershipResult = await admin
     .from("employee_companies")
-    .select("company_id")
+    .select("company_id,is_company_admin")
     .eq("employee_id", employee.id)
     .eq("company_id", input.companyId)
     .maybeSingle();
@@ -135,8 +137,15 @@ Deno.serve(async (req) => {
     return failure("feature_not_enabled", "AI task parsing is not enabled", 403);
   }
 
-  const [departmentResult, colleagueResult, settingsResult] = await Promise.all([
-    admin.from("departments").select("name").eq("company_id", input.companyId),
+  const unrestrictedDepartments = employee.is_super_admin === true
+    || membershipResult.data.is_company_admin === true;
+  const [departmentResult, employeeDepartmentResult, colleagueResult, settingsResult] = await Promise.all([
+    admin.from("departments").select("id,name").eq("company_id", input.companyId),
+    unrestrictedDepartments
+      ? Promise.resolve({ data: [] as { department_id: string }[], error: null })
+      : admin.from("employee_departments")
+        .select("department_id")
+        .eq("employee_id", employee.id),
     admin.from("employee_companies")
       .select("employee_id,employees!inner(name)")
       .eq("company_id", input.companyId),
@@ -145,7 +154,7 @@ Deno.serve(async (req) => {
       .eq("id", 1)
       .maybeSingle(),
   ]);
-  if (departmentResult.error || colleagueResult.error) {
+  if (departmentResult.error || employeeDepartmentResult.error || colleagueResult.error) {
     return failure("company_context_failed", "Company context lookup failed", 500);
   }
   if (settingsResult.error || !settingsResult.data?.openai_api_key) {
@@ -153,7 +162,11 @@ Deno.serve(async (req) => {
   }
 
   const meName = String(employee.name || "").trim() || "當前使用者";
-  const departmentNames = uniqueNames((departmentResult.data ?? []).map((row) => row.name));
+  const departmentNames = departmentNamesForEmployee(
+    departmentResult.data ?? [],
+    employeeDepartmentResult.data ?? [],
+    unrestrictedDepartments,
+  );
   const colleagueNames = uniqueNames((colleagueResult.data ?? [])
     .map((row) => {
       const related = (row as unknown as { employees?: { name?: unknown } | { name?: unknown }[] }).employees;
@@ -187,7 +200,7 @@ Deno.serve(async (req) => {
     const tasks = sanitizeParsedTasks(safeJson(content), departmentNames);
     return json({ tasks });
   } catch (error) {
-    const diagnostic = error instanceof TeamParseContractError ? error.code : "invalid_ai_response";
-    return failure("ai_invalid_response", "AI returned an invalid task response", 502, diagnostic);
+    const detail = parsedTasksFailure(error);
+    return failure(detail.code, "AI returned an invalid task response", 502, detail.diagnostic);
   }
 });
