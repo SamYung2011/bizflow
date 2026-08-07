@@ -6,7 +6,7 @@ import { availableTaskDepartments, renderTaskSubmitDialog, taskMembersForDepartm
 import { isTaskFilterGroup } from "./tasks-filters.js";
 import { renderTaskCalendar } from "./tasks-calendar.js";
 import { renderTaskOverview } from "./tasks-overview.js";
-import { renderTaskAiDialog } from "./tasks-ai.js";
+import { createTaskAiState, createTaskAiTasks, normalizeTaskAiCards, renderTaskAiDialog, taskAiCardsReady, taskAiErrorKey, taskAiPublishItems, updateTaskAiCardDepartment } from "./tasks-ai.js";
 import { calendarRelatedTasks, canDeleteTaskForUser, defaultTaskViewForUser, isOpenTask, isTaskAssignedTo, isTaskCreator, isTaskMentionedForMember, isWaitingApproval, memberIdentity, openAssignedTaskCount, taskAssignee, taskCompletionForMember, taskReadFingerprintRootId } from "./tasks-model.js";
 import { attachTaskDomainController } from "./tasks-domain-controller.js";
 import { renderTaskBoardGrid, renderTaskToolbar } from "./tasks-board.js";
@@ -21,6 +21,7 @@ import { consumeNavigationPreset, navigationPresetKeys } from "../components/nav
 import { closeTaskFeedbackMention, createTaskFeedbackDraft, removeTaskFeedbackMention, selectTaskFeedbackMention, taskFeedbackMentionCandidates, updateTaskFeedbackMentionInput } from "./tasks-mentions.js";
 import { pastedTaskFeedbackImages, revokeTaskFeedbackAttachmentDrafts, taskFeedbackAttachmentDraft } from "./tasks-clipboard.js";
 import { buildTaskSubtaskEcho, createTaskSubmitSubtaskDraft, createTaskSubmitSubtasks, normalizeTaskSubmitSubtasks } from "./tasks-submit-subtasks.js";
+import { callTeamTaskParser } from "../data/live-ai-parse.js";
 
 let data = null;
 let currentUser = null;
@@ -100,6 +101,7 @@ function createTaskState(nextData, historyState = null) {
     calendarMonth: Number.isInteger(restored.calendarMonth) ? restored.calendarMonth : now.getMonth(),
     calendarExpandedDate: null,
     aiOpen: false,
+    ai: createTaskAiState(),
     detailOpen: false,
     selectedTaskId: null,
     detailTab: "content",
@@ -310,7 +312,7 @@ export function renderTaskManagement(helpers) {
       </main>
     </section>
     ${renderTaskSubmitDialog({ state, data: { ...data, members: state.members }, helpers })}
-    ${renderTaskAiDialog({ state, helpers })}
+    ${renderTaskAiDialog({ state, context: taskAiContext(), helpers })}
   </div>`;
 }
 
@@ -323,7 +325,7 @@ function closeAllFilterMenus(except) {
   });
 }
 
-function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, focusFeedback = false, feedbackCursor = null, focusFeedbackMenuId = "", focusFeedbackEditId = "", focusSubmit = false, focusSubmitSubtaskId = "", restoreSubmitFocus = false, focusFilterGroup = "", focusActionMenu = false, restoreActionTaskId = "", focusBoard = false, focusSubtaskId = "", focusSubtaskAdd = false, focusSubtaskEditId = "" } = {}) {
+function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, focusFeedback = false, feedbackCursor = null, focusFeedbackMenuId = "", focusFeedbackEditId = "", focusSubmit = false, focusSubmitSubtaskId = "", restoreSubmitFocus = false, focusFilterGroup = "", focusActionMenu = false, restoreActionTaskId = "", focusBoard = false, focusSubtaskId = "", focusSubtaskAdd = false, focusSubtaskEditId = "", focusAi = false } = {}) {
   taskDueDatePanel.close({ restoreFocus: false });
   taskStartDatePanel.close({ restoreFocus: false });
   const page = document.querySelector(".team-task-page");
@@ -350,6 +352,7 @@ function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, foc
   if (focusSubtaskId) document.querySelector(`[data-task-subtask-toggle="${CSS.escape(focusSubtaskId)}"]`)?.focus();
   if (focusSubtaskAdd) document.querySelector('[data-task-subtask-form] input[name="title"]')?.focus();
   if (focusSubtaskEditId) document.querySelector(`[data-task-subtask-edit-form="${CSS.escape(focusSubtaskEditId)}"] input[name="subtaskTitle"]`)?.focus();
+  if (focusAi) document.querySelector(state.ai.stage === "preview" ? "[data-task-ai-card] input[data-task-ai-field=\"title\"]" : "[data-task-ai-text]")?.focus();
   activeScope?.animationFrame(observeTaskBoardUnreadColumns);
   if (taskLiveRefresh?.pending) queueMicrotask(() => void taskLiveRefresh.flush());
 }
@@ -460,6 +463,148 @@ function onTaskMousedown(event) {
 
 function taskSubmitData() {
   return { ...data, members: state.members };
+}
+
+function taskAiContext() {
+  return {
+    departments: availableTaskDepartments(state, taskSubmitData()),
+    members: state.members.filter((member) => member.dept !== "all"),
+    currentUserId: state.currentUser.id,
+    canAssignOthers: state.permissions.canAssignOthers
+  };
+}
+
+function openTaskAi() {
+  if (!data.featureAiBatch || !state.permissions.canCreate || !state.liveTaskWrites || state.writeBusy) return;
+  state.ai = createTaskAiState();
+  state.aiOpen = true;
+  state.writeError = "";
+  state.writeErrorValues = {};
+  state.writeNotice = "";
+  rerenderTaskPage({ focusAi: true });
+}
+
+function closeTaskAi() {
+  if (!state.aiOpen || state.ai.parseBusy || state.ai.publishBusy) return;
+  state.aiOpen = false;
+  state.ai = createTaskAiState();
+  rerenderTaskPage();
+  document.querySelector("[data-task-ai-open]")?.focus();
+}
+
+function appendTaskAiEcho(createdEntry) {
+  const item = createdEntry.item;
+  const assignee = state.members.find((member) => member.id === item.assigneeIds[0]);
+  if (!assignee) throw new Error(`Created task assignee is unavailable: ${item.assigneeIds[0]}`);
+  const column = state.board.find((entry) => entry.key === item.priority) ?? state.board[0];
+  const department = taskSubmitDepartment(item.departmentId);
+  const task = {
+    id: String(createdEntry.result?.task?.id || `local-ai-task-${Date.now()}`),
+    title: item.title,
+    content: item.content,
+    due: item.due || "",
+    owner: assignee.name,
+    priority: column.key,
+    dbPriority: column.key === "medium" ? "mid" : column.key,
+    status: "inProgress",
+    done: false,
+    countBadge: "",
+    departmentId: item.departmentId || "",
+    visibility: item.departmentId ? "department" : "team",
+    requiresReview: false,
+    completionMode: "ratio",
+    members: [assignee.name],
+    feedback: [],
+    startDate: "",
+    createdAt: localTimestamp(),
+    completedAt: "",
+    creator: state.currentUser.name,
+    creatorId: state.currentUser.id,
+    parentId: null,
+    visibilityDepartment: department?.name || "",
+    approvedAt: "",
+    approvedBy: "",
+    attachments: [],
+    attachmentCount: 0,
+    assignees: [{ employeeId: assignee.id, name: assignee.name, completedAt: null, abandonedAt: null }],
+    subtasks: []
+  };
+  column.tasks.unshift(task);
+  state.tasks.unshift(task);
+  state.summary.total += 1;
+  state.summary.inProgress += 1;
+  adjustOpenTaskCounts(task, 1);
+}
+
+async function parseTaskAiDraft() {
+  if (!state.aiOpen || state.ai.parseBusy || !state.ai.text.trim()) return;
+  const mountId = activeMountId;
+  const scope = activeScope;
+  state.ai.parseBusy = true;
+  state.ai.errorKey = "";
+  state.ai.errorValues = {};
+  rerenderTaskPage();
+  try {
+    const tasks = await callTeamTaskParser({
+      text: state.ai.text.trim(),
+      companyId: currentUser.activeCompanyId
+    });
+    if (!isCurrentTaskMount(mountId, scope)) return;
+    const cards = normalizeTaskAiCards(tasks, taskAiContext());
+    if (!cards.length) throw Object.assign(new Error("no_tasks"), { code: "no_tasks" });
+    state.ai.cards = cards;
+    state.ai.stage = "preview";
+  } catch (error) {
+    if (!isCurrentTaskMount(mountId, scope)) return;
+    console.warn("AI task parse failed", error);
+    state.ai.errorKey = taskAiErrorKey(error);
+  } finally {
+    if (isCurrentTaskMount(mountId, scope)) state.ai.parseBusy = false;
+  }
+  if (isCurrentTaskMount(mountId, scope)) rerenderTaskPage({ focusAi: true });
+}
+
+async function publishTaskAiDraft() {
+  const context = taskAiContext();
+  if (!state.aiOpen || state.ai.publishBusy || !taskAiCardsReady(state.ai.cards, context)) return;
+  const mountId = activeMountId;
+  const scope = activeScope;
+  const items = taskAiPublishItems(state.ai.cards, context);
+  state.ai.publishBusy = true;
+  state.ai.errorKey = "";
+  state.ai.errorValues = {};
+  state.writeError = "";
+  state.writeErrorValues = {};
+  state.writeNotice = "";
+  rerenderTaskPage();
+  const outcome = await createTaskAiTasks({
+    items,
+    createTask: createLiveTask,
+    shouldContinue: () => isCurrentTaskMount(mountId, scope)
+  });
+  if (!isCurrentTaskMount(mountId, scope)) return;
+  outcome.created.forEach((createdEntry) => {
+    try {
+      appendTaskAiEcho(createdEntry);
+    } catch (error) {
+      console.error("AI task create persisted but local echo failed", error);
+    }
+  });
+  if (outcome.failure) {
+    console.warn(`AI task create failed: ${outcome.failure.item.title}`, outcome.failure.error);
+    state.ai.cards = state.ai.cards.slice(outcome.created.length);
+    state.ai.errorKey = "tasks.ai.error.partial";
+    state.ai.errorValues = { title: outcome.failure.item.title };
+    state.writeError = "tasks.ai.error.partial";
+    state.writeErrorValues = { title: outcome.failure.item.title };
+    state.ai.publishBusy = false;
+    rerenderTaskPage({ focusAi: true });
+    return;
+  }
+  state.aiOpen = false;
+  state.ai = createTaskAiState();
+  state.writeNotice = "tasks.ai.published";
+  rerenderTaskPage({ focusBoard: true });
 }
 
 function taskSubmitDepartment(departmentId) {
@@ -1098,6 +1243,25 @@ async function onTaskClick(event) {
     closeFeedbackMentionMenuInPlace();
   }
 
+  if (event.target.closest("[data-task-ai-back]")) {
+    if (state.ai.publishBusy) return;
+    state.ai.stage = "input";
+    state.ai.errorKey = "";
+    state.ai.errorValues = {};
+    rerenderTaskPage({ focusAi: true });
+    return;
+  }
+
+  const aiRemove = event.target.closest("[data-task-ai-remove]");
+  if (aiRemove) {
+    if (state.ai.publishBusy) return;
+    const cardId = aiRemove.getAttribute("data-task-ai-remove");
+    state.ai.cards = state.ai.cards.filter((card) => card.id !== cardId);
+    if (!state.ai.cards.length) state.ai.stage = "input";
+    rerenderTaskPage({ focusAi: true });
+    return;
+  }
+
   const columnExpand = event.target.closest("[data-task-column-expand]");
   if (columnExpand) {
     const priority = columnExpand.getAttribute("data-task-column-expand");
@@ -1532,6 +1696,12 @@ function onTaskKeydown(event) {
     return;
   }
   if (event.key !== "Escape") return;
+  if (state.aiOpen) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    closeTaskAi();
+    return;
+  }
   if (state.feedbackDraft.mentionMenu?.open) {
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -1594,6 +1764,13 @@ function onTaskKeydown(event) {
 async function onTaskSubmit(event) {
   const mountId = activeMountId;
   const scope = activeScope;
+  const aiForm = event.target.closest("[data-task-ai-form]");
+  if (aiForm) {
+    event.preventDefault();
+    if (aiForm.getAttribute("data-task-ai-form") === "publish") await publishTaskAiDraft();
+    else await parseTaskAiDraft();
+    return;
+  }
   const feedbackEditForm = event.target.closest("[data-task-feedback-edit-form]");
   if (feedbackEditForm) {
     event.preventDefault();
@@ -1991,6 +2168,22 @@ function syncTaskSubmitSegment(control) {
 }
 
 function onTaskInput(event) {
+  const aiText = event.target.closest("[data-task-ai-text]");
+  if (aiText) {
+    state.ai.text = aiText.value;
+    const button = aiText.closest("[data-task-ai-form]")?.querySelector('button[type="submit"]');
+    if (button) button.disabled = !state.ai.text.trim();
+    return;
+  }
+  const aiField = event.target.closest("[data-task-ai-field]");
+  if (aiField) {
+    const card = state.ai.cards.find((item) => item.id === aiField.getAttribute("data-task-ai-id"));
+    const field = aiField.getAttribute("data-task-ai-field");
+    if (card && ["title", "description"].includes(field)) card[field] = aiField.value;
+    const button = aiField.closest("[data-task-ai-form]")?.querySelector('button[type="submit"]');
+    if (button) button.disabled = !taskAiCardsReady(state.ai.cards, taskAiContext());
+    return;
+  }
   const feedbackEditInput = event.target.closest('[data-task-feedback-edit-form] textarea[name="feedbackEdit"]');
   if (feedbackEditInput) {
     state.feedbackEditDraft = feedbackEditInput.value;
@@ -2025,6 +2218,22 @@ function onTaskInput(event) {
 }
 
 function onTaskChange(event) {
+  const aiField = event.target.closest("[data-task-ai-field]");
+  if (aiField) {
+    const cardId = aiField.getAttribute("data-task-ai-id");
+    const field = aiField.getAttribute("data-task-ai-field");
+    const cardIndex = state.ai.cards.findIndex((item) => item.id === cardId);
+    if (cardIndex < 0) return;
+    if (field === "departmentId") {
+      state.ai.cards[cardIndex] = updateTaskAiCardDepartment(state.ai.cards[cardIndex], aiField.value, taskAiContext());
+      rerenderTaskPage({ focusAi: true });
+      return;
+    }
+    if (["assigneeId", "due", "priority"].includes(field)) state.ai.cards[cardIndex][field] = aiField.value;
+    const button = aiField.closest("[data-task-ai-form]")?.querySelector('button[type="submit"]');
+    if (button) button.disabled = !taskAiCardsReady(state.ai.cards, taskAiContext());
+    return;
+  }
   const feedbackAttachmentInput = event.target.closest("[data-task-feedback-file]");
   if (feedbackAttachmentInput) {
     if (state.liveReadOnly && !state.liveTaskWrites) return;
@@ -2130,6 +2339,7 @@ function hasTaskSubmitUnsavedChanges() {
 
 function hasTaskUnsavedChanges() {
   return hasTaskSubmitUnsavedChanges()
+    || Boolean(state.aiOpen && (state.ai.text.trim() || state.ai.cards.length))
     || Boolean(state.feedbackDraft.message.trim() || state.feedbackDraft.attachments.length || state.feedbackDraft.mentions?.length)
     || Boolean(state.feedbackEditingId && state.feedbackEditDraft !== state.feedbackEditOriginal)
     || Boolean(String(state.subtaskAddDraft.title || "").trim() || state.subtaskAddDraft.assigneeId)
@@ -2137,9 +2347,9 @@ function hasTaskUnsavedChanges() {
 }
 
 function hasTaskRealtimeRefreshBlock() {
-  if (state.writeBusy || state.submitOpen || state.feedbackEditingId || hasTaskUnsavedChanges()) return true;
+  if (state.writeBusy || state.submitOpen || state.aiOpen || state.feedbackEditingId || hasTaskUnsavedChanges()) return true;
   const active = document.activeElement;
-  return Boolean(active?.closest?.("[data-task-feedback-form], [data-task-feedback-edit-form], [data-task-subtask-form], [data-task-subtask-edit-form], [data-task-submit-form]"));
+  return Boolean(active?.closest?.("[data-task-feedback-form], [data-task-feedback-edit-form], [data-task-subtask-form], [data-task-subtask-edit-form], [data-task-submit-form], [data-task-ai-form]"));
 }
 
 function currentTaskViewState() {
@@ -2172,6 +2382,7 @@ function applyRealtimeTaskData(nextData) {
   Object.assign(next.state, {
     calendarExpandedDate: currentState.calendarExpandedDate,
     aiOpen: currentState.aiOpen,
+    ai: currentState.ai,
     detailOpen: keepDetail,
     selectedTaskId: keepDetail ? selectedTaskId : null,
     detailTab: keepDetail ? currentState.detailTab : "content",
@@ -2282,6 +2493,8 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
         refreshTaskBoardReadState: () => taskBoardReadTracker?.refresh(state.tasks),
         markMemberBoardSeen,
         approveTask: approveWaitingTask,
+        openTaskAi,
+        closeTaskAi,
         refreshLiveData: refreshLiveTaskSnapshot,
         isLiveRefreshBlocked: hasTaskRealtimeRefreshBlock,
         scope

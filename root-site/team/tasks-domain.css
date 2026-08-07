@@ -604,6 +604,10 @@
   width: min(92vw, 480px);
 }
 
+.task-ai-dialog {
+  width: min(92vw, 760px);
+}
+
 .task-calendar-dialog header,
 .task-ai-dialog header,
 .task-ai-dialog footer {
@@ -1010,28 +1014,103 @@
   cursor: not-allowed;
 }
 
-/* AI shell */
+/* AI organize + publish */
 .task-ai-dialog header {
   border-bottom: 1px solid var(--gray-10);
 }
 
-.task-ai-dialog > div p {
+.task-ai-dialog .task-ai-body > p {
   margin: 0;
   color: var(--gray-60);
   line-height: var(--lh-body);
 }
 
+.task-ai-input,
+.task-ai-card label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-4);
+  color: var(--gray-60);
+  font-size: var(--font-description-size);
+}
+
+.task-ai-dialog input,
+.task-ai-dialog select,
 .task-ai-dialog textarea {
+  width: 100%;
+  min-width: 0;
   min-height: 180px;
   padding: var(--space-10);
   border: 1px solid var(--gray-15);
   border-radius: var(--radius-10);
+  color: var(--gray-80);
+  background: var(--white);
+  font: inherit;
+}
+
+.task-ai-dialog input,
+.task-ai-dialog select {
+  min-height: 40px;
+}
+
+.task-ai-input textarea {
   resize: vertical;
 }
 
-.task-ai-dialog > div > span {
-  color: var(--gray-40);
-  font-size: var(--font-description-size);
+.task-ai-list {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-10);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.task-ai-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-10);
+  padding: var(--space-10);
+  border: 1px solid var(--gray-10);
+  border-radius: var(--radius-10);
+  background: var(--gray-5);
+}
+
+.task-ai-card > header {
+  padding: 0;
+  border: 0;
+}
+
+.task-ai-card > header button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-20);
+  color: var(--red);
+  background: var(--white);
+}
+
+.task-ai-card textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
+.task-ai-card__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-10);
+}
+
+.task-ai-error {
+  padding: var(--space-10);
+  border-radius: var(--radius-10);
+  color: var(--red) !important;
+  background: color-mix(in srgb, var(--red) 8%, var(--white));
 }
 
 .task-ai-dialog footer {
@@ -1048,7 +1127,8 @@
   background: var(--blue);
 }
 
-.task-ai-dialog footer button:first-child {
+.task-ai-dialog footer [data-task-ai-close],
+.task-ai-dialog footer [data-task-ai-back] {
   color: var(--gray-60);
   background: var(--gray-10);
 }
@@ -1141,6 +1221,10 @@
   .task-calendar-overlay,
   .task-ai-overlay {
     padding: var(--grid-margin-mobile);
+  }
+
+  .task-ai-card__grid {
+    grid-template-columns: 1fr;
   }
 
   .task-detail__subtask {

@@ -22,6 +22,8 @@ export function attachTaskDomainController({
   refreshTaskBoardReadState,
   markMemberBoardSeen,
   approveTask,
+  openTaskAi,
+  closeTaskAi,
   refreshLiveData,
   isLiveRefreshBlocked,
   scope
@@ -115,14 +117,12 @@ export function attachTaskDomainController({
     }
 
     if (event.target.closest("[data-task-ai-open]")) {
-      state.aiOpen = true;
-      rerender();
+      openTaskAi?.();
       return;
     }
 
     if (event.target.closest("[data-task-ai-close]") || event.target.matches("[data-task-ai-overlay]")) {
-      state.aiOpen = false;
-      rerender();
+      closeTaskAi?.();
       return;
     }
 

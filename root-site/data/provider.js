@@ -17,6 +17,7 @@ import {
 import { getReadState, rememberUnreadWatermarks, setReadStateAccount } from "./read-state.js";
 import { buildCustomerGroups } from "./customer-groups.js";
 import { customerSourceFromInvoices } from "./customer-source.js";
+import { featureAiBatchForCompany } from "./team-feature-flags.js";
 
 function warnProviderFallback(snapshot, fallback) {
   console.warn(`[provider] ${snapshot} invalid → fallback ${fallback}`);
@@ -512,12 +513,13 @@ function normalizeTeamTaskDetail(task, priority, index) {
 }
 
 export async function getTeamTaskData() {
-  const [home, homeSnap, snap, membersSnap, teamExtras] = await Promise.all([
+  const [home, homeSnap, snap, membersSnap, teamExtras, authUser] = await Promise.all([
     getHomeData(),
     loadSnapshot(),
     loadTasksSnapshot(),
     loadMembersSnapshot(),
-    loadTeamExtrasSnapshot()
+    loadTeamExtrasSnapshot(),
+    getSession().then((session) => session ? getAuthCurrentUser() : null).catch(() => null)
   ]);
 
   // 任务三数:真实 status 计数(total/completed/open),坏了整块回退 mock
@@ -643,8 +645,7 @@ export async function getTeamTaskData() {
     departments,
     board,
     tasks: fullTasksOk ? normalizedTasks : board.flatMap((column) => column.tasks),
-    featureAiBatch: Array.isArray(teamExtras?.companies) && teamExtras.companies.some((company) =>
-      company && company.name === "Honnmono" && company.featureAiBatch === true)
+    featureAiBatch: featureAiBatchForCompany(teamExtras?.companies, authUser?.activeCompanyId)
   };
 }
 
