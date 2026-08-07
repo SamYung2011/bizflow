@@ -113,6 +113,7 @@ Deno.serve(async (req) => {
     .from("employees")
     .select("id,name,is_super_admin")
     .eq("user_id", userData.user.id)
+    .order("id", { ascending: true })
     .limit(1);
   if (employeeResult.error) return failure("employee_lookup_failed", "Employee lookup failed", 500);
   const employee = employeeResult.data?.[0];

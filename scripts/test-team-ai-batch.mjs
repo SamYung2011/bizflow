@@ -233,8 +233,8 @@ assert.match(edgeSource, /companyResult\.data\?\.feature_ai_batch !== true/);
 assert.match(edgeSource, /departmentNamesForEmployee\([\s\S]*?unrestrictedDepartments/);
 assert.match(edgeSource, /detail\.code[\s\S]*?detail\.diagnostic/,
   "no_tasks must be returned as the public Edge error code");
-assert.match(edgeSource, /\.eq\("user_id", userData\.user\.id\)\s*\.limit\(1\)/,
-  "duplicate employee rows must not make the Edge Function return 500");
+assert.match(edgeSource, /\.eq\("user_id", userData\.user\.id\)\s*\.order\("id", \{ ascending: true \}\)\s*\.limit\(1\)/,
+  "duplicate employee rows must resolve deterministically without returning 500");
 assert.match(edgeSource, /\.from\("wa_settings"\)[\s\S]*?\.select\("openai_api_key,openai_base_url,model"\)[\s\S]*?\.eq\("id", 1\)/);
 const featureFlow = providerSource.slice(providerSource.indexOf("export async function getTeamTaskData"), providerSource.indexOf("// team/團隊成員屏"));
 assert.match(featureFlow, /featureAiBatchForCompany\([\s\S]*?authUser\?\.bindings/);
