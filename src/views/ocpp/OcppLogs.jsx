@@ -11,6 +11,7 @@ import {
 // 列表只取摘要，完整 data 需點開後單條查詢，避免首屏拉大 JSON。
 
 const DEFAULT_LIMIT = 50;
+const LIST_CACHE_TTL_MS = 30_000;
 const MAX_LIMIT_WITH_PILE = 200;
 const MAX_LIMIT_WITHOUT_PILE = 20;
 const MAX_WINDOW_WITH_PILE_HOURS = 24;
@@ -112,14 +113,57 @@ function effectiveWindow({ pileNo, from, to, limit }) {
   };
 }
 
+let prefetchedDefaultWindow = null;
+
+function createDefaultWindow(now = new Date()) {
+  const fromInput = toLocalInputValue(new Date(now.getTime() - 60 * 60 * 1000));
+  const toInput = toLocalInputValue(now);
+  const plan = effectiveWindow({
+    pileNo: "",
+    from: inputToUnixSeconds(fromInput),
+    to: inputToUnixSeconds(toInput),
+    limit: DEFAULT_LIMIT,
+  });
+  const qs = new URLSearchParams();
+  qs.set("from", String(plan.from));
+  qs.set("to", String(plan.to));
+  qs.set("limit", String(plan.limit));
+  return {
+    createdAt: Date.now(),
+    fromInput,
+    toInput,
+    path: `/ocpp/logs?${qs}`,
+  };
+}
+
+function initialWindow() {
+  if (
+    prefetchedDefaultWindow &&
+    Date.now() - prefetchedDefaultWindow.createdAt < LIST_CACHE_TTL_MS
+  ) {
+    return prefetchedDefaultWindow;
+  }
+  return createDefaultWindow();
+}
+
+export function prefetchDefaultOcppLogs({ accessToken } = {}) {
+  if (!accessToken) return Promise.resolve(null);
+  const nextWindow = createDefaultWindow();
+  prefetchedDefaultWindow = nextWindow;
+  return callOcppAdmin(nextWindow.path, {
+    accessToken,
+    ttlMs: LIST_CACHE_TTL_MS,
+  });
+}
+
 export default function OcppLogs({ session, isAdmin }) {
   const { t } = useT();
-  const now = useMemo(() => new Date(), []);
+  const defaultWindow = useMemo(initialWindow, []);
   const [pileInput, setPileInput] = useState("");
   const [pileNo, setPileNo] = useState("");
   const [dir, setDir] = useState("all");
-  const [fromInput, setFromInput] = useState(() => toLocalInputValue(new Date(now.getTime() - 60 * 60 * 1000)));
-  const [toInput, setToInput] = useState(() => toLocalInputValue(now));
+  const [fromInput, setFromInput] = useState(defaultWindow.fromInput);
+  const [toInput, setToInput] = useState(defaultWindow.toInput);
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
   const [beforeId, setBeforeId] = useState("");
   const [cursorStack, setCursorStack] = useState([]);
@@ -155,7 +199,11 @@ export default function OcppLogs({ session, isAdmin }) {
       qs.set("to", String(queryPlan.to));
       qs.set("limit", String(queryPlan.limit));
       if (beforeId) qs.set("before_id", beforeId);
-      const data = await callOcppAdmin(`/ocpp/logs?${qs}`, { accessToken, force, ttlMs: 0 });
+      const data = await callOcppAdmin(`/ocpp/logs?${qs}`, {
+        accessToken,
+        force,
+        ttlMs: LIST_CACHE_TTL_MS,
+      });
       if (!aliveRef.current) return;
       setRows(Array.isArray(data?.data) ? data.data : []);
       setHasMore(Boolean(data?.page?.hasMore));

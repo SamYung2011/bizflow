@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
 import { useT } from "../../i18n.jsx";
 
-const OcppLogs = lazy(() => import("./OcppLogs.jsx"));
+const loadOcppLogs = () => import("./OcppLogs.jsx");
+const OcppLogs = lazy(loadOcppLogs);
 const CommandLogs = lazy(() => import("./CommandLogs.jsx"));
 const AlarmInfo = lazy(() => import("./AlarmInfo.jsx"));
 
@@ -374,7 +375,7 @@ function ScheduleStartModal({ open, action, onConfirm, onCancel, t, busy }) {
   );
 }
 
-function MonitorSubTabs({ active, onChange, t }) {
+function MonitorSubTabs({ active, onChange, onWarmLogs, t }) {
   return (
     <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: "1px solid #e5e7eb" }}>
       {[
@@ -389,6 +390,8 @@ function MonitorSubTabs({ active, onChange, t }) {
             key={id}
             type="button"
             onClick={() => onChange(id)}
+            onMouseEnter={id === "logs" ? onWarmLogs : undefined}
+            onFocus={id === "logs" ? onWarmLogs : undefined}
             style={{
               padding: "8px 16px",
               background: "none",
@@ -462,6 +465,15 @@ export default function OcppMonitor({ supabase, session, isAdmin }) {
     }
   }, [isAdmin, accessToken]);
 
+  const warmOcppLogs = useCallback(() => {
+    if (!isAdmin || !accessToken) return;
+    void loadOcppLogs()
+      .then((module) => module.prefetchDefaultOcppLogs?.({ accessToken }))
+      .catch(() => {
+        // 預載失敗不阻塞監控頁；真正進入消息流時仍會正常請求並顯示錯誤。
+      });
+  }, [isAdmin, accessToken]);
+
   useEffect(() => {
     aliveRef.current = true;
     refresh();
@@ -471,6 +483,16 @@ export default function OcppMonitor({ supabase, session, isAdmin }) {
   useEffect(() => {
     refreshSchedules();
   }, [refreshSchedules]);
+
+  useEffect(() => {
+    if (!isAdmin || !accessToken) return undefined;
+    if (typeof window.requestIdleCallback === "function") {
+      const id = window.requestIdleCallback(warmOcppLogs, { timeout: 1500 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const id = window.setTimeout(warmOcppLogs, 600);
+    return () => window.clearTimeout(id);
+  }, [isAdmin, accessToken, warmOcppLogs]);
 
   useEffect(() => {
     if (!autoRefresh || !isAdmin) return undefined;
@@ -556,7 +578,7 @@ export default function OcppMonitor({ supabase, session, isAdmin }) {
   if (activeSubTab === "logs") {
     return (
       <div style={{ padding: "16px 20px", maxWidth: 1400 }}>
-        <MonitorSubTabs active={activeSubTab} onChange={setActiveSubTab} t={t} />
+        <MonitorSubTabs active={activeSubTab} onChange={setActiveSubTab} onWarmLogs={warmOcppLogs} t={t} />
         <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#888" }}>{t("載入中…")}</div>}>
           <OcppLogs session={session} isAdmin={isAdmin} />
         </Suspense>
@@ -567,7 +589,7 @@ export default function OcppMonitor({ supabase, session, isAdmin }) {
   if (activeSubTab === "commandLogs") {
     return (
       <div style={{ padding: "16px 20px", maxWidth: 1400 }}>
-        <MonitorSubTabs active={activeSubTab} onChange={setActiveSubTab} t={t} />
+        <MonitorSubTabs active={activeSubTab} onChange={setActiveSubTab} onWarmLogs={warmOcppLogs} t={t} />
         <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#888" }}>{t("載入中…")}</div>}>
           <CommandLogs session={session} isAdmin={isAdmin} active />
         </Suspense>
@@ -578,7 +600,7 @@ export default function OcppMonitor({ supabase, session, isAdmin }) {
   if (activeSubTab === "alarms") {
     return (
       <div style={{ padding: "16px 20px", maxWidth: 1400 }}>
-        <MonitorSubTabs active={activeSubTab} onChange={setActiveSubTab} t={t} />
+        <MonitorSubTabs active={activeSubTab} onChange={setActiveSubTab} onWarmLogs={warmOcppLogs} t={t} />
         <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#888" }}>{t("載入中…")}</div>}>
           <AlarmInfo session={session} isAdmin={isAdmin} active />
         </Suspense>
@@ -588,7 +610,7 @@ export default function OcppMonitor({ supabase, session, isAdmin }) {
 
   return (
     <div style={{ padding: "16px 20px", maxWidth: 1400 }}>
-      <MonitorSubTabs active={activeSubTab} onChange={setActiveSubTab} t={t} />
+      <MonitorSubTabs active={activeSubTab} onChange={setActiveSubTab} onWarmLogs={warmOcppLogs} t={t} />
 
       {/* preview / demo banner */}
       <div style={{ background: "#fff7e6", border: "1px solid #ffd58a", color: "#92400e", padding: "10px 14px", borderRadius: 6, fontSize: 13, marginBottom: 16 }}>
