@@ -10,6 +10,13 @@ import {
 } from "../root-site/bizflow/app-feedback-api.js";
 import { appFeedbackCopy } from "../root-site/bizflow/app-feedback-i18n.js";
 import {
+  createDeviceUnbindController,
+  createDeviceUnbindState,
+  deviceExpectedUserId,
+  isValidDeviceImei,
+  renderDeviceUnbind,
+} from "../root-site/bizflow/app-feedback-device.js";
+import {
   FEEDBACK_POLL_INTERVAL_MS,
   FEEDBACK_POLL_MAX_INTERVAL_MS,
   applyFeedbackListPayload,
@@ -103,6 +110,15 @@ for (const subPath of [
 assert.doesNotThrow(() =>
   assertHonnmonoAdminRequest("/feedback/9/log-link", "POST"),
 );
+assert.doesNotThrow(() =>
+  assertHonnmonoAdminRequest(
+    "/device/binding?imei=862635066123456",
+    "GET",
+  ),
+);
+assert.doesNotThrow(() =>
+  assertHonnmonoAdminRequest("/device/unbind", "POST"),
+);
 for (const [method, subPath] of [
   ["GET", "/feedback/0"],
   ["GET", "/feedback/-1"],
@@ -112,6 +128,12 @@ for (const [method, subPath] of [
   ["DELETE", "/feedback/1"],
   ["GET", "//evil.example/feedback"],
   ["GET", "/feedback#https://evil.example"],
+  ["GET", "/device/binding"],
+  ["GET", "/device/binding?imei=123"],
+  ["GET", "/device/binding?imei=862635066123456&extra=1"],
+  ["POST", "/device/binding?imei=862635066123456"],
+  ["GET", "/device/unbind"],
+  ["POST", "/device/unbind/extra"],
 ]) {
   assert.throws(
     () => assertHonnmonoAdminRequest(subPath, method),
@@ -213,10 +235,11 @@ assert.deepEqual(
 const loadedPage = await feedbackRoute.load();
 assert.equal(typeof loadedPage.mountPage, "function");
 
-const [pageSource, apiSource, pollerSource, htmlSource, cssSource] =
+const [pageSource, apiSource, deviceSource, pollerSource, htmlSource, cssSource] =
   await Promise.all([
     read("root-site/bizflow/app-feedback.js"),
     read("root-site/bizflow/app-feedback-api.js"),
+    read("root-site/bizflow/app-feedback-device.js"),
     read("root-site/bizflow/app-feedback-poller.js"),
     read("root-site/bizflow/app-feedback.html"),
     read("root-site/bizflow/app-feedback.css"),
@@ -248,10 +271,23 @@ assert.doesNotMatch(pageSource, /HONNMONO_ADMIN_INTERNAL_TOKEN/);
 assert.doesNotMatch(pageSource, /app-api/i);
 assert.doesNotMatch(apiSource, /HONNMONO_ADMIN_INTERNAL_TOKEN/);
 assert.doesNotMatch(apiSource, /app-api/i);
+assert.doesNotMatch(deviceSource, /HONNMONO_ADMIN_INTERNAL_TOKEN/);
+assert.doesNotMatch(deviceSource, /app-api/i);
 assert.match(apiSource, /functions\/v1\/\$\{EDGE_FUNCTION\}/);
 assert.match(apiSource, /Authorization:\s*`Bearer \$\{context\.accessToken\}`/);
 assert.match(apiSource, /apikey:\s*context\.anonKey/);
 assert.match(apiSource, /signal,/);
+assert.match(apiSource, /"Content-Type":\s*"application\/json"/);
+assert.match(apiSource, /body:\s*serializedBody/);
+assert.match(pageSource, /data-app-feedback-tab="feedback"/);
+assert.match(pageSource, /data-app-feedback-tab="device"/);
+assert.match(pageSource, /activePoller\?\.pause\(\)/);
+assert.match(pageSource, /state\.activeTab\s*!==\s*"feedback"/);
+assert.match(deviceSource, /expected_userid:\s*expectedUserid/);
+assert.match(deviceSource, /pattern="\[0-9\]\{15\}"/);
+assert.match(deviceSource, /escapeHtml/);
+assert.match(deviceSource, /data-device-confirm-submit/);
+assert.match(deviceSource, /noAccountWarning/);
 assert.match(pageSource, /document\.visibilityState\s*!==\s*"visible"/);
 assert.match(pageSource, /pendingListPayload/);
 assert.match(pageSource, /data-feedback-new/);
@@ -265,6 +301,142 @@ assert.match(
 );
 assert.match(pollerSource, /scope\.onCleanup\(/);
 assert.doesNotMatch(pollerSource, /\bsetInterval\s*\(/);
+
+assert.equal(isValidDeviceImei("862635066123456"), true);
+assert.equal(isValidDeviceImei("86263506612345"), false);
+assert.equal(isValidDeviceImei("86263506612345x"), false);
+assert.equal(deviceExpectedUserId({ dev_cloud: { userid: 0 } }), 0);
+assert.equal(deviceExpectedUserId({ dev_cloud: { userid: 101 } }), 101);
+assert.equal(deviceExpectedUserId({ dev_cloud: { userid: "bad" } }), null);
+const deviceState = createDeviceUnbindState({
+  deviceImeiInput: "86x2635066123456overflow",
+});
+assert.equal(deviceState.imeiInput, "862635066123456");
+deviceState.queriedImei = "862635066123456";
+deviceState.binding = {
+  imei: "862635066123456",
+  unbound: false,
+  dev_cloud: {
+    uuid: "<img src=x onerror=alert(1)>",
+    userid: 101,
+    bindtime: 1_700_000_000_000,
+  },
+  binding_user: {
+    username: "<script>alert(1)</script>",
+    contact: "+852<unsafe>",
+  },
+  sr_iot_device: { binder: "owner@example.com" },
+  sr_iot_config_value: { mapping: { vin: "VIN<unsafe>" } },
+  lufengzhe_account: { exists: false, id: null },
+};
+deviceState.confirmOpen = true;
+deviceState.result = {
+  status: "unbound",
+  lufengzhe: "no_account",
+  steps: [
+    { key: "dev_cloud", status: "ok" },
+    { key: "lufengzhe", status: "skip" },
+  ],
+};
+const escapeHtml = (value) =>
+  String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+const deviceHtml = renderDeviceUnbind({
+  deviceState,
+  t: (key) => key,
+  escapeHtml,
+  formatTime: () => "2026-08-12 12:00:00",
+  errorCopy: () => "error",
+});
+assert.doesNotMatch(deviceHtml, /<script>alert\(1\)<\/script>/);
+assert.doesNotMatch(deviceHtml, /<img src=x/);
+assert.match(deviceHtml, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+assert.match(deviceHtml, /VIN&lt;unsafe&gt;/);
+assert.match(deviceHtml, /noAccountWarning/);
+assert.match(deviceHtml, /2026-08-12 12:00:00/);
+
+const controllerState = createDeviceUnbindState();
+const controllerCalls = [];
+let controllerRenders = 0;
+const controller = createDeviceUnbindController({
+  deviceState: controllerState,
+  scope: { signal: new AbortController().signal },
+  isActive: () => true,
+  isDeviceTab: () => true,
+  rerender: () => {
+    controllerRenders += 1;
+  },
+  focus: () => {},
+  request: async (path, options = {}) => {
+    controllerCalls.push([path, options]);
+    if (path.startsWith("/device/binding")) {
+      return {
+        imei: "862635066123456",
+        unbound: false,
+        dev_cloud: { userid: 101 },
+      };
+    }
+    return {
+      status: "unbound",
+      lufengzhe: "no_account",
+      binding: {
+        imei: "862635066123456",
+        unbound: true,
+        dev_cloud: { userid: 0 },
+      },
+      steps: [],
+    };
+  },
+});
+assert.equal(
+  controller.setImeiInput("862-635-066-123-456"),
+  "862635066123456",
+);
+await controller.lookup();
+assert.equal(
+  controllerCalls[0][0],
+  "/device/binding?imei=862635066123456",
+);
+assert.equal(controllerState.binding.dev_cloud.userid, 101);
+controller.openConfirm();
+assert.equal(controllerState.confirmOpen, true);
+await controller.submitUnbind();
+assert.deepEqual(controllerCalls[1][1].body, {
+  imei: "862635066123456",
+  expected_userid: 101,
+});
+assert.equal(controllerState.binding.unbound, true);
+assert.equal(controllerState.confirmOpen, false);
+assert.equal(controllerState.result.lufengzhe, "no_account");
+assert.ok(controllerRenders >= 5);
+
+const conflictState = createDeviceUnbindState({
+  deviceImeiInput: "862635066123456",
+});
+conflictState.queriedImei = "862635066123456";
+conflictState.binding = {
+  imei: "862635066123456",
+  unbound: false,
+  dev_cloud: { userid: 101 },
+};
+const conflictController = createDeviceUnbindController({
+  deviceState: conflictState,
+  scope: { signal: new AbortController().signal },
+  isActive: () => true,
+  isDeviceTab: () => true,
+  rerender: () => {},
+  focus: () => {},
+  request: async () => {
+    throw new HonnmonoAdminError("upstreamError", 409);
+  },
+});
+await conflictController.submitUnbind();
+assert.equal(conflictState.binding, null);
+assert.equal(conflictState.unbindError.status, 409);
 
 assert.match(htmlSource, /<script src="\.\.\/shell\/shell-skeleton\.js"><\/script>/);
 assert.match(htmlSource, /<script type="module" src="\.\.\/spa\/entry\.js"><\/script>/);
@@ -402,6 +574,29 @@ assert.equal(
   0,
   "page-scope disposal must remove the visibility listener",
 );
+
+const pausedDocument = createFakeDocument();
+const pausedScope = createFakeScope();
+let pausedPollCalls = 0;
+const pausablePoller = createFeedbackPoller({
+  scope: pausedScope,
+  documentRef: pausedDocument,
+  poll: async () => {
+    pausedPollCalls += 1;
+    return true;
+  },
+  clearTimeoutFn: (id) => pausedScope.timers.delete(id),
+});
+pausablePoller.start();
+assert.equal(pausedScope.timers.size, 1);
+pausablePoller.pause();
+assert.equal(pausedScope.timers.size, 0);
+await pausedDocument.setVisibility("hidden");
+await pausedDocument.setVisibility("visible");
+assert.equal(pausedPollCalls, 0, "paused device tab must not poll");
+pausablePoller.resume();
+assert.equal(pausedScope.timers.size, 1);
+pausedScope.dispose();
 await fakeDocument.setVisibility("hidden");
 await fakeDocument.setVisibility("visible");
 assert.equal(
@@ -460,5 +655,5 @@ for (let cycle = 0; cycle < 30; cycle += 1) {
 }
 
 console.log(
-  "Honnmono APP feedback root-site contracts: PASS (SPA lifecycle, scoped polling, visibility, backoff, stable state, admin menu, edge-only channel, log tri-state, i18n)",
+  "Honnmono APP root-site contracts: PASS (feedback + manual device unbind tabs, exact IMEI allowlist, confirmation, escaped fields, checklist, scoped polling, i18n)",
 );

@@ -5,6 +5,8 @@ const ALLOWED_REQUESTS = [
   { method: "GET", path: /^\/feedback(?:\?[^#]*)?$/ },
   { method: "GET", path: /^\/feedback\/[1-9]\d*$/ },
   { method: "POST", path: /^\/feedback\/[1-9]\d*\/log-link$/ },
+  { method: "GET", path: /^\/device\/binding\?imei=\d{15}$/ },
+  { method: "POST", path: /^\/device\/unbind$/ },
 ];
 
 export class HonnmonoAdminError extends Error {
@@ -48,11 +50,20 @@ async function edgeContext() {
 
 export async function callHonnmonoAdmin(
   subPath,
-  { method = "GET", signal } = {},
+  { method = "GET", signal, body } = {},
 ) {
   const normalizedMethod = String(method).toUpperCase();
   assertHonnmonoAdminRequest(subPath, normalizedMethod);
+  if (
+    body != null &&
+    (normalizedMethod !== "POST" ||
+      typeof body !== "object" ||
+      Array.isArray(body))
+  ) {
+    throw new HonnmonoAdminError("requestError");
+  }
   const context = await edgeContext();
+  const serializedBody = body == null ? undefined : JSON.stringify(body);
   const response = await fetch(
     `${context.baseUrl}/functions/v1/${EDGE_FUNCTION}${subPath}`,
     {
@@ -62,7 +73,9 @@ export async function callHonnmonoAdmin(
       headers: {
         apikey: context.anonKey,
         Authorization: `Bearer ${context.accessToken}`,
+        ...(serializedBody ? { "Content-Type": "application/json" } : {}),
       },
+      body: serializedBody,
     },
   );
   const text = await response.text();

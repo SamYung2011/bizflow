@@ -9,6 +9,11 @@ import {
   normalizeFeedbackLogStatus,
   safeHttpUrl,
 } from "./app-feedback-api.js";
+import {
+  createDeviceUnbindController,
+  createDeviceUnbindState,
+  renderDeviceUnbind,
+} from "./app-feedback-device.js";
 import { translateAppFeedback } from "./app-feedback-i18n.js";
 import {
   applyFeedbackListPayload,
@@ -22,6 +27,7 @@ let state = null;
 let helpers = null;
 let activeScope = null;
 let activePoller = null;
+let activeDeviceController = null;
 let instanceSequence = 0;
 let activeInstance = 0;
 
@@ -66,6 +72,15 @@ function errorCopy(error) {
     return t(code, { status: error?.status || "—" });
   }
   return t(code);
+}
+
+function deviceErrorCopy(error) {
+  if (error instanceof HonnmonoAdminError) {
+    if (error.code === "imeiValidation") return t("imeiValidation");
+    if (error.status === 404) return t("deviceNotFoundError");
+    if (error.status === 409) return t("bindingChangedError");
+  }
+  return errorCopy(error);
 }
 
 function selectOptions(values, selected) {
@@ -264,24 +279,47 @@ function renderDrawer() {
   </div>`;
 }
 
-function render(nextHelpers) {
-  helpers = nextHelpers;
+function renderFeedbackPanel() {
   const error = state.listError
     ? `<div class="app-feedback-alert">${rawE(t("listError", { message: errorCopy(state.listError) }))}</div>`
     : "";
+  return `<div class="app-feedback-card">
+    ${renderToolbar()}
+    ${error}
+    ${renderNewFeedbackNotice()}
+    ${renderTable()}
+    ${renderPager()}
+  </div>
+  ${renderDrawer()}`;
+}
+
+function renderTabs() {
+  return `<nav class="app-feedback-tabs" aria-label="${rawE(t("honnmonoAppTitle"))}">
+    <button type="button" class="app-feedback-tab${state.activeTab === "feedback" ? " is-active" : ""}" data-app-feedback-tab="feedback" aria-selected="${state.activeTab === "feedback"}">${rawE(t("feedbackTab"))}</button>
+    <button type="button" class="app-feedback-tab${state.activeTab === "device" ? " is-active" : ""}" data-app-feedback-tab="device" aria-selected="${state.activeTab === "device"}">${rawE(t("deviceUnbindTab"))}</button>
+  </nav>`;
+}
+
+function render(nextHelpers) {
+  helpers = nextHelpers;
+  const isFeedback = state.activeTab === "feedback";
   return `<section class="app-feedback-page" data-app-feedback-page>
     <header class="app-feedback-head">
-      <div><h1>${rawE(t("title"))}</h1><p>${rawE(t("subtitle"))}</p></div>
-      <button type="button" class="app-feedback-button app-feedback-button--refresh" data-feedback-refresh${state.loading ? " disabled" : ""}>${rawE(t(state.loading ? "refreshing" : "refresh"))}</button>
+      <div><h1>${rawE(t("honnmonoAppTitle"))}</h1><p>${rawE(t(isFeedback ? "subtitle" : "deviceUnbindSubtitle"))}</p></div>
+      ${isFeedback ? `<button type="button" class="app-feedback-button app-feedback-button--refresh" data-feedback-refresh${state.loading ? " disabled" : ""}>${rawE(t(state.loading ? "refreshing" : "refresh"))}</button>` : ""}
     </header>
-    <div class="app-feedback-card">
-      ${renderToolbar()}
-      ${error}
-      ${renderNewFeedbackNotice()}
-      ${renderTable()}
-      ${renderPager()}
-    </div>
-    ${renderDrawer()}
+    ${renderTabs()}
+    ${
+      isFeedback
+        ? renderFeedbackPanel()
+        : renderDeviceUnbind({
+            deviceState: state.device,
+            t,
+            escapeHtml: helpers.escapeHtml,
+            formatTime: (value) => formatFeedbackTime(value, helpers.lang),
+            errorCopy: deviceErrorCopy,
+          })
+    }
   </section>`;
 }
 
@@ -367,6 +405,7 @@ async function pollFeedbackList({ signal } = {}) {
   if (
     !state ||
     !isActive(instance, scope) ||
+    state.activeTab !== "feedback" ||
     document.visibilityState !== "visible" ||
     state.loading
   ) {
@@ -429,7 +468,13 @@ async function pollFeedbackList({ signal } = {}) {
 async function loadList() {
   const instance = activeInstance;
   const scope = activeScope;
-  if (!state || !isActive(instance, scope)) return;
+  if (
+    !state ||
+    state.activeTab !== "feedback" ||
+    !isActive(instance, scope)
+  ) {
+    return;
+  }
   const request = ++state.listRequest;
   clearPendingFeedback({ updateNotice: false });
   state.loading = true;
@@ -573,7 +618,49 @@ async function downloadLog(id) {
   }
 }
 
+function switchAppTab(nextTab) {
+  if (!state || !["feedback", "device"].includes(nextTab)) return;
+  if (state.activeTab === nextTab) return;
+  state.activeTab = nextTab;
+  state.detailRequest += 1;
+  state.selectedId = null;
+  state.detail = null;
+  state.detailError = null;
+  state.downloadError = null;
+  if (nextTab === "device") {
+    activePoller?.pause();
+    rerender();
+    activeScope?.animationFrame(() =>
+      document.querySelector("[data-device-imei]")?.focus(),
+    );
+    return;
+  }
+  activePoller?.resume();
+  rerender();
+  if (!state.hasLoadedList) void loadList();
+}
+
 function onFeedbackClick(event) {
+  const tab = event.target.closest?.("[data-app-feedback-tab]");
+  if (tab) {
+    switchAppTab(tab.getAttribute("data-app-feedback-tab"));
+    return;
+  }
+  if (event.target.closest?.("[data-device-unbind]")) {
+    activeDeviceController?.openConfirm();
+    return;
+  }
+  if (
+    event.target.matches?.("[data-device-confirm-overlay]") ||
+    event.target.closest?.("[data-device-confirm-cancel]")
+  ) {
+    activeDeviceController?.closeConfirm();
+    return;
+  }
+  if (event.target.closest?.("[data-device-confirm-submit]")) {
+    void activeDeviceController?.submitUnbind();
+    return;
+  }
   if (event.target.closest?.("[data-feedback-new]")) {
     acceptPendingFeedback();
     return;
@@ -607,6 +694,11 @@ function onFeedbackClick(event) {
 }
 
 function onFeedbackInput(event) {
+  if (event.target.matches("[data-device-imei]")) {
+    const value = activeDeviceController?.setImeiInput(event.target.value) ?? "";
+    event.target.value = value;
+    return;
+  }
   if (event.target.matches("[data-feedback-query]")) {
     state.searchInput = event.target.value;
   }
@@ -627,6 +719,11 @@ function onFeedbackChange(event) {
 }
 
 function onFeedbackSubmit(event) {
+  if (event.target.matches("[data-device-search]")) {
+    event.preventDefault();
+    void activeDeviceController?.lookup();
+    return;
+  }
   if (!event.target.matches("[data-feedback-search]")) return;
   event.preventDefault();
   state.keyword = state.searchInput.trim();
@@ -635,6 +732,10 @@ function onFeedbackSubmit(event) {
 }
 
 function onFeedbackKeydown(event) {
+  if (event.key === "Escape" && state?.device?.confirmOpen) {
+    activeDeviceController?.closeConfirm();
+    return;
+  }
   if (event.key === "Escape" && state?.selectedId != null) closeDetail();
 }
 
@@ -642,6 +743,8 @@ function createState(historyState) {
   const saved =
     historyState && typeof historyState === "object" ? historyState : {};
   return {
+    activeTab: saved.activeTab === "device" ? "device" : "feedback",
+    device: createDeviceUnbindState(saved),
     rows: [],
     total: 0,
     facets: {
@@ -698,18 +801,22 @@ export async function mountPage({
   throwIfPageAborted(signal, scope);
   requireFeedbackRouteAccess(currentUser, session, { url, navigation });
   const nextState = createState(historyState);
+  const initialList =
+    nextState.activeTab === "feedback"
+      ? callHonnmonoAdmin(listSubPath(nextState), { signal }).then(
+          (payload) => ({ payload, error: null }),
+          (error) => ({ payload: null, error }),
+        )
+      : Promise.resolve({ payload: null, error: null });
   const [initialResult, unread] = await Promise.all([
-    callHonnmonoAdmin(listSubPath(nextState), { signal }).then(
-      (payload) => ({ payload, error: null }),
-      (error) => ({ payload: null, error }),
-    ),
+    initialList,
     getUnread(),
   ]);
   throwIfPageAborted(signal, scope);
   if (initialResult.payload) {
     applyFeedbackListPayload(nextState, initialResult.payload);
     nextState.hasLoadedList = true;
-  } else {
+  } else if (initialResult.error) {
     nextState.listError = initialResult.error;
   }
   const instance = ++instanceSequence;
@@ -717,6 +824,16 @@ export async function mountPage({
   activeScope = scope;
   state = nextState;
   helpers = null;
+  const deviceController = createDeviceUnbindController({
+    deviceState: nextState.device,
+    scope,
+    isActive: () => isActive(instance, scope),
+    isDeviceTab: () => state?.activeTab === "device",
+    rerender,
+    focus: (selector) =>
+      scope.animationFrame(() => document.querySelector(selector)?.focus()),
+  });
+  activeDeviceController = deviceController;
   let poller = null;
 
   return {
@@ -733,9 +850,11 @@ export async function mountPage({
         poll: pollFeedbackList,
       });
       activePoller = poller;
-      poller.start();
+      if (state.activeTab === "feedback") poller.start();
     },
     captureState: () => ({
+      activeTab: state.activeTab,
+      deviceImeiInput: state.device.imeiInput,
       page: state.page,
       clientModel: state.clientModel,
       appVersion: state.appVersion,
@@ -746,6 +865,9 @@ export async function mountPage({
     dispose() {
       poller?.dispose();
       if (activePoller === poller) activePoller = null;
+      if (activeDeviceController === deviceController) {
+        activeDeviceController = null;
+      }
       if (activeInstance === instance) activeInstance = 0;
       if (activeScope === scope) activeScope = null;
       state = null;

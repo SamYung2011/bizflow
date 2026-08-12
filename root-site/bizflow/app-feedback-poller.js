@@ -81,11 +81,13 @@ export function createFeedbackPoller({
   let rerunImmediately = false;
   let consecutiveFailures = 0;
   let disposed = false;
+  let enabled = false;
   let runAbortController = null;
 
   function isVisibleAndActive() {
     return (
       !disposed &&
+      enabled &&
       scope.isCurrent() === true &&
       documentRef.visibilityState === "visible"
     );
@@ -165,6 +167,19 @@ export function createFeedbackPoller({
 
   return Object.freeze({
     start() {
+      enabled = true;
+      schedule(FEEDBACK_POLL_INTERVAL_MS);
+    },
+    pause() {
+      enabled = false;
+      rerunImmediately = false;
+      cancelTimer();
+      abortRunningPoll();
+    },
+    resume() {
+      if (disposed) return;
+      enabled = true;
+      consecutiveFailures = 0;
       schedule(FEEDBACK_POLL_INTERVAL_MS);
     },
     restart() {
@@ -172,11 +187,13 @@ export function createFeedbackPoller({
       schedule(FEEDBACK_POLL_INTERVAL_MS);
     },
     refreshNow() {
+      enabled = true;
       cancelTimer();
       return runPoll({ immediate: true });
     },
     dispose() {
       disposed = true;
+      enabled = false;
       rerunImmediately = false;
       cancelTimer();
       abortRunningPoll();
