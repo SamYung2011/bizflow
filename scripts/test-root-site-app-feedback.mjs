@@ -180,6 +180,12 @@ for (const language of feedbackLanguages) {
   assert.equal(typeof appFeedbackCopy[language].external, "string");
   assert.equal(typeof appFeedbackCopy[language].expired, "string");
   assert.equal(typeof appFeedbackCopy[language].available, "string");
+  assert.equal(typeof appFeedbackCopy[language].stepUnverified, "string");
+  assert.equal(
+    typeof appFeedbackCopy[language].providerUnverifiedWarning,
+    "string",
+  );
+  assert.equal(typeof appFeedbackCopy[language].imeiAmbiguousError, "string");
 }
 
 for (const language of ["zh", "en", "fr"]) {
@@ -279,6 +285,8 @@ assert.match(apiSource, /apikey:\s*context\.anonKey/);
 assert.match(apiSource, /signal,/);
 assert.match(apiSource, /"Content-Type":\s*"application\/json"/);
 assert.match(apiSource, /body:\s*serializedBody/);
+assert.match(apiSource, /backendCode === "imei_ambiguous"/);
+assert.match(pageSource, /error\.code === "imei_ambiguous"/);
 assert.match(pageSource, /data-app-feedback-tab="feedback"/);
 assert.match(pageSource, /data-app-feedback-tab="device"/);
 assert.match(pageSource, /activePoller\?\.pause\(\)/);
@@ -288,6 +296,7 @@ assert.match(deviceSource, /pattern="\[0-9\]\{15\}"/);
 assert.match(deviceSource, /escapeHtml/);
 assert.match(deviceSource, /data-device-confirm-submit/);
 assert.match(deviceSource, /noAccountWarning/);
+assert.match(deviceSource, /providerUnverifiedWarning/);
 assert.match(pageSource, /document\.visibilityState\s*!==\s*"visible"/);
 assert.match(pageSource, /pendingListPayload/);
 assert.match(pageSource, /data-feedback-new/);
@@ -358,6 +367,22 @@ assert.match(deviceHtml, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
 assert.match(deviceHtml, /VIN&lt;unsafe&gt;/);
 assert.match(deviceHtml, /noAccountWarning/);
 assert.match(deviceHtml, /2026-08-12 12:00:00/);
+
+deviceState.result = {
+  status: "unbound",
+  lufengzhe: { status: "unverified" },
+  steps: [{ key: "lufengzhe", status: "unverified" }],
+};
+const unverifiedHtml = renderDeviceUnbind({
+  deviceState,
+  t: (key) => key,
+  escapeHtml,
+  formatTime: () => "2026-08-12 12:00:00",
+  errorCopy: () => "error",
+});
+assert.match(unverifiedHtml, /app-feedback-device-check--unverified/);
+assert.match(unverifiedHtml, />stepUnverified</);
+assert.match(unverifiedHtml, /providerUnverifiedWarning/);
 
 const controllerState = createDeviceUnbindState();
 const controllerCalls = [];
@@ -453,6 +478,7 @@ assert.deepEqual(
   ],
 );
 assert.match(cssSource, /@media\s+\(max-width:/);
+assert.match(cssSource, /\.app-feedback-device-check--unverified/);
 assert.doesNotMatch(cssSource, /(?:^|[;:{\s])#[0-9a-f]{3,8}\b/i);
 
 assert.equal(feedbackPollDelay(0), FEEDBACK_POLL_INTERVAL_MS);

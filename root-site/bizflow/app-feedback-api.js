@@ -86,7 +86,11 @@ export async function callHonnmonoAdmin(
     throw new HonnmonoAdminError("responseError", response.status);
   }
   if (!response.ok) {
-    throw new HonnmonoAdminError("upstreamError", response.status);
+    const backendCode = parsed?.detail?.code;
+    throw new HonnmonoAdminError(
+      backendCode === "imei_ambiguous" ? backendCode : "upstreamError",
+      response.status,
+    );
   }
   if (parsed == null || typeof parsed !== "object") {
     throw new HonnmonoAdminError("responseError", response.status);

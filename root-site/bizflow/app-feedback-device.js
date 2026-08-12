@@ -18,6 +18,7 @@ const STEP_STATUS_KEYS = Object.freeze({
   ok: "stepOk",
   skip: "stepSkip",
   fail: "stepFail",
+  unverified: "stepUnverified",
 });
 
 export function isValidDeviceImei(value) {
@@ -244,13 +245,16 @@ export function renderDeviceUnbind({
     if (!result) return "";
     const steps = Array.isArray(result.steps) ? result.steps : [];
     const noAccount = result.lufengzhe === "no_account";
+    const providerUnverified = steps.some(
+      (step) => step?.key === "lufengzhe" && step?.status === "unverified",
+    );
     return `<section class="app-feedback-device-result" aria-live="polite">
       <h2>${rawE(t("unbindResult"))}</h2>
       <p class="app-feedback-device-result__summary">${rawE(t(result.status === "already_unbound" ? "alreadyUnbound" : "unbindSuccess"))}</p>
       <ul class="app-feedback-device-checklist">
         ${steps
           .map((step) => {
-            const status = ["ok", "skip", "fail"].includes(step?.status)
+            const status = ["ok", "skip", "fail", "unverified"].includes(step?.status)
               ? step.status
               : "fail";
             const labelKey = STEP_LABEL_KEYS[step?.key];
@@ -260,6 +264,7 @@ export function renderDeviceUnbind({
           .join("")}
       </ul>
       ${noAccount ? `<div class="app-feedback-device-warning">${rawE(t("noAccountWarning"))}</div>` : ""}
+      ${providerUnverified ? `<div class="app-feedback-device-warning">${rawE(t("providerUnverifiedWarning"))}</div>` : ""}
     </section>`;
   };
 

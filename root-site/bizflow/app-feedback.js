@@ -77,6 +77,7 @@ function errorCopy(error) {
 function deviceErrorCopy(error) {
   if (error instanceof HonnmonoAdminError) {
     if (error.code === "imeiValidation") return t("imeiValidation");
+    if (error.code === "imei_ambiguous") return t("imeiAmbiguousError");
     if (error.status === 404) return t("deviceNotFoundError");
     if (error.status === 409) return t("bindingChangedError");
   }

@@ -607,6 +607,14 @@
   color: var(--red);
 }
 
+.app-feedback-device-check--unverified {
+  background: color-mix(in srgb, var(--yellow) 9%, var(--white));
+}
+
+.app-feedback-device-check--unverified strong {
+  color: color-mix(in srgb, var(--yellow) 55%, var(--black));
+}
+
 .app-feedback-device-warning {
   margin-top: var(--space-20);
   padding: var(--space-10);
