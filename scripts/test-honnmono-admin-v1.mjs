@@ -80,7 +80,7 @@ assert.match(edge, /operatorEmail\s*=\s*String\(user\?\.email/);
 assert.match(edge, /"X-Operator-Email": guard\.operatorEmail/);
 assert.match(edge, /body:\s*upstreamBody\s*\|\|\s*undefined/);
 assert.match(edge, /MAX_REQUEST_JSON_BYTES = 16_384/);
-assert.match(edge, /DEVICE_UNBIND_TIMEOUT_MS = 30_000/);
+assert.match(edge, /DEVICE_UNBIND_TIMEOUT_MS = 90_000/);
 assert.match(edge, /upstreamPath === "\/internal\/admin\/device\/unbind"/);
 assert.match(edge, /MAX_JSON_BYTES = 2_000_000/);
 
