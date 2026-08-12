@@ -4,6 +4,8 @@
 //   GET  /honnmono-admin/feedback
 //   GET  /honnmono-admin/feedback/{id}
 //   POST /honnmono-admin/feedback/{id}/log-link
+//   GET  /honnmono-admin/device/binding?imei={15 digits}
+//   POST /honnmono-admin/device/unbind
 //
 // Log bytes are intentionally outside this allowlist. The link-issuance route
 // returns a short-lived, one-time Shenzhen URL that the browser downloads
@@ -26,7 +28,9 @@ const HONNMONO_ADMIN_API_URL = (
 const HONNMONO_ADMIN_INTERNAL_TOKEN =
   Deno.env.get("HONNMONO_ADMIN_INTERNAL_TOKEN") ?? "";
 const UPSTREAM_TIMEOUT_MS = 10_000;
+const DEVICE_UNBIND_TIMEOUT_MS = 30_000;
 const MAX_JSON_BYTES = 2_000_000;
+const MAX_REQUEST_JSON_BYTES = 16_384;
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -35,7 +39,7 @@ const CORS_HEADERS = {
 };
 
 type GuardResult =
-  | { ok: true }
+  | { ok: true; operatorEmail: string }
   | { ok: false; status: number; error: string };
 
 function json(body: unknown, status = 200) {
@@ -61,7 +65,7 @@ function requireEnv() {
 
 // verifyAdmin is copied from the deployed ocpp-proxy guard so its
 // Supabase JWT -> employees.is_admin and 401/403 semantics remain identical.
-async function verifyAdmin(req: Request): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+async function verifyAdmin(req: Request): Promise<GuardResult> {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
     return { ok: false, status: 500, error: "Server misconfigured" };
   }
@@ -74,6 +78,7 @@ async function verifyAdmin(req: Request): Promise<{ ok: true } | { ok: false; st
 
   // 1) Resolve user via Supabase Auth REST
   let userId = "";
+  let operatorEmail = "";
   try {
     const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
       headers: {
@@ -86,6 +91,13 @@ async function verifyAdmin(req: Request): Promise<{ ok: true } | { ok: false; st
     const user = await r.json();
     userId = String(user?.id ?? "");
     if (!userId) return { ok: false, status: 401, error: "User not found" };
+    operatorEmail = String(user?.email ?? "")
+      .trim()
+      .replace(/[\r\n]/g, "")
+      .slice(0, 255);
+    if (!operatorEmail) {
+      return { ok: false, status: 401, error: "User email not found" };
+    }
   } catch (_) {
     return { ok: false, status: 500, error: "Auth lookup failed" };
   }
@@ -107,7 +119,7 @@ async function verifyAdmin(req: Request): Promise<{ ok: true } | { ok: false; st
     const rows = await r.json();
     if (!Array.isArray(rows) || rows.length === 0) return { ok: false, status: 403, error: "Not authorized" };
     if (rows[0]?.is_admin !== true) return { ok: false, status: 403, error: "Not authorized" };
-    return { ok: true };
+    return { ok: true, operatorEmail };
   } catch (_) {
     return { ok: false, status: 500, error: "Admin lookup failed" };
   }
@@ -135,25 +147,62 @@ Deno.serve(async (req) => {
     return json({ error: "Server misconfigured" }, 500);
   }
 
+  let upstreamBody: string | undefined;
+  if (req.method === "POST") {
+    const requestLength = Number(req.headers.get("content-length") ?? "0");
+    if (
+      Number.isFinite(requestLength) &&
+      requestLength > MAX_REQUEST_JSON_BYTES
+    ) {
+      return json({ error: "Request body too large" }, 413);
+    }
+    upstreamBody = await req.text();
+    if (
+      new TextEncoder().encode(upstreamBody).byteLength >
+      MAX_REQUEST_JSON_BYTES
+    ) {
+      return json({ error: "Request body too large" }, 413);
+    }
+    if (upstreamBody) {
+      try {
+        const parsed = JSON.parse(upstreamBody);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          return json({ error: "Invalid JSON body" }, 400);
+        }
+      } catch (_) {
+        return json({ error: "Invalid JSON body" }, 400);
+      }
+    }
+  }
+
   let upstream: Response;
+  const upstreamTimeoutMs =
+    upstreamPath === "/internal/admin/device/unbind"
+      ? DEVICE_UNBIND_TIMEOUT_MS
+      : UPSTREAM_TIMEOUT_MS;
   try {
     upstream = await fetch(upstreamUrl, {
       method: req.method,
-      headers: { "X-Internal-Token": HONNMONO_ADMIN_INTERNAL_TOKEN },
-      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      headers: {
+        "X-Internal-Token": HONNMONO_ADMIN_INTERNAL_TOKEN,
+        "X-Operator-Email": guard.operatorEmail,
+        ...(upstreamBody ? { "Content-Type": "application/json" } : {}),
+      },
+      body: upstreamBody || undefined,
+      signal: AbortSignal.timeout(upstreamTimeoutMs),
     });
   } catch (_) {
-    return json({ error: "Feedback service timeout" }, 504);
+    return json({ error: "Honnmono admin service timeout" }, 504);
   }
 
   const contentLength = Number(upstream.headers.get("content-length") ?? "0");
   if (Number.isFinite(contentLength) && contentLength > MAX_JSON_BYTES) {
-    return json({ error: "Feedback service response too large" }, 502);
+    return json({ error: "Honnmono admin service response too large" }, 502);
   }
 
   const text = await upstream.text();
   if (new TextEncoder().encode(text).byteLength > MAX_JSON_BYTES) {
-    return json({ error: "Feedback service response too large" }, 502);
+    return json({ error: "Honnmono admin service response too large" }, 502);
   }
 
   let body: unknown = null;
@@ -161,11 +210,11 @@ Deno.serve(async (req) => {
     try {
       body = JSON.parse(text);
     } catch (_) {
-      return json({ error: "Feedback service invalid response" }, 502);
+      return json({ error: "Honnmono admin service invalid response" }, 502);
     }
   }
   if (upstream.status === 401 || upstream.status === 403) {
-    return json({ error: "Feedback service unavailable" }, 502);
+    return json({ error: "Honnmono admin service unavailable" }, 502);
   }
   return json(body, upstream.status);
 });

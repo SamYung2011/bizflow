@@ -58,7 +58,16 @@ assert.equal(
   mapHonnmonoAdminPath("/feedback/42/log-link", "POST"),
   "/internal/admin/feedback/42/log-link",
 );
+assert.equal(
+  mapHonnmonoAdminPath("/device/binding", "GET"),
+  "/internal/admin/device/binding",
+);
+assert.equal(
+  mapHonnmonoAdminPath("/device/unbind", "POST"),
+  "/internal/admin/device/unbind",
+);
 assert.equal(mapHonnmonoAdminPath("/feedback-log/token", "GET"), "");
+assert.equal(mapHonnmonoAdminPath("/device/unbind", "GET"), "");
 assert.equal(
   isAllowedHonnmonoUpstream(
     new URL("https://app-api.honnmono.top/internal/admin/feedback-log/token"),
@@ -67,6 +76,12 @@ assert.equal(
 );
 assert.match(edge, /employees\?user_id=eq\./);
 assert.match(edge, /"X-Internal-Token": HONNMONO_ADMIN_INTERNAL_TOKEN/);
+assert.match(edge, /operatorEmail\s*=\s*String\(user\?\.email/);
+assert.match(edge, /"X-Operator-Email": guard\.operatorEmail/);
+assert.match(edge, /body:\s*upstreamBody\s*\|\|\s*undefined/);
+assert.match(edge, /MAX_REQUEST_JSON_BYTES = 16_384/);
+assert.match(edge, /DEVICE_UNBIND_TIMEOUT_MS = 30_000/);
+assert.match(edge, /upstreamPath === "\/internal\/admin\/device\/unbind"/);
 assert.match(edge, /MAX_JSON_BYTES = 2_000_000/);
 
 for (const key of [

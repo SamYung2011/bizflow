@@ -13,6 +13,12 @@ export function mapHonnmonoAdminPath(pathname, method) {
   if (method === "POST" && /^\/feedback\/[1-9]\d*\/log-link$/.test(normalized)) {
     return `/internal/admin${normalized}`;
   }
+  if (method === "GET" && normalized === "/device/binding") {
+    return "/internal/admin/device/binding";
+  }
+  if (method === "POST" && normalized === "/device/unbind") {
+    return "/internal/admin/device/unbind";
+  }
   return "";
 }
 
@@ -44,7 +50,9 @@ export function isAllowedHonnmonoUpstream(url) {
     (
       url.pathname === "/internal/admin/feedback" ||
       /^\/internal\/admin\/feedback\/[1-9]\d*$/.test(url.pathname) ||
-      /^\/internal\/admin\/feedback\/[1-9]\d*\/log-link$/.test(url.pathname)
+      /^\/internal\/admin\/feedback\/[1-9]\d*\/log-link$/.test(url.pathname) ||
+      url.pathname === "/internal/admin/device/binding" ||
+      url.pathname === "/internal/admin/device/unbind"
     )
   );
 }
