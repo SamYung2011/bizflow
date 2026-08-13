@@ -112,10 +112,19 @@ export function createLiveRealtimeManager({
   function handleStatus(status, channelGeneration, tables) {
     if (channelGeneration !== generation) return;
     if (status === "SUBSCRIBED") {
+      // The first SUBSCRIBED needs the same catch-up pass as a reconnect: writes made
+      // by other people while nobody had this channel open never arrived as
+      // postgres_changes, and live-table-cache serves IndexedDB rows as fresh for
+      // LIVE_TABLE_CACHE_TTL_MS (10 min) -- so without this pass a returning user can
+      // stare at up to 10-minute-old data, hard reload included. Costs one extra SWR
+      // round per page open, which is the accepted trade.
+      const firstSubscribe = !subscribedOnce;
       const reconnected = subscribedOnce && disconnectedAfterSubscribe;
       subscribedOnce = true;
       disconnectedAfterSubscribe = false;
-      if (reconnected) queueInvalidation(tables, channelGeneration);
+      // A repeated SUBSCRIBED with no disconnect in between is neither -- stay quiet
+      // so a chatty transport cannot turn into a refresh loop.
+      if (firstSubscribe || reconnected) queueInvalidation(tables, channelGeneration);
       return;
     }
     if (!stopping && subscribedOnce && ["CHANNEL_ERROR", "TIMED_OUT", "CLOSED"].includes(status)) {
