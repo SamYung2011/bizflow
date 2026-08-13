@@ -4,7 +4,7 @@
   "note": "Current source baseline; browser acceptance must also compare runtime listener and timer watermarks.",
   "routes": {
     "/bizflow/home.html": {
-      "moduleCount": 27,
+      "moduleCount": 28,
       "totals": {
         "documentListeners": 3,
         "windowListeners": 4,
@@ -18,7 +18,7 @@
       }
     },
     "/bizflow/orders.html": {
-      "moduleCount": 43,
+      "moduleCount": 44,
       "totals": {
         "documentListeners": 4,
         "windowListeners": 5,
@@ -32,7 +32,7 @@
       }
     },
     "/bizflow/orders-create.html": {
-      "moduleCount": 26,
+      "moduleCount": 28,
       "totals": {
         "documentListeners": 5,
         "windowListeners": 4,
@@ -46,7 +46,7 @@
       }
     },
     "/bizflow/orders-detail.html": {
-      "moduleCount": 32,
+      "moduleCount": 34,
       "totals": {
         "documentListeners": 5,
         "windowListeners": 4,
@@ -60,7 +60,7 @@
       }
     },
     "/bizflow/customers.html": {
-      "moduleCount": 35,
+      "moduleCount": 38,
       "totals": {
         "documentListeners": 3,
         "windowListeners": 5,
@@ -74,7 +74,7 @@
       }
     },
     "/bizflow/customer-detail.html": {
-      "moduleCount": 32,
+      "moduleCount": 34,
       "totals": {
         "documentListeners": 2,
         "windowListeners": 3,
@@ -88,7 +88,7 @@
       }
     },
     "/bizflow/inventory.html": {
-      "moduleCount": 31,
+      "moduleCount": 32,
       "totals": {
         "documentListeners": 2,
         "windowListeners": 3,
@@ -102,7 +102,7 @@
       }
     },
     "/bizflow/inventory-detail.html": {
-      "moduleCount": 23,
+      "moduleCount": 24,
       "totals": {
         "documentListeners": 2,
         "windowListeners": 3,
@@ -116,7 +116,7 @@
       }
     },
     "/bizflow/expense.html": {
-      "moduleCount": 27,
+      "moduleCount": 29,
       "totals": {
         "documentListeners": 4,
         "windowListeners": 5,
@@ -130,7 +130,7 @@
       }
     },
     "/bizflow/whatsapp.html": {
-      "moduleCount": 33,
+      "moduleCount": 34,
       "totals": {
         "documentListeners": 4,
         "windowListeners": 5,
@@ -144,7 +144,7 @@
       }
     },
     "/bizflow/ocpp-monitor.html": {
-      "moduleCount": 32,
+      "moduleCount": 33,
       "totals": {
         "documentListeners": 3,
         "windowListeners": 5,
@@ -158,7 +158,7 @@
       }
     },
     "/bizflow/ocpp-charging.html": {
-      "moduleCount": 30,
+      "moduleCount": 31,
       "totals": {
         "documentListeners": 3,
         "windowListeners": 5,
@@ -172,7 +172,7 @@
       }
     },
     "/bizflow/ocpp-users.html": {
-      "moduleCount": 26,
+      "moduleCount": 27,
       "totals": {
         "documentListeners": 1,
         "windowListeners": 3,
@@ -186,7 +186,7 @@
       }
     },
     "/bizflow/ocpp-finance.html": {
-      "moduleCount": 26,
+      "moduleCount": 27,
       "totals": {
         "documentListeners": 1,
         "windowListeners": 3,
@@ -200,7 +200,7 @@
       }
     },
     "/bizflow/app-feedback.html": {
-      "moduleCount": 24,
+      "moduleCount": 26,
       "totals": {
         "documentListeners": 1,
         "windowListeners": 3,
@@ -214,7 +214,7 @@
       }
     },
     "/team/index.html": {
-      "moduleCount": 38,
+      "moduleCount": 44,
       "totals": {
         "documentListeners": 4,
         "windowListeners": 5,
@@ -228,7 +228,7 @@
       }
     },
     "/team/members.html": {
-      "moduleCount": 30,
+      "moduleCount": 33,
       "totals": {
         "documentListeners": 2,
         "windowListeners": 3,
