@@ -437,7 +437,7 @@ function renderParentStocksCard(helpers) {
       <span>${escapeHtml(warehouse.name || pageT(lang, `inventory.warehouse.${warehouse.key}`))}</span>
       ${renderWarehouseScopeBadge(warehouse, helpers)}
     </span>
-    <input class="inventory-quantity-input" type="number" min="0" step="1" data-parent-warehouse-qty="${escapeHtml(warehouse.id)}" data-inventory-write value="${escapeHtml(warehouse.quantity)}"${writeAttributes}>
+    <input class="inventory-quantity-input" type="number" step="1" data-parent-warehouse-qty="${escapeHtml(warehouse.id)}" data-inventory-write value="${escapeHtml(warehouse.quantity)}"${writeAttributes}>
   </label>`).join("");
   return `<section class="inventory-detail-card">
     <span class="inventory-card-title">${escapeHtml(pageT(lang, "inventory.stockByWarehouse"))}</span>
@@ -661,7 +661,8 @@ function openModal(item) {
 function catalogPayload() {
   const stocks = (rows) => rows.filter((row) => row.id).map((row) => ({
     warehouseId: row.id,
-    quantity: Math.max(0, Math.trunc(Number(row.quantity) || 0))
+    // Stock may go negative: keep the signed value instead of clamping it to 0.
+    quantity: Math.trunc(Number(row.quantity) || 0)
   }));
   const variants = detail.subitems.map((item) => ({
     id: item.id,
@@ -934,7 +935,8 @@ async function onInventoryDetailClick(event) {
       price: Math.max(0, Number(state.modalItem.editPrice) || 0),
       editPrice: Math.max(0, Number(state.modalItem.editPrice) || 0),
       warrantyMonths: Math.max(0, Math.trunc(Number(state.modalItem.warrantyMonths) || 0)),
-      quantity: state.modalItem.warehouses.reduce((sum, row) => sum + Math.max(0, Number(row.quantity) || 0), 0)
+      // Stock may go negative: sum the signed warehouse quantities.
+      quantity: state.modalItem.warehouses.reduce((sum, row) => sum + (Number(row.quantity) || 0), 0)
     };
     const index = detail.subitems.findIndex((row) => row.id === state.modalItem.id);
     if (index >= 0) detail.subitems[index] = item;

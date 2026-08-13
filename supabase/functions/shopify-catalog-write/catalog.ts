@@ -134,7 +134,8 @@ function normalizeStock(value: unknown): NormalizedStock {
   const row = value && typeof value === "object" ? value as JsonRecord : {};
   const warehouseId = text(row.warehouseId);
   const quantity = Math.trunc(finiteNumber(row.quantity));
-  if (!UUID_PATTERN.test(warehouseId) || quantity < 0) throw new Error("Invalid warehouse stock payload");
+  // Stock may go negative (G-inv-17): only the warehouse id is validated here.
+  if (!UUID_PATTERN.test(warehouseId)) throw new Error("Invalid warehouse stock payload");
   return { warehouseId, quantity };
 }
 

@@ -262,7 +262,8 @@ function localStockRows(product) {
     .flatMap((item) => (Array.isArray(item.stocks) ? item.stocks : []).map((stock) => ({
       product_id: item.id,
       warehouse_id: stock.warehouseId,
-      qty: Math.max(0, Math.trunc(Number(stock.quantity) || 0)),
+      // Stock may go negative: persist the signed value instead of clamping it to 0.
+      qty: Math.trunc(Number(stock.quantity) || 0),
       updated_at: new Date().toISOString()
     })));
 }
