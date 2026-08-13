@@ -1,8 +1,11 @@
 import { memberT } from "./members-i18n.js";
+import { memberCanWrite, memberWriteAttrs } from "./members-write-access.js";
+import { approveLiveJoinRequest, rejectLiveJoinRequest } from "../data/live-members-writes.js";
 
 function renderReviewCard(review, data, state, helpers) {
   const { escapeHtml, lang } = helpers;
   const tt = (key) => memberT(lang, key);
+  const writeAttrs = memberWriteAttrs(state, "canApproveRegistration");
   const departmentOptions = data.form.departments.map((department) => {
     const value = typeof department === "string" ? department : department.id;
     const label = typeof department === "string" ? tt(`members.dept.${department}`) : department.name;
@@ -28,19 +31,19 @@ function renderReviewCard(review, data, state, helpers) {
     <div class="review-card__fields">
       <label class="review-card__field">
         <span>${escapeHtml(tt("members.review.position"))}</span>
-        <input name="position" value="${escapeHtml(review.position)}"${state.liveReadOnly ? " disabled" : ""}>
+        <input name="position" value="${escapeHtml(review.position)}"${writeAttrs}>
       </label>
       <label class="review-card__field">
         <span>${escapeHtml(tt("members.review.department"))}</span>
-        <select name="dept"${state.liveReadOnly ? " disabled" : ""}>${departmentOptions}</select>
+        <select name="dept"${writeAttrs}>${departmentOptions}</select>
       </label>
       <label class="review-card__field">
         <span>${escapeHtml(tt("members.review.permission"))}</span>
-        <select name="role"${state.liveReadOnly ? " disabled" : ""}>${roleOptions}</select>
+        <select name="role"${writeAttrs}>${roleOptions}</select>
       </label>
       <div class="review-card__actions">
-        <button type="button" class="review-card__button review-card__button--reject" data-member-review-reject${state.liveReadOnly ? " disabled" : ""}>${escapeHtml(tt("members.review.reject"))}</button>
-        <button type="submit" class="review-card__button review-card__button--approve"${state.liveReadOnly ? " disabled" : ""}>${escapeHtml(tt("members.review.approve"))}</button>
+        <button type="button" class="review-card__button review-card__button--reject" data-member-review-reject${writeAttrs}>${escapeHtml(tt("members.review.reject"))}</button>
+        <button type="submit" class="review-card__button review-card__button--approve"${writeAttrs}>${escapeHtml(tt("members.review.approve"))}</button>
       </div>
     </div>
   </form>`;
@@ -96,13 +99,14 @@ function renderJoinPendingCard(review, state, helpers) {
   return `<article class="member-review-join-pending" data-join-review-card="${escapeHtml(review.id)}">
     <div><strong>${escapeHtml(review.employee || review.name || "—")}</strong><span>${escapeHtml(review.company || "—")}</span><time>${escapeHtml(review.appliedAt || "—")}</time></div>
     <p>${escapeHtml(review.note || tt("members.review.noNote"))}</p>
-    <div><button type="button" class="review-card__button review-card__button--reject" data-join-review-action="reject"${state.liveReadOnly ? " disabled" : ""}>${escapeHtml(tt("members.review.reject"))}</button><button type="button" class="review-card__button review-card__button--approve" data-join-review-action="approve"${state.liveReadOnly ? " disabled" : ""}>${escapeHtml(tt("members.review.approve"))}</button></div>
+    <div><button type="button" class="review-card__button review-card__button--reject" data-join-review-action="reject"${memberWriteAttrs(state, "canApproveRegistration")}>${escapeHtml(tt("members.review.reject"))}</button><button type="button" class="review-card__button review-card__button--approve" data-join-review-action="approve"${memberWriteAttrs(state, "canApproveRegistration")}>${escapeHtml(tt("members.review.approve"))}</button></div>
   </article>`;
 }
 
-export function attachMemberReviewController({ state, rerender, scope }) {
-  // 现网批准/拒绝会写审核表；静态复刻只在真实 pending 出现时提供本地演示动作。
-  scope.listen(document, "click", (event) => {
+export function attachMemberReviewController({ state, rerender, scope, runWrite = null }) {
+  // live 态走 company_join_pending 真写（批准还要先补 employee_companies 绑定）；
+  // 未登录的静态演示态仍只改本地数组。
+  scope.listen(document, "click", async (event) => {
     const mode = event.target.closest("button[data-review-mode]");
     if (mode) {
       state.reviewMode = mode.getAttribute("data-review-mode") === "join" ? "join" : "registration";
@@ -111,15 +115,23 @@ export function attachMemberReviewController({ state, rerender, scope }) {
     }
     const action = event.target.closest("[data-join-review-action]");
     const card = action?.closest("[data-join-review-card]");
-    if (!action || !card || state.liveReadOnly || !state.access.canApproveRegistration) return;
+    if (!action || !card || !memberCanWrite(state, "canApproveRegistration")) return;
     const review = state.joinPending.find((item) => item.id === card.getAttribute("data-join-review-card"));
     if (!review) return;
+    const approved = action.getAttribute("data-join-review-action") === "approve";
+    if (state.membersLive) {
+      const write = approved
+        ? () => approveLiveJoinRequest(review.id)
+        : () => rejectLiveJoinRequest(review.id);
+      if (!runWrite || !await runWrite(write)) return;
+      if (!scope.isCurrent()) return;
+    }
     state.joinPending = state.joinPending.filter((item) => item.id !== review.id);
     state.joinHistory.unshift({
       ...review,
       reviewedAt: new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()).replaceAll("-", "/"),
-      approved: action.getAttribute("data-join-review-action") === "approve",
-      rejectReason: action.getAttribute("data-join-review-action") === "reject" ? review.rejectReason || "" : ""
+      approved,
+      rejectReason: approved ? "" : review.rejectReason || ""
     });
     state.summary.reviewPending = state.reviews.length + state.joinPending.length;
     rerender();

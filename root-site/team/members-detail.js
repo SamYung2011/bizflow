@@ -1,4 +1,5 @@
 import { memberT } from "./members-i18n.js";
+import { memberWriteAttrs } from "./members-write-access.js";
 
 function renderTaskList(tasks, helpers) {
   const { escapeHtml, lang } = helpers;
@@ -29,35 +30,39 @@ export function renderMemberDetailDialog({ state, data, helpers }) {
   }).join("");
   const tabs = ["basic", "tasking", "tasked"];
   const tasks = member.tasks?.[state.memberDetailTab] ?? [];
+  const writeAttrs = memberWriteAttrs(state, "canManageEmployees");
+  // 入職時間讀的是 employees.created_at、佣金是快照算出來的展示值，兩者都沒有寫路徑，
+  // live 態下鎖住，免得改了以為存上了（靜態演示態維持原樣可改）。
+  const derivedAttrs = state.membersLive ? ' disabled aria-disabled="true"' : writeAttrs;
   const body = state.memberDetailTab === "basic"
     ? `<div class="member-panel__form-grid">
         <label class="member-panel__field">
           <span>${escapeHtml(tt("members.detail.position"))}</span>
-          <input name="position" value="${escapeHtml(member.position || "")}"${state.liveReadOnly ? " disabled" : ""}>
+          <input name="position" value="${escapeHtml(member.position || "")}"${writeAttrs}>
         </label>
         <label class="member-panel__field">
           <span>${escapeHtml(tt("members.detail.email"))}</span>
-          <input name="email" type="email" value="${escapeHtml(member.email || "")}"${state.liveReadOnly ? " disabled" : ""}>
+          <input name="email" type="email" value="${escapeHtml(member.email || "")}"${writeAttrs}>
         </label>
         <label class="member-panel__field">
           <span>${escapeHtml(tt("members.detail.phone"))}</span>
-          <input name="phone" value="${escapeHtml(member.phone || "")}"${state.liveReadOnly ? " disabled" : ""}>
+          <input name="phone" value="${escapeHtml(member.phone || "")}"${writeAttrs}>
         </label>
         <label class="member-panel__field">
           <span>${escapeHtml(tt("members.detail.department"))}</span>
-          <select name="dept"${state.liveReadOnly ? " disabled" : ""}>${departmentOptions}</select>
+          <select name="dept"${writeAttrs}>${departmentOptions}</select>
         </label>
         <label class="member-panel__field">
           <span>${escapeHtml(tt("members.detail.permission"))}</span>
-          <select name="role"${state.liveReadOnly ? " disabled" : ""}>${roleOptions}</select>
+          <select name="role"${writeAttrs}>${roleOptions}</select>
         </label>
         <label class="member-panel__field">
           <span>${escapeHtml(tt("members.detail.joinedAt"))}</span>
-          <input name="joinedAt" value="${escapeHtml(member.joinedAt || "")}"${state.liveReadOnly ? " disabled" : ""}>
+          <input name="joinedAt" value="${escapeHtml(member.joinedAt || "")}"${derivedAttrs}>
         </label>
         <label class="member-panel__field">
           <span>${escapeHtml(tt("members.detail.commission"))}</span>
-          <input name="commission" value="${escapeHtml(member.commission === "none" ? tt("members.detail.none") : member.commission || "—")}"${state.liveReadOnly ? " disabled" : ""}>
+          <input name="commission" value="${escapeHtml(member.commission === "none" ? tt("members.detail.none") : member.commission || "—")}"${derivedAttrs}>
         </label>
       </div>`
     : renderTaskList(tasks, helpers);
@@ -86,8 +91,8 @@ export function renderMemberDetailDialog({ state, data, helpers }) {
         <div class="member-panel__divider"></div>
         <div class="member-panel__body">${body}</div>
         <footer class="member-panel__footer">
-          <button type="button" class="member-panel__button member-panel__button--remove" data-member-detail-remove${state.liveReadOnly ? " disabled" : ""}>${escapeHtml(tt("members.detail.remove"))}</button>
-          <button type="submit" class="member-panel__button member-panel__button--save"${state.liveReadOnly ? " disabled" : ""}>${escapeHtml(tt("members.detail.save"))}</button>
+          <button type="button" class="member-panel__button member-panel__button--remove" data-member-detail-remove${writeAttrs}>${escapeHtml(tt("members.detail.remove"))}</button>
+          <button type="submit" class="member-panel__button member-panel__button--save"${writeAttrs}>${escapeHtml(tt("members.detail.save"))}</button>
         </footer>
       </form>
     </section>

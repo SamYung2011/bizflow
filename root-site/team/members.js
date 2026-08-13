@@ -14,6 +14,21 @@ import { renderMemberPermissions } from "./members-permissions.js";
 import { attachMemberCommissionController, renderMemberCommission } from "./members-commission.js";
 import { attachMemberUpdateLogController, renderMemberUpdateLogs } from "./members-update-logs.js";
 import { attachMemberCompanyController, renderMemberCompanies } from "./members-companies.js";
+import { memberCanWrite, memberWriteAttrs } from "./members-write-access.js";
+import {
+  approveLiveRegistration,
+  createLiveDepartment,
+  createLiveMember,
+  createLiveRole,
+  deactivateLiveMember,
+  deleteLiveDepartment,
+  deleteLiveRole,
+  rejectLiveRegistration,
+  renameLiveRole,
+  setLiveRolePermissions,
+  updateLiveDepartment,
+  updateLiveMember
+} from "../data/live-members-writes.js";
 
 const HELEN_EMAIL = "a1017339632@gmail.com";
 const MEMBER_TAB_ORDER = ["members", "permissions", "departments", "reviews", "commission", "updates", "companies"];
@@ -36,6 +51,39 @@ let activeMountId = 0;
 
 function isCurrentMemberMount(mountId, scope = activeScope) {
   return mountId === activeMountId && Boolean(scope?.isCurrent());
+}
+
+// G-mem-13: 原本 liveReadOnly = authenticated 是整页硬闸,live 登录态下成员域所有写按钮
+// 一律 disabled。改成:整页只读只剩「一项写权限都没有」这一种情况,按钮点亮与否交给
+// buildMemberAccess 已有的四个权限位(canManageEmployees / canManageRoles /
+// canManageCompanies / canApproveRegistration)分项判定,写落库再由 RLS 兜底。
+export function memberPageReadOnly(access) {
+  return !(access.canManageEmployees || access.canManageRoles ||
+    access.canManageCompanies || access.canApproveRegistration);
+}
+
+function memberCopy(key) {
+  return pageT(currentHelpers?.lang ?? "zh", key);
+}
+
+let memberWritePending = false;
+
+// 与 members-update-logs.js 的 runWrite 同一套:一次只允许一个写在飞,
+// 失败弹原始报错(含 RLS 拒绝),过期挂载直接丢弃结果。
+async function runMemberWrite(operation) {
+  if (memberWritePending) return null;
+  memberWritePending = true;
+  try {
+    const result = await operation();
+    if (!activeScope?.isCurrent()) return null;
+    return result ?? true;
+  } catch (error) {
+    if (!activeScope?.isCurrent()) return null;
+    window.alert(error?.message || String(error));
+    return null;
+  } finally {
+    memberWritePending = false;
+  }
 }
 
 // 件5b (2026-08-04): 「更新日誌」tab 的紅標与 tasks/orders/inventory 侧栏红点同一套 markRead 水位
@@ -87,7 +135,8 @@ function createMemberState(initialTab) {
   summary: { ...data.summary, reviewPending: data.reviews.length + data.joinPending.length },
   activeTab: initialTab,
   access: memberAccess,
-  liveReadOnly: authenticated,
+  liveReadOnly: authenticated && memberPageReadOnly(memberAccess),
+  membersLive: authenticated,
   departmentFilter: null,
   addMemberOpen: false,
   memberDetailOpen: false,
@@ -218,7 +267,7 @@ function renderMemberCard(member, helpers) {
 
 function renderAddCard({ escapeHtml, icon, lang }) {
   const text = pageT(lang, "members.add");
-  return `<button type="button" class="member-card member-card--add team-member-card team-member-card--add" data-member-add-open title="${escapeHtml(text)}"${state.liveReadOnly ? " disabled aria-disabled=\"true\"" : ""}>
+  return `<button type="button" class="member-card member-card--add team-member-card team-member-card--add" data-member-add-open title="${escapeHtml(text)}"${memberWriteAttrs(state, "canManageEmployees")}>
     ${icon("icon-add-line-add", "icon-add-line team-member-card__add-icon")}
     <span class="team-member-card__add-label">${escapeHtml(text)}</span>
   </button>`;
@@ -376,6 +425,17 @@ function closeDepartmentModal() {
   state.departmentDraft = null;
 }
 
+// 部门卡片的「移除」与弹窗里的「删除」同一条路径:二次确认 → 真删 → 才动本地数组。
+// 删除会连带把部门成员绑定清掉、原属该部门的任务变回公司内可见,所以必须先确认。
+async function removeMemberDepartment(departmentId) {
+  if (!departmentId) return false;
+  if (!await confirmInPage(memberCopy("members.department.removeConfirm"), { danger: true })) return false;
+  if (!activeScope?.isCurrent()) return false;
+  if (state.membersLive && !await runMemberWrite(() => deleteLiveDepartment(departmentId))) return false;
+  state.departments = state.departments.filter((department) => department.id !== departmentId);
+  return true;
+}
+
 async function onMembersClick(event) {
   const pageTab = event.target.closest("[data-members-tab]");
   if (pageTab) {
@@ -393,21 +453,30 @@ async function onMembersClick(event) {
   }
   const permissionToggle = event.target.closest("[data-permission-toggle]");
   if (permissionToggle) {
-    if (state.liveReadOnly || !state.access.canManageRoles) return;
+    if (!memberCanWrite(state, "canManageRoles")) return;
     const rowId = permissionToggle.getAttribute("data-permission-toggle");
     const roleId = permissionToggle.getAttribute("data-permission-role");
     const role = state.permissions.roles.find((item) => item.id === roleId);
-    if (role?.editable && rowId) role.grants[rowId] = role.grants[rowId] !== true;
+    if (!role?.editable || !rowId) return;
+    const nextGrants = { ...role.grants, [rowId]: role.grants[rowId] !== true };
+    if (state.membersLive && !await runMemberWrite(() => setLiveRolePermissions(roleId, nextGrants))) return;
+    role.grants = nextGrants;
     rerenderMembers();
     document.querySelector(`[data-permission-toggle="${CSS.escape(rowId)}"][data-permission-role="${CSS.escape(roleId)}"]`)?.focus();
     return;
   }
   if (event.target.closest("[data-permission-role-add]")) {
-    if (state.liveReadOnly || !state.access.canManageRoles) return;
-    const roleId = `custom-role-${Date.now()}`;
+    if (!memberCanWrite(state, "canManageRoles")) return;
+    const name = pageT(currentHelpers.lang, "members.permission.customRole");
+    // live 态先落库拿真 uuid,别再造 custom-role-${Date.now()} 这种后续写不回去的本地 id。
+    const created = state.membersLive
+      ? await runMemberWrite(() => createLiveRole({ name }))
+      : { id: `custom-role-${Date.now()}` };
+    if (!created) return;
+    const roleId = created.id;
     state.permissions.roles.push({
       id: roleId,
-      name: pageT(currentHelpers.lang, "members.permission.customRole"),
+      name,
       nameKey: null,
       editable: true,
       grants: Object.fromEntries(state.permissions.rows.map((row) => [row.id, false]))
@@ -419,7 +488,7 @@ async function onMembersClick(event) {
   }
   const permissionRoleEdit = event.target.closest("[data-permission-role-edit]");
   if (permissionRoleEdit) {
-    if (state.liveReadOnly || !state.access.canManageRoles) return;
+    if (!memberCanWrite(state, "canManageRoles")) return;
     const roleId = permissionRoleEdit.getAttribute("data-permission-role-edit");
     state.editingPermissionRoleId = roleId;
     rerenderMembers();
@@ -428,8 +497,11 @@ async function onMembersClick(event) {
   }
   const permissionRoleRemove = event.target.closest("[data-permission-role-remove]");
   if (permissionRoleRemove) {
-    if (state.liveReadOnly || !state.access.canManageRoles) return;
+    if (!memberCanWrite(state, "canManageRoles")) return;
     const roleId = permissionRoleRemove.getAttribute("data-permission-role-remove");
+    if (!await confirmInPage(memberCopy("members.permission.removeRoleConfirm"), { danger: true })) return;
+    if (!activeScope?.isCurrent()) return;
+    if (state.membersLive && !await runMemberWrite(() => deleteLiveRole(roleId))) return;
     state.permissions.roles = state.permissions.roles.filter((role) => role.id !== roleId);
     if (state.editingPermissionRoleId === roleId) state.editingPermissionRoleId = null;
     rerenderMembers();
@@ -445,20 +517,20 @@ async function onMembersClick(event) {
     return;
   }
   if (departmentCard && event.target.closest("[data-department-edit]")) {
-    if (state.liveReadOnly || !state.access.canManageRoles) return;
+    if (!memberCanWrite(state, "canManageRoles")) return;
     const department = state.departments.find((item) => item.id === departmentCard.getAttribute("data-department-card"));
     if (department) openDepartmentModal(department);
     return;
   }
   if (departmentCard && event.target.closest("[data-department-remove]")) {
-    if (state.liveReadOnly || !state.access.canManageRoles) return;
+    if (!memberCanWrite(state, "canManageRoles")) return;
     const id = departmentCard.getAttribute("data-department-card");
-    state.departments = state.departments.filter((department) => department.id !== id);
+    if (!await removeMemberDepartment(id)) return;
     rerenderMembers();
     return;
   }
   if (event.target.closest("[data-department-add]")) {
-    if (state.liveReadOnly || !state.access.canManageRoles) return;
+    if (!memberCanWrite(state, "canManageRoles")) return;
     openDepartmentModal(null);
     return;
   }
@@ -468,31 +540,31 @@ async function onMembersClick(event) {
   }
   const removedDepartmentMember = event.target.closest("[data-department-member-remove]");
   if (removedDepartmentMember && state.departmentDraft) {
-    if (state.liveReadOnly || !state.access.canManageRoles) return;
+    if (!memberCanWrite(state, "canManageRoles")) return;
     const id = removedDepartmentMember.getAttribute("data-department-member-remove");
     state.departmentDraft.memberIds = state.departmentDraft.memberIds.filter((memberId) => memberId !== id);
     rerenderMembers();
     return;
   }
   if (event.target.closest("[data-department-member-add]") && state.departmentDraft) {
-    if (state.liveReadOnly || !state.access.canManageRoles) return;
+    if (!memberCanWrite(state, "canManageRoles")) return;
     const member = state.members.find((item) => !state.departmentDraft.memberIds.includes(item.id));
     if (member) state.departmentDraft.memberIds.push(member.id);
     rerenderMembers();
     return;
   }
   if (event.target.closest("[data-department-modal-delete]")) {
-    if (state.liveReadOnly || !state.access.canManageRoles) return;
-    if (state.departmentDraft?.id) {
-      state.departments = state.departments.filter((department) => department.id !== state.departmentDraft.id);
-    }
+    if (!memberCanWrite(state, "canManageRoles")) return;
+    // 草稿还没落库(新建未保存)时,删除等同关掉弹窗,不用打扰使用者。
+    if (state.departmentDraft?.id && !await removeMemberDepartment(state.departmentDraft.id)) return;
     closeDepartmentModal();
     return;
   }
   const rejectedReview = event.target.closest("[data-member-review-reject]")?.closest("[data-member-review-card]");
   if (rejectedReview) {
-    if (state.liveReadOnly || !state.access.canApproveRegistration) return;
+    if (!memberCanWrite(state, "canApproveRegistration")) return;
     const id = rejectedReview.getAttribute("data-member-review-card");
+    if (state.membersLive && !await runMemberWrite(() => rejectLiveRegistration(id))) return;
     state.reviews = state.reviews.filter((review) => review.id !== id);
     state.summary.reviewPending = state.reviews.length + state.joinPending.length;
     rerenderMembers();
@@ -518,9 +590,12 @@ async function onMembersClick(event) {
     return;
   }
   if (event.target.closest("[data-member-detail-remove]")) {
-    if (state.liveReadOnly || !state.access.canManageEmployees) return;
+    if (!memberCanWrite(state, "canManageEmployees")) return;
     const member = state.members.find((item) => item.id === state.selectedMemberId);
     if (member && member.status !== "departed") {
+      if (!await confirmInPage(memberCopy("members.detail.removeConfirm"), { danger: true })) return;
+      if (!activeScope?.isCurrent()) return;
+      if (state.membersLive && !await runMemberWrite(() => deactivateLiveMember(member.id))) return;
       member.status = "departed";
       state.summary.active = Math.max(0, state.summary.active - 1);
       state.summary.departed += 1;
@@ -529,7 +604,7 @@ async function onMembersClick(event) {
     return;
   }
   if (event.target.closest("[data-member-add-open]")) {
-    if (state.liveReadOnly || !state.access.canManageEmployees) return;
+    if (!memberCanWrite(state, "canManageEmployees")) return;
     state.addMemberOpen = true;
     rerenderMembers({ focusForm: true });
     return;
@@ -539,17 +614,27 @@ async function onMembersClick(event) {
   }
 }
 
-function onMembersSubmit(event) {
+async function onMembersSubmit(event) {
   const departmentForm = event.target.closest("[data-department-modal-form]");
   if (departmentForm && state.departmentDraft) {
     event.preventDefault();
-    if (state.liveReadOnly || !state.access.canManageRoles) return;
+    if (!memberCanWrite(state, "canManageRoles")) return;
     const values = new FormData(departmentForm);
     state.departmentDraft.name = String(values.get("name") || "").trim();
     state.departmentDraft.managerId = String(values.get("managerId") || "");
     const manager = state.members.find((member) => member.id === state.departmentDraft.managerId)?.name ?? "";
     const existing = state.departments.find((department) => department.id === state.departmentDraft.id);
+    const memberIds = state.departmentDraft.memberIds.slice();
+    // departments 表只有 name,主管是页面侧的展示字段(库里没有对应列),所以只本地保留。
     if (existing) {
+      const name = state.departmentDraft.name === state.departmentDraft.initialName && state.departmentDraft.nameKey
+        ? pageT(currentHelpers.lang, state.departmentDraft.nameKey)
+        : state.departmentDraft.name;
+      if (state.membersLive && !await runMemberWrite(() => updateLiveDepartment(existing.id, {
+        name,
+        memberIds,
+        previousMemberIds: existing.memberIds
+      }))) return;
       if (state.departmentDraft.name === state.departmentDraft.initialName && state.departmentDraft.nameKey) {
         existing.nameKey = state.departmentDraft.nameKey;
         delete existing.name;
@@ -558,14 +643,18 @@ function onMembersSubmit(event) {
         delete existing.nameKey;
       }
       existing.manager = manager;
-      existing.memberIds = state.departmentDraft.memberIds.slice();
+      existing.memberIds = memberIds;
     } else {
+      const created = state.membersLive
+        ? await runMemberWrite(() => createLiveDepartment({ name: state.departmentDraft.name, memberIds }))
+        : { id: `custom-department-${Date.now()}` };
+      if (!created) return;
       state.departments.push({
-        id: `custom-department-${Date.now()}`,
+        id: created.id,
         name: state.departmentDraft.name,
         icon: state.departmentDraft.icon,
         manager,
-        memberIds: state.departmentDraft.memberIds.slice()
+        memberIds
       });
     }
     closeDepartmentModal();
@@ -574,13 +663,18 @@ function onMembersSubmit(event) {
   const reviewForm = event.target.closest("[data-member-review-card]");
   if (reviewForm) {
     event.preventDefault();
-    if (state.liveReadOnly || !state.access.canApproveRegistration) return;
+    if (!memberCanWrite(state, "canApproveRegistration")) return;
     const id = reviewForm.getAttribute("data-member-review-card");
     const review = state.reviews.find((item) => item.id === id);
     if (!review) return;
     const values = new FormData(reviewForm);
-    const memberId = `approved-${review.id}`;
     const dept = String(values.get("dept") || review.dept);
+    const roleId = String(values.get("role") || review.role);
+    const approved = state.membersLive
+      ? await runMemberWrite(() => approveLiveRegistration(id, { departmentId: dept || null, roleId: roleId || null }))
+      : { id: `approved-${review.id}` };
+    if (!approved) return;
+    const memberId = approved.id;
     state.members.push({
       id: memberId,
       name: review.name,
@@ -608,20 +702,36 @@ function onMembersSubmit(event) {
   const detailForm = event.target.closest("[data-member-detail-form]");
   if (detailForm) {
     event.preventDefault();
-    if (state.liveReadOnly || !state.access.canManageEmployees) return;
+    if (!memberCanWrite(state, "canManageEmployees")) return;
     const member = state.members.find((item) => item.id === state.selectedMemberId);
     if (member && state.memberDetailTab === "basic") {
       const values = new FormData(detailForm);
-      member.position = String(values.get("position") || "").trim();
-      member.email = String(values.get("email") || "").trim();
-      member.phone = String(values.get("phone") || "").trim();
-      member.dept = String(values.get("dept") || member.dept);
-      member.role = String(values.get("role") || member.role);
+      const position = String(values.get("position") || "").trim();
+      const email = String(values.get("email") || "").trim();
+      const phone = String(values.get("phone") || "").trim();
+      const dept = String(values.get("dept") || member.dept);
+      const roleId = String(values.get("role") || member.role);
+      if (state.membersLive && !await runMemberWrite(() => updateLiveMember(member.id, {
+        position,
+        email,
+        phone,
+        roleId,
+        departmentId: dept || null,
+        previousDepartmentId: member.dept || null
+      }))) return;
+      member.position = position;
+      member.email = email;
+      member.phone = phone;
+      member.dept = dept;
+      member.role = roleId;
       member.departmentName = data.form.departments.find((item) => (typeof item === "string" ? item : item.id) === member.dept)?.name ?? member.departmentName;
       member.roleName = data.form.roles.find((item) => (typeof item === "string" ? item : item.id) === member.role)?.name ?? member.roleName;
-      member.joinedAt = String(values.get("joinedAt") || "").trim();
-      const commission = String(values.get("commission") || "").trim();
-      member.commission = commission === pageT(currentHelpers.lang, "members.detail.none") ? "none" : commission;
+      // 入職時間讀 employees.created_at、佣金是快照算出來的,live 態下輸入框已鎖,只在演示態回寫本地。
+      if (!state.membersLive) {
+        member.joinedAt = String(values.get("joinedAt") || "").trim();
+        const commission = String(values.get("commission") || "").trim();
+        member.commission = commission === pageT(currentHelpers.lang, "members.detail.none") ? "none" : commission;
+      }
     }
     closeMemberDetail();
     return;
@@ -629,10 +739,20 @@ function onMembersSubmit(event) {
   const form = event.target.closest("[data-member-add-form]");
   if (!form) return;
   event.preventDefault();
-  if (state.liveReadOnly || !state.access.canManageEmployees) return;
+  if (!memberCanWrite(state, "canManageEmployees")) return;
   const values = new FormData(form);
-  const memberId = `demo-member-${Date.now()}`;
   const dept = String(values.get("dept") || data.form.defaults.dept);
+  const created = state.membersLive
+    ? await runMemberWrite(() => createLiveMember({
+        name: String(values.get("name") || "").trim(),
+        position: String(values.get("position") || "").trim(),
+        email: String(values.get("email") || "").trim(),
+        departmentId: dept || null,
+        roleId: String(values.get("role") || data.form.defaults.role) || null
+      }))
+    : { id: `demo-member-${Date.now()}` };
+  if (!created) return;
+  const memberId = created.id;
   state.members.push({
     id: memberId,
     name: String(values.get("name") || "").trim(),
@@ -659,7 +779,7 @@ function onMembersSubmit(event) {
 function onMembersInput(event) {
   const roleNameInput = event.target.closest("[data-permission-role-name]");
   if (roleNameInput) {
-    if (state.liveReadOnly || !state.access.canManageRoles) return;
+    if (!memberCanWrite(state, "canManageRoles")) return;
     const role = state.permissions.roles.find((item) => item.id === roleNameInput.getAttribute("data-permission-role-name"));
     if (role) role.name = roleNameInput.value;
     return;
@@ -681,14 +801,18 @@ function onMembersChange(event) {
   state.departmentDraft.managerId = String(event.target.form?.elements.managerId?.value || "");
 }
 
-function onMembersKeydown(event) {
+async function onMembersKeydown(event) {
   const roleNameInput = event.target.closest?.("[data-permission-role-name]");
   if (roleNameInput && (event.key === "Enter" || event.key === "Escape")) {
     event.preventDefault();
     const roleId = roleNameInput.getAttribute("data-permission-role-name");
     const role = state.permissions.roles.find((item) => item.id === roleId);
     if (role) {
-      role.name = role.name.trim() || (role.nameKey ? pageT(currentHelpers.lang, role.nameKey) : pageT(currentHelpers.lang, "members.permission.customRole"));
+      // onMembersInput 已经把输入实时写进 role.name(草稿),这里是提交点:先落库再定稿。
+      // 写失败就保持编辑态不收起,使用者看到报错还能改回去重试。
+      const name = role.name.trim() || (role.nameKey ? pageT(currentHelpers.lang, role.nameKey) : pageT(currentHelpers.lang, "members.permission.customRole"));
+      if (state.membersLive && !await runMemberWrite(() => renameLiveRole(roleId, name))) return;
+      role.name = name;
     }
     state.editingPermissionRoleId = null;
     rerenderMembers();
@@ -809,8 +933,8 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       scope.listen(document, "keydown", onMembersKeydown);
       attachMemberCommissionController({ state, rerender: rerenderMembers, scope });
       attachMemberUpdateLogController({ state, rerender: rerenderMembers, scope });
-      attachMemberReviewController({ state, rerender: rerenderMembers, scope });
-      attachMemberCompanyController({ state, rerender: rerenderMembers, scope });
+      attachMemberReviewController({ state, rerender: rerenderMembers, scope, runWrite: runMemberWrite });
+      attachMemberCompanyController({ state, rerender: rerenderMembers, scope, runWrite: runMemberWrite });
     },
     hasUnsavedChanges: hasMemberUnsavedChanges,
     async canLeave() {

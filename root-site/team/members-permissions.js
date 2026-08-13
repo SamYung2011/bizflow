@@ -1,4 +1,5 @@
 import { memberT } from "./members-i18n.js";
+import { memberCanWrite, memberWriteAttrs } from "./members-write-access.js";
 
 function renderRoleHeader(role, state, helpers) {
   const { escapeHtml, icon, lang } = helpers;
@@ -10,10 +11,11 @@ function renderRoleHeader(role, state, helpers) {
     </label>`;
   }
 
-  const editButton = role.editable ? `<button type="button" class="permission-matrix__role-action permission-matrix__role-edit" data-permission-role-edit="${escapeHtml(role.id)}" aria-label="${escapeHtml(`${tt("members.permission.editRole")}: ${name}`)}"${state.liveReadOnly ? " disabled" : ""}>
+  const writeAttrs = memberWriteAttrs(state, "canManageRoles");
+  const editButton = role.editable ? `<button type="button" class="permission-matrix__role-action permission-matrix__role-edit" data-permission-role-edit="${escapeHtml(role.id)}" aria-label="${escapeHtml(`${tt("members.permission.editRole")}: ${name}`)}"${writeAttrs}>
       ${icon("icon-edit-default", "icon")}
     </button>` : "";
-  const removeButton = role.editable ? `<button type="button" class="permission-matrix__role-action permission-matrix__role-remove" data-permission-role-remove="${escapeHtml(role.id)}" aria-label="${escapeHtml(`${tt("members.permission.removeRole")}: ${name}`)}"${state.liveReadOnly ? " disabled" : ""}></button>` : "";
+  const removeButton = role.editable ? `<button type="button" class="permission-matrix__role-action permission-matrix__role-remove" data-permission-role-remove="${escapeHtml(role.id)}" aria-label="${escapeHtml(`${tt("members.permission.removeRole")}: ${name}`)}"${writeAttrs}></button>` : "";
 
   return `<div class="permission-matrix__role${role.editable ? " permission-matrix__role--editable" : ""}">
     ${editButton}
@@ -28,7 +30,7 @@ function renderPermissionToggle(row, role, state, helpers) {
   const name = role.name || memberT(lang, role.nameKey);
   const permission = memberT(lang, row.labelKey);
   const action = memberT(lang, granted ? "members.permission.disable" : "members.permission.enable");
-  return `<button type="button" class="permission-matrix__toggle${granted ? " permission-matrix__toggle--on" : ""}" data-permission-toggle="${escapeHtml(row.id)}" data-permission-role="${escapeHtml(role.id)}" aria-pressed="${granted}" aria-label="${escapeHtml(`${action}: ${permission}, ${name}`)}"${role.editable && !state.liveReadOnly ? "" : ' disabled aria-disabled="true"'}></button>`;
+  return `<button type="button" class="permission-matrix__toggle${granted ? " permission-matrix__toggle--on" : ""}" data-permission-toggle="${escapeHtml(row.id)}" data-permission-role="${escapeHtml(role.id)}" aria-pressed="${granted}" aria-label="${escapeHtml(`${action}: ${permission}, ${name}`)}"${role.editable && memberCanWrite(state, "canManageRoles") ? "" : ' disabled aria-disabled="true"'}></button>`;
 }
 
 export function renderMemberPermissions({ state, helpers }) {
@@ -45,7 +47,7 @@ export function renderMemberPermissions({ state, helpers }) {
     <section class="tp-component permission-matrix" style="--permission-role-count:${roles.length};--permission-row-count:${rows.length}" aria-label="${escapeHtml(tt("members.tab.permissions"))}">
       <span class="permission-matrix__corner" aria-hidden="true"></span>
       ${roleHeaders}
-      <button type="button" class="permission-matrix__add-role" data-permission-role-add aria-label="${escapeHtml(tt("members.permission.addRole"))}"${state.liveReadOnly ? " disabled" : ""}></button>
+      <button type="button" class="permission-matrix__add-role" data-permission-role-add aria-label="${escapeHtml(tt("members.permission.addRole"))}"${memberWriteAttrs(state, "canManageRoles")}></button>
       <span class="permission-matrix__spacer" aria-hidden="true"></span>
       ${permissionRows}
     </section>

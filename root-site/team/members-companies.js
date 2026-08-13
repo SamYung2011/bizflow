@@ -1,5 +1,12 @@
 import { memberT } from "./members-i18n.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
+import { memberCanWrite, memberWriteAttrs } from "./members-write-access.js";
+import {
+  createLiveCompany,
+  deleteLiveCompany,
+  renameLiveCompany,
+  setLiveCompanyAiBatch
+} from "../data/live-members-writes.js";
 
 function currentLang() {
   return document.documentElement.lang === "zh-Hant" ? "zh" : document.documentElement.lang;
@@ -18,17 +25,18 @@ function renderCompanyRow(company, state, helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const tt = (key) => memberT(lang, key);
   const editing = state.editingCompanyId === company.id;
+  const writeAttrs = memberWriteAttrs(state, "canManageCompanies");
   const name = editing
-    ? `<form class="member-company-name-form" data-company-name-form data-company-id="${escapeHtml(company.id)}"><input name="name" value="${escapeHtml(company.name)}" required${state.liveReadOnly ? " disabled" : ""}><button type="submit" aria-label="${escapeHtml(tt("members.companies.save"))}"${state.liveReadOnly ? " disabled" : ""}>✓</button><button type="button" data-company-edit-cancel aria-label="${escapeHtml(tt("members.companies.cancel"))}">×</button></form>`
+    ? `<form class="member-company-name-form" data-company-name-form data-company-id="${escapeHtml(company.id)}"><input name="name" value="${escapeHtml(company.name)}" required${writeAttrs}><button type="submit" aria-label="${escapeHtml(tt("members.companies.save"))}"${writeAttrs}>✓</button><button type="button" data-company-edit-cancel aria-label="${escapeHtml(tt("members.companies.cancel"))}">×</button></form>`
     : `<strong title="${escapeHtml(company.name)}">${escapeHtml(company.name)}</strong>`;
   return `<article class="member-company-row" data-company-row="${escapeHtml(company.id)}">
     <div data-company-cell="${escapeHtml(tt("members.companies.name"))}">${name}</div>
     <div data-company-cell="${escapeHtml(tt("members.companies.employeeCount"))}"><span>${escapeHtml(company.employeeCount)}</span></div>
     <div data-company-cell="${escapeHtml(tt("members.companies.createdAt"))}"><time>${escapeHtml(company.createdAt)}</time></div>
-    <div data-company-cell="${escapeHtml(tt("members.companies.ai"))}"><label class="member-company-ai"><input type="checkbox" data-company-ai="${escapeHtml(company.id)}"${company.featureAiBatch ? " checked" : ""}${state.liveReadOnly ? " disabled" : ""}><span>${escapeHtml(tt("members.companies.ai"))}</span></label></div>
+    <div data-company-cell="${escapeHtml(tt("members.companies.ai"))}"><label class="member-company-ai"><input type="checkbox" data-company-ai="${escapeHtml(company.id)}"${company.featureAiBatch ? " checked" : ""}${writeAttrs}><span>${escapeHtml(tt("members.companies.ai"))}</span></label></div>
     <div class="member-company-row__actions" data-company-cell="${escapeHtml(tt("members.companies.actions"))}">
-      <button type="button" data-company-edit="${escapeHtml(company.id)}" aria-label="${escapeHtml(tt("members.companies.edit"))}"${state.liveReadOnly ? " disabled" : ""}>${icon("icon-edit-default", "icon icon--sm")}</button>
-      <button type="button" data-company-delete="${escapeHtml(company.id)}" aria-label="${escapeHtml(tt("members.companies.delete"))}"${state.liveReadOnly ? " disabled" : ""}>×</button>
+      <button type="button" data-company-edit="${escapeHtml(company.id)}" aria-label="${escapeHtml(tt("members.companies.edit"))}"${writeAttrs}>${icon("icon-edit-default", "icon icon--sm")}</button>
+      <button type="button" data-company-delete="${escapeHtml(company.id)}" aria-label="${escapeHtml(tt("members.companies.delete"))}"${writeAttrs}>×</button>
     </div>
   </article>`;
 }
@@ -37,7 +45,7 @@ export function renderMemberCompanies({ state, helpers }) {
   const { escapeHtml, lang } = helpers;
   const tt = (key) => memberT(lang, key);
   return `<section class="member-companies" data-member-companies data-company-count="${state.companies.length}">
-    <form class="member-company-create" data-company-create-form><input name="name" placeholder="${escapeHtml(tt("members.companies.addPlaceholder"))}" required${state.liveReadOnly ? " disabled" : ""}><button type="submit" class="member-domain-button member-domain-button--primary"${state.liveReadOnly ? " disabled" : ""}>${escapeHtml(tt("members.companies.add"))}</button></form>
+    <form class="member-company-create" data-company-create-form><input name="name" placeholder="${escapeHtml(tt("members.companies.addPlaceholder"))}" required${memberWriteAttrs(state, "canManageCompanies")}><button type="submit" class="member-domain-button member-domain-button--primary"${memberWriteAttrs(state, "canManageCompanies")}>${escapeHtml(tt("members.companies.add"))}</button></form>
     <div class="member-company-table">
       <header><span>${escapeHtml(tt("members.companies.name"))}</span><span>${escapeHtml(tt("members.companies.employeeCount"))}</span><span>${escapeHtml(tt("members.companies.createdAt"))}</span><span>${escapeHtml(tt("members.companies.ai"))}</span><span>${escapeHtml(tt("members.companies.actions"))}</span></header>
       ${state.companies.map((company) => renderCompanyRow(company, state, helpers)).join("")}
@@ -46,10 +54,11 @@ export function renderMemberCompanies({ state, helpers }) {
   </section>`;
 }
 
-export function attachMemberCompanyController({ state, rerender, scope }) {
-  // 现网该页受 isSuperAdmin 门控；静态复刻按真数据展示，所有动作只改本地 state。
+export function attachMemberCompanyController({ state, rerender, scope, runWrite = null }) {
+  // 现网该页受 isSuperAdmin 门控（= canManageCompanies）。live 态四个动作全部真写 companies 表，
+  // 未登录的静态演示态仍只改本地 state。
   scope.listen(document, "click", async (event) => {
-    if (state.liveReadOnly) return;
+    if (!memberCanWrite(state, "canManageCompanies")) return;
     const edit = event.target.closest("[data-company-edit]");
     if (edit) {
       state.editingCompanyId = edit.getAttribute("data-company-edit");
@@ -71,40 +80,56 @@ export function attachMemberCompanyController({ state, rerender, scope }) {
     }
     if (await confirmInPage(memberT(currentLang(), "members.companies.deleteConfirm"), { danger: true })) {
       if (!scope.isCurrent()) return;
+      if (state.membersLive && !(runWrite && await runWrite(() => deleteLiveCompany(company.id)))) return;
+      if (!scope.isCurrent()) return;
       state.companies = state.companies.filter((item) => item.id !== company.id);
       rerender();
     }
   });
 
-  scope.listen(document, "change", (event) => {
-    if (state.liveReadOnly) return;
+  scope.listen(document, "change", async (event) => {
+    if (!memberCanWrite(state, "canManageCompanies")) return;
     const toggle = event.target.closest("[data-company-ai]");
     if (!toggle) return;
     const company = state.companies.find((item) => item.id === toggle.getAttribute("data-company-ai"));
-    if (company) company.featureAiBatch = toggle.checked;
+    if (!company) return;
+    const next = toggle.checked;
+    if (state.membersLive && !(runWrite && await runWrite(() => setLiveCompanyAiBatch(company.id, next)))) {
+      toggle.checked = company.featureAiBatch === true;
+      return;
+    }
+    if (!scope.isCurrent()) return;
+    company.featureAiBatch = next;
     rerender();
   });
 
-  scope.listen(document, "submit", (event) => {
+  scope.listen(document, "submit", async (event) => {
     const createForm = event.target.closest("[data-company-create-form]");
     const nameForm = event.target.closest("[data-company-name-form]");
     if (!createForm && !nameForm) return;
     event.preventDefault();
-    if (state.liveReadOnly) return;
+    if (!memberCanWrite(state, "canManageCompanies")) return;
     const values = new FormData(event.target);
     const name = String(values.get("name") || "").trim();
     if (!name) return;
     if (createForm) {
+      const row = state.membersLive
+        ? runWrite && await runWrite(() => createLiveCompany(name))
+        : { id: `local-company-${Date.now()}`, created_at: null };
+      if (!row || !scope.isCurrent()) return;
       state.companies.push({
-        id: `local-company-${Date.now()}`,
+        id: row.id,
         name,
-        featureAiBatch: false,
+        featureAiBatch: row.feature_ai_batch === true,
         employeeCount: 0,
         createdAt: hongKongDate()
       });
     } else {
       const company = state.companies.find((item) => item.id === nameForm.getAttribute("data-company-id"));
-      if (company) company.name = name;
+      if (!company) return;
+      if (state.membersLive && !(runWrite && await runWrite(() => renameLiveCompany(company.id, name)))) return;
+      if (!scope.isCurrent()) return;
+      company.name = name;
       state.editingCompanyId = null;
     }
     rerender();

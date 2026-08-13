@@ -1,4 +1,5 @@
 import { memberT } from "./members-i18n.js";
+import { memberWriteAttrs } from "./members-write-access.js";
 
 function renderDepartmentCard(department, state, helpers) {
   const { escapeHtml, icon, lang } = helpers;
@@ -15,8 +16,8 @@ function renderDepartmentCard(department, state, helpers) {
     <div class="dept-card__count">${escapeHtml(tt("members.department.memberCount"))}: <strong>${escapeHtml(department.memberIds.length)}</strong></div>
     <footer class="dept-card__actions">
       <button type="button" class="dept-card__button dept-card__button--view" data-department-view>${escapeHtml(tt("members.department.view"))}</button>
-      <button type="button" class="dept-card__button dept-card__button--edit" data-department-edit${state.liveReadOnly ? " disabled" : ""}>${escapeHtml(tt("members.department.edit"))}</button>
-      <button type="button" class="dept-card__button dept-card__button--remove" data-department-remove${state.liveReadOnly ? " disabled" : ""}>${escapeHtml(tt("members.department.remove"))}</button>
+      <button type="button" class="dept-card__button dept-card__button--edit" data-department-edit${memberWriteAttrs(state, "canManageRoles")}>${escapeHtml(tt("members.department.edit"))}</button>
+      <button type="button" class="dept-card__button dept-card__button--remove" data-department-remove${memberWriteAttrs(state, "canManageRoles")}>${escapeHtml(tt("members.department.remove"))}</button>
     </footer>
   </article>`;
 }
@@ -29,7 +30,7 @@ export function renderMemberDepartments({ state, helpers }) {
   return `<div class="team-members-departments">
     ${cards}
     ${empty}
-    <button type="button" class="tp-component dept-card dept-card--add" data-department-add title="${escapeHtml(addText)}"${state.liveReadOnly ? " disabled" : ""}>
+    <button type="button" class="tp-component dept-card dept-card--add" data-department-add title="${escapeHtml(addText)}"${memberWriteAttrs(state, "canManageRoles")}>
       ${icon("icon-add-line-add", "icon-add-line dept-card__add-icon")}
       <span>${escapeHtml(addText)}</span>
     </button>
