@@ -7,6 +7,8 @@ const ALLOWED_REQUESTS = [
   { method: "POST", path: /^\/feedback\/[1-9]\d*\/log-link$/ },
   { method: "GET", path: /^\/device\/binding\?imei=\d{15}$/ },
   { method: "POST", path: /^\/device\/unbind$/ },
+  { method: "GET", path: /^\/ota\/package$/ },
+  { method: "POST", path: /^\/ota\/package$/ },
 ];
 
 export class HonnmonoAdminError extends Error {

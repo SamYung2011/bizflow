@@ -4,7 +4,9 @@ import test from "node:test";
 import {
   isAllowedHonnmonoApiBase,
   isAllowedHonnmonoUpstream,
+  isAllowedOtaAdminBase,
   mapHonnmonoAdminPath,
+  mapOtaAdminPath,
   stripFunctionPrefix,
 } from "./routing.mjs";
 
@@ -45,6 +47,16 @@ test("rejects writes, raw download proxying, and unrelated routes", () => {
 });
 
 
+test("maps only the OTA package read and replace routes", () => {
+  assert.equal(stripFunctionPrefix("/honnmono-admin/ota/package"), "/ota/package");
+  assert.equal(mapOtaAdminPath("/ota/package", "GET"), "/package");
+  assert.equal(mapOtaAdminPath("/ota/package/", "POST"), "/package");
+  assert.equal(mapOtaAdminPath("/ota/package", "DELETE"), "");
+  assert.equal(mapOtaAdminPath("/ota/backups", "GET"), "");
+  assert.equal(mapOtaAdminPath("/package", "GET"), "");
+});
+
+
 test("pins the bridge to the Shenzhen app-api host and JSON endpoints", () => {
   assert.equal(isAllowedHonnmonoApiBase("https://app-api.honnmono.top"), true);
   assert.equal(isAllowedHonnmonoApiBase("https://app-api.honnmono.top/"), true);
@@ -82,4 +94,14 @@ test("pins the bridge to the Shenzhen app-api host and JSON endpoints", () => {
     ),
     false,
   );
+});
+
+
+test("accepts a clean internal OTA service base and rejects unsafe URL shapes", () => {
+  assert.equal(isAllowedOtaAdminBase("http://172.18.0.1:8086"), true);
+  assert.equal(isAllowedOtaAdminBase("http://127.0.0.1:8086/"), true);
+  assert.equal(isAllowedOtaAdminBase("ftp://172.18.0.1:8086"), false);
+  assert.equal(isAllowedOtaAdminBase("http://user:pass@172.18.0.1:8086"), false);
+  assert.equal(isAllowedOtaAdminBase("http://172.18.0.1:8086/base"), false);
+  assert.equal(isAllowedOtaAdminBase("http://172.18.0.1:8086?next=evil"), false);
 });

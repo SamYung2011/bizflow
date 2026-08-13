@@ -3,7 +3,9 @@ import { readFile } from "node:fs/promises";
 
 import {
   isAllowedHonnmonoUpstream,
+  isAllowedOtaAdminBase,
   mapHonnmonoAdminPath,
+  mapOtaAdminPath,
 } from "../supabase/functions/honnmono-admin/routing.mjs";
 
 
@@ -68,6 +70,11 @@ assert.equal(
 );
 assert.equal(mapHonnmonoAdminPath("/feedback-log/token", "GET"), "");
 assert.equal(mapHonnmonoAdminPath("/device/unbind", "GET"), "");
+assert.equal(mapOtaAdminPath("/ota/package", "GET"), "/package");
+assert.equal(mapOtaAdminPath("/ota/package", "POST"), "/package");
+assert.equal(mapOtaAdminPath("/ota/package", "DELETE"), "");
+assert.equal(isAllowedOtaAdminBase("http://172.18.0.1:8086"), true);
+assert.equal(isAllowedOtaAdminBase("http://172.18.0.1:8086/base"), false);
 assert.equal(
   isAllowedHonnmonoUpstream(
     new URL("https://app-api.honnmono.top/internal/admin/feedback-log/token"),
@@ -83,6 +90,21 @@ assert.match(edge, /MAX_REQUEST_JSON_BYTES = 16_384/);
 assert.match(edge, /DEVICE_UNBIND_TIMEOUT_MS = 90_000/);
 assert.match(edge, /upstreamPath === "\/internal\/admin\/device\/unbind"/);
 assert.match(edge, /MAX_JSON_BYTES = 2_000_000/);
+assert.match(edge, /Deno\.env\.get\("OTA_ADMIN_URL"\)/);
+assert.match(edge, /Deno\.env\.get\("OTA_ADMIN_TOKEN"\)/);
+assert.match(edge, /"X-Internal-Token": OTA_ADMIN_TOKEN/);
+assert.match(edge, /mapOtaAdminPath\(subPath, req\.method\)/);
+assert.match(edge, /OTA admin service unavailable/);
+assert.match(edge, /MAX_OTA_REQUEST_JSON_BYTES = 2_800_000/);
+assert.ok(
+  edge.indexOf("const guard: GuardResult = await verifyAdmin(req)") <
+    edge.indexOf("if (isOtaRequest)"),
+  "OTA routing must remain behind the existing JWT/admin guard",
+);
+assert.match(
+  edge,
+  /return json\(\{ error: "OTA admin service unavailable" \}, 503\)/,
+);
 
 for (const key of [
   "OCPP_API_KEY",

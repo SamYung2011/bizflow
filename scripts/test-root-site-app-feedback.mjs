@@ -17,6 +17,14 @@ import {
   renderDeviceUnbind,
 } from "../root-site/bizflow/app-feedback-device.js";
 import {
+  OTA_MAX_FILE_BYTES,
+  createOtaPackageController,
+  createOtaPackageState,
+  otaFileToBase64,
+  renderOtaPackage,
+  validateOtaFile,
+} from "../root-site/bizflow/app-feedback-ota.js";
+import {
   FEEDBACK_POLL_INTERVAL_MS,
   FEEDBACK_POLL_MAX_INTERVAL_MS,
   applyFeedbackListPayload,
@@ -119,6 +127,12 @@ assert.doesNotThrow(() =>
 assert.doesNotThrow(() =>
   assertHonnmonoAdminRequest("/device/unbind", "POST"),
 );
+assert.doesNotThrow(() =>
+  assertHonnmonoAdminRequest("/ota/package", "GET"),
+);
+assert.doesNotThrow(() =>
+  assertHonnmonoAdminRequest("/ota/package", "POST"),
+);
 for (const [method, subPath] of [
   ["GET", "/feedback/0"],
   ["GET", "/feedback/-1"],
@@ -134,6 +148,9 @@ for (const [method, subPath] of [
   ["POST", "/device/binding?imei=862635066123456"],
   ["GET", "/device/unbind"],
   ["POST", "/device/unbind/extra"],
+  ["DELETE", "/ota/package"],
+  ["GET", "/ota/package?extra=1"],
+  ["POST", "/ota/backups"],
 ]) {
   assert.throws(
     () => assertHonnmonoAdminRequest(subPath, method),
@@ -186,6 +203,9 @@ for (const language of feedbackLanguages) {
     "string",
   );
   assert.equal(typeof appFeedbackCopy[language].imeiAmbiguousError, "string");
+  assert.equal(typeof appFeedbackCopy[language].otaPackageTitle, "string");
+  assert.equal(typeof appFeedbackCopy[language].otaMd5Hint, "string");
+  assert.equal(typeof appFeedbackCopy[language].otaPermissionError, "string");
 }
 
 for (const language of ["zh", "en", "fr"]) {
@@ -241,11 +261,12 @@ assert.deepEqual(
 const loadedPage = await feedbackRoute.load();
 assert.equal(typeof loadedPage.mountPage, "function");
 
-const [pageSource, apiSource, deviceSource, pollerSource, htmlSource, cssSource] =
+const [pageSource, apiSource, deviceSource, otaSource, pollerSource, htmlSource, cssSource] =
   await Promise.all([
     read("root-site/bizflow/app-feedback.js"),
     read("root-site/bizflow/app-feedback-api.js"),
     read("root-site/bizflow/app-feedback-device.js"),
+    read("root-site/bizflow/app-feedback-ota.js"),
     read("root-site/bizflow/app-feedback-poller.js"),
     read("root-site/bizflow/app-feedback.html"),
     read("root-site/bizflow/app-feedback.css"),
@@ -279,6 +300,8 @@ assert.doesNotMatch(apiSource, /HONNMONO_ADMIN_INTERNAL_TOKEN/);
 assert.doesNotMatch(apiSource, /app-api/i);
 assert.doesNotMatch(deviceSource, /HONNMONO_ADMIN_INTERNAL_TOKEN/);
 assert.doesNotMatch(deviceSource, /app-api/i);
+assert.doesNotMatch(otaSource, /HONNMONO_ADMIN_INTERNAL_TOKEN/);
+assert.doesNotMatch(otaSource, /app-api/i);
 assert.match(apiSource, /functions\/v1\/\$\{EDGE_FUNCTION\}/);
 assert.match(apiSource, /Authorization:\s*`Bearer \$\{context\.accessToken\}`/);
 assert.match(apiSource, /apikey:\s*context\.anonKey/);
@@ -289,6 +312,8 @@ assert.match(apiSource, /backendCode === "imei_ambiguous"/);
 assert.match(pageSource, /error\.code === "imei_ambiguous"/);
 assert.match(pageSource, /data-app-feedback-tab="feedback"/);
 assert.match(pageSource, /data-app-feedback-tab="device"/);
+assert.match(pageSource, /activeOtaController\?\.load\(\)/);
+assert.match(pageSource, /data-ota-file/);
 assert.match(pageSource, /activePoller\?\.pause\(\)/);
 assert.match(pageSource, /state\.activeTab\s*!==\s*"feedback"/);
 assert.match(deviceSource, /expected_userid:\s*expectedUserid/);
@@ -297,6 +322,11 @@ assert.match(deviceSource, /escapeHtml/);
 assert.match(deviceSource, /data-device-confirm-submit/);
 assert.match(deviceSource, /noAccountWarning/);
 assert.match(deviceSource, /providerUnverifiedWarning/);
+assert.match(otaSource, /accept="\.bin"/);
+assert.match(otaSource, /data-ota-confirm-submit/);
+assert.match(otaSource, /content_base64:/);
+assert.match(otaSource, /OTA_MAX_FILE_BYTES = 2 \* 1024 \* 1024/);
+assert.doesNotMatch(otaSource, /window\.confirm/);
 assert.match(pageSource, /document\.visibilityState\s*!==\s*"visible"/);
 assert.match(pageSource, /pendingListPayload/);
 assert.match(pageSource, /data-feedback-new/);
@@ -463,6 +493,115 @@ await conflictController.submitUnbind();
 assert.equal(conflictState.binding, null);
 assert.equal(conflictState.unbindError.status, 409);
 
+assert.equal(validateOtaFile({ name: "gbccs25.bin", size: 1024 }), null);
+assert.equal(
+  validateOtaFile({ name: "../gbccs25.bin", size: 1024 }).code,
+  "otaFileType",
+);
+assert.equal(
+  validateOtaFile({ name: "gbccs25.bin", size: OTA_MAX_FILE_BYTES + 1 }).code,
+  "otaFileTooLarge",
+);
+assert.equal(
+  await otaFileToBase64({
+    arrayBuffer: async () => Uint8Array.from([0, 1, 2, 255]).buffer,
+  }),
+  "AAEC/w==",
+);
+
+const otaState = createOtaPackageState();
+const otaCalls = [];
+let otaRenders = 0;
+const otaFile = {
+  name: "gbccs25.bin",
+  size: 4,
+  arrayBuffer: async () => Uint8Array.from([1, 2, 3, 4]).buffer,
+};
+let otaGetCount = 0;
+const otaController = createOtaPackageController({
+  otaState,
+  scope: { signal: new AbortController().signal },
+  isActive: () => true,
+  isDeviceTab: () => true,
+  rerender: () => {
+    otaRenders += 1;
+  },
+  focus: () => {},
+  encodeFile: async () => "AQIDBA==",
+  request: async (path, options = {}) => {
+    otaCalls.push([path, options]);
+    if (options.method === "POST") {
+      return { filename: "gbccs25.bin", size: 4, md5: "server-md5" };
+    }
+    otaGetCount += 1;
+    return otaGetCount === 1
+      ? {
+          current: {
+            filename: "gbccs24.bin",
+            size: 3,
+            md5: "old-md5",
+            mtime: 1_700_000_000,
+          },
+          backups: [],
+        }
+      : {
+          current: {
+            filename: "gbccs25.bin",
+            size: 4,
+            md5: "server-md5",
+            mtime: 1_700_000_100,
+          },
+          backups: [
+            {
+              filename: "gbccs24.bin.bak-20260813-120000",
+              size: 3,
+              mtime: 1_700_000_000,
+            },
+          ],
+        };
+  },
+});
+await otaController.load();
+assert.equal(otaState.packageInfo.current.filename, "gbccs24.bin");
+otaController.selectFile(otaFile);
+otaController.openConfirm();
+assert.equal(otaState.confirmOpen, true);
+await otaController.submit();
+assert.deepEqual(otaCalls.map(([path, options]) => [path, options.method || "GET"]), [
+  ["/ota/package", "GET"],
+  ["/ota/package", "POST"],
+  ["/ota/package", "GET"],
+]);
+assert.deepEqual(otaCalls[1][1].body, {
+  filename: "gbccs25.bin",
+  content_base64: "AQIDBA==",
+});
+assert.equal(otaState.packageInfo.current.filename, "gbccs25.bin");
+assert.equal(otaState.uploadResult.md5, "server-md5");
+assert.equal(otaState.selectedFile, null);
+assert.ok(otaRenders >= 6);
+
+otaState.packageInfo.backups.push({
+  filename: '<img src=x onerror="alert(1)">.bak-unsafe',
+  size: 1,
+  mtime: 1_700_000_000,
+});
+const otaHtml = renderOtaPackage({
+  otaState,
+  t: (key, values = {}) =>
+    Object.entries(values).reduce(
+      (text, [name, value]) => text.replaceAll(`{${name}}`, String(value)),
+      key,
+    ),
+  escapeHtml,
+  formatTime: () => "2026-08-13 12:00:00",
+  errorCopy: (error) => error?.code || "error",
+});
+assert.doesNotMatch(otaHtml, /<img src=x/);
+assert.match(otaHtml, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
+assert.match(otaHtml, /server-md5/);
+assert.match(otaHtml, /otaMd5Hint/);
+
 assert.match(htmlSource, /<script src="\.\.\/shell\/shell-skeleton\.js"><\/script>/);
 assert.match(htmlSource, /<script type="module" src="\.\.\/spa\/entry\.js"><\/script>/);
 assert.match(htmlSource, /<title>Honnmono APP · 用戶反饋<\/title>/);
@@ -479,6 +618,7 @@ assert.deepEqual(
 );
 assert.match(cssSource, /@media\s+\(max-width:/);
 assert.match(cssSource, /\.app-feedback-device-check--unverified/);
+assert.match(cssSource, /\.app-feedback-ota-card/);
 assert.doesNotMatch(cssSource, /(?:^|[;:{\s])#[0-9a-f]{3,8}\b/i);
 
 assert.equal(feedbackPollDelay(0), FEEDBACK_POLL_INTERVAL_MS);
@@ -681,5 +821,5 @@ for (let cycle = 0; cycle < 30; cycle += 1) {
 }
 
 console.log(
-  "Honnmono APP root-site contracts: PASS (feedback + manual device unbind tabs, exact IMEI allowlist, confirmation, escaped fields, checklist, scoped polling, i18n)",
+  "Honnmono APP root-site contracts: PASS (feedback + device unbind + OTA package card, allowlists, confirmations, escaped fields, scoped polling, i18n)",
 );

@@ -14,6 +14,11 @@ import {
   createDeviceUnbindState,
   renderDeviceUnbind,
 } from "./app-feedback-device.js";
+import {
+  createOtaPackageController,
+  createOtaPackageState,
+  renderOtaPackage,
+} from "./app-feedback-ota.js";
 import { translateAppFeedback } from "./app-feedback-i18n.js";
 import {
   applyFeedbackListPayload,
@@ -28,6 +33,7 @@ let helpers = null;
 let activeScope = null;
 let activePoller = null;
 let activeDeviceController = null;
+let activeOtaController = null;
 let instanceSequence = 0;
 let activeInstance = 0;
 
@@ -80,6 +86,24 @@ function deviceErrorCopy(error) {
     if (error.code === "imei_ambiguous") return t("imeiAmbiguousError");
     if (error.status === 404) return t("deviceNotFoundError");
     if (error.status === 409) return t("bindingChangedError");
+  }
+  return errorCopy(error);
+}
+
+function otaErrorCopy(error) {
+  if (error instanceof HonnmonoAdminError) {
+    if (error.status === 403) return t("otaPermissionError");
+    if (
+      [
+        "otaFileRequired",
+        "otaFileType",
+        "otaFileEmpty",
+        "otaFileTooLarge",
+        "otaFileReadError",
+      ].includes(error.code)
+    ) {
+      return t(error.code);
+    }
   }
   return errorCopy(error);
 }
@@ -313,13 +337,22 @@ function render(nextHelpers) {
     ${
       isFeedback
         ? renderFeedbackPanel()
-        : renderDeviceUnbind({
-            deviceState: state.device,
-            t,
-            escapeHtml: helpers.escapeHtml,
-            formatTime: (value) => formatFeedbackTime(value, helpers.lang),
-            errorCopy: deviceErrorCopy,
-          })
+        : `<div class="app-feedback-device-panel">
+            ${renderDeviceUnbind({
+              deviceState: state.device,
+              t,
+              escapeHtml: helpers.escapeHtml,
+              formatTime: (value) => formatFeedbackTime(value, helpers.lang),
+              errorCopy: deviceErrorCopy,
+            })}
+            ${renderOtaPackage({
+              otaState: state.ota,
+              t,
+              escapeHtml: helpers.escapeHtml,
+              formatTime: (value) => formatFeedbackTime(value, helpers.lang),
+              errorCopy: otaErrorCopy,
+            })}
+          </div>`
     }
   </section>`;
 }
@@ -631,6 +664,7 @@ function switchAppTab(nextTab) {
   if (nextTab === "device") {
     activePoller?.pause();
     rerender();
+    if (!state.ota.loaded) void activeOtaController?.load();
     activeScope?.animationFrame(() =>
       document.querySelector("[data-device-imei]")?.focus(),
     );
@@ -660,6 +694,25 @@ function onFeedbackClick(event) {
   }
   if (event.target.closest?.("[data-device-confirm-submit]")) {
     void activeDeviceController?.submitUnbind();
+    return;
+  }
+  if (event.target.closest?.("[data-ota-retry]")) {
+    void activeOtaController?.load();
+    return;
+  }
+  if (event.target.closest?.("[data-ota-replace]")) {
+    activeOtaController?.openConfirm();
+    return;
+  }
+  if (
+    event.target.matches?.("[data-ota-confirm-overlay]") ||
+    event.target.closest?.("[data-ota-confirm-cancel]")
+  ) {
+    activeOtaController?.closeConfirm();
+    return;
+  }
+  if (event.target.closest?.("[data-ota-confirm-submit]")) {
+    void activeOtaController?.submit();
     return;
   }
   if (event.target.closest?.("[data-feedback-new]")) {
@@ -706,6 +759,10 @@ function onFeedbackInput(event) {
 }
 
 function onFeedbackChange(event) {
+  if (event.target.matches("[data-ota-file]")) {
+    activeOtaController?.selectFile(event.target.files?.[0] ?? null);
+    return;
+  }
   if (event.target.matches("[data-feedback-client]")) {
     state.clientModel = event.target.value;
   } else if (event.target.matches("[data-feedback-version]")) {
@@ -733,6 +790,10 @@ function onFeedbackSubmit(event) {
 }
 
 function onFeedbackKeydown(event) {
+  if (event.key === "Escape" && state?.ota?.confirmOpen) {
+    activeOtaController?.closeConfirm();
+    return;
+  }
   if (event.key === "Escape" && state?.device?.confirmOpen) {
     activeDeviceController?.closeConfirm();
     return;
@@ -746,6 +807,7 @@ function createState(historyState) {
   return {
     activeTab: saved.activeTab === "device" ? "device" : "feedback",
     device: createDeviceUnbindState(saved),
+    ota: createOtaPackageState(),
     rows: [],
     total: 0,
     facets: {
@@ -835,6 +897,16 @@ export async function mountPage({
       scope.animationFrame(() => document.querySelector(selector)?.focus()),
   });
   activeDeviceController = deviceController;
+  const otaController = createOtaPackageController({
+    otaState: nextState.ota,
+    scope,
+    isActive: () => isActive(instance, scope),
+    isDeviceTab: () => state?.activeTab === "device",
+    rerender,
+    focus: (selector) =>
+      scope.animationFrame(() => document.querySelector(selector)?.focus()),
+  });
+  activeOtaController = otaController;
   let poller = null;
 
   return {
@@ -852,6 +924,7 @@ export async function mountPage({
       });
       activePoller = poller;
       if (state.activeTab === "feedback") poller.start();
+      if (state.activeTab === "device") void otaController.load();
     },
     captureState: () => ({
       activeTab: state.activeTab,
@@ -869,6 +942,7 @@ export async function mountPage({
       if (activeDeviceController === deviceController) {
         activeDeviceController = null;
       }
+      if (activeOtaController === otaController) activeOtaController = null;
       if (activeInstance === instance) activeInstance = 0;
       if (activeScope === scope) activeScope = null;
       state = null;

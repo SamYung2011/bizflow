@@ -22,6 +22,14 @@ export function mapHonnmonoAdminPath(pathname, method) {
   return "";
 }
 
+export function mapOtaAdminPath(pathname, method) {
+  const normalized = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+  if (["GET", "POST"].includes(method) && normalized === "/ota/package") {
+    return "/package";
+  }
+  return "";
+}
+
 export function isAllowedHonnmonoApiBase(value) {
   try {
     const url = new URL(value);
@@ -55,4 +63,21 @@ export function isAllowedHonnmonoUpstream(url) {
       url.pathname === "/internal/admin/device/unbind"
     )
   );
+}
+
+export function isAllowedOtaAdminBase(value) {
+  try {
+    const url = new URL(value);
+    return (
+      ["http:", "https:"].includes(url.protocol) &&
+      Boolean(url.hostname) &&
+      url.username === "" &&
+      url.password === "" &&
+      (url.pathname === "" || url.pathname === "/") &&
+      url.search === "" &&
+      url.hash === ""
+    );
+  } catch {
+    return false;
+  }
 }

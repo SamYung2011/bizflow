@@ -6,6 +6,8 @@
 //   POST /honnmono-admin/feedback/{id}/log-link
 //   GET  /honnmono-admin/device/binding?imei={15 digits}
 //   POST /honnmono-admin/device/unbind
+//   GET  /honnmono-admin/ota/package
+//   POST /honnmono-admin/ota/package
 //
 // Log bytes are intentionally outside this allowlist. The link-issuance route
 // returns a short-lived, one-time Shenzhen URL that the browser downloads
@@ -14,7 +16,9 @@
 import {
   isAllowedHonnmonoApiBase,
   isAllowedHonnmonoUpstream,
+  isAllowedOtaAdminBase,
   mapHonnmonoAdminPath,
+  mapOtaAdminPath,
   stripFunctionPrefix,
 } from "./routing.mjs";
 
@@ -27,10 +31,13 @@ const HONNMONO_ADMIN_API_URL = (
 ).replace(/\/+$/, "");
 const HONNMONO_ADMIN_INTERNAL_TOKEN =
   Deno.env.get("HONNMONO_ADMIN_INTERNAL_TOKEN") ?? "";
+const OTA_ADMIN_URL = (Deno.env.get("OTA_ADMIN_URL") ?? "").replace(/\/+$/, "");
+const OTA_ADMIN_TOKEN = Deno.env.get("OTA_ADMIN_TOKEN") ?? "";
 const UPSTREAM_TIMEOUT_MS = 10_000;
 const DEVICE_UNBIND_TIMEOUT_MS = 90_000;
 const MAX_JSON_BYTES = 2_000_000;
 const MAX_REQUEST_JSON_BYTES = 16_384;
+const MAX_OTA_REQUEST_JSON_BYTES = 2_800_000;
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -53,11 +60,17 @@ function json(body: unknown, status = 200) {
   });
 }
 
-function requireEnv() {
+function requireAuthEnv() {
   return (
     Boolean(SUPABASE_URL) &&
     Boolean(SUPABASE_ANON_KEY) &&
-    Boolean(SUPABASE_SERVICE_ROLE_KEY) &&
+    Boolean(SUPABASE_SERVICE_ROLE_KEY)
+  );
+}
+
+function requireEnv() {
+  return (
+    requireAuthEnv() &&
     HONNMONO_ADMIN_INTERNAL_TOKEN.length >= 32 &&
     isAllowedHonnmonoApiBase(HONNMONO_ADMIN_API_URL)
   );
@@ -129,13 +142,84 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
   }
-  if (!requireEnv()) return json({ error: "Server misconfigured" }, 500);
+
+  const url = new URL(req.url);
+  const subPath = stripFunctionPrefix(url.pathname);
+  const isOtaRequest = subPath.startsWith("/ota/");
+  if (isOtaRequest ? !requireAuthEnv() : !requireEnv()) {
+    return json({ error: "Server misconfigured" }, 500);
+  }
 
   const guard: GuardResult = await verifyAdmin(req);
   if (!guard.ok) return json({ error: guard.error }, guard.status);
 
-  const url = new URL(req.url);
-  const subPath = stripFunctionPrefix(url.pathname);
+  if (isOtaRequest) {
+    const otaPath = mapOtaAdminPath(subPath, req.method);
+    if (!otaPath) return json({ error: "Not found" }, 404);
+    if (
+      !OTA_ADMIN_URL ||
+      !OTA_ADMIN_TOKEN ||
+      !isAllowedOtaAdminBase(OTA_ADMIN_URL)
+    ) {
+      return json({ error: "OTA admin service unavailable" }, 503);
+    }
+
+    let otaBody: string | undefined;
+    if (req.method === "POST") {
+      const requestLength = Number(req.headers.get("content-length") ?? "0");
+      if (
+        Number.isFinite(requestLength) &&
+        requestLength > MAX_OTA_REQUEST_JSON_BYTES
+      ) {
+        return json({ error: "Request body too large" }, 413);
+      }
+      otaBody = await req.text();
+      if (
+        new TextEncoder().encode(otaBody).byteLength >
+        MAX_OTA_REQUEST_JSON_BYTES
+      ) {
+        return json({ error: "Request body too large" }, 413);
+      }
+      try {
+        const parsed = JSON.parse(otaBody);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          return json({ error: "Invalid JSON body" }, 400);
+        }
+      } catch (_) {
+        return json({ error: "Invalid JSON body" }, 400);
+      }
+    }
+
+    let otaUpstream: Response;
+    try {
+      otaUpstream = await fetch(new URL(otaPath, `${OTA_ADMIN_URL}/`), {
+        method: req.method,
+        headers: {
+          "X-Internal-Token": OTA_ADMIN_TOKEN,
+          ...(otaBody ? { "Content-Type": "application/json" } : {}),
+        },
+        body: otaBody || undefined,
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      });
+    } catch (_) {
+      return json({ error: "OTA admin service timeout" }, 504);
+    }
+
+    const otaText = await otaUpstream.text();
+    if (new TextEncoder().encode(otaText).byteLength > MAX_JSON_BYTES) {
+      return json({ error: "OTA admin service response too large" }, 502);
+    }
+    return new Response(otaText, {
+      status: otaUpstream.status,
+      headers: {
+        ...CORS_HEADERS,
+        "Content-Type":
+          otaUpstream.headers.get("content-type") ?? "application/json",
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
   const upstreamPath = mapHonnmonoAdminPath(subPath, req.method);
   if (!upstreamPath) return json({ error: "Not found" }, 404);
 
