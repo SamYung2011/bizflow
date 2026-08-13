@@ -494,6 +494,11 @@ assert.equal(conflictState.binding, null);
 assert.equal(conflictState.unbindError.status, 409);
 
 assert.equal(validateOtaFile({ name: "gbccs25.bin", size: 1024 }), null);
+assert.equal(validateOtaFile({ name: `${"a".repeat(60)}.bin`, size: 1 }), null);
+assert.equal(
+  validateOtaFile({ name: `${"a".repeat(61)}.bin`, size: 1 }).code,
+  "otaFileType",
+);
 assert.equal(
   validateOtaFile({ name: "../gbccs25.bin", size: 1024 }).code,
   "otaFileType",
@@ -580,6 +585,46 @@ assert.equal(otaState.packageInfo.current.filename, "gbccs25.bin");
 assert.equal(otaState.uploadResult.md5, "server-md5");
 assert.equal(otaState.selectedFile, null);
 assert.ok(otaRenders >= 6);
+
+let resolveRacingLoad;
+let resolveRacingPost;
+let racingGetCount = 0;
+const racingState = createOtaPackageState();
+const racingController = createOtaPackageController({
+  otaState: racingState,
+  scope: { signal: new AbortController().signal },
+  isActive: () => true,
+  isDeviceTab: () => true,
+  rerender: () => {},
+  focus: () => {},
+  encodeFile: async () => "AQIDBA==",
+  request: async (_path, options = {}) => {
+    if (options.method === "POST") {
+      return new Promise((resolve) => {
+        resolveRacingPost = resolve;
+      });
+    }
+    racingGetCount += 1;
+    if (racingGetCount === 1) {
+      return new Promise((resolve) => {
+        resolveRacingLoad = resolve;
+      });
+    }
+    return { current: null, backups: [] };
+  },
+});
+const racingLoad = racingController.load();
+racingController.selectFile(otaFile);
+racingController.openConfirm();
+const racingSubmit = racingController.submit();
+await Promise.resolve();
+resolveRacingLoad({ current: null, backups: [] });
+await racingLoad;
+assert.equal(racingState.loading, false);
+assert.equal(racingState.uploadLoading, true);
+resolveRacingPost({ filename: "gbccs25.bin", size: 4, md5: "server-md5" });
+await racingSubmit;
+assert.equal(racingState.uploadLoading, false);
 
 otaState.packageInfo.backups.push({
   filename: '<img src=x onerror="alert(1)">.bak-unsafe',

@@ -5,7 +5,7 @@ import {
 
 
 export const OTA_MAX_FILE_BYTES = 2 * 1024 * 1024;
-const OTA_FILENAME_PATTERN = /^[A-Za-z0-9._-]{1,64}\.bin$/;
+const OTA_FILENAME_PATTERN = /^[A-Za-z0-9._-]{1,60}\.bin$/;
 
 export function createOtaPackageState() {
   return {
@@ -95,10 +95,8 @@ export function createOtaPackageController({
     } catch (error) {
       if (isCurrent(sequence)) otaState.loadError = error;
     } finally {
-      if (isCurrent(sequence)) {
-        otaState.loading = false;
-        if (isDeviceTab()) rerender();
-      }
+      otaState.loading = false;
+      if (isActive() && isDeviceTab()) rerender();
     }
   }
 
