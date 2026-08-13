@@ -14,7 +14,11 @@ import {
   readLiveSnapshotCache,
   writeLiveSnapshotCache
 } from "./live-table-cache.js";
-import { LIVE_SNAPSHOT_INVALIDATED_EVENT, LIVE_SNAPSHOT_UPDATED_EVENT } from "./live-snapshot-dependencies.js";
+import {
+  isCompanyScopedSnapshot,
+  LIVE_SNAPSHOT_INVALIDATED_EVENT,
+  LIVE_SNAPSHOT_UPDATED_EVENT
+} from "./live-snapshot-dependencies.js";
 import { ensureLiveRealtime } from "./live-realtime.js";
 import {
   clearProviderSnapshotMemo,
@@ -950,16 +954,24 @@ function comparableSnapshot(value) {
   return JSON.stringify(value, (key, item) => key === "generated_at" ? undefined : item);
 }
 
-async function buildAndCacheSnapshot(snapshot, builder, userId, { fresh = false } = {}) {
+// Company-scoped builders read getCurrentUser().activeCompanyId themselves, so the
+// cache key has to be resolved from the same source before the entry is read or
+// written; otherwise a switched company keeps hitting the previous company's entry.
+async function snapshotCompanyId(snapshot) {
+  if (!isCompanyScopedSnapshot(snapshot)) return "";
+  return String((await getCurrentUser())?.activeCompanyId || "");
+}
+
+async function buildAndCacheSnapshot(snapshot, builder, userId, companyId, { fresh = false } = {}) {
   const version = liveSnapshotCacheVersion(snapshot);
   const value = liveValue(await (fresh ? withFreshLiveTableReads(builder) : builder()));
-  const stored = await writeLiveSnapshotCache({ userId, snapshot, value, version });
+  const stored = await writeLiveSnapshotCache({ userId, snapshot, companyId, value, version });
   return { value, stored };
 }
 
-function refreshLiveSnapshot(snapshot, builder, userId, cachedValue) {
+function refreshLiveSnapshot(snapshot, builder, userId, companyId, cachedValue) {
   if (LIVE_REFRESHES.has(snapshot)) return LIVE_REFRESHES.get(snapshot);
-  const promise = buildAndCacheSnapshot(snapshot, builder, userId, { fresh: true })
+  const promise = buildAndCacheSnapshot(snapshot, builder, userId, companyId, { fresh: true })
     .then(({ value, stored }) => {
       if (!stored || userId !== snapshotUserId) return value;
       LIVE_BUILDERS.set(snapshot, Promise.resolve(value));
@@ -978,13 +990,14 @@ function refreshLiveSnapshot(snapshot, builder, userId, cachedValue) {
 }
 
 async function loadLiveSnapshot(snapshot, builder, userId) {
-  const cached = await readLiveSnapshotCache({ userId, snapshot });
+  const companyId = await snapshotCompanyId(snapshot);
+  const cached = await readLiveSnapshotCache({ userId, snapshot, companyId });
   if (cached) {
     const value = liveValue(cached.value);
-    if (cached.stale) void refreshLiveSnapshot(snapshot, builder, userId, value);
+    if (cached.stale) void refreshLiveSnapshot(snapshot, builder, userId, companyId, value);
     return value;
   }
-  const { value } = await buildAndCacheSnapshot(snapshot, builder, userId);
+  const { value } = await buildAndCacheSnapshot(snapshot, builder, userId, companyId);
   return value;
 }
 

@@ -11,7 +11,12 @@ import {
   writeLiveTableCache
 } from "./live-table-cache.js";
 import { fetchAllTablePages } from "./fetch-all-pages.js";
-import { LIVE_TABLE_SWR_REFRESHED_EVENT } from "./live-snapshot-dependencies.js";
+import {
+  COMPANY_SCOPED_SNAPSHOTS,
+  LIVE_SNAPSHOT_INVALIDATED_EVENT,
+  LIVE_SNAPSHOT_UPDATED_EVENT,
+  LIVE_TABLE_SWR_REFRESHED_EVENT
+} from "./live-snapshot-dependencies.js";
 
 const CONFIG_URL = new URL("../config.local.js", import.meta.url);
 const ADMIN_EMAIL = "samyung2011@gmail.com";
@@ -416,6 +421,18 @@ export async function getCurrentUser({ refresh = false } = {}) {
   return currentUserPromise;
 }
 
+// Company-scoped snapshots are cached per company, so a switch never has to drop the
+// stored entries; only the memoized in-page copies are still keyed by snapshot name.
+// The invalidated event evicts those live-builder and provider memos, and the updated
+// event lets already-mounted pages rebuild for the new company right away instead of
+// waiting out the snapshot TTL.
+function notifyCompanyScopeChange() {
+  if (typeof window === "undefined") return;
+  const detail = { snapshots: [...COMPANY_SCOPED_SNAPSHOTS], tables: [], source: "company-switch" };
+  window.dispatchEvent(new CustomEvent(LIVE_SNAPSHOT_INVALIDATED_EVENT, { detail }));
+  window.dispatchEvent(new CustomEvent(LIVE_SNAPSHOT_UPDATED_EVENT, { detail }));
+}
+
 export async function setActiveCompany(companyId) {
   const context = await getCurrentUser();
   const nextCompanyId = String(companyId || "");
@@ -425,5 +442,7 @@ export async function setActiveCompany(companyId) {
   safeLocalStorageSet(`team-active-company-${context.userId || context.employeeId}`, nextCompanyId);
   clearCurrentUserMemory();
   await invalidateLiveAuthCache();
-  return getCurrentUser();
+  const nextContext = await getCurrentUser();
+  notifyCompanyScopeChange();
+  return nextContext;
 }

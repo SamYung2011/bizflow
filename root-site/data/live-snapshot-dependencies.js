@@ -4,6 +4,19 @@ export const LIVE_SNAPSHOT_INVALIDATED_EVENT = "tp:live-snapshot-invalidated";
 export const LIVE_SNAPSHOT_UPDATED_EVENT = "tp:live-snapshot-updated";
 export const LIVE_TABLE_SWR_REFRESHED_EVENT = "tp:live-table-swr-refreshed";
 
+// Snapshots whose payload is already filtered by the reader's active company:
+// buildTasksSnapshot and memberSourceData drop rows outside activeCompanyId, and
+// home.json embeds both. Their cached entries therefore belong to one company, not
+// just one user, so the cache key carries the company id and a switch cannot serve
+// the previous company's members/tasks until the TTL expires.
+export const COMPANY_SCOPED_SNAPSHOTS = Object.freeze(["home.json", "members.json", "tasks.json"]);
+
+const COMPANY_SCOPED_SNAPSHOT_SET = new Set(COMPANY_SCOPED_SNAPSHOTS);
+
+export function isCompanyScopedSnapshot(snapshot) {
+  return COMPANY_SCOPED_SNAPSHOT_SET.has(String(snapshot || ""));
+}
+
 const SNAPSHOT_TABLES = Object.freeze({
   "home.json": [
     "invoices", "customers", "employees", "shipment_events", "customer_devices", "products",

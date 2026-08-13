@@ -104,8 +104,12 @@ function authCacheKey(userId) {
   return `${CACHE_AUTH_PREFIX}${encoded(userId)}`;
 }
 
-function snapshotCacheKey(userId, snapshot) {
-  return `${CACHE_SNAPSHOT_PREFIX}${encoded(userId)}:${encoded(snapshot)}`;
+// Company-scoped snapshots append their company id so two companies of the same
+// user never share one entry. The company segment stays last, keeping the
+// userId:snapshot prefix that invalidateLiveSnapshotCache() parses intact.
+function snapshotCacheKey(userId, snapshot, companyId) {
+  const scope = companyId ? `:${encoded(companyId)}` : "";
+  return `${CACHE_SNAPSHOT_PREFIX}${encoded(userId)}:${encoded(snapshot)}${scope}`;
 }
 
 function serializedBytes(value) {
@@ -282,10 +286,13 @@ function parseAuthPayload(value, expectedUserId) {
   return payload;
 }
 
-function parseSnapshotPayload(value, expectedUserId, expectedSnapshot) {
+function parseSnapshotPayload(value, expectedUserId, expectedSnapshot, expectedCompanyId) {
   const payload = typeof value === "string" ? JSON.parse(value) : value;
   if (!payload?.value || typeof payload.value !== "object" || Array.isArray(payload.value) ||
     payload.userId !== expectedUserId || payload.snapshot !== expectedSnapshot ||
+    // Entries written before company scoping carry no companyId; they stay readable
+    // only for company-neutral reads and can never satisfy a scoped one.
+    String(payload.companyId || "") !== expectedCompanyId ||
     !Number.isFinite(payload.cachedAt)) {
     throw new Error("invalid snapshot cache payload");
   }
@@ -421,13 +428,14 @@ export function liveSnapshotCacheVersion(snapshot) {
   return `${cacheEpoch}:${SNAPSHOT_CONTRACT_GENERATIONS.get(key) || 0}:${snapshotVersions.get(key) || 0}`;
 }
 
-export async function readLiveSnapshotCache({ userId, snapshot }) {
+export async function readLiveSnapshotCache({ userId, snapshot, companyId = "" }) {
   const normalizedUserId = String(userId || "");
   const normalizedSnapshot = String(snapshot || "");
+  const normalizedCompanyId = String(companyId || "");
   if (!normalizedUserId || !normalizedSnapshot) return null;
   await activateLiveTableCacheUser(normalizedUserId);
   if (activeUserId !== normalizedUserId) return null;
-  const key = snapshotCacheKey(normalizedUserId, normalizedSnapshot);
+  const key = snapshotCacheKey(normalizedUserId, normalizedSnapshot, normalizedCompanyId);
   const currentVersion = liveSnapshotCacheVersion(normalizedSnapshot);
   const usePayload = async (payload, remove) => {
     if (snapshotVersionChangedInThisPage(normalizedSnapshot) && payload.version !== undefined && payload.version !== currentVersion) {
@@ -446,7 +454,10 @@ export async function readLiveSnapshotCache({ userId, snapshot }) {
   const indexed = await readIndexedValue(key);
   if (indexed.value) {
     try {
-      return await usePayload(parseSnapshotPayload(indexed.value, normalizedUserId, normalizedSnapshot), () => removeIndexedValue(key));
+      return await usePayload(
+        parseSnapshotPayload(indexed.value, normalizedUserId, normalizedSnapshot, normalizedCompanyId),
+        () => removeIndexedValue(key)
+      );
     } catch {
       await removeIndexedValue(key);
     }
@@ -454,7 +465,7 @@ export async function readLiveSnapshotCache({ userId, snapshot }) {
   const serialized = getFallbackValue(key);
   if (!serialized) return null;
   try {
-    const payload = parseSnapshotPayload(serialized, normalizedUserId, normalizedSnapshot);
+    const payload = parseSnapshotPayload(serialized, normalizedUserId, normalizedSnapshot, normalizedCompanyId);
     const result = await usePayload(payload, async () => removeFallbackValue(key));
     if (!result) return null;
     if (indexed.available) {
@@ -468,20 +479,22 @@ export async function readLiveSnapshotCache({ userId, snapshot }) {
   }
 }
 
-export async function writeLiveSnapshotCache({ userId, snapshot, value, version }) {
+export async function writeLiveSnapshotCache({ userId, snapshot, companyId = "", value, version }) {
   const normalizedUserId = String(userId || "");
   const normalizedSnapshot = String(snapshot || "");
+  const normalizedCompanyId = String(companyId || "");
   if (!normalizedUserId || !normalizedSnapshot || !value || typeof value !== "object" || Array.isArray(value)) return false;
   if (version !== undefined && version !== liveSnapshotCacheVersion(normalizedSnapshot)) return false;
   await activateLiveTableCacheUser(normalizedUserId);
   if (version !== undefined && version !== liveSnapshotCacheVersion(normalizedSnapshot)) return false;
-  const key = snapshotCacheKey(normalizedUserId, normalizedSnapshot);
+  const key = snapshotCacheKey(normalizedUserId, normalizedSnapshot, normalizedCompanyId);
   const payload = {
     key,
     userId: normalizedUserId,
     kind: "snapshot",
     table: "",
     snapshot: normalizedSnapshot,
+    companyId: normalizedCompanyId,
     cachedAt: Date.now(),
     value,
     version: version ?? liveSnapshotCacheVersion(normalizedSnapshot)
