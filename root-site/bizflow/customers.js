@@ -17,6 +17,7 @@ import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { renderNewCustomerFields } from "../components/new-customer-fields.js";
 import { safeSetSelectionRange, suggestEmail } from "../components/email-suggest.js";
 import { copyPhoneNumber } from "../components/phone-copy.js";
+import { matchesSearchValues } from "../components/search-match.js";
 import { createLiveOrderCustomer } from "../data/live-orders-writes.js";
 import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
@@ -258,20 +259,14 @@ function restoreCustomersTextFocus(focus) {
   input.setSelectionRange(Math.min(focus.start ?? end, end), Math.min(focus.end ?? end, end));
 }
 
+// 匹配口径搬去 components/search-match.js 共用(保修提醒同一份),这里只声明搜哪些字段。
 export function customerMatchesSearch(customer, query) {
-  const term = String(query || "").trim().toLocaleLowerCase();
-  if (!term) return true;
-  const compactTerm = term.replace(/[\s-]+/g, "");
-  const values = [
+  return matchesSearchValues([
     customer.allNames, customer.allEmails, customer.allPhones, customer.allPhoneMainlands,
     customer.imeiCodes, customer.allCarMakes, customer.allCarModels,
     customer.name, customer.phone, customer.imei,
     customer.detail?.email, customer.detail?.carMake, customer.detail?.carModelValue, customer.detail?.carModel
-  ].flat().filter((value) => value != null);
-  return values.some((value) => {
-    const text = String(value).toLocaleLowerCase();
-    return text.includes(term) || (compactTerm && text.replace(/[\s-]+/g, "").includes(compactTerm));
-  });
+  ], query);
 }
 
 function filteredCustomers() {

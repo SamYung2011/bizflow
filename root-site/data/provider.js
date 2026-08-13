@@ -1205,6 +1205,16 @@ function isValidWarrantyItem(item) {
     typeof item.warrantyMonths === "number";
 }
 
+// warranty.json 每行只带客户组主记录的一个电话(live-snapshots.js buildWarrantySnapshot),
+// 客户列表却是拿整组 allPhones + allPhoneMainlands 在搜。这里把整组号码补回行上,
+// 保修提醒搜别名号 / 内地号才不会落空(todo #359);行上展示的仍旧只有 item.phone。
+function warrantySearchPhones(item, customer) {
+  return [...new Set([item.phone, ...(customer?.allPhones ?? []), ...(customer?.allPhoneMainlands ?? [])]
+    .flatMap((value) => String(value ?? "").split(/\n+/))
+    .map((value) => value.trim())
+    .filter(Boolean))];
+}
+
 export async function getWarrantyData() {
   const snapshot = await loadWarrantySnapshot();
   const itemsValid = Array.isArray(snapshot?.items) && snapshot.items.every(isValidWarrantyItem);
@@ -1212,9 +1222,11 @@ export async function getWarrantyData() {
   if (!itemsValid) return { items: [] };
   const customers = await loadGroupedCustomers();
   const customerIdMap = new Map();
+  const customerByGroupId = new Map();
   customers.forEach((customer) => {
     const ids = Array.isArray(customer.groupCids) ? customer.groupCids : [customer.id];
     ids.forEach((id) => customerIdMap.set(String(id), customer.id));
+    customerByGroupId.set(customer.id, customer);
   });
   const today = Date.parse(`${hongKongDateInput()}T00:00:00Z`);
   // Mirrors bizflow_samyung/src/context/AppContext.jsx:429-447: known customer and [-30, +365] days only.
@@ -1223,7 +1235,7 @@ export async function getWarrantyData() {
     const expiry = Date.parse(`${item.expiry.replaceAll("/", "-")}T00:00:00Z`);
     const daysLeft = Math.ceil((expiry - today) / 86400000);
     return customerId && Number.isFinite(daysLeft) && daysLeft >= -30 && daysLeft <= 365
-      ? [{ ...item, customerId }]
+      ? [{ ...item, customerId, phones: warrantySearchPhones(item, customerByGroupId.get(customerId)) }]
       : [];
   });
   return { items };

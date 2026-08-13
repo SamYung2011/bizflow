@@ -2,6 +2,7 @@ import { getWarrantyData } from "../data/provider.js";
 import { managementPageSize, renderManagementList, renderManagementPager } from "../components/management-list.js";
 import { createDateRangePanel } from "../components/date-range-panel.js";
 import { clearPhoneCopyNotice, phoneCopyLabel } from "../components/phone-copy.js";
+import { matchesSearchValues } from "../components/search-match.js";
 import { renewLiveWarranty } from "../data/live-warranty-writes.js";
 
 const copy = {
@@ -265,8 +266,15 @@ export function warrantyBucketCounts(items) {
   return counts;
 }
 
+// 与客户列表同一口径(components/search-match.js):大小写、空格、横杠都不影响命中。
+// item.phones 是 provider 按客户组补齐的整组号码(别名号 + 内地号),只参与搜索;
+// 行上展示的仍旧只有主号 item.phone。
+export function warrantyMatchesSearch(item, query) {
+  return matchesSearchValues([item.customer, item.phone, item.phones, item.product, item.no], query);
+}
+
 function filteredItems() {
-  const term = state.search.trim().toLocaleLowerCase();
+  const term = state.search.trim();
   const rangeFrom = dateValue(state.dateFrom);
   const rangeTo = dateValue(state.dateTo);
   return (state.items ?? []).filter((item) => {
@@ -275,8 +283,7 @@ function filteredItems() {
     if (Number.isFinite(rangeFrom) && (!Number.isFinite(purchaseDate) || purchaseDate < rangeFrom)) return false;
     if (Number.isFinite(rangeTo) && (!Number.isFinite(purchaseDate) || purchaseDate > rangeTo)) return false;
     if (!term) return true;
-    return [item.customer, item.phone, item.product, item.no]
-      .some((value) => String(value).toLocaleLowerCase().includes(term));
+    return warrantyMatchesSearch(item, term);
   });
 }
 
