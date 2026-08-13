@@ -11,6 +11,7 @@ import { consumeNavigationPreset, navigationPresetKeys } from "../components/nav
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { clearPhoneCopyNotice, copyPhoneNumber, phoneCopyLabel } from "../components/phone-copy.js";
+import { matchesSearchValues } from "../components/search-match.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
 import {
@@ -179,15 +180,15 @@ const STATUS_CLASS = {
   "in-progress": "order-status--progress",
   "cancelled": "order-status--cancelled"
 };
+// 匹配口径同客户列表/保修提醒(components/search-match.js):大小写、空格、横杠不影响命中。
+// 原先这里是第三份手写的原文 includes,搜带空格的电话「9123 4567」敲连号搜不到,与 #359 同病根。
 export function orderMatchesSearch(order, query) {
-  const term = String(query || "").trim().toLocaleLowerCase();
-  if (!term) return true;
-  return [
+  return matchesSearchValues([
     order.dcNumber, order.invoiceNumber, order.detail?.orderNo,
     order.customer, order.phone, order.product, order.detail?.salesperson,
     order.detail?.note, order.detail?.trackingNo,
     ...(Array.isArray(order.detail?.items) ? order.detail.items.map((item) => item?.name) : [])
-  ].some((value) => String(value || "").toLocaleLowerCase().includes(term));
+  ], query);
 }
 
 function ordersBeforeShipping() {
