@@ -80,6 +80,18 @@ function dcInvoiceNumber(invoice) {
   return `DC${/^\d+$/.test(stripped) ? stripped.padStart(5, "0") : stripped}`;
 }
 
+// 机器自动写入的备注段不给使用者看(煊煊 2026-08-14 拍:机械性备注不显示):
+// Framer 表單意向+时间戳(forms-buy 写)、Shopify order #N | financial=… | fulfillment=…
+// (shopify-orders 写)、Notion 旧资料导入残留 batch=… idx=… raw_status=…。
+// 渠道已有来源标签、付款/发货已有状态丸,这些同步流水只碍眼;人手写的备注和 Promo Code 段保留。
+// 只影响展示/搜索用的 detail.note;invoiceChannel/customer-source 读原始 notes,不受影响。
+const MACHINE_NOTE_SEGMENT = new RegExp("^(?:" + [
+  "Framer 表單意向(?:\\s+\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2})?",
+  "Shopify order\\s+\\S+",
+  "(?:financial|fulfillment)=\\S*",
+  "batch=\\S+(?:\\s+idx=\\S+)?(?:\\s+raw_status=\\S+)?"
+].join("|") + ")$");
+
 function visibleInvoiceNotes(notes) {
   return asText(notes)
     .replace(/__[A-Z_]+__(?::[\w-]+)?\s*/g, "")
@@ -89,7 +101,10 @@ function visibleInvoiceNotes(notes) {
       const pad = (value) => String(value).padStart(2, "0");
       return `${hongKong.getUTCFullYear()}-${pad(hongKong.getUTCMonth() + 1)}-${pad(hongKong.getUTCDate())} ${pad(hongKong.getUTCHours())}:${pad(hongKong.getUTCMinutes())}`;
     })
-    .trim();
+    .split(/[|\n]/)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment && !MACHINE_NOTE_SEGMENT.test(segment))
+    .join(" | ");
 }
 
 function invoiceChannel(invoice) {
