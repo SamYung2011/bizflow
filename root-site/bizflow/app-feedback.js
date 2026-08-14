@@ -100,6 +100,7 @@ function otaErrorCopy(error) {
         "otaFileEmpty",
         "otaFileTooLarge",
         "otaFileReadError",
+        "otaVersionFormat",
       ].includes(error.code)
     ) {
       return t(error.code);
@@ -748,6 +749,10 @@ function onFeedbackClick(event) {
 }
 
 function onFeedbackInput(event) {
+  if (event.target.matches("[data-ota-version]")) {
+    activeOtaController?.setVersionInput(event.target.value);
+    return;
+  }
   if (event.target.matches("[data-device-imei]")) {
     const value = activeDeviceController?.setImeiInput(event.target.value) ?? "";
     event.target.value = value;
