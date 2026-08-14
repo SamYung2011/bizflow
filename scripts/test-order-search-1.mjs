@@ -39,6 +39,9 @@ const order = {
     salesperson: "Helen",
     note: "急件",
     trackingNo: "SF 123-456",
+    carMake: "Tesla",
+    carModelValue: "Model 3",
+    carModel: "Tesla Model 3",
     items: [{ name: "Charger Pro" }, null]
   }
 };
@@ -48,6 +51,15 @@ assert.equal(run(order, "91234567"), true, "compact phone must match spaced stor
 assert.equal(run(order, "9123 4567"), true);
 assert.equal(run(order, "9123-4567"), true);
 assert.equal(run(order, "+852 9123-4567"), true);
+// 车型:与客户列表同一组三字段(carMake/carModelValue/carModel),厂牌、型号、连写都要命中。
+assert.equal(run(order, "tesla"), true, "car make must match");
+assert.equal(run(order, "model 3"), true, "car model must match");
+assert.equal(run(order, "tesla model 3"), true);
+assert.equal(run(order, "teslamodel3"), true, "compact car model must match spaced storage");
+assert.equal(run(order, "Model-3"), true);
+assert.equal(run(order, "bmw"), false, "other car model must not match");
+const orderNoCar = { ...order, detail: { ...order.detail, carMake: null, carModelValue: null, carModel: null } };
+assert.equal(run(orderNoCar, "tesla"), false, "order without car fields must not match car query");
 // 其他字段原有行为不回归:原文、大小写、item 名、trackingNo 压缩形态。
 assert.equal(run(order, "dc-2026-001"), true);
 assert.equal(run(order, "charger pro"), true);

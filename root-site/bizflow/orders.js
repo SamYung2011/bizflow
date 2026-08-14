@@ -182,10 +182,13 @@ const STATUS_CLASS = {
 };
 // 匹配口径同客户列表/保修提醒(components/search-match.js):大小写、空格、横杠不影响命中。
 // 原先这里是第三份手写的原文 includes,搜带空格的电话「9123 4567」敲连号搜不到,与 #359 同病根。
+// 车型三字段(carMake/carModelValue/carModel)与客户列表同一组:detail 里 snapshot 建行时
+// 已从客户表带过来(live-snapshots.js buildOrderRow),这里只是没进搜索面。
 export function orderMatchesSearch(order, query) {
   return matchesSearchValues([
     order.dcNumber, order.invoiceNumber, order.detail?.orderNo,
     order.customer, order.phone, order.product, order.detail?.salesperson,
+    order.detail?.carMake, order.detail?.carModelValue, order.detail?.carModel,
     order.detail?.note, order.detail?.trackingNo,
     ...(Array.isArray(order.detail?.items) ? order.detail.items.map((item) => item?.name) : [])
   ], query);
