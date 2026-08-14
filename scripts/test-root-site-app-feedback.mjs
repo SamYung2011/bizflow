@@ -21,8 +21,10 @@ import {
   createOtaPackageController,
   createOtaPackageState,
   otaFileToBase64,
+  parseOtaVersion,
   renderOtaPackage,
   validateOtaFile,
+  validateOtaVersion,
 } from "../root-site/bizflow/app-feedback-ota.js";
 import {
   FEEDBACK_POLL_INTERVAL_MS,
@@ -204,6 +206,9 @@ for (const language of feedbackLanguages) {
   );
   assert.equal(typeof appFeedbackCopy[language].imeiAmbiguousError, "string");
   assert.equal(typeof appFeedbackCopy[language].otaPackageTitle, "string");
+  assert.equal(typeof appFeedbackCopy[language].otaVersionPlaceholder, "string");
+  assert.equal(typeof appFeedbackCopy[language].otaVersionNotRecorded, "string");
+  assert.equal(typeof appFeedbackCopy[language].otaVersionFormat, "string");
   assert.equal(typeof appFeedbackCopy[language].otaMd5Hint, "string");
   assert.equal(typeof appFeedbackCopy[language].otaPermissionError, "string");
 }
@@ -314,6 +319,7 @@ assert.match(pageSource, /data-app-feedback-tab="feedback"/);
 assert.match(pageSource, /data-app-feedback-tab="device"/);
 assert.match(pageSource, /activeOtaController\?\.load\(\)/);
 assert.match(pageSource, /data-ota-file/);
+assert.match(pageSource, /data-ota-version/);
 assert.match(pageSource, /activePoller\?\.pause\(\)/);
 assert.match(pageSource, /state\.activeTab\s*!==\s*"feedback"/);
 assert.match(deviceSource, /expected_userid:\s*expectedUserid/);
@@ -323,6 +329,7 @@ assert.match(deviceSource, /data-device-confirm-submit/);
 assert.match(deviceSource, /noAccountWarning/);
 assert.match(deviceSource, /providerUnverifiedWarning/);
 assert.match(otaSource, /accept="\.bin"/);
+assert.match(otaSource, /pattern="\[0-9\]\+\[\.\]\[0-9\]\+"/);
 assert.match(otaSource, /data-ota-confirm-submit/);
 assert.match(otaSource, /content_base64:/);
 assert.match(otaSource, /OTA_MAX_FILE_BYTES = 2 \* 1024 \* 1024/);
@@ -494,6 +501,11 @@ assert.equal(conflictState.binding, null);
 assert.equal(conflictState.unbindError.status, 409);
 
 assert.equal(validateOtaFile({ name: "gbccs25.bin", size: 1024 }), null);
+assert.equal(parseOtaVersion(""), null);
+assert.deepEqual(parseOtaVersion("1.20"), { mainver: 1, subver: 20 });
+assert.deepEqual(parseOtaVersion(" 0.0 "), { mainver: 0, subver: 0 });
+assert.equal(validateOtaVersion("1").code, "otaVersionFormat");
+assert.equal(validateOtaVersion("-1.20").code, "otaVersionFormat");
 assert.equal(validateOtaFile({ name: `${"a".repeat(60)}.bin`, size: 1 }), null);
 assert.equal(
   validateOtaFile({ name: `${"a".repeat(61)}.bin`, size: 1 }).code,
@@ -546,6 +558,7 @@ const otaController = createOtaPackageController({
             size: 3,
             md5: "old-md5",
             mtime: 1_700_000_000,
+            version: null,
           },
           backups: [],
         }
@@ -555,6 +568,7 @@ const otaController = createOtaPackageController({
             size: 4,
             md5: "server-md5",
             mtime: 1_700_000_100,
+            version: { mainver: 1, subver: 20 },
           },
           backups: [
             {
@@ -569,6 +583,12 @@ const otaController = createOtaPackageController({
 await otaController.load();
 assert.equal(otaState.packageInfo.current.filename, "gbccs24.bin");
 otaController.selectFile(otaFile);
+otaController.setVersionInput("1");
+otaController.openConfirm();
+assert.equal(otaState.confirmOpen, false);
+assert.equal(otaState.versionError.code, "otaVersionFormat");
+assert.equal(otaCalls.length, 1);
+otaController.setVersionInput("1.20");
 otaController.openConfirm();
 assert.equal(otaState.confirmOpen, true);
 await otaController.submit();
@@ -580,10 +600,13 @@ assert.deepEqual(otaCalls.map(([path, options]) => [path, options.method || "GET
 assert.deepEqual(otaCalls[1][1].body, {
   filename: "gbccs25.bin",
   content_base64: "AQIDBA==",
+  mainver: 1,
+  subver: 20,
 });
 assert.equal(otaState.packageInfo.current.filename, "gbccs25.bin");
 assert.equal(otaState.uploadResult.md5, "server-md5");
 assert.equal(otaState.selectedFile, null);
+assert.equal(otaState.versionInput, "");
 assert.ok(otaRenders >= 6);
 
 let resolveRacingLoad;
@@ -600,6 +623,8 @@ const racingController = createOtaPackageController({
   encodeFile: async () => "AQIDBA==",
   request: async (_path, options = {}) => {
     if (options.method === "POST") {
+      assert.equal("mainver" in options.body, false);
+      assert.equal("subver" in options.body, false);
       return new Promise((resolve) => {
         resolveRacingPost = resolve;
       });
@@ -645,7 +670,30 @@ const otaHtml = renderOtaPackage({
 assert.doesNotMatch(otaHtml, /<img src=x/);
 assert.match(otaHtml, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
 assert.match(otaHtml, /server-md5/);
+assert.match(otaHtml, /1\.20/);
 assert.match(otaHtml, /otaMd5Hint/);
+
+const unversionedOtaHtml = renderOtaPackage({
+  otaState: {
+    ...createOtaPackageState(),
+    loaded: true,
+    packageInfo: {
+      current: {
+        filename: "legacy.bin",
+        size: 1,
+        md5: "legacy-md5",
+        mtime: 1_700_000_000,
+        version: null,
+      },
+      backups: [],
+    },
+  },
+  t: (key) => key,
+  escapeHtml,
+  formatTime: () => "2026-08-14 12:00:00",
+  errorCopy: (error) => error?.code || "error",
+});
+assert.match(unversionedOtaHtml, /otaVersionNotRecorded/);
 
 assert.match(htmlSource, /<script src="\.\.\/shell\/shell-skeleton\.js"><\/script>/);
 assert.match(htmlSource, /<script type="module" src="\.\.\/spa\/entry\.js"><\/script>/);

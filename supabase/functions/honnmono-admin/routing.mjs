@@ -30,6 +30,14 @@ export function mapOtaAdminPath(pathname, method) {
   return "";
 }
 
+export function validateOtaAdminBody(rawBody) {
+  const parsed = JSON.parse(rawBody);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new TypeError("Invalid OTA JSON body");
+  }
+  return rawBody;
+}
+
 export function isAllowedHonnmonoApiBase(value) {
   try {
     const url = new URL(value);

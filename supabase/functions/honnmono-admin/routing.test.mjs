@@ -8,6 +8,7 @@ import {
   mapHonnmonoAdminPath,
   mapOtaAdminPath,
   stripFunctionPrefix,
+  validateOtaAdminBody,
 } from "./routing.mjs";
 
 
@@ -54,6 +55,21 @@ test("maps only the OTA package read and replace routes", () => {
   assert.equal(mapOtaAdminPath("/ota/package", "DELETE"), "");
   assert.equal(mapOtaAdminPath("/ota/backups", "GET"), "");
   assert.equal(mapOtaAdminPath("/package", "GET"), "");
+});
+
+
+test("preserves optional OTA package version fields in the forwarded JSON", () => {
+  const body = {
+    filename: "gbccs25.bin",
+    content_base64: "AQIDBA==",
+    mainver: 1,
+    subver: 20,
+  };
+  const rawBody = JSON.stringify(body);
+  assert.equal(validateOtaAdminBody(rawBody), rawBody);
+  assert.deepEqual(JSON.parse(validateOtaAdminBody(rawBody)), body);
+  assert.throws(() => validateOtaAdminBody("[]"), TypeError);
+  assert.throws(() => validateOtaAdminBody("not-json"), SyntaxError);
 });
 
 

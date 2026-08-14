@@ -20,6 +20,7 @@ import {
   mapHonnmonoAdminPath,
   mapOtaAdminPath,
   stripFunctionPrefix,
+  validateOtaAdminBody,
 } from "./routing.mjs";
 
 
@@ -181,10 +182,7 @@ Deno.serve(async (req) => {
         return json({ error: "Request body too large" }, 413);
       }
       try {
-        const parsed = JSON.parse(otaBody);
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          return json({ error: "Invalid JSON body" }, 400);
-        }
+        otaBody = validateOtaAdminBody(otaBody);
       } catch (_) {
         return json({ error: "Invalid JSON body" }, 400);
       }
