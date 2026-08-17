@@ -63,8 +63,9 @@ function currentHongKongDate() {
 }
 
 function createAdapterDeviceState(saved = {}) {
+  const kind = saved.adapterKind === "dc-pro" ? "dc-pro" : "flash";
   return {
-    kind: saved.adapterKind === "dc-pro" ? "dc-pro" : "flash",
+    kind,
     rows: [],
     total: 0,
     page:
@@ -78,7 +79,7 @@ function createAdapterDeviceState(saved = {}) {
     error: null,
     request: 0,
     detailDevice: null,
-    detailDate: currentHongKongDate(),
+    detailDate: kind === "flash" ? currentHongKongDate() : "",
     sessions: [],
     sessionTotal: 0,
     sessionPage: 1,
@@ -110,10 +111,10 @@ export function adapterActionsForKind(kind) {
 export function adapterSessionSubPath({ kind, certid, date, page = 1 }) {
   if (!["flash", "dc-pro"].includes(kind) || !certid) return "";
   const params = new URLSearchParams({
-    date: String(date || currentHongKongDate()),
     page: String(Math.max(1, Number(page) || 1)),
     pageSize: String(PAGE_SIZE),
   });
+  if (date) params.set("date", String(date));
   return `/devices/${kind}/${encodeURIComponent(String(certid))}/sessions?${params}`;
 }
 
@@ -1252,6 +1253,8 @@ function onFeedbackClick(event) {
     const kind = adapterKind.getAttribute("data-adapter-kind");
     if (["flash", "dc-pro"].includes(kind) && kind !== state.adapters.kind) {
       state.adapters.kind = kind;
+      state.adapters.detailDate =
+        kind === "flash" ? currentHongKongDate() : "";
       state.adapters.page = 1;
       state.adapters.rows = [];
       state.adapters.total = 0;
@@ -1442,7 +1445,9 @@ function onFeedbackChange(event) {
     return;
   }
   if (event.target.matches("[data-adapter-session-date]")) {
-    state.adapters.detailDate = event.target.value || currentHongKongDate();
+    state.adapters.detailDate =
+      event.target.value ||
+      (state.adapters.kind === "flash" ? currentHongKongDate() : "");
     state.adapters.sessionPage = 1;
     void loadAdapterSessions();
     return;

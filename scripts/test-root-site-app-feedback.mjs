@@ -222,7 +222,16 @@ assert.equal(
     date: "2026-08-17",
     page: 3,
   }),
-  "/devices/dc-pro/CERT_2/sessions?date=2026-08-17&page=3&pageSize=20",
+  "/devices/dc-pro/CERT_2/sessions?page=3&pageSize=20&date=2026-08-17",
+);
+assert.equal(
+  adapterSessionSubPath({
+    kind: "dc-pro",
+    certid: "CERT_2",
+    date: "",
+    page: 1,
+  }),
+  "/devices/dc-pro/CERT_2/sessions?page=1&pageSize=20",
 );
 const otaPackageSource = {
   current: { filename: "current.bin" },
