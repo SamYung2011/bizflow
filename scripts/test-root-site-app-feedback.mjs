@@ -12,6 +12,7 @@ import { appFeedbackCopy } from "../root-site/bizflow/app-feedback-i18n.js";
 import {
   ADAPTER_SESSION_HISTORY_DAYS,
   adapterActionsForKind,
+  adapterLiveMetrics,
   adapterOtaPackages,
   adapterSessionMinDate,
   adapterSessionSubPath,
@@ -480,6 +481,58 @@ for (const key of ["today", "previousMonth", "nextMonth", "year", "chooseMonth",
     );
   }
 }
+
+assert.deepEqual(
+  adapterLiveMetrics({
+    charging: true,
+    charger: { watts: 2880, volts: 360, amps: 8, kwh: 12.5 },
+  }),
+  { watts: 2880, volts: 360, amps: 8, kwh: 12.5 },
+  "a charging adapter shows its live heartbeat values",
+);
+assert.deepEqual(
+  adapterLiveMetrics({
+    charging: false,
+    charger: { watts: 2880, volts: 360, amps: 8, kwh: 12.5 },
+  }),
+  { watts: 0, volts: 0, amps: 0, kwh: 0 },
+  "an idle adapter must read 0 instead of the previous session's leftover heartbeat",
+);
+assert.deepEqual(adapterLiveMetrics({ charger: { watts: 2880 } }), {
+  watts: 0,
+  volts: 0,
+  amps: 0,
+  kwh: 0,
+});
+assert.deepEqual(adapterLiveMetrics(undefined), {
+  watts: 0,
+  volts: 0,
+  amps: 0,
+  kwh: 0,
+});
+assert.match(pageSource, /const live = adapterLiveMetrics\(device\);/);
+for (const [field, unit] of [
+  ["watts", " W"],
+  ["volts", " V"],
+  ["amps", " A"],
+  ["kwh", " kWh"],
+]) {
+  assert.match(
+    pageSource,
+    new RegExp(`metric\\(live\\.${field}, "${unit}"\\)`),
+    `card ${field} must render through the charging gate on both adapter tabs`,
+  );
+}
+assert.doesNotMatch(
+  pageSource,
+  /metric\(charger\./,
+  "no card metric may read the raw heartbeat directly",
+);
+assert.match(
+  pageSource,
+  /detailRow\("chargedKwh", metric\(session\.kwh, " kWh"\)\)/,
+  "historical session energy in the drawer stays untouched by the live zeroing rule",
+);
 const deviceState = createDeviceUnbindState({
   deviceImeiInput: "86x2635066123456overflow",
 });

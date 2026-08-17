@@ -433,6 +433,17 @@ function metric(value, unit = "") {
   return Number.isFinite(numeric) ? `${numeric}${unit}` : "—";
 }
 
+export function adapterLiveMetrics(device) {
+  if (!device?.charging) return { watts: 0, volts: 0, amps: 0, kwh: 0 };
+  const charger = device.charger || {};
+  return {
+    watts: charger.watts,
+    volts: charger.volts,
+    amps: charger.amps,
+    kwh: charger.kwh,
+  };
+}
+
 function durationText(value) {
   const seconds = Number(value);
   if (!Number.isFinite(seconds) || seconds < 0) return "—";
@@ -456,7 +467,7 @@ function renderAdapterCards() {
       const id = adapterDeviceId(device);
       const imei = String(device?.imei || "");
       const owner = adapterOwner(device);
-      const charger = device?.charger || {};
+      const live = adapterLiveMetrics(device);
       const firmware =
         typeof device?.firmware === "object"
           ? device.firmware
@@ -487,10 +498,10 @@ function renderAdapterCards() {
           ${detailRow("chargeCount", t("chargeCount", { count: Number(device.chargeCount) || 0 }))}
         </dl>
         <section class="app-feedback-adapter-live" aria-label="${rawE(t("realtimeData"))}">
-          <div><strong>${e(metric(charger.watts, " W"))}</strong><span>${rawE(t("power"))}</span></div>
-          <div><strong>${e(metric(charger.volts, " V"))}</strong><span>${rawE(t("voltage"))}</span></div>
-          <div><strong>${e(metric(charger.amps, " A"))}</strong><span>${rawE(t("current"))}</span></div>
-          <div><strong>${e(metric(charger.kwh, " kWh"))}</strong><span>${rawE(t("chargedKwh"))}</span></div>
+          <div><strong>${e(metric(live.watts, " W"))}</strong><span>${rawE(t("power"))}</span></div>
+          <div><strong>${e(metric(live.volts, " V"))}</strong><span>${rawE(t("voltage"))}</span></div>
+          <div><strong>${e(metric(live.amps, " A"))}</strong><span>${rawE(t("current"))}</span></div>
+          <div><strong>${e(metric(live.kwh, " kWh"))}</strong><span>${rawE(t("chargedKwh"))}</span></div>
         </section>
         <div class="app-feedback-adapter-actions">
           <button type="button" class="app-feedback-button" data-adapter-detail="${rawE(id)}"${!device.certid || actionBusy ? " disabled" : ""}>${rawE(t("viewSessions"))}</button>
