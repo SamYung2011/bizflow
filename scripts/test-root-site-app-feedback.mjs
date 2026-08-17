@@ -10,8 +10,10 @@ import {
 } from "../root-site/bizflow/app-feedback-api.js";
 import { appFeedbackCopy } from "../root-site/bizflow/app-feedback-i18n.js";
 import {
+  ADAPTER_SESSION_HISTORY_DAYS,
   adapterActionsForKind,
   adapterOtaPackages,
+  adapterSessionMinDate,
   adapterSessionSubPath,
 } from "../root-site/bizflow/app-feedback.js";
 import {
@@ -268,6 +270,7 @@ for (const language of feedbackLanguages) {
   assert.equal(typeof appFeedbackCopy[language].otaVersionFormat, "string");
   assert.equal(typeof appFeedbackCopy[language].otaMd5Hint, "string");
   assert.equal(typeof appFeedbackCopy[language].otaPermissionError, "string");
+  assert.match(appFeedbackCopy[language].chargeCount, /90/);
 }
 
 for (const language of ["zh", "en", "fr"]) {
@@ -421,6 +424,9 @@ assert.equal(isValidDeviceImei("86263506612345x"), false);
 assert.equal(deviceExpectedUserId({ dev_cloud: { userid: 0 } }), 0);
 assert.equal(deviceExpectedUserId({ dev_cloud: { userid: 101 } }), 101);
 assert.equal(deviceExpectedUserId({ dev_cloud: { userid: "bad" } }), null);
+assert.equal(ADAPTER_SESSION_HISTORY_DAYS, 90);
+assert.equal(adapterSessionMinDate("2026-08-17"), "2026-05-19");
+assert.match(pageSource, /type="date"[^>]+min="\$\{rawE\(adapterSessionMinDate\(\)\)\}"/);
 const deviceState = createDeviceUnbindState({
   deviceImeiInput: "86x2635066123456overflow",
 });

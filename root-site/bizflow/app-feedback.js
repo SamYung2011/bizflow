@@ -28,6 +28,7 @@ import {
 } from "./app-feedback-poller.js";
 
 const PAGE_SIZE = 20;
+export const ADAPTER_SESSION_HISTORY_DAYS = 90;
 let state = null;
 let helpers = null;
 let activeScope = null;
@@ -60,6 +61,16 @@ function currentHongKongDate() {
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
+}
+
+export function adapterSessionMinDate(today = currentHongKongDate()) {
+  const match = String(today).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return "";
+  const date = new Date(
+    Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])),
+  );
+  date.setUTCDate(date.getUTCDate() - ADAPTER_SESSION_HISTORY_DAYS);
+  return date.toISOString().slice(0, 10);
 }
 
 function createAdapterDeviceState(saved = {}) {
@@ -569,7 +580,7 @@ function renderAdapterSessions() {
         <button type="button" class="app-feedback-button" data-adapter-drawer-close>${rawE(t("close"))}</button>
       </header>
       <div class="app-feedback-drawer__body">
-        <label class="app-feedback-ota-version"><span>${rawE(t("sessionDate"))}</span><input type="date" class="app-feedback-control" value="${rawE(adapters.detailDate)}" data-adapter-session-date></label>
+        <label class="app-feedback-ota-version"><span>${rawE(t("sessionDate"))}</span><input type="date" class="app-feedback-control" value="${rawE(adapters.detailDate)}" min="${rawE(adapterSessionMinDate())}" data-adapter-session-date></label>
         ${adapters.downloadError ? `<div class="app-feedback-alert">${rawE(t("reportDownloadError", { message: errorCopy(adapters.downloadError) }))}</div>` : ""}
         ${body}
         <nav class="app-feedback-pager" aria-label="${rawE(t("page", { page: adapters.sessionPage, pages: sessionPages }))}">
