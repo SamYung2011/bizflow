@@ -9,6 +9,12 @@ const ALLOWED_REQUESTS = [
   { method: "POST", path: /^\/device\/unbind$/ },
   { method: "GET", path: /^\/ota\/package$/ },
   { method: "POST", path: /^\/ota\/package$/ },
+  { method: "GET", path: /^\/ota\/legacy-packages$/ },
+  { method: "POST", path: /^\/ota\/legacy-packages\/(150001|150002|150003|150004)$/ },
+  { method: "GET", path: /^\/devices\/(flash|dc-pro)(?:\?[^#]*)?$/ },
+  { method: "GET", path: /^\/devices\/(flash|dc-pro)\/[A-Za-z0-9_-]{1,64}\/sessions(?:\?[^#]*)?$/ },
+  { method: "GET", path: /^\/devices\/flash\/[A-Za-z0-9_-]{1,64}\/uploads\/[1-9]\d*$/ },
+  { method: "POST", path: /^\/devices\/flash\/[A-Za-z0-9_-]{1,64}\/actions$/ },
 ];
 
 export class HonnmonoAdminError extends Error {

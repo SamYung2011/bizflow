@@ -6,6 +6,7 @@ import {
 
 export const OTA_MAX_FILE_BYTES = 2 * 1024 * 1024;
 const OTA_FILENAME_PATTERN = /^[A-Za-z0-9._-]{1,60}\.bin$/;
+const LEGACY_OTA_FILENAME_PATTERN = /^[A-Za-z0-9._-]{1,60}\.UPG$/i;
 const OTA_VERSION_PATTERN = /^(\d+)\.(\d+)$/;
 
 export function createOtaPackageState() {
@@ -22,6 +23,15 @@ export function createOtaPackageState() {
     uploadError: null,
     uploadResult: null,
     confirmOpen: false,
+    legacyPackages: [],
+    legacyLoaded: false,
+    legacyLoadError: null,
+    legacySelectedFiles: {},
+    legacySelectErrors: {},
+    legacyUploadErrors: {},
+    legacyUploadResults: {},
+    legacyUploadingSlot: null,
+    legacyConfirmSlot: null,
     requestSequence: 0,
   };
 }
@@ -36,6 +46,27 @@ export function validateOtaFile(file) {
     filename.includes("\\")
   ) {
     return new HonnmonoAdminError("otaFileType");
+  }
+  const size = Number(file.size);
+  if (!Number.isFinite(size) || size < 1) {
+    return new HonnmonoAdminError("otaFileEmpty");
+  }
+  if (size > OTA_MAX_FILE_BYTES) {
+    return new HonnmonoAdminError("otaFileTooLarge");
+  }
+  return null;
+}
+
+export function validateLegacyOtaFile(file) {
+  if (!file) return new HonnmonoAdminError("legacyOtaFileRequired");
+  const filename = typeof file.name === "string" ? file.name : "";
+  if (
+    !LEGACY_OTA_FILENAME_PATTERN.test(filename) ||
+    filename.includes("..") ||
+    filename.includes("/") ||
+    filename.includes("\\")
+  ) {
+    return new HonnmonoAdminError("legacyOtaFileType");
   }
   const size = Number(file.size);
   if (!Number.isFinite(size) || size < 1) {
@@ -94,6 +125,17 @@ function normalizePackageInfo(payload) {
   return { current, backups };
 }
 
+function normalizeLegacyPackages(payload) {
+  return Array.isArray(payload?.items)
+    ? payload.items.filter(
+        (item) =>
+          item &&
+          typeof item === "object" &&
+          [150001, 150002, 150003, 150004].includes(Number(item.id)),
+      )
+    : [];
+}
+
 export function createOtaPackageController({
   otaState,
   scope,
@@ -112,19 +154,29 @@ export function createOtaPackageController({
     const sequence = ++otaState.requestSequence;
     otaState.loading = true;
     otaState.loadError = null;
+    otaState.legacyLoadError = null;
     rerender();
-    try {
-      const payload = await request("/ota/package", { signal: scope.signal });
-      if (isCurrent(sequence)) {
+    const [packageResult, legacyResult] = await Promise.allSettled([
+      request("/ota/package", { signal: scope.signal }),
+      request("/ota/legacy-packages", { signal: scope.signal }),
+    ]);
+    if (isCurrent(sequence)) {
+      if (packageResult.status === "fulfilled") {
+        const payload = packageResult.value;
         otaState.packageInfo = normalizePackageInfo(payload);
         otaState.loaded = true;
+      } else {
+        otaState.loadError = packageResult.reason;
       }
-    } catch (error) {
-      if (isCurrent(sequence)) otaState.loadError = error;
-    } finally {
-      otaState.loading = false;
-      if (isActive() && isDeviceTab()) rerender();
+      if (legacyResult.status === "fulfilled") {
+        otaState.legacyPackages = normalizeLegacyPackages(legacyResult.value);
+        otaState.legacyLoaded = true;
+      } else {
+        otaState.legacyLoadError = legacyResult.reason;
+      }
     }
+    otaState.loading = false;
+    if (isActive() && isDeviceTab()) rerender();
   }
 
   function selectFile(file) {
@@ -164,6 +216,39 @@ export function createOtaPackageController({
     otaState.confirmOpen = false;
     rerender();
     focus("[data-ota-replace]");
+  }
+
+  function selectLegacyFile(slotId, file) {
+    const key = String(slotId);
+    otaState.legacySelectedFiles[key] = file || null;
+    otaState.legacySelectErrors[key] = file
+      ? validateLegacyOtaFile(file)
+      : null;
+    otaState.legacyUploadErrors[key] = null;
+    otaState.legacyUploadResults[key] = null;
+    otaState.legacyConfirmSlot = null;
+    rerender();
+  }
+
+  function openLegacyConfirm(slotId) {
+    const key = String(slotId);
+    const error = validateLegacyOtaFile(otaState.legacySelectedFiles[key]);
+    otaState.legacySelectErrors[key] = error;
+    if (error || otaState.legacyUploadingSlot != null) {
+      rerender();
+      return;
+    }
+    otaState.legacyConfirmSlot = Number(slotId);
+    rerender();
+    focus("[data-legacy-ota-confirm-cancel]");
+  }
+
+  function closeLegacyConfirm() {
+    if (otaState.legacyUploadingSlot != null) return;
+    const slotId = otaState.legacyConfirmSlot;
+    otaState.legacyConfirmSlot = null;
+    rerender();
+    focus(`[data-legacy-ota-replace="${slotId}"]`);
   }
 
   async function submit() {
@@ -229,6 +314,63 @@ export function createOtaPackageController({
     }
   }
 
+  async function submitLegacy() {
+    const slotId = Number(otaState.legacyConfirmSlot);
+    const key = String(slotId);
+    const file = otaState.legacySelectedFiles[key];
+    const fileError = validateLegacyOtaFile(file);
+    if (
+      ![150001, 150002, 150003, 150004].includes(slotId) ||
+      fileError ||
+      otaState.legacyUploadingSlot != null
+    ) {
+      otaState.legacySelectErrors[key] = fileError;
+      rerender();
+      return;
+    }
+    const slot = otaState.legacyPackages.find(
+      (item) => Number(item.id) === slotId,
+    );
+    const sequence = ++otaState.requestSequence;
+    otaState.legacyUploadingSlot = slotId;
+    otaState.legacyUploadErrors[key] = null;
+    rerender();
+    try {
+      const contentBase64 = await encodeFile(file);
+      const result = await request(`/ota/legacy-packages/${slotId}`, {
+        method: "POST",
+        signal: scope.signal,
+        body: {
+          filename: file.name,
+          content_base64: contentBase64,
+          previousFilename: slot?.filename || "",
+        },
+      });
+      if (!isCurrent(sequence)) return;
+      otaState.legacyUploadResults[key] = result;
+      otaState.legacySelectedFiles[key] = null;
+      otaState.legacySelectErrors[key] = null;
+      otaState.legacyConfirmSlot = null;
+      const legacyPayload = await request("/ota/legacy-packages", {
+        signal: scope.signal,
+      });
+      if (isCurrent(sequence)) {
+        otaState.legacyPackages = normalizeLegacyPackages(legacyPayload);
+        otaState.legacyLoaded = true;
+      }
+    } catch (error) {
+      if (isCurrent(sequence)) {
+        otaState.legacyUploadErrors[key] = error;
+        otaState.legacyConfirmSlot = null;
+      }
+    } finally {
+      if (isCurrent(sequence)) {
+        otaState.legacyUploadingSlot = null;
+        if (isDeviceTab()) rerender();
+      }
+    }
+  }
+
   return Object.freeze({
     load,
     selectFile,
@@ -236,6 +378,10 @@ export function createOtaPackageController({
     openConfirm,
     closeConfirm,
     submit,
+    selectLegacyFile,
+    openLegacyConfirm,
+    closeLegacyConfirm,
+    submitLegacy,
   });
 }
 
@@ -277,6 +423,9 @@ export function renderOtaPackage({
   const current = otaState.packageInfo?.current ?? null;
   const backups = Array.isArray(otaState.packageInfo?.backups)
     ? otaState.packageInfo.backups.slice(0, 5)
+    : [];
+  const legacyPackages = Array.isArray(otaState.legacyPackages)
+    ? otaState.legacyPackages
     : [];
   const selected = otaState.selectedFile;
   const detailRow = (labelKey, value, { mono = false } = {}) =>
@@ -320,6 +469,64 @@ export function renderOtaPackage({
       </div>`
     : "";
 
+  const legacyCards = otaState.loading && !otaState.legacyLoaded
+    ? `<div class="app-feedback-device-empty">${rawE(t("otaLoading"))}</div>`
+    : legacyPackages.length
+      ? `<div class="app-feedback-legacy-ota-grid">${legacyPackages
+          .map((slot) => {
+            const key = String(slot.id);
+            const file = otaState.legacySelectedFiles[key];
+            const busy = otaState.legacyUploadingSlot === Number(slot.id);
+            return `<article class="app-feedback-device-binding app-feedback-legacy-ota-slot">
+              <header class="app-feedback-device-binding__head">
+                <div><h2>${e(slot.name || t("legacyOtaSlot", { id: slot.id }))}</h2><span class="app-feedback-device-status app-feedback-device-status--bound">${e(slot.carModel || slot.code)}</span></div>
+              </header>
+              <dl class="app-feedback-device-details">
+                ${detailRow("otaFilename", slot.filename, { mono: true })}
+                ${detailRow("otaMd5", slot.md5, { mono: true })}
+                ${detailRow("otaUrl", slot.url, { mono: true })}
+                ${detailRow("otaChangedAt", formatTime(slot.updatedAt))}
+              </dl>
+              <div class="app-feedback-ota-upload">
+                <label class="app-feedback-ota-file" for="app-feedback-legacy-ota-${rawE(slot.id)}">
+                  <span>${rawE(t("legacyOtaChooseFile"))}</span>
+                  <input id="app-feedback-legacy-ota-${rawE(slot.id)}" type="file" accept=".UPG,.upg" data-legacy-ota-file="${rawE(slot.id)}"${busy ? " disabled" : ""}>
+                </label>
+                <div class="app-feedback-ota-selection">${file ? `${e(file.name)} · ${e(formatSize(file.size, t))}` : rawE(t("otaNoFileSelected"))}</div>
+                ${otaState.legacySelectErrors[key] ? `<div class="app-feedback-alert">${rawE(errorCopy(otaState.legacySelectErrors[key]))}</div>` : ""}
+                ${otaState.legacyUploadErrors[key] ? `<div class="app-feedback-alert">${rawE(t("legacyOtaReplaceError", { message: errorCopy(otaState.legacyUploadErrors[key]) }))}</div>` : ""}
+                <button type="button" class="app-feedback-button app-feedback-button--primary" data-legacy-ota-replace="${rawE(slot.id)}"${!file || otaState.legacySelectErrors[key] || busy ? " disabled" : ""}>${rawE(t(busy ? "legacyOtaReplacing" : "legacyOtaReplace"))}</button>
+                ${otaState.legacyUploadResults[key] ? `<div class="app-feedback-ota-success"><strong>${rawE(t("legacyOtaReplaceSuccess"))}</strong></div>` : ""}
+              </div>
+            </article>`;
+          })
+          .join("")}</div>`
+      : `<div class="app-feedback-device-empty">${rawE(t("legacyOtaNoPackages"))}</div>`;
+
+  const legacyConfirmSlot = legacyPackages.find(
+    (slot) => Number(slot.id) === Number(otaState.legacyConfirmSlot),
+  );
+  const legacyConfirmFile = legacyConfirmSlot
+    ? otaState.legacySelectedFiles[String(legacyConfirmSlot.id)]
+    : null;
+  const legacyConfirm = legacyConfirmSlot && legacyConfirmFile
+    ? `<div class="app-feedback-overlay app-feedback-device-confirm-overlay" data-legacy-ota-confirm-overlay>
+        <section class="app-feedback-device-confirm" role="alertdialog" aria-modal="true" aria-labelledby="app-feedback-legacy-ota-confirm-title">
+          <h2 id="app-feedback-legacy-ota-confirm-title">${rawE(t("legacyOtaConfirmTitle"))}</h2>
+          <p>${rawE(t("legacyOtaConfirmText"))}</p>
+          <dl class="app-feedback-device-confirm__details">
+            ${detailRow("legacyOtaSlotLabel", legacyConfirmSlot.name || legacyConfirmSlot.id)}
+            ${detailRow("otaFilename", legacyConfirmFile.name, { mono: true })}
+            ${detailRow("otaFileSize", formatSize(legacyConfirmFile.size, t))}
+          </dl>
+          <div class="app-feedback-device-confirm__actions">
+            <button type="button" class="app-feedback-button" data-legacy-ota-confirm-cancel>${rawE(t("cancel"))}</button>
+            <button type="button" class="app-feedback-button app-feedback-button--danger" data-legacy-ota-confirm-submit>${rawE(t("legacyOtaConfirmReplace"))}</button>
+          </div>
+        </section>
+      </div>`
+    : "";
+
   return `<section class="app-feedback-card app-feedback-ota-card" aria-labelledby="app-feedback-ota-title">
     <header class="app-feedback-ota-head">
       <div>
@@ -329,6 +536,10 @@ export function renderOtaPackage({
       <button type="button" class="app-feedback-button" data-ota-retry${otaState.loading || otaState.uploadLoading ? " disabled" : ""}>${rawE(t(otaState.loading ? "refreshing" : "refresh"))}</button>
     </header>
     ${otaState.loadError ? `<div class="app-feedback-alert">${rawE(t("otaLoadError", { message: errorCopy(otaState.loadError) }))}</div>` : ""}
+    <section class="app-feedback-ota-section">
+      <h3>${rawE(t("otaFlashPackageSection"))}</h3>
+      <p class="app-feedback-ota-muted">${rawE(t("otaPackageSubtitle"))}</p>
+    </section>
     <section class="app-feedback-ota-section">
       <h3>${rawE(t("otaCurrentPackage"))}</h3>
       ${currentPackage}
@@ -354,6 +565,13 @@ export function renderOtaPackage({
       <button type="button" class="app-feedback-button app-feedback-button--primary" data-ota-replace${!selected || otaState.selectError || otaState.uploadLoading ? " disabled" : ""}>${rawE(t(otaState.uploadLoading ? "otaReplacing" : "otaReplacePackage"))}</button>
       ${otaState.uploadResult ? `<div class="app-feedback-ota-success" aria-live="polite"><strong>${rawE(t("otaReplaceSuccess"))}</strong><span>${rawE(t("otaServerMd5"))}: <code>${e(otaState.uploadResult.md5)}</code></span><p>${rawE(t("otaMd5Hint"))}</p></div>` : ""}
     </section>
+    <section class="app-feedback-ota-section">
+      <h3>${rawE(t("legacyOtaPackages"))}</h3>
+      <p class="app-feedback-ota-muted">${rawE(t("legacyOtaSubtitle"))}</p>
+      ${otaState.legacyLoadError ? `<div class="app-feedback-alert">${rawE(t("legacyOtaLoadError", { message: errorCopy(otaState.legacyLoadError) }))}</div>` : ""}
+      ${legacyCards}
+    </section>
     ${confirm}
+    ${legacyConfirm}
   </section>`;
 }

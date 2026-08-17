@@ -53,6 +53,51 @@ function pageCount(targetState = state) {
   return Math.max(1, Math.ceil(targetState.total / PAGE_SIZE));
 }
 
+function currentHongKongDate() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Hong_Kong",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function createAdapterDeviceState(saved = {}) {
+  return {
+    kind: saved.adapterKind === "dc-pro" ? "dc-pro" : "flash",
+    rows: [],
+    total: 0,
+    page:
+      Number.isInteger(saved.adapterPage) && saved.adapterPage > 0
+        ? saved.adapterPage
+        : 1,
+    queryInput:
+      typeof saved.adapterQuery === "string" ? saved.adapterQuery : "",
+    query: typeof saved.adapterQuery === "string" ? saved.adapterQuery : "",
+    loading: false,
+    error: null,
+    request: 0,
+    detailDevice: null,
+    detailDate: currentHongKongDate(),
+    sessions: [],
+    sessionTotal: 0,
+    sessionLoading: false,
+    sessionError: null,
+    sessionRequest: 0,
+    downloadingUploadId: null,
+    downloadError: null,
+    actionConfirm: null,
+    actionLoading: false,
+    actionError: null,
+    actionResult: null,
+    actionLookupId: null,
+  };
+}
+
+function adapterPageCount() {
+  return Math.max(1, Math.ceil((state?.adapters?.total || 0) / PAGE_SIZE));
+}
+
 function canAccessFeedback(currentUser, session) {
   return Boolean(
     session?.user &&
@@ -210,8 +255,8 @@ function renderNewFeedbackNotice() {
   return `<button type="button" class="app-feedback-new" data-feedback-new aria-live="polite"${count > 0 ? "" : " hidden"}>${count > 0 ? rawE(t("newFeedback", { count })) : ""}</button>`;
 }
 
-function detailRow(labelKey, value, { mono = false } = {}) {
-  return `<div class="app-feedback-detail-row${mono ? " app-feedback-detail-row--mono" : ""}"><dt>${rawE(t(labelKey))}</dt><dd>${e(value)}</dd></div>`;
+function detailRow(labelKey, value, { mono = false, html = false } = {}) {
+  return `<div class="app-feedback-detail-row${mono ? " app-feedback-detail-row--mono" : ""}"><dt>${rawE(t(labelKey))}</dt><dd>${html ? value : e(value)}</dd></div>`;
 }
 
 function detailSection(titleKey, content) {
@@ -319,26 +364,254 @@ function renderFeedbackPanel() {
   ${renderDrawer()}`;
 }
 
+function adapterDeviceId(device) {
+  return String(device?.certid || device?.devid || device?.uuid || "");
+}
+
+function adapterDeviceName(device) {
+  return String(
+    device?.name ||
+      device?.devid ||
+      device?.imei ||
+      device?.certid ||
+      device?.uuid ||
+      "",
+  );
+}
+
+function adapterOwner(device) {
+  return String(
+    device?.binding?.username ||
+      device?.binding?.contact ||
+      device?.binding?.userId ||
+      "",
+  );
+}
+
+function metric(value, unit = "") {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? `${numeric}${unit}` : "—";
+}
+
+function durationText(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds < 0) return "—";
+  if (seconds < 3600) {
+    return t("durationMinutes", { minutes: Math.max(1, Math.round(seconds / 60)) });
+  }
+  return t("durationHours", { hours: (seconds / 3600).toFixed(1) });
+}
+
+function renderAdapterCards() {
+  const adapters = state.adapters;
+  if (adapters.loading && adapters.rows.length === 0) {
+    return `<div class="app-feedback-device-empty">${rawE(t("devicesLoading"))}</div>`;
+  }
+  if (adapters.rows.length === 0) {
+    return `<div class="app-feedback-device-empty">${rawE(t("noDevices"))}</div>`;
+  }
+  return `<div class="app-feedback-adapter-grid">${adapters.rows
+    .map((device) => {
+      const kind = adapters.kind;
+      const id = adapterDeviceId(device);
+      const imei = String(device?.imei || "");
+      const owner = adapterOwner(device);
+      const charger = device?.charger || {};
+      const firmware =
+        typeof device?.firmware === "object"
+          ? device.firmware
+          : { software: device?.firmware };
+      const bindingUserId = String(device?.binding?.userId ?? "").trim();
+      const unbindDisabled =
+        !/^\d{15}$/.test(imei) || !bindingUserId || bindingUserId === "0";
+      const actionBusy =
+        state.adapters.actionLoading || state.adapters.actionLookupId === id;
+      return `<article class="app-feedback-device-binding app-feedback-adapter-card">
+        <header class="app-feedback-device-binding__head">
+          <div>
+            <h2>${e(adapterDeviceName(device))}</h2>
+            <span class="app-feedback-device-status app-feedback-device-status--${device.online ? "bound" : "unbound"}">${rawE(t(device.online ? "online" : "offline"))}</span>
+            <span class="app-feedback-device-status app-feedback-device-status--${device.charging ? "bound" : "unbound"}">${rawE(t(device.charging ? "charging" : "idle"))}</span>
+            ${kind === "flash" ? `<span class="app-feedback-device-status app-feedback-device-status--${device.locked ? "bound" : "unbound"}">${rawE(t(device.locked ? "locked" : "unlocked"))}</span>` : ""}
+          </div>
+        </header>
+        <dl class="app-feedback-device-details">
+          ${detailRow("imei", imei, { mono: true })}
+          ${detailRow("uuid", id, { mono: true })}
+          ${detailRow("deviceModel", device.model)}
+          ${detailRow("boundAccount", owner || t("unboundAccount"))}
+          ${detailRow("softwareVersion", firmware.software || device.firmware)}
+          ${detailRow("hardwareVersion", firmware.hardware)}
+          ${detailRow("lastHeartbeat", formatFeedbackTime(device.lastHeartbeatAt || device.lastStatusTime, helpers.lang))}
+          ${detailRow("chargeCount", t("chargeCount", { count: Number(device.chargeCount) || 0 }))}
+        </dl>
+        <section class="app-feedback-adapter-live" aria-label="${rawE(t("realtimeData"))}">
+          <div><strong>${e(metric(charger.watts, " W"))}</strong><span>${rawE(t("power"))}</span></div>
+          <div><strong>${e(metric(charger.volts, " V"))}</strong><span>${rawE(t("voltage"))}</span></div>
+          <div><strong>${e(metric(charger.amps, " A"))}</strong><span>${rawE(t("current"))}</span></div>
+          <div><strong>${e(metric(charger.kwh, " kWh"))}</strong><span>${rawE(t("chargedKwh"))}</span></div>
+        </section>
+        <div class="app-feedback-adapter-actions">
+          <button type="button" class="app-feedback-button" data-adapter-detail="${rawE(id)}"${!device.certid || actionBusy ? " disabled" : ""}>${rawE(t("viewSessions"))}</button>
+          <button type="button" class="app-feedback-button app-feedback-button--danger" data-adapter-action="unbind" data-adapter-id="${rawE(id)}"${unbindDisabled || actionBusy ? " disabled" : ""}>${rawE(t("unbindDevice"))}</button>
+          ${kind === "flash" ? `<button type="button" class="app-feedback-button" data-adapter-action="force_ota" data-adapter-id="${rawE(id)}"${actionBusy ? " disabled" : ""}>${rawE(t("forceOta"))}</button>
+          <button type="button" class="app-feedback-button" data-adapter-action="lock" data-adapter-id="${rawE(id)}"${actionBusy ? " disabled" : ""}>${rawE(t("lockDevice"))}</button>
+          <button type="button" class="app-feedback-button" data-adapter-action="unlock" data-adapter-id="${rawE(id)}"${actionBusy ? " disabled" : ""}>${rawE(t("unlockDevice"))}</button>` : ""}
+        </div>
+      </article>`;
+    })
+    .join("")}</div>`;
+}
+
+function renderAdapterActionConfirm() {
+  const confirm = state.adapters.actionConfirm;
+  if (!confirm) return "";
+  const device = confirm.device;
+  const packages = [
+    state.ota.packageInfo?.current,
+    ...(state.ota.packageInfo?.backups || []),
+  ].filter((item) => item?.filename);
+  const actionKey = {
+    unbind: "unbindDevice",
+    force_ota: "forceOta",
+    lock: "lockDevice",
+    unlock: "unlockDevice",
+  }[confirm.action];
+  return `<div class="app-feedback-overlay app-feedback-device-confirm-overlay" data-adapter-confirm-overlay>
+    <section class="app-feedback-device-confirm" role="alertdialog" aria-modal="true" aria-labelledby="app-feedback-adapter-confirm-title">
+      <h2 id="app-feedback-adapter-confirm-title">${rawE(t("actionConfirmTitle"))}</h2>
+      <p>${rawE(t("actionConfirmText"))}</p>
+      <dl class="app-feedback-device-confirm__details">
+        ${detailRow("actions", t(actionKey))}
+        ${detailRow("uuid", adapterDeviceId(device), { mono: true })}
+        ${detailRow("imei", device.imei, { mono: true })}
+        ${detailRow("boundAccount", adapterOwner(device) || t("unboundAccount"))}
+      </dl>
+      ${confirm.action === "force_ota" ? `<label class="app-feedback-ota-file">
+        <span>${rawE(t("chooseOtaPackage"))}</span>
+        <select class="app-feedback-control" data-adapter-action-package>
+          ${packages.map((item) => `<option value="${rawE(item.filename)}"${item.filename === confirm.package ? " selected" : ""}>${e(item.filename)}</option>`).join("")}
+        </select>
+      </label>
+      <label class="app-feedback-ota-version">
+        <span>${rawE(t("otaVersionOverride"))}</span>
+        <input type="text" class="app-feedback-control" value="${rawE(confirm.versionInput || "")}" placeholder="${rawE(t("otaVersionPlaceholder"))}" data-adapter-action-version>
+      </label>` : ""}
+      ${state.adapters.actionError ? `<div class="app-feedback-alert">${rawE(t("deviceActionError", { message: deviceErrorCopy(state.adapters.actionError) }))}</div>` : ""}
+      <div class="app-feedback-device-confirm__actions">
+        <button type="button" class="app-feedback-button" data-adapter-confirm-cancel${state.adapters.actionLoading ? " disabled" : ""}>${rawE(t("cancel"))}</button>
+        <button type="button" class="app-feedback-button app-feedback-button--danger" data-adapter-confirm-submit${state.adapters.actionLoading || (confirm.action === "force_ota" && !confirm.package) ? " disabled" : ""}>${rawE(t(state.adapters.actionLoading ? "refreshing" : "confirmAction"))}</button>
+      </div>
+    </section>
+  </div>`;
+}
+
+function renderAdapterSessions() {
+  const adapters = state.adapters;
+  const device = adapters.detailDevice;
+  if (!device) return "";
+  let body = `<div class="app-feedback-device-empty">${rawE(t("devicesLoading"))}</div>`;
+  if (adapters.sessionError) {
+    body = `<div class="app-feedback-alert">${rawE(t("sessionLoadError", { message: errorCopy(adapters.sessionError) }))}</div>`;
+  } else if (!adapters.sessionLoading && adapters.sessions.length === 0) {
+    body = `<div class="app-feedback-device-empty">${rawE(t("noSessions"))}</div>`;
+  } else if (adapters.sessions.length) {
+    body = `<div class="app-feedback-session-list">${adapters.sessions
+      .map((session) => {
+        const amapUrl = safeHttpUrl(session?.location?.amapUrl);
+        const upload = session?.upload;
+        return `<article class="app-feedback-device-binding app-feedback-session-card">
+          <dl class="app-feedback-device-details">
+            ${detailRow("chargeStart", formatFeedbackTime(session.startTime, helpers.lang))}
+            ${detailRow("chargeEnd", formatFeedbackTime(session.endTime, helpers.lang))}
+            ${detailRow("chargeDuration", durationText(session.durationSeconds))}
+            ${detailRow("chargedKwh", metric(session.kwh, " kWh"))}
+            ${detailRow("soc", metric(session.soc, "%"))}
+            ${detailRow("location", amapUrl ? `<a href="${rawE(amapUrl)}" target="_blank" rel="noopener noreferrer">${rawE(t("openAmap"))}</a>` : t("no"), { html: true })}
+          </dl>
+          <div class="app-feedback-log-row">
+            <span class="app-feedback-log-name">${upload ? e(upload.filename) : rawE(t("noReport"))}</span>
+            ${upload ? `<button type="button" class="app-feedback-button" data-adapter-report="${rawE(upload.id)}"${adapters.downloadingUploadId === Number(upload.id) ? " disabled" : ""}>${rawE(t(adapters.downloadingUploadId === Number(upload.id) ? "downloadingReport" : "downloadReport"))}</button>` : ""}
+          </div>
+        </article>`;
+      })
+      .join("")}</div>`;
+  }
+  return `<div class="app-feedback-overlay" data-adapter-drawer>
+    <aside class="app-feedback-drawer" role="dialog" aria-modal="true" aria-labelledby="app-feedback-session-title">
+      <header class="app-feedback-drawer__head">
+        <div><h2 id="app-feedback-session-title">${rawE(t("sessionTitle"))}</h2><p>${e(adapterDeviceName(device))} · ${rawE(t("sessionSubtitle"))}</p></div>
+        <button type="button" class="app-feedback-button" data-adapter-drawer-close>${rawE(t("close"))}</button>
+      </header>
+      <div class="app-feedback-drawer__body">
+        ${state.adapters.kind === "flash" ? `<label class="app-feedback-ota-version"><span>${rawE(t("sessionDate"))}</span><input type="date" class="app-feedback-control" value="${rawE(adapters.detailDate)}" data-adapter-session-date></label>` : ""}
+        ${adapters.downloadError ? `<div class="app-feedback-alert">${rawE(t("reportDownloadError", { message: errorCopy(adapters.downloadError) }))}</div>` : ""}
+        ${body}
+      </div>
+    </aside>
+  </div>`;
+}
+
+function renderAdapterPanel() {
+  const adapters = state.adapters;
+  const pages = adapterPageCount();
+  return `<div class="app-feedback-device-panel">
+    <div class="app-feedback-card">
+      <nav class="app-feedback-tabs app-feedback-adapter-tabs" aria-label="${rawE(t("deviceListTab"))}">
+        <button type="button" class="app-feedback-tab${adapters.kind === "flash" ? " is-active" : ""}" data-adapter-kind="flash">${rawE(t("flashAdapterTab"))}</button>
+        <button type="button" class="app-feedback-tab${adapters.kind === "dc-pro" ? " is-active" : ""}" data-adapter-kind="dc-pro">${rawE(t("dcProAdapterTab"))}</button>
+      </nav>
+      <div class="app-feedback-toolbar app-feedback-adapter-toolbar">
+        <form class="app-feedback-search" data-adapter-search>
+          <input class="app-feedback-control" data-adapter-query value="${rawE(adapters.queryInput)}" placeholder="${rawE(t("deviceSearchPlaceholder"))}" aria-label="${rawE(t("deviceSearchAria"))}">
+          <button type="submit" class="app-feedback-button app-feedback-button--primary"${adapters.loading ? " disabled" : ""}>${rawE(t("search"))}</button>
+        </form>
+        <span class="app-feedback-total">${rawE(t("totalDevices", { count: adapters.total }))}</span>
+        <button type="button" class="app-feedback-button" data-adapter-refresh${adapters.loading ? " disabled" : ""}>${rawE(t(adapters.loading ? "refreshing" : "refresh"))}</button>
+      </div>
+      ${adapters.error ? `<div class="app-feedback-alert">${rawE(t("deviceListError", { message: errorCopy(adapters.error) }))}</div>` : ""}
+      ${adapters.actionError && !adapters.actionConfirm ? `<div class="app-feedback-alert">${rawE(t("deviceActionError", { message: deviceErrorCopy(adapters.actionError) }))}</div>` : ""}
+      ${adapters.actionResult ? `<div class="app-feedback-ota-success"><strong>${rawE(t("deviceActionSuccess"))}</strong></div>` : ""}
+      ${renderAdapterCards()}
+      <nav class="app-feedback-pager" aria-label="${rawE(t("page", { page: adapters.page, pages }))}">
+        <span>${rawE(t("page", { page: adapters.page, pages }))}</span>
+        <button type="button" class="app-feedback-button" data-adapter-page="${adapters.page - 1}"${adapters.page <= 1 || adapters.loading ? " disabled" : ""}>${rawE(t("previous"))}</button>
+        <button type="button" class="app-feedback-button" data-adapter-page="${adapters.page + 1}"${adapters.page >= pages || adapters.loading ? " disabled" : ""}>${rawE(t("next"))}</button>
+      </nav>
+    </div>
+    ${renderAdapterActionConfirm()}
+    ${renderAdapterSessions()}
+  </div>`;
+}
+
 function renderTabs() {
   return `<nav class="app-feedback-tabs" aria-label="${rawE(t("honnmonoAppTitle"))}">
     <button type="button" class="app-feedback-tab${state.activeTab === "feedback" ? " is-active" : ""}" data-app-feedback-tab="feedback" aria-selected="${state.activeTab === "feedback"}">${rawE(t("feedbackTab"))}</button>
     <button type="button" class="app-feedback-tab${state.activeTab === "device" ? " is-active" : ""}" data-app-feedback-tab="device" aria-selected="${state.activeTab === "device"}">${rawE(t("deviceUnbindTab"))}</button>
+    <button type="button" class="app-feedback-tab${state.activeTab === "devices" ? " is-active" : ""}" data-app-feedback-tab="devices" aria-selected="${state.activeTab === "devices"}">${rawE(t("deviceListTab"))}</button>
   </nav>`;
 }
 
 function render(nextHelpers) {
   helpers = nextHelpers;
   const isFeedback = state.activeTab === "feedback";
+  const subtitleKey = isFeedback
+    ? "subtitle"
+    : state.activeTab === "devices"
+      ? "deviceListSubtitle"
+      : "deviceUnbindSubtitle";
   return `<section class="app-feedback-page" data-app-feedback-page>
     <header class="app-feedback-head">
-      <div><h1>${rawE(t("honnmonoAppTitle"))}</h1><p>${rawE(t(isFeedback ? "subtitle" : "deviceUnbindSubtitle"))}</p></div>
+      <div><h1>${rawE(t("honnmonoAppTitle"))}</h1><p>${rawE(t(subtitleKey))}</p></div>
       ${isFeedback ? `<button type="button" class="app-feedback-button app-feedback-button--refresh" data-feedback-refresh${state.loading ? " disabled" : ""}>${rawE(t(state.loading ? "refreshing" : "refresh"))}</button>` : ""}
     </header>
     ${renderTabs()}
     ${
       isFeedback
         ? renderFeedbackPanel()
-        : `<div class="app-feedback-device-panel">
+        : state.activeTab === "devices"
+          ? renderAdapterPanel()
+          : `<div class="app-feedback-device-panel">
             ${renderDeviceUnbind({
               deviceState: state.device,
               t,
@@ -553,6 +826,246 @@ async function loadList() {
   }
 }
 
+function adapterListSubPath() {
+  const params = new URLSearchParams({
+    page: String(state.adapters.page),
+    pageSize: String(PAGE_SIZE),
+  });
+  if (state.adapters.query) params.set("query", state.adapters.query);
+  return `/devices/${state.adapters.kind}?${params}`;
+}
+
+async function loadAdapters() {
+  const instance = activeInstance;
+  const scope = activeScope;
+  if (!state || state.activeTab !== "devices" || !isActive(instance, scope)) {
+    return;
+  }
+  const request = ++state.adapters.request;
+  state.adapters.loading = true;
+  state.adapters.error = null;
+  rerender();
+  try {
+    const payload = await callHonnmonoAdmin(adapterListSubPath(), {
+      signal: scope.signal,
+    });
+    if (!isActive(instance, scope) || request !== state.adapters.request) return;
+    state.adapters.rows = Array.isArray(payload?.items) ? payload.items : [];
+    state.adapters.total = Number(payload?.total) || 0;
+    if (state.adapters.page > adapterPageCount()) {
+      state.adapters.page = adapterPageCount();
+      void loadAdapters();
+      return;
+    }
+  } catch (error) {
+    if (isActive(instance, scope) && request === state.adapters.request) {
+      state.adapters.rows = [];
+      state.adapters.total = 0;
+      state.adapters.error = error;
+    }
+  } finally {
+    if (isActive(instance, scope) && request === state.adapters.request) {
+      state.adapters.loading = false;
+      rerender();
+    }
+  }
+}
+
+async function loadAdapterSessions() {
+  const device = state?.adapters?.detailDevice;
+  if (!device) return;
+  const instance = activeInstance;
+  const scope = activeScope;
+  const request = ++state.adapters.sessionRequest;
+  state.adapters.sessionLoading = true;
+  state.adapters.sessionError = null;
+  state.adapters.downloadError = null;
+  rerender();
+  const certid = encodeURIComponent(String(device.certid || ""));
+  const params = new URLSearchParams({ page: "1", pageSize: String(PAGE_SIZE) });
+  if (state.adapters.kind === "flash") {
+    params.set("date", state.adapters.detailDate);
+  }
+  try {
+    const payload = await callHonnmonoAdmin(
+      `/devices/${state.adapters.kind}/${certid}/sessions?${params}`,
+      { signal: scope.signal },
+    );
+    if (!isActive(instance, scope) || request !== state.adapters.sessionRequest) return;
+    state.adapters.sessions = Array.isArray(payload?.items) ? payload.items : [];
+    state.adapters.sessionTotal = Number(payload?.total) || 0;
+  } catch (error) {
+    if (isActive(instance, scope) && request === state.adapters.sessionRequest) {
+      state.adapters.sessions = [];
+      state.adapters.sessionTotal = 0;
+      state.adapters.sessionError = error;
+    }
+  } finally {
+    if (isActive(instance, scope) && request === state.adapters.sessionRequest) {
+      state.adapters.sessionLoading = false;
+      rerender();
+    }
+  }
+}
+
+function openAdapterSessions(id) {
+  const device = state.adapters.rows.find(
+    (item) => adapterDeviceId(item) === String(id),
+  );
+  if (!device?.certid) return;
+  state.adapters.detailDevice = device;
+  state.adapters.sessions = [];
+  state.adapters.sessionError = null;
+  state.adapters.downloadError = null;
+  void loadAdapterSessions();
+}
+
+function closeAdapterSessions() {
+  state.adapters.sessionRequest += 1;
+  state.adapters.detailDevice = null;
+  state.adapters.sessions = [];
+  state.adapters.sessionError = null;
+  state.adapters.downloadError = null;
+  rerender();
+}
+
+async function beginAdapterAction(action, id) {
+  const device = state.adapters.rows.find(
+    (item) => adapterDeviceId(item) === String(id),
+  );
+  if (!device || !["unbind", "force_ota", "lock", "unlock"].includes(action)) {
+    return;
+  }
+  state.adapters.actionError = null;
+  state.adapters.actionResult = null;
+  if (action === "unbind") {
+    state.adapters.actionLookupId = adapterDeviceId(device);
+    rerender();
+    try {
+      const binding = await callHonnmonoAdmin(
+        `/device/binding?imei=${encodeURIComponent(device.imei)}`,
+        { signal: activeScope.signal },
+      );
+      if (!isActive() || state.activeTab !== "devices") return;
+      state.adapters.actionConfirm = { action, device, binding };
+    } catch (error) {
+      if (isActive()) state.adapters.actionError = error;
+    } finally {
+      if (isActive()) {
+        state.adapters.actionLookupId = null;
+        rerender();
+      }
+    }
+    return;
+  }
+  const packages = [
+    state.ota.packageInfo?.current,
+    ...(state.ota.packageInfo?.backups || []),
+  ].filter((item) => item?.filename);
+  state.adapters.actionConfirm = {
+    action,
+    device,
+    package: action === "force_ota" ? packages[0]?.filename || "" : "",
+    versionInput: "",
+  };
+  rerender();
+}
+
+function closeAdapterAction() {
+  if (state.adapters.actionLoading) return;
+  state.adapters.actionConfirm = null;
+  state.adapters.actionError = null;
+  rerender();
+}
+
+async function submitAdapterAction() {
+  const confirm = state.adapters.actionConfirm;
+  if (!confirm || state.adapters.actionLoading) return;
+  const instance = activeInstance;
+  const scope = activeScope;
+  let path;
+  let body;
+  if (confirm.action === "unbind") {
+    const expectedUserId = Number(confirm.binding?.dev_cloud?.userid);
+    if (!Number.isSafeInteger(expectedUserId) || expectedUserId <= 0) return;
+    path = "/device/unbind";
+    body = { imei: confirm.device.imei, expected_userid: expectedUserId };
+  } else {
+    path = `/devices/flash/${encodeURIComponent(confirm.device.certid)}/actions`;
+    body = { action: confirm.action };
+    if (confirm.action === "force_ota") {
+      body.package = confirm.package;
+      const version = String(confirm.versionInput || "").trim();
+      if (version) {
+        const match = version.match(/^(\d+)\.(\d+)$/);
+        if (!match) {
+          state.adapters.actionError = new HonnmonoAdminError("otaVersionFormat");
+          rerender();
+          return;
+        }
+        body.mainver = Number(match[1]);
+        body.subver = Number(match[2]);
+      }
+    }
+  }
+  state.adapters.actionLoading = true;
+  state.adapters.actionError = null;
+  rerender();
+  try {
+    const result = await callHonnmonoAdmin(path, {
+      method: "POST",
+      signal: scope.signal,
+      body,
+    });
+    if (!isActive(instance, scope)) return;
+    state.adapters.actionResult = result;
+    state.adapters.actionConfirm = null;
+    void loadAdapters();
+  } catch (error) {
+    if (isActive(instance, scope)) state.adapters.actionError = error;
+  } finally {
+    if (isActive(instance, scope)) {
+      state.adapters.actionLoading = false;
+      rerender();
+    }
+  }
+}
+
+async function downloadAdapterReport(uploadId) {
+  const device = state.adapters.detailDevice;
+  const numericId = Number(uploadId);
+  if (!device?.certid || !Number.isSafeInteger(numericId) || numericId <= 0) return;
+  state.adapters.downloadingUploadId = numericId;
+  state.adapters.downloadError = null;
+  rerender();
+  try {
+    const payload = await callHonnmonoAdmin(
+      `/devices/flash/${encodeURIComponent(device.certid)}/uploads/${numericId}`,
+      { signal: activeScope.signal },
+    );
+    if (!isActive()) return;
+    const binary = globalThis.atob(String(payload.contentBase64 || ""));
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+    link.download = String(payload.filename || "charge-report.BIN");
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(link.href);
+  } catch (error) {
+    if (isActive()) state.adapters.downloadError = error;
+  } finally {
+    if (isActive()) {
+      state.adapters.downloadingUploadId = null;
+      rerender();
+    }
+  }
+}
+
 async function openDetail(id) {
   const numericId = Number(id);
   if (
@@ -654,7 +1167,7 @@ async function downloadLog(id) {
 }
 
 function switchAppTab(nextTab) {
-  if (!state || !["feedback", "device"].includes(nextTab)) return;
+  if (!state || !["feedback", "device", "devices"].includes(nextTab)) return;
   if (state.activeTab === nextTab) return;
   state.activeTab = nextTab;
   state.detailRequest += 1;
@@ -671,6 +1184,16 @@ function switchAppTab(nextTab) {
     );
     return;
   }
+  if (nextTab === "devices") {
+    activePoller?.pause();
+    rerender();
+    if (!state.ota.loaded) void activeOtaController?.load();
+    void loadAdapters();
+    activeScope?.animationFrame(() =>
+      document.querySelector("[data-adapter-query]")?.focus(),
+    );
+    return;
+  }
   activePoller?.resume();
   rerender();
   if (!state.hasLoadedList) void loadList();
@@ -680,6 +1203,66 @@ function onFeedbackClick(event) {
   const tab = event.target.closest?.("[data-app-feedback-tab]");
   if (tab) {
     switchAppTab(tab.getAttribute("data-app-feedback-tab"));
+    return;
+  }
+  const adapterKind = event.target.closest?.("[data-adapter-kind]");
+  if (adapterKind) {
+    const kind = adapterKind.getAttribute("data-adapter-kind");
+    if (["flash", "dc-pro"].includes(kind) && kind !== state.adapters.kind) {
+      state.adapters.kind = kind;
+      state.adapters.page = 1;
+      state.adapters.rows = [];
+      state.adapters.total = 0;
+      state.adapters.actionResult = null;
+      closeAdapterSessions();
+      void loadAdapters();
+    }
+    return;
+  }
+  const adapterDetail = event.target.closest?.("[data-adapter-detail]");
+  if (adapterDetail) {
+    openAdapterSessions(adapterDetail.getAttribute("data-adapter-detail"));
+    return;
+  }
+  const adapterAction = event.target.closest?.("[data-adapter-action]");
+  if (adapterAction) {
+    void beginAdapterAction(
+      adapterAction.getAttribute("data-adapter-action"),
+      adapterAction.getAttribute("data-adapter-id"),
+    );
+    return;
+  }
+  if (
+    event.target.matches?.("[data-adapter-confirm-overlay]") ||
+    event.target.closest?.("[data-adapter-confirm-cancel]")
+  ) {
+    closeAdapterAction();
+    return;
+  }
+  if (event.target.closest?.("[data-adapter-confirm-submit]")) {
+    void submitAdapterAction();
+    return;
+  }
+  if (
+    event.target.matches?.("[data-adapter-drawer]") ||
+    event.target.closest?.("[data-adapter-drawer-close]")
+  ) {
+    closeAdapterSessions();
+    return;
+  }
+  const adapterReport = event.target.closest?.("[data-adapter-report]");
+  if (adapterReport) {
+    void downloadAdapterReport(adapterReport.getAttribute("data-adapter-report"));
+    return;
+  }
+  const adapterPage = event.target.closest?.("[data-adapter-page]");
+  if (adapterPage && !adapterPage.disabled) {
+    state.adapters.page = Number(adapterPage.getAttribute("data-adapter-page"));
+    void loadAdapters();
+    return;
+  }
+  if (event.target.closest?.("[data-adapter-refresh]")) {
+    void loadAdapters();
     return;
   }
   if (event.target.closest?.("[data-device-unbind]")) {
@@ -716,6 +1299,24 @@ function onFeedbackClick(event) {
     void activeOtaController?.submit();
     return;
   }
+  const legacyReplace = event.target.closest?.("[data-legacy-ota-replace]");
+  if (legacyReplace) {
+    activeOtaController?.openLegacyConfirm(
+      legacyReplace.getAttribute("data-legacy-ota-replace"),
+    );
+    return;
+  }
+  if (
+    event.target.matches?.("[data-legacy-ota-confirm-overlay]") ||
+    event.target.closest?.("[data-legacy-ota-confirm-cancel]")
+  ) {
+    activeOtaController?.closeLegacyConfirm();
+    return;
+  }
+  if (event.target.closest?.("[data-legacy-ota-confirm-submit]")) {
+    void activeOtaController?.submitLegacy();
+    return;
+  }
   if (event.target.closest?.("[data-feedback-new]")) {
     acceptPendingFeedback();
     return;
@@ -749,6 +1350,17 @@ function onFeedbackClick(event) {
 }
 
 function onFeedbackInput(event) {
+  if (event.target.matches("[data-adapter-query]")) {
+    state.adapters.queryInput = event.target.value;
+    return;
+  }
+  if (event.target.matches("[data-adapter-action-version]")) {
+    if (state.adapters.actionConfirm) {
+      state.adapters.actionConfirm.versionInput = event.target.value;
+      state.adapters.actionError = null;
+    }
+    return;
+  }
   if (event.target.matches("[data-ota-version]")) {
     activeOtaController?.setVersionInput(event.target.value);
     return;
@@ -764,6 +1376,24 @@ function onFeedbackInput(event) {
 }
 
 function onFeedbackChange(event) {
+  if (event.target.matches("[data-legacy-ota-file]")) {
+    activeOtaController?.selectLegacyFile(
+      event.target.getAttribute("data-legacy-ota-file"),
+      event.target.files?.[0] ?? null,
+    );
+    return;
+  }
+  if (event.target.matches("[data-adapter-action-package]")) {
+    if (state.adapters.actionConfirm) {
+      state.adapters.actionConfirm.package = event.target.value;
+    }
+    return;
+  }
+  if (event.target.matches("[data-adapter-session-date]")) {
+    state.adapters.detailDate = event.target.value || currentHongKongDate();
+    void loadAdapterSessions();
+    return;
+  }
   if (event.target.matches("[data-ota-file]")) {
     activeOtaController?.selectFile(event.target.files?.[0] ?? null);
     return;
@@ -782,6 +1412,13 @@ function onFeedbackChange(event) {
 }
 
 function onFeedbackSubmit(event) {
+  if (event.target.matches("[data-adapter-search]")) {
+    event.preventDefault();
+    state.adapters.query = state.adapters.queryInput.trim();
+    state.adapters.page = 1;
+    void loadAdapters();
+    return;
+  }
   if (event.target.matches("[data-device-search]")) {
     event.preventDefault();
     void activeDeviceController?.lookup();
@@ -795,6 +1432,18 @@ function onFeedbackSubmit(event) {
 }
 
 function onFeedbackKeydown(event) {
+  if (event.key === "Escape" && state?.adapters?.actionConfirm) {
+    closeAdapterAction();
+    return;
+  }
+  if (event.key === "Escape" && state?.adapters?.detailDevice) {
+    closeAdapterSessions();
+    return;
+  }
+  if (event.key === "Escape" && state?.ota?.legacyConfirmSlot != null) {
+    activeOtaController?.closeLegacyConfirm();
+    return;
+  }
   if (event.key === "Escape" && state?.ota?.confirmOpen) {
     activeOtaController?.closeConfirm();
     return;
@@ -810,9 +1459,12 @@ function createState(historyState) {
   const saved =
     historyState && typeof historyState === "object" ? historyState : {};
   return {
-    activeTab: saved.activeTab === "device" ? "device" : "feedback",
+    activeTab: ["device", "devices"].includes(saved.activeTab)
+      ? saved.activeTab
+      : "feedback",
     device: createDeviceUnbindState(saved),
     ota: createOtaPackageState(),
+    adapters: createAdapterDeviceState(saved),
     rows: [],
     total: 0,
     facets: {
@@ -906,7 +1558,7 @@ export async function mountPage({
     otaState: nextState.ota,
     scope,
     isActive: () => isActive(instance, scope),
-    isDeviceTab: () => state?.activeTab === "device",
+    isDeviceTab: () => ["device", "devices"].includes(state?.activeTab),
     rerender,
     focus: (selector) =>
       scope.animationFrame(() => document.querySelector(selector)?.focus()),
@@ -929,11 +1581,15 @@ export async function mountPage({
       });
       activePoller = poller;
       if (state.activeTab === "feedback") poller.start();
-      if (state.activeTab === "device") void otaController.load();
+      if (["device", "devices"].includes(state.activeTab)) void otaController.load();
+      if (state.activeTab === "devices") void loadAdapters();
     },
     captureState: () => ({
       activeTab: state.activeTab,
       deviceImeiInput: state.device.imeiInput,
+      adapterKind: state.adapters.kind,
+      adapterPage: state.adapters.page,
+      adapterQuery: state.adapters.query,
       page: state.page,
       clientModel: state.clientModel,
       appVersion: state.appVersion,

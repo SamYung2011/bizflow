@@ -8,6 +8,12 @@
 //   POST /honnmono-admin/device/unbind
 //   GET  /honnmono-admin/ota/package
 //   POST /honnmono-admin/ota/package
+//   GET  /honnmono-admin/devices/{flash|dc-pro}
+//   GET  /honnmono-admin/devices/{kind}/{certid}/sessions
+//   GET  /honnmono-admin/devices/flash/{certid}/uploads/{id}
+//   POST /honnmono-admin/devices/flash/{certid}/actions
+//   GET  /honnmono-admin/ota/legacy-packages
+//   POST /honnmono-admin/ota/legacy-packages/{slot}
 //
 // Log bytes are intentionally outside this allowlist. The link-issuance route
 // returns a short-lived, one-time Shenzhen URL that the browser downloads
@@ -37,6 +43,7 @@ const OTA_ADMIN_TOKEN = Deno.env.get("OTA_ADMIN_TOKEN") ?? "";
 const UPSTREAM_TIMEOUT_MS = 10_000;
 const DEVICE_UNBIND_TIMEOUT_MS = 90_000;
 const MAX_JSON_BYTES = 2_000_000;
+const MAX_OTA_JSON_BYTES = 2_900_000;
 const MAX_REQUEST_JSON_BYTES = 16_384;
 const MAX_OTA_REQUEST_JSON_BYTES = 2_800_000;
 
@@ -146,8 +153,17 @@ Deno.serve(async (req) => {
 
   const url = new URL(req.url);
   const subPath = stripFunctionPrefix(url.pathname);
-  const isOtaRequest = subPath.startsWith("/ota/");
-  if (isOtaRequest ? !requireAuthEnv() : !requireEnv()) {
+  const isLegacyPackageWrite =
+    req.method === "POST" &&
+    /^\/ota\/legacy-packages\/(150001|150002|150003|150004)$/.test(subPath);
+  const isOtaRequest =
+    subPath === "/ota/package" ||
+    subPath.startsWith("/devices/flash") ||
+    isLegacyPackageWrite;
+  if (
+    !requireAuthEnv() ||
+    ((!isOtaRequest || isLegacyPackageWrite) && !requireEnv())
+  ) {
     return json({ error: "Server misconfigured" }, 500);
   }
 
@@ -188,12 +204,17 @@ Deno.serve(async (req) => {
       }
     }
 
+    const otaUpstreamUrl = new URL(otaPath, `${OTA_ADMIN_URL}/`);
+    for (const [key, value] of url.searchParams.entries()) {
+      otaUpstreamUrl.searchParams.append(key, value);
+    }
     let otaUpstream: Response;
     try {
-      otaUpstream = await fetch(new URL(otaPath, `${OTA_ADMIN_URL}/`), {
+      otaUpstream = await fetch(otaUpstreamUrl, {
         method: req.method,
         headers: {
           "X-Internal-Token": OTA_ADMIN_TOKEN,
+          "X-Operator-Email": guard.operatorEmail,
           ...(otaBody ? { "Content-Type": "application/json" } : {}),
         },
         body: otaBody || undefined,
@@ -204,8 +225,68 @@ Deno.serve(async (req) => {
     }
 
     const otaText = await otaUpstream.text();
-    if (new TextEncoder().encode(otaText).byteLength > MAX_JSON_BYTES) {
+    if (new TextEncoder().encode(otaText).byteLength > MAX_OTA_JSON_BYTES) {
       return json({ error: "OTA admin service response too large" }, 502);
+    }
+    if (isLegacyPackageWrite) {
+      let storedPackage: Record<string, unknown>;
+      try {
+        storedPackage = JSON.parse(otaText);
+      } catch (_) {
+        return json({ error: "OTA admin service invalid response" }, 502);
+      }
+      if (!otaUpstream.ok) {
+        return json(storedPackage, otaUpstream.status);
+      }
+      const packageUrl = String(storedPackage?.url ?? "");
+      const packageMd5 = String(storedPackage?.md5 ?? "");
+      const shenzhenPath = mapHonnmonoAdminPath(subPath, req.method);
+      if (!shenzhenPath) return json({ error: "Not found" }, 404);
+      const shenzhenUrl = new URL(
+        `${HONNMONO_ADMIN_API_URL}${shenzhenPath}`,
+      );
+      if (!isAllowedHonnmonoUpstream(shenzhenUrl)) {
+        return json({ error: "Server misconfigured" }, 500);
+      }
+      let metadataResponse: Response;
+      try {
+        metadataResponse = await fetch(shenzhenUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Internal-Token": HONNMONO_ADMIN_INTERNAL_TOKEN,
+            "X-Operator-Email": guard.operatorEmail,
+          },
+          body: JSON.stringify({ url: packageUrl, md5: packageMd5 }),
+          signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+        });
+      } catch (_) {
+        return json(
+          { error: "Honnmono metadata update timeout", storage: storedPackage },
+          504,
+        );
+      }
+      const metadataText = await metadataResponse.text();
+      let metadataBody: unknown;
+      try {
+        metadataBody = metadataText ? JSON.parse(metadataText) : null;
+      } catch (_) {
+        return json(
+          { error: "Honnmono metadata update invalid response", storage: storedPackage },
+          502,
+        );
+      }
+      if (!metadataResponse.ok) {
+        return json(
+          {
+            error: "Honnmono metadata update failed",
+            storage: storedPackage,
+            metadata: metadataBody,
+          },
+          metadataResponse.status,
+        );
+      }
+      return json({ storage: storedPackage, metadata: metadataBody });
     }
     return new Response(otaText, {
       status: otaUpstream.status,

@@ -73,8 +73,43 @@ assert.equal(mapHonnmonoAdminPath("/device/unbind", "GET"), "");
 assert.equal(mapOtaAdminPath("/ota/package", "GET"), "/package");
 assert.equal(mapOtaAdminPath("/ota/package", "POST"), "/package");
 assert.equal(mapOtaAdminPath("/ota/package", "DELETE"), "");
+assert.equal(
+  mapHonnmonoAdminPath("/devices/dc-pro", "GET"),
+  "/internal/admin/adapter-devices/dc-pro",
+);
+assert.equal(
+  mapHonnmonoAdminPath("/devices/dc-pro/CERT_1/sessions", "GET"),
+  "/internal/admin/adapter-devices/dc-pro/CERT_1/sessions",
+);
+assert.equal(
+  mapHonnmonoAdminPath("/ota/legacy-packages", "GET"),
+  "/internal/admin/ota/legacy-packages",
+);
+assert.equal(
+  mapHonnmonoAdminPath("/ota/legacy-packages/150004", "POST"),
+  "/internal/admin/ota/legacy-packages/150004",
+);
+assert.equal(mapOtaAdminPath("/devices/flash", "GET"), "/devices/flash");
+assert.equal(
+  mapOtaAdminPath("/devices/flash/CERT_1/sessions", "GET"),
+  "/devices/flash/CERT_1/sessions",
+);
+assert.equal(
+  mapOtaAdminPath("/devices/flash/CERT_1/uploads/7", "GET"),
+  "/devices/flash/CERT_1/uploads/7",
+);
+assert.equal(
+  mapOtaAdminPath("/devices/flash/CERT_1/actions", "POST"),
+  "/devices/flash/CERT_1/actions",
+);
+assert.equal(
+  mapOtaAdminPath("/ota/legacy-packages/150001", "POST"),
+  "/legacy-packages/150001",
+);
 assert.equal(isAllowedOtaAdminBase("http://172.18.0.1:8086"), true);
 assert.equal(isAllowedOtaAdminBase("http://172.18.0.1:8086/base"), false);
+assert.equal(isAllowedOtaAdminBase("https://172.18.0.1:8086"), false);
+assert.equal(isAllowedOtaAdminBase("http://public.example:8086"), false);
 assert.equal(
   isAllowedHonnmonoUpstream(
     new URL("https://app-api.honnmono.top/internal/admin/feedback-log/token"),
@@ -112,6 +147,8 @@ for (const key of [
   "OCPP_ADMIN_INTERNAL_TOKEN",
   "HONNMONO_ADMIN_API_URL",
   "HONNMONO_ADMIN_INTERNAL_TOKEN",
+  "OTA_ADMIN_URL",
+  "OTA_ADMIN_TOKEN",
 ]) {
   assert.match(override, new RegExp(`\\b${key}:`), `override missing ${key}`);
 }

@@ -23,6 +23,7 @@ import {
   otaFileToBase64,
   parseOtaVersion,
   renderOtaPackage,
+  validateLegacyOtaFile,
   validateOtaFile,
   validateOtaVersion,
 } from "../root-site/bizflow/app-feedback-ota.js";
@@ -136,6 +137,18 @@ assert.doesNotThrow(() =>
   assertHonnmonoAdminRequest("/ota/package", "POST"),
 );
 for (const [method, subPath] of [
+  ["GET", "/ota/legacy-packages"],
+  ["POST", "/ota/legacy-packages/150001"],
+  ["GET", "/devices/flash?page=1&pageSize=20&query=flash"],
+  ["GET", "/devices/dc-pro?page=2&pageSize=20"],
+  ["GET", "/devices/flash/CERT_1/sessions?date=2026-08-17&page=1&pageSize=20"],
+  ["GET", "/devices/dc-pro/CERT_2/sessions?page=1&pageSize=20"],
+  ["GET", "/devices/flash/CERT_1/uploads/9"],
+  ["POST", "/devices/flash/CERT_1/actions"],
+]) {
+  assert.doesNotThrow(() => assertHonnmonoAdminRequest(subPath, method));
+}
+for (const [method, subPath] of [
   ["GET", "/feedback/0"],
   ["GET", "/feedback/-1"],
   ["GET", "/feedback/1/log-link"],
@@ -153,6 +166,9 @@ for (const [method, subPath] of [
   ["DELETE", "/ota/package"],
   ["GET", "/ota/package?extra=1"],
   ["POST", "/ota/backups"],
+  ["POST", "/ota/legacy-packages/150005"],
+  ["GET", "/devices/flash/CERT_1/uploads/0"],
+  ["POST", "/devices/dc-pro/CERT_2/actions"],
 ]) {
   assert.throws(
     () => assertHonnmonoAdminRequest(subPath, method),
@@ -317,6 +333,14 @@ assert.match(apiSource, /backendCode === "imei_ambiguous"/);
 assert.match(pageSource, /error\.code === "imei_ambiguous"/);
 assert.match(pageSource, /data-app-feedback-tab="feedback"/);
 assert.match(pageSource, /data-app-feedback-tab="device"/);
+assert.match(pageSource, /data-app-feedback-tab="devices"/);
+assert.match(pageSource, /data-adapter-kind="flash"/);
+assert.match(pageSource, /data-adapter-kind="dc-pro"/);
+assert.match(pageSource, /data-adapter-action="force_ota"/);
+assert.match(pageSource, /data-adapter-action="lock"/);
+assert.match(pageSource, /data-adapter-action="unlock"/);
+assert.match(pageSource, /data-adapter-report=/);
+assert.match(pageSource, /pageSize:\s*String\(PAGE_SIZE\)/);
 assert.match(pageSource, /activeOtaController\?\.load\(\)/);
 assert.match(pageSource, /data-ota-file/);
 assert.match(pageSource, /data-ota-version/);
@@ -333,6 +357,8 @@ assert.match(otaSource, /pattern="\[0-9\]\+\[\.\]\[0-9\]\+"/);
 assert.match(otaSource, /data-ota-confirm-submit/);
 assert.match(otaSource, /content_base64:/);
 assert.match(otaSource, /OTA_MAX_FILE_BYTES = 2 \* 1024 \* 1024/);
+assert.match(otaSource, /accept="\.UPG,\.upg"/);
+assert.match(otaSource, /data-legacy-ota-confirm-submit/);
 assert.doesNotMatch(otaSource, /window\.confirm/);
 assert.match(pageSource, /document\.visibilityState\s*!==\s*"visible"/);
 assert.match(pageSource, /pendingListPayload/);
@@ -534,6 +560,13 @@ const otaFile = {
   size: 4,
   arrayBuffer: async () => Uint8Array.from([1, 2, 3, 4]).buffer,
 };
+const legacyOtaFile = {
+  name: "general.UPG",
+  size: 3,
+  arrayBuffer: async () => Uint8Array.from([5, 6, 7]).buffer,
+};
+assert.equal(validateLegacyOtaFile(legacyOtaFile), null);
+assert.equal(validateLegacyOtaFile({ ...legacyOtaFile, name: "bad.bin" }).code, "legacyOtaFileType");
 let otaGetCount = 0;
 const otaController = createOtaPackageController({
   otaState,
@@ -547,7 +580,28 @@ const otaController = createOtaPackageController({
   encodeFile: async () => "AQIDBA==",
   request: async (path, options = {}) => {
     otaCalls.push([path, options]);
-    if (options.method === "POST") {
+    if (path === "/ota/legacy-packages") {
+      return {
+        items: [
+          {
+            id: 150001,
+            name: "General",
+            carModel: "general",
+            filename: "general.UPG",
+            url: "http://ota.example/legacy/general.UPG",
+            md5: "legacy-md5",
+            updatedAt: 1_700_000_000,
+          },
+        ],
+      };
+    }
+    if (path === "/ota/legacy-packages/150001") {
+      return {
+        storage: { filename: "general.UPG", md5: "new-legacy-md5" },
+        metadata: { id: 150001 },
+      };
+    }
+    if (options.method === "POST" && path === "/ota/package") {
       return { filename: "gbccs25.bin", size: 4, md5: "server-md5" };
     }
     otaGetCount += 1;
@@ -587,17 +641,18 @@ otaController.setVersionInput("1");
 otaController.openConfirm();
 assert.equal(otaState.confirmOpen, false);
 assert.equal(otaState.versionError.code, "otaVersionFormat");
-assert.equal(otaCalls.length, 1);
+assert.equal(otaCalls.length, 2);
 otaController.setVersionInput("1.20");
 otaController.openConfirm();
 assert.equal(otaState.confirmOpen, true);
 await otaController.submit();
 assert.deepEqual(otaCalls.map(([path, options]) => [path, options.method || "GET"]), [
   ["/ota/package", "GET"],
+  ["/ota/legacy-packages", "GET"],
   ["/ota/package", "POST"],
   ["/ota/package", "GET"],
 ]);
-assert.deepEqual(otaCalls[1][1].body, {
+assert.deepEqual(otaCalls[2][1].body, {
   filename: "gbccs25.bin",
   content_base64: "AQIDBA==",
   mainver: 1,
@@ -607,6 +662,15 @@ assert.equal(otaState.packageInfo.current.filename, "gbccs25.bin");
 assert.equal(otaState.uploadResult.md5, "server-md5");
 assert.equal(otaState.selectedFile, null);
 assert.equal(otaState.versionInput, "");
+otaController.selectLegacyFile(150001, legacyOtaFile);
+otaController.openLegacyConfirm(150001);
+assert.equal(otaState.legacyConfirmSlot, 150001);
+await otaController.submitLegacy();
+assert.deepEqual(otaCalls.at(-2).slice(0, 1), ["/ota/legacy-packages/150001"]);
+assert.equal(otaCalls.at(-2)[1].method, "POST");
+assert.equal(otaCalls.at(-2)[1].body.previousFilename, "general.UPG");
+assert.equal(otaCalls.at(-1)[0], "/ota/legacy-packages");
+assert.equal(otaState.legacyUploadResults["150001"].metadata.id, 150001);
 assert.ok(otaRenders >= 6);
 
 let resolveRacingLoad;
@@ -621,7 +685,8 @@ const racingController = createOtaPackageController({
   rerender: () => {},
   focus: () => {},
   encodeFile: async () => "AQIDBA==",
-  request: async (_path, options = {}) => {
+  request: async (path, options = {}) => {
+    if (path === "/ota/legacy-packages") return { items: [] };
     if (options.method === "POST") {
       assert.equal("mainver" in options.body, false);
       assert.equal("subver" in options.body, false);
@@ -712,6 +777,8 @@ assert.deepEqual(
 assert.match(cssSource, /@media\s+\(max-width:/);
 assert.match(cssSource, /\.app-feedback-device-check--unverified/);
 assert.match(cssSource, /\.app-feedback-ota-card/);
+assert.match(cssSource, /\.app-feedback-adapter-grid/);
+assert.match(cssSource, /\.app-feedback-legacy-ota-grid/);
 assert.doesNotMatch(cssSource, /(?:^|[;:{\s])#[0-9a-f]{3,8}\b/i);
 
 assert.equal(feedbackPollDelay(0), FEEDBACK_POLL_INTERVAL_MS);

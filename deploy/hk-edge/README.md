@@ -20,11 +20,15 @@ CHARGECMS_READAPI_URL=...
 OCPP_ADMIN_INTERNAL_TOKEN=...
 HONNMONO_ADMIN_API_URL=https://app-api.honnmono.top
 HONNMONO_ADMIN_INTERNAL_TOKEN=<same random secret as Shenzhen>
+OTA_ADMIN_URL=http://172.18.0.1:8086
+OTA_ADMIN_TOKEN=<same random secret as the HK OTA admin service>
 ```
 
 No secret belongs in this repository. `HONNMONO_ADMIN_INTERNAL_TOKEN` must be
 at least 32 characters and must exactly match the Shenzhen backend's
-`HONNMONO_ADMIN_INTERNAL_TOKEN`.
+`HONNMONO_ADMIN_INTERNAL_TOKEN`. `OTA_ADMIN_URL` is deliberately restricted by
+the Edge function to `http://172.18.0.1:8086`; do not expose that service on a
+public address.
 
 For a Functions-only recreate, the required command shape is:
 
