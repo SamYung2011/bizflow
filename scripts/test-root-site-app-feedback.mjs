@@ -714,6 +714,58 @@ assert.equal(otaCalls.at(-1)[0], "/ota/legacy-packages");
 assert.equal(otaState.legacyUploadResults["150001"].metadata.id, 150001);
 assert.ok(otaRenders >= 6);
 
+const legacyRetryState = createOtaPackageState();
+legacyRetryState.legacyPackages = [
+  { id: 150001, filename: "old-general.UPG" },
+];
+let legacyRetryAttempts = 0;
+const legacyRetryBodies = [];
+const legacyRetryController = createOtaPackageController({
+  otaState: legacyRetryState,
+  scope: { signal: new AbortController().signal },
+  isActive: () => true,
+  isDeviceTab: () => true,
+  rerender: () => {},
+  focus: () => {},
+  encodeFile: async () => "BQYH",
+  request: async (path, options = {}) => {
+    if (path === "/ota/legacy-packages/150001") {
+      legacyRetryAttempts += 1;
+      legacyRetryBodies.push(options.body);
+      if (legacyRetryAttempts === 1) {
+        throw new HonnmonoAdminError("upstreamError", 504);
+      }
+      return {
+        storage: {
+          filename: "new-general.UPG",
+          md5: "retry-md5",
+          idempotent: true,
+        },
+        metadata: { id: 150001 },
+      };
+    }
+    if (path === "/ota/legacy-packages") {
+      return { items: [{ id: 150001, filename: "new-general.UPG" }] };
+    }
+    throw new Error(`unexpected retry path: ${path}`);
+  },
+});
+const retriedLegacyFile = { ...legacyOtaFile, name: "new-general.UPG" };
+legacyRetryController.selectLegacyFile(150001, retriedLegacyFile);
+legacyRetryController.openLegacyConfirm(150001);
+await legacyRetryController.submitLegacy();
+assert.equal(legacyRetryState.legacyUploadErrors["150001"].status, 504);
+assert.equal(legacyRetryState.legacySelectedFiles["150001"], retriedLegacyFile);
+legacyRetryController.openLegacyConfirm(150001);
+await legacyRetryController.submitLegacy();
+assert.equal(legacyRetryAttempts, 2);
+assert.deepEqual(legacyRetryBodies[0], legacyRetryBodies[1]);
+assert.equal(
+  legacyRetryState.legacyUploadResults["150001"].storage.idempotent,
+  true,
+);
+assert.equal(legacyRetryState.legacySelectedFiles["150001"], null);
+
 let resolveRacingLoad;
 let resolveRacingPost;
 let racingGetCount = 0;
