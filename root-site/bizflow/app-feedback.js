@@ -81,6 +81,7 @@ function createAdapterDeviceState(saved = {}) {
     detailDate: currentHongKongDate(),
     sessions: [],
     sessionTotal: 0,
+    sessionPage: 1,
     sessionLoading: false,
     sessionError: null,
     sessionRequest: 0,
@@ -96,6 +97,30 @@ function createAdapterDeviceState(saved = {}) {
 
 function adapterPageCount() {
   return Math.max(1, Math.ceil((state?.adapters?.total || 0) / PAGE_SIZE));
+}
+
+export function adapterActionsForKind(kind) {
+  return kind === "flash"
+    ? ["force_ota", "lock", "unlock"]
+    : kind === "dc-pro"
+      ? ["unbind"]
+      : [];
+}
+
+export function adapterSessionSubPath({ kind, certid, date, page = 1 }) {
+  if (!["flash", "dc-pro"].includes(kind) || !certid) return "";
+  const params = new URLSearchParams({
+    date: String(date || currentHongKongDate()),
+    page: String(Math.max(1, Number(page) || 1)),
+    pageSize: String(PAGE_SIZE),
+  });
+  return `/devices/${kind}/${encodeURIComponent(String(certid))}/sessions?${params}`;
+}
+
+export function adapterOtaPackages(packageInfo) {
+  return [packageInfo?.current, ...(packageInfo?.backups || [])]
+    .filter((item) => item?.filename)
+    .map((item) => ({ ...item }));
 }
 
 function canAccessFeedback(currentUser, session) {
@@ -424,6 +449,7 @@ function renderAdapterCards() {
       const bindingUserId = String(device?.binding?.userId ?? "").trim();
       const unbindDisabled =
         !/^\d{15}$/.test(imei) || !bindingUserId || bindingUserId === "0";
+      const availableActions = adapterActionsForKind(kind);
       const actionBusy =
         state.adapters.actionLoading || state.adapters.actionLookupId === id;
       return `<article class="app-feedback-device-binding app-feedback-adapter-card">
@@ -453,8 +479,8 @@ function renderAdapterCards() {
         </section>
         <div class="app-feedback-adapter-actions">
           <button type="button" class="app-feedback-button" data-adapter-detail="${rawE(id)}"${!device.certid || actionBusy ? " disabled" : ""}>${rawE(t("viewSessions"))}</button>
-          <button type="button" class="app-feedback-button app-feedback-button--danger" data-adapter-action="unbind" data-adapter-id="${rawE(id)}"${unbindDisabled || actionBusy ? " disabled" : ""}>${rawE(t("unbindDevice"))}</button>
-          ${kind === "flash" ? `<button type="button" class="app-feedback-button" data-adapter-action="force_ota" data-adapter-id="${rawE(id)}"${actionBusy ? " disabled" : ""}>${rawE(t("forceOta"))}</button>
+          ${availableActions.includes("unbind") ? `<button type="button" class="app-feedback-button app-feedback-button--danger" data-adapter-action="unbind" data-adapter-id="${rawE(id)}"${unbindDisabled || actionBusy ? " disabled" : ""}>${rawE(t("unbindDevice"))}</button>` : ""}
+          ${availableActions.includes("force_ota") ? `<button type="button" class="app-feedback-button" data-adapter-action="force_ota" data-adapter-id="${rawE(id)}"${actionBusy ? " disabled" : ""}>${rawE(t("forceOta"))}</button>
           <button type="button" class="app-feedback-button" data-adapter-action="lock" data-adapter-id="${rawE(id)}"${actionBusy ? " disabled" : ""}>${rawE(t("lockDevice"))}</button>
           <button type="button" class="app-feedback-button" data-adapter-action="unlock" data-adapter-id="${rawE(id)}"${actionBusy ? " disabled" : ""}>${rawE(t("unlockDevice"))}</button>` : ""}
         </div>
@@ -467,10 +493,7 @@ function renderAdapterActionConfirm() {
   const confirm = state.adapters.actionConfirm;
   if (!confirm) return "";
   const device = confirm.device;
-  const packages = [
-    state.ota.packageInfo?.current,
-    ...(state.ota.packageInfo?.backups || []),
-  ].filter((item) => item?.filename);
+  const packages = Array.isArray(confirm.packages) ? confirm.packages : [];
   const actionKey = {
     unbind: "unbindDevice",
     force_ota: "forceOta",
@@ -510,6 +533,7 @@ function renderAdapterSessions() {
   const adapters = state.adapters;
   const device = adapters.detailDevice;
   if (!device) return "";
+  const sessionPages = Math.max(1, Math.ceil(adapters.sessionTotal / PAGE_SIZE));
   let body = `<div class="app-feedback-device-empty">${rawE(t("devicesLoading"))}</div>`;
   if (adapters.sessionError) {
     body = `<div class="app-feedback-alert">${rawE(t("sessionLoadError", { message: errorCopy(adapters.sessionError) }))}</div>`;
@@ -544,9 +568,14 @@ function renderAdapterSessions() {
         <button type="button" class="app-feedback-button" data-adapter-drawer-close>${rawE(t("close"))}</button>
       </header>
       <div class="app-feedback-drawer__body">
-        ${state.adapters.kind === "flash" ? `<label class="app-feedback-ota-version"><span>${rawE(t("sessionDate"))}</span><input type="date" class="app-feedback-control" value="${rawE(adapters.detailDate)}" data-adapter-session-date></label>` : ""}
+        <label class="app-feedback-ota-version"><span>${rawE(t("sessionDate"))}</span><input type="date" class="app-feedback-control" value="${rawE(adapters.detailDate)}" data-adapter-session-date></label>
         ${adapters.downloadError ? `<div class="app-feedback-alert">${rawE(t("reportDownloadError", { message: errorCopy(adapters.downloadError) }))}</div>` : ""}
         ${body}
+        <nav class="app-feedback-pager" aria-label="${rawE(t("page", { page: adapters.sessionPage, pages: sessionPages }))}">
+          <span>${rawE(t("page", { page: adapters.sessionPage, pages: sessionPages }))}</span>
+          <button type="button" class="app-feedback-button" data-adapter-session-page="${adapters.sessionPage - 1}"${adapters.sessionPage <= 1 || adapters.sessionLoading ? " disabled" : ""}>${rawE(t("previous"))}</button>
+          <button type="button" class="app-feedback-button" data-adapter-session-page="${adapters.sessionPage + 1}"${adapters.sessionPage >= sessionPages || adapters.sessionLoading ? " disabled" : ""}>${rawE(t("next"))}</button>
+        </nav>
       </div>
     </aside>
   </div>`;
@@ -876,24 +905,32 @@ async function loadAdapterSessions() {
   if (!device) return;
   const instance = activeInstance;
   const scope = activeScope;
+  const subPath = adapterSessionSubPath({
+    kind: state.adapters.kind,
+    certid: device.certid,
+    date: state.adapters.detailDate,
+    page: state.adapters.sessionPage,
+  });
+  if (!subPath) return;
   const request = ++state.adapters.sessionRequest;
   state.adapters.sessionLoading = true;
   state.adapters.sessionError = null;
   state.adapters.downloadError = null;
   rerender();
-  const certid = encodeURIComponent(String(device.certid || ""));
-  const params = new URLSearchParams({ page: "1", pageSize: String(PAGE_SIZE) });
-  if (state.adapters.kind === "flash") {
-    params.set("date", state.adapters.detailDate);
-  }
   try {
-    const payload = await callHonnmonoAdmin(
-      `/devices/${state.adapters.kind}/${certid}/sessions?${params}`,
-      { signal: scope.signal },
-    );
+    const payload = await callHonnmonoAdmin(subPath, { signal: scope.signal });
     if (!isActive(instance, scope) || request !== state.adapters.sessionRequest) return;
     state.adapters.sessions = Array.isArray(payload?.items) ? payload.items : [];
     state.adapters.sessionTotal = Number(payload?.total) || 0;
+    const sessionPages = Math.max(
+      1,
+      Math.ceil(state.adapters.sessionTotal / PAGE_SIZE),
+    );
+    if (state.adapters.sessionPage > sessionPages) {
+      state.adapters.sessionPage = sessionPages;
+      void loadAdapterSessions();
+      return;
+    }
   } catch (error) {
     if (isActive(instance, scope) && request === state.adapters.sessionRequest) {
       state.adapters.sessions = [];
@@ -915,6 +952,7 @@ function openAdapterSessions(id) {
   if (!device?.certid) return;
   state.adapters.detailDevice = device;
   state.adapters.sessions = [];
+  state.adapters.sessionPage = 1;
   state.adapters.sessionError = null;
   state.adapters.downloadError = null;
   void loadAdapterSessions();
@@ -924,6 +962,7 @@ function closeAdapterSessions() {
   state.adapters.sessionRequest += 1;
   state.adapters.detailDevice = null;
   state.adapters.sessions = [];
+  state.adapters.sessionPage = 1;
   state.adapters.sessionError = null;
   state.adapters.downloadError = null;
   rerender();
@@ -936,6 +975,7 @@ async function beginAdapterAction(action, id) {
   if (!device || !["unbind", "force_ota", "lock", "unlock"].includes(action)) {
     return;
   }
+  if (!adapterActionsForKind(state.adapters.kind).includes(action)) return;
   state.adapters.actionError = null;
   state.adapters.actionResult = null;
   if (action === "unbind") {
@@ -958,13 +998,11 @@ async function beginAdapterAction(action, id) {
     }
     return;
   }
-  const packages = [
-    state.ota.packageInfo?.current,
-    ...(state.ota.packageInfo?.backups || []),
-  ].filter((item) => item?.filename);
+  const packages = adapterOtaPackages(state.ota.packageInfo);
   state.adapters.actionConfirm = {
     action,
     device,
+    packages,
     package: action === "force_ota" ? packages[0]?.filename || "" : "",
     versionInput: "",
   };
@@ -986,6 +1024,7 @@ async function submitAdapterAction() {
   let path;
   let body;
   if (confirm.action === "unbind") {
+    if (state.adapters.kind !== "dc-pro") return;
     const expectedUserId = Number(confirm.binding?.dev_cloud?.userid);
     if (!Number.isSafeInteger(expectedUserId) || expectedUserId <= 0) return;
     path = "/device/unbind";
@@ -994,6 +1033,9 @@ async function submitAdapterAction() {
     path = `/devices/flash/${encodeURIComponent(confirm.device.certid)}/actions`;
     body = { action: confirm.action };
     if (confirm.action === "force_ota") {
+      if (!confirm.packages?.some((item) => item.filename === confirm.package)) {
+        return;
+      }
       body.package = confirm.package;
       const version = String(confirm.versionInput || "").trim();
       if (version) {
@@ -1255,6 +1297,16 @@ function onFeedbackClick(event) {
     void downloadAdapterReport(adapterReport.getAttribute("data-adapter-report"));
     return;
   }
+  const adapterSessionPage = event.target.closest?.(
+    "[data-adapter-session-page]",
+  );
+  if (adapterSessionPage && !adapterSessionPage.disabled) {
+    state.adapters.sessionPage = Number(
+      adapterSessionPage.getAttribute("data-adapter-session-page"),
+    );
+    void loadAdapterSessions();
+    return;
+  }
   const adapterPage = event.target.closest?.("[data-adapter-page]");
   if (adapterPage && !adapterPage.disabled) {
     state.adapters.page = Number(adapterPage.getAttribute("data-adapter-page"));
@@ -1391,6 +1443,7 @@ function onFeedbackChange(event) {
   }
   if (event.target.matches("[data-adapter-session-date]")) {
     state.adapters.detailDate = event.target.value || currentHongKongDate();
+    state.adapters.sessionPage = 1;
     void loadAdapterSessions();
     return;
   }

@@ -175,8 +175,10 @@ export function createOtaPackageController({
         otaState.legacyLoadError = legacyResult.reason;
       }
     }
-    otaState.loading = false;
-    if (isActive() && isDeviceTab()) rerender();
+    if (isCurrent(sequence)) {
+      otaState.loading = false;
+      if (isDeviceTab()) rerender();
+    }
   }
 
   function selectFile(file) {
@@ -264,6 +266,7 @@ export function createOtaPackageController({
     const version = parseOtaVersion(otaState.versionInput);
 
     const sequence = ++otaState.requestSequence;
+    otaState.loading = false;
     otaState.uploadLoading = true;
     otaState.uploadError = null;
     otaState.loadError = null;
@@ -332,6 +335,7 @@ export function createOtaPackageController({
       (item) => Number(item.id) === slotId,
     );
     const sequence = ++otaState.requestSequence;
+    otaState.loading = false;
     otaState.legacyUploadingSlot = slotId;
     otaState.legacyUploadErrors[key] = null;
     rerender();

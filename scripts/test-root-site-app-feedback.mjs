@@ -10,6 +10,11 @@ import {
 } from "../root-site/bizflow/app-feedback-api.js";
 import { appFeedbackCopy } from "../root-site/bizflow/app-feedback-i18n.js";
 import {
+  adapterActionsForKind,
+  adapterOtaPackages,
+  adapterSessionSubPath,
+} from "../root-site/bizflow/app-feedback.js";
+import {
   createDeviceUnbindController,
   createDeviceUnbindState,
   deviceExpectedUserId,
@@ -142,7 +147,7 @@ for (const [method, subPath] of [
   ["GET", "/devices/flash?page=1&pageSize=20&query=flash"],
   ["GET", "/devices/dc-pro?page=2&pageSize=20"],
   ["GET", "/devices/flash/CERT_1/sessions?date=2026-08-17&page=1&pageSize=20"],
-  ["GET", "/devices/dc-pro/CERT_2/sessions?page=1&pageSize=20"],
+  ["GET", "/devices/dc-pro/CERT_2/sessions?date=2026-08-17&page=1&pageSize=20"],
   ["GET", "/devices/flash/CERT_1/uploads/9"],
   ["POST", "/devices/flash/CERT_1/actions"],
 ]) {
@@ -202,6 +207,33 @@ assert.equal(normalizeFeedbackLogStatus({ logStatus: "expired" }), "expired");
 assert.equal(normalizeFeedbackLogStatus({ logStatus: "mystery" }), "expired");
 assert.match(formatFeedbackTime(1_700_000_000, "zh"), /\d/);
 assert.equal(formatFeedbackTime("not-a-timestamp", "en"), "not-a-timestamp");
+
+assert.deepEqual(adapterActionsForKind("flash"), [
+  "force_ota",
+  "lock",
+  "unlock",
+]);
+assert.deepEqual(adapterActionsForKind("dc-pro"), ["unbind"]);
+assert.deepEqual(adapterActionsForKind("unknown"), []);
+assert.equal(
+  adapterSessionSubPath({
+    kind: "dc-pro",
+    certid: "CERT_2",
+    date: "2026-08-17",
+    page: 3,
+  }),
+  "/devices/dc-pro/CERT_2/sessions?date=2026-08-17&page=3&pageSize=20",
+);
+const otaPackageSource = {
+  current: { filename: "current.bin" },
+  backups: [{ filename: "backup.bin" }],
+};
+const otaPackageSnapshot = adapterOtaPackages(otaPackageSource);
+otaPackageSource.current.filename = "changed-after-dialog-open.bin";
+assert.deepEqual(
+  otaPackageSnapshot.map((item) => item.filename),
+  ["current.bin", "backup.bin"],
+);
 
 const feedbackLanguages = Object.keys(appFeedbackCopy);
 assert.deepEqual(feedbackLanguages, ["zh", "en", "fr"]);
