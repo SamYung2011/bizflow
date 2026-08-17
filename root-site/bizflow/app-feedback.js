@@ -1,4 +1,6 @@
 import { createBizflowMenu } from "../components/bizflow-menu.js";
+import { createDateRangePanel } from "../components/date-range-panel.js";
+import { displayDateInput } from "../components/date-value.js";
 import { getSession } from "../data/auth.js";
 import { getCurrentUser, getUnread } from "../data/provider.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
@@ -29,6 +31,7 @@ import {
 
 const PAGE_SIZE = 20;
 export const ADAPTER_SESSION_HISTORY_DAYS = 90;
+const adapterSessionDatePanel = createDateRangePanel();
 let state = null;
 let helpers = null;
 let activeScope = null;
@@ -580,7 +583,7 @@ function renderAdapterSessions() {
         <button type="button" class="app-feedback-button" data-adapter-drawer-close>${rawE(t("close"))}</button>
       </header>
       <div class="app-feedback-drawer__body">
-        <label class="app-feedback-ota-version"><span>${rawE(t("sessionDate"))}</span><input type="date" class="app-feedback-control" value="${rawE(adapters.detailDate)}" min="${rawE(adapterSessionMinDate())}" data-adapter-session-date></label>
+        <div class="app-feedback-ota-version"><span>${rawE(t("sessionDate"))}</span><button type="button" class="date-panel-trigger" data-adapter-session-date aria-haspopup="dialog" aria-expanded="${adapterSessionDatePanel.isOpen()}">${helpers.icon("icon-task-calendar", "icon")}<span class="date-panel-trigger__value">${rawE(displayDateInput(adapters.detailDate) || t("sessionDate"))}</span></button></div>
         ${adapters.downloadError ? `<div class="app-feedback-alert">${rawE(t("reportDownloadError", { message: errorCopy(adapters.downloadError) }))}</div>` : ""}
         ${body}
         <nav class="app-feedback-pager" aria-label="${rawE(t("page", { page: adapters.sessionPage, pages: sessionPages }))}">
@@ -694,6 +697,7 @@ function restoreScrollState(scrollState) {
 function rerender({ preserveScroll = false } = {}) {
   const page = document.querySelector("[data-app-feedback-page]");
   if (!page || !helpers) return;
+  adapterSessionDatePanel.close();
   const scrollState = preserveScroll ? captureScrollState() : null;
   page.outerHTML = render(helpers);
   if (scrollState) restoreScrollState(scrollState);
@@ -970,7 +974,26 @@ function openAdapterSessions(id) {
   void loadAdapterSessions();
 }
 
+function openAdapterSessionDatePanel(anchor) {
+  adapterSessionDatePanel.open({
+    anchor,
+    mode: "single",
+    date: state.adapters.detailDate,
+    minDate: adapterSessionMinDate(),
+    language: helpers?.lang || "zh",
+    t: (key) => t(key === "date" ? "sessionDate" : key),
+    onCommit: ({ date }) => {
+      if (!isActive() || !state?.adapters?.detailDevice) return;
+      state.adapters.detailDate =
+        date || (state.adapters.kind === "flash" ? currentHongKongDate() : "");
+      state.adapters.sessionPage = 1;
+      void loadAdapterSessions();
+    },
+  });
+}
+
 function closeAdapterSessions() {
+  adapterSessionDatePanel.close();
   state.adapters.sessionRequest += 1;
   state.adapters.detailDevice = null;
   state.adapters.sessions = [];
@@ -1306,6 +1329,13 @@ function onFeedbackClick(event) {
     closeAdapterSessions();
     return;
   }
+  const adapterSessionDate = event.target.closest?.(
+    "[data-adapter-session-date]",
+  );
+  if (adapterSessionDate) {
+    openAdapterSessionDatePanel(adapterSessionDate);
+    return;
+  }
   const adapterReport = event.target.closest?.("[data-adapter-report]");
   if (adapterReport) {
     void downloadAdapterReport(adapterReport.getAttribute("data-adapter-report"));
@@ -1453,14 +1483,6 @@ function onFeedbackChange(event) {
     if (state.adapters.actionConfirm) {
       state.adapters.actionConfirm.package = event.target.value;
     }
-    return;
-  }
-  if (event.target.matches("[data-adapter-session-date]")) {
-    state.adapters.detailDate =
-      event.target.value ||
-      (state.adapters.kind === "flash" ? currentHongKongDate() : "");
-    state.adapters.sessionPage = 1;
-    void loadAdapterSessions();
     return;
   }
   if (event.target.matches("[data-ota-file]")) {
@@ -1667,6 +1689,7 @@ export async function mountPage({
       keyword: state.keyword,
     }),
     dispose() {
+      adapterSessionDatePanel.close();
       poller?.dispose();
       if (activePoller === poller) activePoller = null;
       if (activeDeviceController === deviceController) {

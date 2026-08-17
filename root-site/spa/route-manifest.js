@@ -86,6 +86,7 @@ const routes = [
     "../components/segment.css", "../bizflow/ocpp.css"
   ], () => import("../bizflow/ocpp-finance.js")),
   route("/bizflow/app-feedback.html", "bizflow", "../bizflow/app-feedback.js", [
+    "../components/date-range-panel.css",
     "../bizflow/app-feedback.css"
   ], () => import("../bizflow/app-feedback.js")),
   route("/team/index.html", "team", "../team/tasks.js", ["../components/date-range-panel.css", "../team/tasks.css", "../team/tasks-domain.css"], () => import("../team/tasks.js")),

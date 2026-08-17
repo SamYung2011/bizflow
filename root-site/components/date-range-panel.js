@@ -95,10 +95,15 @@ export function createDateRangePanel() {
   let jumpOpen = false;
   let mode = "range";
   let presets = [];
+  let minDate = "";
   let onComplete = async () => {};
 
   function singleMode() {
     return mode === "single";
+  }
+
+  function blockedDay(value) {
+    return Boolean(minDate) && Boolean(value) && value < minDate;
   }
 
   function isOpen() {
@@ -170,6 +175,7 @@ export function createDateRangePanel() {
       .join("");
     const days = calendarDays(viewMonth).map((day) => {
       const selected = day.value === draft.start || (!singleMode() && day.value === draft.end);
+      const blocked = blockedDay(day.value);
       const classes = [
         "date-range-panel__day",
         day.outside ? "date-range-panel__day--outside" : "",
@@ -177,9 +183,10 @@ export function createDateRangePanel() {
         day.value === draft.start ? "date-range-panel__day--range-start" : "",
         day.value === draft.end ? "date-range-panel__day--range-end" : "",
         selected ? "date-range-panel__day--selected" : "",
-        day.value === today ? "date-range-panel__day--today" : ""
+        day.value === today ? "date-range-panel__day--today" : "",
+        blocked ? "date-range-panel__day--blocked" : ""
       ].filter(Boolean).join(" ");
-      return `<button type="button" class="${classes}" data-date-range-day="${day.value}" aria-pressed="${selected}" title="${escapeHtml(panelDate(day.value))}"><span>${day.label}</span></button>`;
+      return `<button type="button" class="${classes}" data-date-range-day="${day.value}" aria-pressed="${selected}" title="${escapeHtml(panelDate(day.value))}"${blocked ? " disabled" : ""}><span>${day.label}</span></button>`;
     }).join("");
     const jump = `<div class="date-range-panel__jump" data-date-range-jump>
       <label class="date-range-panel__year"><span>${escapeHtml(translate("year"))}</span><input type="number" inputmode="numeric" min="1900" max="2200" value="${viewMonth.getFullYear()}" data-date-range-year></label>
@@ -223,7 +230,7 @@ export function createDateRangePanel() {
 
   function selectDay(value) {
     const normalized = normalizeDateInput(value);
-    if (!normalized) return;
+    if (!normalized || blockedDay(normalized)) return;
     if (singleMode()) {
       draft = { start: normalized, end: "" };
       commit({ date: normalized });
@@ -255,7 +262,9 @@ export function createDateRangePanel() {
       const selected = presets[Number(preset.getAttribute("data-date-range-preset"))];
       if (!selected) return;
       if (singleMode()) {
-        commit({ date: normalizeDateInput(selected.date) });
+        const presetDate = normalizeDateInput(selected.date);
+        if (blockedDay(presetDate)) return;
+        commit({ date: presetDate });
       } else {
         commit(normalizeRange(selected.start, selected.end));
       }
@@ -291,11 +300,13 @@ export function createDateRangePanel() {
       jumpOpen = false;
       render({ focus: `[data-date-range-action="${action}"]` });
     } else if (action === "today") {
+      const todayInput = inputFromDate(new Date());
       if (singleMode()) {
-        commit({ date: inputFromDate(new Date()) });
+        if (blockedDay(todayInput)) return;
+        commit({ date: todayInput });
         return;
       }
-      viewMonth = monthStart(inputFromDate(new Date()));
+      viewMonth = monthStart(todayInput);
       jumpOpen = false;
       render({ focus: '[data-date-range-action="today"]' });
     } else if (action === "clear") {
@@ -314,7 +325,7 @@ export function createDateRangePanel() {
     }
   }
 
-  function open({ anchor: nextAnchor, mode: nextMode = "range", date = "", start = "", end = "", viewDate = "", presets: nextPresets = [], language = "zh", t = (key) => key, onCommit = async () => {} } = {}) {
+  function open({ anchor: nextAnchor, mode: nextMode = "range", date = "", start = "", end = "", viewDate = "", minDate: nextMinDate = "", presets: nextPresets = [], language = "zh", t = (key) => key, onCommit = async () => {} } = {}) {
     if (!(nextAnchor instanceof HTMLElement)) return false;
     close({ restoreFocus: false });
     anchor = nextAnchor;
@@ -323,6 +334,7 @@ export function createDateRangePanel() {
     translate = t;
     lang = language;
     mode = nextMode === "single" ? "single" : "range";
+    minDate = normalizeDateInput(nextMinDate);
     presets = (Array.isArray(nextPresets) ? nextPresets : []).filter((preset) => preset && typeof preset.label === "string");
     draft = singleMode() ? { start: normalizeDateInput(date), end: "" } : normalizeRange(start, end);
     activeSide = singleMode() ? "start" : draft.start && !draft.end ? "end" : "start";

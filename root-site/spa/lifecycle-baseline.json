@@ -18,7 +18,7 @@
       }
     },
     "/bizflow/orders.html": {
-      "moduleCount": 44,
+      "moduleCount": 45,
       "totals": {
         "documentListeners": 4,
         "windowListeners": 5,
@@ -200,14 +200,14 @@
       }
     },
     "/bizflow/app-feedback.html": {
-      "moduleCount": 26,
+      "moduleCount": 29,
       "totals": {
-        "documentListeners": 1,
-        "windowListeners": 3,
+        "documentListeners": 3,
+        "windowListeners": 5,
         "mediaQueryListeners": 0,
         "timeouts": 25,
         "intervals": 2,
-        "animationFrames": 1,
+        "animationFrames": 3,
         "observers": 0,
         "authSubscriptions": 4,
         "realtimeSubscriptions": 3

@@ -321,7 +321,8 @@ assert.equal(feedbackRoute.frame.title, "Honnmono APP · 用戶反饋");
 assert.equal(feedbackRoute.entry.endsWith("/bizflow/app-feedback.js"), true);
 assert.deepEqual(
   feedbackRoute.styles.map((url) => new URL(url).pathname.split("/root-site/").at(-1)),
-  ["bizflow/app-feedback.css"],
+  ["components/date-range-panel.css", "bizflow/app-feedback.css"],
+  "the session date picker reuses the live date panel stylesheet",
 );
 const loadedPage = await feedbackRoute.load();
 assert.equal(typeof loadedPage.mountPage, "function");
@@ -426,7 +427,59 @@ assert.equal(deviceExpectedUserId({ dev_cloud: { userid: 101 } }), 101);
 assert.equal(deviceExpectedUserId({ dev_cloud: { userid: "bad" } }), null);
 assert.equal(ADAPTER_SESSION_HISTORY_DAYS, 90);
 assert.equal(adapterSessionMinDate("2026-08-17"), "2026-05-19");
-assert.match(pageSource, /type="date"[^>]+min="\$\{rawE\(adapterSessionMinDate\(\)\)\}"/);
+
+const [expenseSource, taskSubmitSource, datePanelSource] = await Promise.all([
+  read("root-site/bizflow/expense.js"),
+  read("root-site/team/tasks-submit.js"),
+  read("root-site/components/date-range-panel.js"),
+]);
+const sharedDateTrigger =
+  /class="date-panel-trigger"[^>]*aria-haspopup="dialog"[^>]*>\$\{(?:helpers\.)?icon\("icon-task-calendar", "icon"\)\}<span class="date-panel-trigger__value">/;
+for (const [page, source] of [
+  ["expense", expenseSource],
+  ["team tasks-submit", taskSubmitSource],
+  ["app feedback sessions", pageSource],
+]) {
+  assert.match(
+    source,
+    sharedDateTrigger,
+    `${page} must render the shared .date-panel-trigger markup`,
+  );
+}
+assert.doesNotMatch(
+  pageSource,
+  /type="date"/,
+  "the session filter must reuse the live date panel instead of a hand-rolled native date input",
+);
+assert.match(pageSource, /createDateRangePanel\(\)/);
+assert.match(
+  pageSource,
+  /adapterSessionDatePanel\.open\(\{[\s\S]*?mode: "single",[\s\S]*?minDate: adapterSessionMinDate\(\),/,
+  "the drawer must open the shared panel in single-date mode with the 90 day floor",
+);
+for (const hook of [
+  /function closeAdapterSessions\(\) \{\n  adapterSessionDatePanel\.close\(\);/,
+  /function rerender\(\{[^}]*\} = \{\}\) \{[\s\S]*?adapterSessionDatePanel\.close\(\);/,
+  /dispose\(\) \{\n      adapterSessionDatePanel\.close\(\);/,
+]) {
+  assert.match(pageSource, hook, "the shared panel must be torn down with the page");
+}
+assert.match(datePanelSource, /function blockedDay\(value\) \{\n    return Boolean\(minDate\)/);
+assert.match(
+  datePanelSource,
+  /if \(!normalized \|\| blockedDay\(normalized\)\) return;/,
+  "the shared panel must refuse days before minDate rather than let each page re-implement it",
+);
+assert.match(datePanelSource, /blocked \? " disabled" : ""/);
+for (const key of ["today", "previousMonth", "nextMonth", "year", "chooseMonth", "clear"]) {
+  for (const language of feedbackLanguages) {
+    assert.equal(
+      typeof appFeedbackCopy[language][key],
+      "string",
+      `${language}.${key} must exist so the shared date panel reads in all three languages`,
+    );
+  }
+}
 const deviceState = createDeviceUnbindState({
   deviceImeiInput: "86x2635066123456overflow",
 });

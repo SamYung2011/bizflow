@@ -343,6 +343,15 @@
   color: var(--gray-20);
 }
 
+.date-range-panel__day--blocked {
+  color: var(--gray-20);
+  cursor: not-allowed;
+}
+
+.date-range-panel__day--blocked span {
+  text-decoration: line-through;
+}
+
 .date-range-panel__day--selected span {
   border-color: var(--blue);
   background: var(--blue);
