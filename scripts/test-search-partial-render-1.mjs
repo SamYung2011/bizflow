@@ -73,8 +73,6 @@ assert.match(realtimeBlock, /\[data-task-search\]/,
 const realtimeViewState = tasks.slice(tasks.indexOf("function currentTaskViewState"), tasks.indexOf("function applyRealtimeTaskData"));
 assert.match(realtimeViewState, /search: filterState\.search/,
   "realtime task data must restore the live search term instead of clearing it");
-assert.match(tasks, /scope\.listen\(document, "focusout", \(event\) => event\.target\.closest\("\[data-task-search\]"\) && void taskLiveRefresh\?\.flush\(\)\)/,
-  "leaving task search must flush a deferred realtime refresh");
 assert.match(taskBoard, /data-task-search/);
 for (const language of ["zh", "en", "fr"]) {
   assert.match(taskI18n, new RegExp(`${language}: \\{[\\s\\S]*?"tasks.search":`), `${language} task search copy must exist`);

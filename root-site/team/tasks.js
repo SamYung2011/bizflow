@@ -2519,7 +2519,6 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       scope.listen(document, "input", onTaskInput);
       scope.listen(document, "change", onTaskChange);
       scope.listen(document, "focusin", onTaskFocus);
-      scope.listen(document, "focusout", (event) => event.target.closest("[data-task-search]") && void taskLiveRefresh?.flush());
       if (typeof taskMobileViewport.addEventListener === "function") scope.listen(taskMobileViewport, "change", onTaskViewportChange);
       else {
         const viewport = taskMobileViewport;
