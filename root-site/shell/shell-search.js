@@ -22,10 +22,9 @@ function ensureSearchData() {
   if (state.datasets) return Promise.resolve(state.datasets);
   if (state.loadPromise) return state.loadPromise;
   state.loading = true;
-  // Keep provider external to the classic shell demo bundle; application pages
-  // and previews still share the same provider module cache at runtime.
-  const providerPath = "../data/provider.js";
-  state.loadPromise = import(providerPath).then(({ getGlobalSearchData }) => getGlobalSearchData()).catch(() => {
+  // The classic demo build marks this literal import external; the production
+  // root-site build folds it into the atomic SPA bundle.
+  state.loadPromise = import("../data/provider.js").then(({ getGlobalSearchData }) => getGlobalSearchData()).catch(() => {
     console.warn("[provider] global-search provider invalid → fallback empty search index");
     return { customers: null, products: null, invoices: null };
   }).then((datasets) => {

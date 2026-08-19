@@ -408,9 +408,8 @@ async function refreshUnreadIndicators(event) {
   if (key) {
     unread = { ...unread, [key]: 0 };
   } else {
-    // Keep provider external to the classic shell demo bundle; screen modules already share this ESM instance.
-    const providerPath = "../data/provider.js";
-    const { getUnread } = await import(providerPath);
+    // The classic demo build keeps this external; production folds it into the SPA bundle.
+    const { getUnread } = await import("../data/provider.js");
     unread = await getUnread();
   }
   pageContext = { ...pageContext, data: { ...pageContext.data, unread: { ...unread } } };
@@ -537,10 +536,9 @@ function attachShellBehaviors() {
       const now = Date.now();
       if (now - lastResumeRefreshAt < 1_000) return;
       lastResumeRefreshAt = now;
-      const snapshotsPath = "../data/live-snapshot-utils.js";
       void Promise.all([
         authApi.getCurrentUser({ refresh: true }),
-        import(snapshotsPath).then(({ refreshStaleLiveTables }) => refreshStaleLiveTables())
+        import("../data/live-snapshot-utils.js").then(({ refreshStaleLiveTables }) => refreshStaleLiveTables())
       ]).catch((error) => console.warn("[live-cache] resume refresh failed", error));
     };
     document.addEventListener("visibilitychange", refreshStaleCaches);
@@ -622,8 +620,7 @@ function attachShellBehaviors() {
 }
 
 async function guardAuthenticatedShell() {
-  const authPath = "../data/auth.js";
-  authApi = await import(authPath);
+  authApi = await import("../data/auth.js");
   if (!await authApi.isAuthConfigured()) return true;
   state.authEnabled = true;
   const session = await authApi.getSession();

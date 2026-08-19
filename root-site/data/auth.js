@@ -18,7 +18,6 @@ import {
   LIVE_TABLE_SWR_REFRESHED_EVENT
 } from "./live-snapshot-dependencies.js";
 
-const CONFIG_URL = new URL("../config.local.js", import.meta.url);
 const ADMIN_EMAIL = "samyung2011@gmail.com";
 const WA_ADMIN_EMAILS = Object.freeze([ADMIN_EMAIL, "a1017339632@gmail.com"]);
 export const TRANSIENT_AUTH_RESET_EVENT = "tp:auth-transient-reset";
@@ -124,7 +123,7 @@ function normalizeConfig(module) {
 
 async function loadConfig() {
   if (!configPromise) {
-    configPromise = import(CONFIG_URL.href)
+    configPromise = import("../config.local.js")
       .then(normalizeConfig)
       .catch((error) => {
         if (error?.message?.includes("privileged Supabase credentials")) throw error;

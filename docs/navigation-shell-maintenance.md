@@ -40,7 +40,7 @@ node scripts/test-ui-unify-1.mjs
 
 ## Shell bundle 是受控生成物
 
-`root-site/shell/shell.bundle.js` 由 `root-site/shell/shell.js` 生成，禁止手改。桌面与移动演示页都只加载这一份 classic bundle；正式 SPA 继续使用 ESM，加载链不变。
+`root-site/shell/shell.bundle.js` 由 `root-site/shell/shell.js` 生成，禁止手改。桌面与移动演示页都只加载这一份 classic bundle。`root-site/` 源码页继续直接加载 ESM 供开发；正式 `dist/` 则由 `scripts/build-root-site.mjs` 原子合成内容指纹 bundle，见 `docs/root-site-production-build.md`。
 
 功能契约应读取或执行真实源文件，不要再解析 bundle 复测同一行为；bundle 与真实源的一致性统一由逐字节校验负责。
 

@@ -18,6 +18,7 @@ import { getReadState, rememberUnreadWatermarks, setReadStateAccount } from "./r
 import { buildCustomerGroups } from "./customer-groups.js";
 import { customerSourceFromInvoices } from "./customer-source.js";
 import { featureAiBatchForCompany } from "./team-feature-flags.js";
+import { rootSiteUrl } from "../components/root-site-url.js";
 
 function warnProviderFallback(snapshot, fallback) {
   console.warn(`[provider] ${snapshot} invalid → fallback ${fallback}`);
@@ -142,9 +143,8 @@ const teamTaskMock = {
   }))
 };
 
-// 快照路径按本模块文件定位(等价于从 bizflow/home.html 看的 ../data/snapshots/home.json,
-// 用 import.meta.url 是为了任何页面引用本模块时路径都不跑偏)
-const SNAPSHOT_URL = new URL("./snapshots/home.json", import.meta.url);
+// 快照始终从站根定位；rootSiteUrl 同时兼容开发源码目录与生产指纹 bundle。
+const SNAPSHOT_URL = rootSiteUrl("data/snapshots/home.json");
 
 function loadSnapshot() {
   return loadProviderSnapshot("home.json", () =>
@@ -396,8 +396,8 @@ export async function getCurrentUser() {
 }
 
 // 任务侧快照(snapshots/tasks.json:taskStats/kanban/kanbanCounts,口径=Honnmono 板块,详见 README)
-const TASKS_SNAPSHOT_URL = new URL("./snapshots/tasks.json", import.meta.url);
-const TEAM_EXTRAS_SNAPSHOT_URL = new URL("./snapshots/team-extras.json", import.meta.url);
+const TASKS_SNAPSHOT_URL = rootSiteUrl("data/snapshots/tasks.json");
+const TEAM_EXTRAS_SNAPSHOT_URL = rootSiteUrl("data/snapshots/team-extras.json");
 
 function loadTasksSnapshot() {
   return loadProviderSnapshot("tasks.json", () =>
@@ -808,7 +808,7 @@ function buildFallbackTeamMembersData(home) {
   };
 }
 
-const MEMBERS_SNAPSHOT_URL = new URL("./snapshots/members.json", import.meta.url);
+const MEMBERS_SNAPSHOT_URL = rootSiteUrl("data/snapshots/members.json");
 const R9_PERMISSION_KEYS = [
   "can_create_task",
   "can_manage_roles",
@@ -1139,7 +1139,7 @@ function customerSnapshotGroups(customers) {
   });
 }
 
-const CUSTOMERS_SNAPSHOT_URL = new URL("./snapshots/customers.json", import.meta.url);
+const CUSTOMERS_SNAPSHOT_URL = rootSiteUrl("data/snapshots/customers.json");
 
 let groupedCustomersPromise = null;
 let groupedCustomersSource = null;
@@ -1184,7 +1184,7 @@ export async function getCustomerMergeCandidates() {
   }));
 }
 
-const WARRANTY_SNAPSHOT_URL = new URL("./snapshots/warranty.json", import.meta.url);
+const WARRANTY_SNAPSHOT_URL = rootSiteUrl("data/snapshots/warranty.json");
 
 function loadWarrantySnapshot() {
   return loadProviderSnapshot("warranty.json", () =>
@@ -1335,8 +1335,8 @@ const isOrderRow = (row) => !!row &&
     .every((key) => typeof row[key] === "string");
 const withOrderIds = (orders) => orders.map((order, index) => ({ id: order.id ?? `order-${index + 1}`, ...order }));
 
-const ORDERS_SNAPSHOT_URL = new URL("./snapshots/orders.json", import.meta.url);
-const HOME_ORDER_METRICS_URL = new URL("./snapshots/home-order-metrics.json", import.meta.url);
+const ORDERS_SNAPSHOT_URL = rootSiteUrl("data/snapshots/orders.json");
+const HOME_ORDER_METRICS_URL = rootSiteUrl("data/snapshots/home-order-metrics.json");
 
 function loadOrdersSnapshot() {
   return loadProviderSnapshot("orders.json", () =>
@@ -1529,7 +1529,7 @@ const inventoryDetailMock = {
 
 const isInventoryProduct = (x) => x && typeof x.id === "string" && typeof x.name === "string" && typeof x.status === "string";
 
-const INVENTORY_SNAPSHOT_URL = new URL("./snapshots/inventory.json", import.meta.url);
+const INVENTORY_SNAPSHOT_URL = rootSiteUrl("data/snapshots/inventory.json");
 function loadInventorySnapshot() {
   return loadProviderSnapshot("inventory.json", () =>
     fetchSnapshot(INVENTORY_SNAPSHOT_URL, "inventory.json", "inventory mock/empty metrics"));
@@ -1727,15 +1727,15 @@ export async function getGlobalSearchData() {
 }
 
 // R11 订单域子页快照;无效时只返回空数据,禁止用演示值填充生产缺口。
-const NORTHBOUND_SNAPSHOT_URL = new URL("./snapshots/northbound.json", import.meta.url);
-const CHARGER_LEADS_SNAPSHOT_URL = new URL("./snapshots/charger-leads.json", import.meta.url);
-const ALIASES_SNAPSHOT_URL = new URL("./snapshots/aliases.json", import.meta.url);
-const SHOPIFY_LINKS_SNAPSHOT_URL = new URL("./snapshots/shopify-links.json", import.meta.url);
-const SUPPLIERS_SNAPSHOT_URL = new URL("./snapshots/suppliers.json", import.meta.url);
-const PENDING_DEDUCTION_SNAPSHOT_URL = new URL("./snapshots/pending-deduction.json", import.meta.url);
-const EXPENSE_SNAPSHOT_URL = new URL("./snapshots/expense.json", import.meta.url);
-const WHATSAPP_SNAPSHOT_URL = new URL("./snapshots/whatsapp.json", import.meta.url);
-const OCPP_SNAPSHOT_URL = new URL("./snapshots/ocpp.json", import.meta.url);
+const NORTHBOUND_SNAPSHOT_URL = rootSiteUrl("data/snapshots/northbound.json");
+const CHARGER_LEADS_SNAPSHOT_URL = rootSiteUrl("data/snapshots/charger-leads.json");
+const ALIASES_SNAPSHOT_URL = rootSiteUrl("data/snapshots/aliases.json");
+const SHOPIFY_LINKS_SNAPSHOT_URL = rootSiteUrl("data/snapshots/shopify-links.json");
+const SUPPLIERS_SNAPSHOT_URL = rootSiteUrl("data/snapshots/suppliers.json");
+const PENDING_DEDUCTION_SNAPSHOT_URL = rootSiteUrl("data/snapshots/pending-deduction.json");
+const EXPENSE_SNAPSHOT_URL = rootSiteUrl("data/snapshots/expense.json");
+const WHATSAPP_SNAPSHOT_URL = rootSiteUrl("data/snapshots/whatsapp.json");
+const OCPP_SNAPSHOT_URL = rootSiteUrl("data/snapshots/ocpp.json");
 
 function loadR11Snapshot(url, cacheKey) {
   const snapshot = url.pathname.split("/").pop() || cacheKey;

@@ -1,5 +1,6 @@
 // P6 completed the original 16 routes; Honnmono APP feedback extends the live SPA to 17.
 import { createRouteFrame, routeMenuKey } from "./route-menu.js";
+import { rootSiteUrl } from "../components/root-site-url.js";
 
 export { createRouteFrame, createRouteMenu } from "./route-menu.js";
 
@@ -25,7 +26,7 @@ export const spaRouteAllowlist = Object.freeze([
   "/team/members.html"
 ]);
 
-const fromHere = (path) => new URL(path, import.meta.url).href;
+const fromHere = (path) => rootSiteUrl(String(path || "").replace(/^\.\.\//, "")).href;
 
 function route(path, section, entry, styles, load = null) {
   return Object.freeze({

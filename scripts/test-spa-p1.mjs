@@ -55,7 +55,12 @@ async function verifyManifest() {
   assert.equal(
     cacheHeaders.find(({ source, key }) => source === "/(.*)" && key === "Cache-Control")?.value,
     "public, max-age=0, must-revalidate",
-    "HTML, JS and CSS routes must revalidate instead of serving stale releases"
+    "HTML and unhashed routes must revalidate instead of serving stale releases"
+  );
+  assert.equal(
+    cacheHeaders.find(({ source, key }) => source === "/assets/root/(.*)" && key === "Cache-Control")?.value,
+    "public, max-age=31536000, immutable",
+    "only the production root-site fingerprint directory may use an immutable cache"
   );
   assert.equal(
     cacheHeaders.some(({ value }) => String(value).includes("stale-while-revalidate")),

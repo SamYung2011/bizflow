@@ -20,6 +20,11 @@ const result = await build({
   entryPoints: ["root-site/shell/shell.js"],
   outfile: bundleRelativePath,
   bundle: true,
+  external: [
+    "../data/provider.js",
+    "../data/live-snapshot-utils.js",
+    "../data/auth.js"
+  ],
   format: "iife",
   platform: "browser",
   charset: "ascii",

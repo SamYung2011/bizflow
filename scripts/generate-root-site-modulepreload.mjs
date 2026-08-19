@@ -9,13 +9,6 @@ const endMarker = "    <!-- modulepreload:end -->";
 const spaEntryPath = path.join(siteRoot, "spa/entry.js");
 const vendorPath = path.join(siteRoot, "vendor/supabase-js.esm.js");
 
-// These imports use computed URL/path variables, so a source regex cannot discover them.
-const computedImports = new Map([
-  ["data/auth.js", ["config.local.js"]],
-  ["shell/shell-search.js", ["data/provider.js"]],
-  ["shell/shell.js", ["data/provider.js", "data/live-snapshot-utils.js", "data/auth.js"]],
-]);
-
 function sitePath(filePath) {
   return path.relative(siteRoot, filePath).split(path.sep).join("/");
 }
@@ -59,9 +52,6 @@ async function moduleDependencies(filePath) {
   const dependencies = extractLiteralImports(source)
     .map((specifier) => resolveModule(filePath, specifier))
     .filter(Boolean);
-  for (const extra of computedImports.get(relative) ?? []) {
-    dependencies.push(path.join(siteRoot, extra));
-  }
   return [...new Set(dependencies)];
 }
 

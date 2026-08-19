@@ -40,8 +40,8 @@ run("npx vite build --base=/task-platform/team/ --outDir dist-swap", teamDir, {
 });
 cpSync(join(teamDir, "dist-swap"), join(dist, "task-platform", "team"), { recursive: true });
 
-// 3. 新任务平台(root-site/)→ 站根
-cpSync(join(repoRoot, "root-site"), dist, { recursive: true });
+// 3. 新任务平台(root-site/)→ 站根；生产 HTML 只引用内容指纹 bundle，源码目录仍供本地开发。
+run("node scripts/build-root-site.mjs --outdir dist", repoRoot);
 
 // 4. 自检:关键入口都在、asset 前缀正确
 const checks = [
