@@ -4,7 +4,7 @@ import { snapshotsForTables } from "../root-site/data/live-snapshot-dependencies
 import { invalidateLiveTableCache, liveSnapshotCacheVersion } from "../root-site/data/live-table-cache.js";
 
 const read = (relative) => readFile(new URL(`../${relative}`, import.meta.url), "utf8");
-const [migration, writes, snapshots, tableCache, provider, warranty, customers, css, home] = await Promise.all([
+const [migration, writes, snapshots, tableCache, provider, warranty, customers, css, home, phaseMigration] = await Promise.all([
   read("migrations/096_warranty_renewals.sql"),
   read("root-site/data/live-warranty-writes.js"),
   read("root-site/data/live-snapshots.js"),
@@ -13,7 +13,8 @@ const [migration, writes, snapshots, tableCache, provider, warranty, customers, 
   read("root-site/bizflow/customers-warranty.js"),
   read("root-site/bizflow/customers.js"),
   read("root-site/bizflow/customers-warranty.css"),
-  read("root-site/bizflow/home.js")
+  read("root-site/bizflow/home.js"),
+  read("migrations/102_bizflow_data_phase1.sql")
 ]);
 
 assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.warranty_renewals[\s\S]*invoice_id text NOT NULL REFERENCES public\.invoices\(id\)[\s\S]*product_id uuid NOT NULL REFERENCES public\.products\(id\)[\s\S]*customer_id uuid NOT NULL REFERENCES public\.customers\(id\)/);
@@ -70,8 +71,10 @@ assert.match(tableCache, /SNAPSHOT_CONTRACT_GENERATIONS[\s\S]*\["home\.json", [1
 assert.match(snapshots, /LIVE_SNAPSHOT_INVALIDATED_EVENT[\s\S]*invalidateProviderSnapshotMemo\(snapshots\)[\s\S]*LIVE_BUILDERS\.delete/,
   "snapshot invalidation must also evict provider and live-builder memory state");
 assert.match(provider, /item\.invoiceId[\s\S]*item\.productId[\s\S]*item\.latestRenewal[\s\S]*\[12, 24\]\.includes\(item\.latestRenewal\.months\)/);
-assert.match(home, /getWarrantyData\(\)[\s\S]*stat\.key === "warranty"[\s\S]*value: warrantyData\.items\.length[\s\S]*warrantyItems: warrantyData\.items\.slice\(0, 4\)[\s\S]*date: item\.expiry/,
-  "Home card and warranty count must rebuild together from the invalidated shared warranty provider");
+assert.match(home, /getHomeDashboardData\(\)/,
+  "Home must load its warranty count and bounded rows with the server dashboard payload");
+assert.match(phaseMigration, /bizflow_warranty_rows[\s\S]*security_invoker = true[\s\S]*warranty_renewals[\s\S]*'warranty', \(SELECT count\(\*\) FROM warranty\)[\s\S]*warranty_items[\s\S]*LIMIT 4/,
+  "the server dashboard must derive one warranty source for both the count and top-four widget");
 
 for (const language of ["zh", "en", "fr"]) {
   assert.match(warranty, new RegExp(`${language}: \\{[\\s\\S]*renewalTitle:[\\s\\S]*renewalPaidAt:[\\s\\S]*renewalSuccess:`), `${language} renewal copy must be complete`);

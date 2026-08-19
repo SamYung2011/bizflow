@@ -11,6 +11,7 @@ import {
   writeLiveTableCache
 } from "./live-table-cache.js";
 import { fetchAllTablePages } from "./fetch-all-pages.js";
+import { clearLiveQueryCache } from "./live-query-cache.js";
 import {
   COMPANY_SCOPED_SNAPSHOTS,
   LIVE_SNAPSHOT_INVALIDATED_EVENT,
@@ -209,13 +210,13 @@ export async function signOut() {
   const client = await getSupabaseClient();
   if (!client) {
     clearCurrentUserMemory();
-    await clearLiveTableCache();
+    await Promise.all([clearLiveTableCache(), clearLiveQueryCache()]);
     return;
   }
   const { error } = await client.auth.signOut();
   if (error) throw error;
   clearCurrentUserMemory();
-  await clearLiveTableCache();
+  await Promise.all([clearLiveTableCache(), clearLiveQueryCache()]);
 }
 
 export async function resetPasswordForEmail(email, redirectTo) {
