@@ -25,6 +25,10 @@ import {
   invalidateProviderSnapshotMemo,
   updateProviderSnapshotMemo
 } from "./provider-snapshot-cache.js";
+import {
+  LIVE_SNAPSHOT_REFRESH_RETRY_DELAYS_MS,
+  retryLiveSnapshotRefresh
+} from "./live-snapshot-retry.js";
 import { buildCustomerGroups } from "./customer-groups.js";
 import { customerSourceFromInvoices } from "./customer-source.js";
 import {
@@ -46,6 +50,7 @@ export const LIVE_SNAPSHOT_MISS = Symbol("live-snapshot-miss");
 
 const LIVE_BUILDERS = new Map();
 const LIVE_REFRESHES = new Map();
+const LIVE_REFRESH_PENDING = new Set();
 let snapshotUserId = "";
 
 if (typeof window !== "undefined") {
@@ -986,9 +991,21 @@ async function buildAndCacheSnapshot(snapshot, builder, userId, companyId, { fre
 
 function refreshLiveSnapshot(snapshot, builder, userId, companyId, cachedValue) {
   if (LIVE_REFRESHES.has(snapshot)) return LIVE_REFRESHES.get(snapshot);
-  const promise = buildAndCacheSnapshot(snapshot, builder, userId, companyId, { fresh: true })
+  LIVE_REFRESH_PENDING.delete(snapshot);
+  let promise;
+  promise = retryLiveSnapshotRefresh(
+    () => buildAndCacheSnapshot(snapshot, builder, userId, companyId, { fresh: true }),
+    {
+      shouldRetry: () => LIVE_REFRESHES.get(snapshot) === promise && userId === snapshotUserId,
+      onRetry: ({ attempt, delay, error }) => console.warn(
+        `[live-snapshot-cache] ${snapshot} refresh attempt ${attempt} failed; retrying in ${delay}ms`,
+        error
+      )
+    }
+  )
     .then(({ value, stored }) => {
       if (!stored || userId !== snapshotUserId) return value;
+      LIVE_REFRESH_PENDING.delete(snapshot);
       LIVE_BUILDERS.set(snapshot, Promise.resolve(value));
       updateProviderSnapshotMemo(snapshot, value);
       if (comparableSnapshot(value) !== comparableSnapshot(cachedValue) && typeof window !== "undefined") {
@@ -996,7 +1013,18 @@ function refreshLiveSnapshot(snapshot, builder, userId, companyId, cachedValue) 
       }
       return value;
     })
-    .catch((error) => console.warn(`[live-snapshot-cache] ${snapshot} refresh failed`, error))
+    .catch((error) => {
+      if (LIVE_REFRESHES.get(snapshot) !== promise || userId !== snapshotUserId) return undefined;
+      LIVE_REFRESH_PENDING.add(snapshot);
+      LIVE_BUILDERS.delete(snapshot);
+      invalidateProviderSnapshotMemo(snapshot);
+      const attempts = LIVE_SNAPSHOT_REFRESH_RETRY_DELAYS_MS.length + 1;
+      console.warn(
+        `[live-snapshot-cache] ${snapshot} refresh failed after ${attempts} attempts; pending retry`,
+        error
+      );
+      return undefined;
+    })
     .finally(() => {
       if (LIVE_REFRESHES.get(snapshot) === promise) LIVE_REFRESHES.delete(snapshot);
     });
@@ -1024,11 +1052,13 @@ export async function getLiveSnapshot(snapshot) {
     snapshotUserId = session.user.id;
     LIVE_BUILDERS.clear();
     LIVE_REFRESHES.clear();
+    LIVE_REFRESH_PENDING.clear();
     clearProviderSnapshotMemo();
   }
   // OCPP stays on its separately approved read-only snapshot line (docs/41); P0 never invents a Supabase source for it.
   const builder = builders[snapshot];
   if (!builder) return LIVE_SNAPSHOT_MISS;
+  if (LIVE_REFRESH_PENDING.has(snapshot)) LIVE_BUILDERS.delete(snapshot);
   if (!LIVE_BUILDERS.has(snapshot)) {
     const promise = loadLiveSnapshot(snapshot, builder, session.user.id).catch((error) => {
       if (LIVE_BUILDERS.get(snapshot) === promise) LIVE_BUILDERS.delete(snapshot);
@@ -1045,6 +1075,7 @@ export function invalidateLiveSnapshot(...snapshots) {
   targets.forEach((snapshot) => {
     LIVE_BUILDERS.delete(snapshot);
     LIVE_REFRESHES.delete(snapshot);
+    LIVE_REFRESH_PENDING.delete(snapshot);
   });
   void invalidateLiveSnapshotCache(targets)
     .catch((error) => console.warn("[live-snapshot-cache] invalidation failed", error));

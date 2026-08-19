@@ -605,6 +605,7 @@ async function performLiveExpenseWrite(operation, applyResult) {
     const result = await operation();
     if (!isCurrentExpenseMount(mountId, scope)) return;
     applyResult(result);
+    rerender();
     try {
       await refreshExpenseRows(mountId, scope);
     } catch (error) {

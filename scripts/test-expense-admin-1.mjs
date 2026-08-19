@@ -120,5 +120,9 @@ for (const helper of ["createLiveExpense", "updateLiveExpense", "approveLiveExpe
 }
 assert.match(expenseSource, /tables: EXPENSE_LIVE_TABLES/,
   "revert/unpay must ride the existing expense_reimbursements realtime pipeline, not a new one");
+const liveWriteStart = expenseSource.indexOf("async function performLiveExpenseWrite");
+const liveWriteEnd = expenseSource.indexOf("async function onExpenseClick", liveWriteStart);
+assert.match(expenseSource.slice(liveWriteStart, liveWriteEnd), /applyResult\(result\);\s*rerender\(\);\s*try \{\s*await refreshExpenseRows/,
+  "expense status badges must rerender from the optimistic result before the snapshot refresh finishes");
 
 console.log("expense-admin-1 contracts: PASS (withdraw approval, undo payment, admin snapshot employee join)");
