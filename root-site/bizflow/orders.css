@@ -119,6 +119,10 @@
   font: inherit;
 }
 
+[data-orders-search-results] {
+  display: contents;
+}
+
 .orders-shipping-filters {
   display: flex;
   max-width: 100%;

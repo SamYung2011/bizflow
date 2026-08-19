@@ -42,8 +42,8 @@ assert.equal((model.match(/task\.done !== true && task\.status !== "completed" &
   "the raw open-task predicate must have one source of truth");
 assert.match(model, /export function isOpenTask\(task\)/);
 assert.match(model, /calendarRelatedTasks[\s\S]*?\.filter\(\(task\) => isTaskRelated\(task, currentUser\)\)/);
-assert.match(tasks, /calendarRelatedTasks\(state\.tasks,[\s\S]*?renderTaskCalendar\(\{ tasks: calendarTasks/,
-  "calendar bars and day dialogs must consume the filtered calendar task list");
+assert.match(tasks, /const searchedTasks = state\.tasks\.filter[\s\S]*?calendarRelatedTasks\(searchedTasks,[\s\S]*?renderTaskCalendar\(\{ tasks: calendarTasks/,
+  "calendar bars and day dialogs must consume the search-filtered related task list");
 assert.match(tasks, /task\.parentId === null && isOpenTask\(task\)/,
   "the member rail total must reuse the shared open-task predicate");
 assert.doesNotMatch(calendar, /task\.status !== "completed"|task\.status !== "abandoned"/,

@@ -127,6 +127,10 @@
   font: inherit;
 }
 
+[data-customers-search-results] {
+  display: contents;
+}
+
 .customers-filter-anchor {
   position: relative;
   display: inline-flex;

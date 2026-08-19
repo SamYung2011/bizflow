@@ -12,6 +12,7 @@ import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { clearPhoneCopyNotice, copyPhoneNumber, phoneCopyLabel } from "../components/phone-copy.js";
 import { matchesSearchValues } from "../components/search-match.js";
+import { createDebouncedTask } from "../components/debounced-task.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
 import {
@@ -144,6 +145,7 @@ let activeScope = null;
 let activeNavigation = null;
 let ordersLiveRefresh = null;
 let northboundLiveRefresh = null;
+let ordersSearchRender = null;
 
 function isCurrentOrdersScope(scope = activeScope) {
   return Boolean(scope && scope === activeScope && scope.isCurrent());
@@ -317,7 +319,7 @@ function renderOrderSearch(helpers) {
   </label>`;
 }
 
-function renderOrderList(helpers) {
+function renderOrderResults(helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const e = escapeHtml;
   const tt = (key) => pageT(lang, key);
@@ -341,10 +343,16 @@ function renderOrderList(helpers) {
     previousLabel: tt("orders.prevPage"),
     nextLabel: tt("orders.nextPage")
   });
-  return `<div class="orders-list-panel" data-orders-list-panel>
-    <div class="orders-toolbar">${dateFilter.render(helpers)}${renderSourceFilter(helpers)}${renderOrderSearch(helpers)}</div>
+  return `<div data-orders-search-results>
     ${renderShippingFilters(helpers, view.counts)}
     ${renderManagementList({ content: listHtml, pager: pagerHtml, paged: shouldPaginate })}
+  </div>`;
+}
+
+function renderOrderList(helpers) {
+  return `<div class="orders-list-panel" data-orders-list-panel>
+    <div class="orders-toolbar">${dateFilter.render(helpers)}${renderSourceFilter(helpers)}${renderOrderSearch(helpers)}</div>
+    ${renderOrderResults(helpers)}
   </div>`;
 }
 
@@ -389,6 +397,17 @@ function rerenderOrdersPage() {
       void ordersLiveRefresh?.flush();
       void northboundLiveRefresh?.flush();
     });
+  }
+}
+
+function rerenderOrderSearchResults() {
+  const results = document.querySelector("[data-orders-search-results]");
+  if (!results || !currentHelpers || state.tab !== "list") return;
+  results.outerHTML = renderOrderResults(currentHelpers);
+  const page = document.querySelector("[data-orders-page]");
+  if (page) {
+    page.dataset.ordersSearchValue = state.search;
+    page.dataset.currentPage = String(state.page);
   }
 }
 
@@ -512,12 +531,7 @@ function onOrdersInput(event) {
   if (!search) return;
   state.search = search.value;
   state.page = 1;
-  rerenderOrdersPage();
-  const next = document.querySelector("[data-orders-search]");
-  if (next) {
-    next.focus();
-    next.setSelectionRange(next.value.length, next.value.length);
-  }
+  ordersSearchRender?.schedule();
 }
 
 function onOrdersKeydown(event) {
@@ -617,6 +631,8 @@ export async function mountPage({ scope, signal, historyState = null, navigation
     },
     activate() {
       if (state.tab === "list") markRead("orders", unreadWatermarks.orders);
+      ordersSearchRender = createDebouncedTask(rerenderOrderSearchResults);
+      scope.onCleanup(() => ordersSearchRender?.cancel());
       scope.listen(document, "click", onOrdersClick);
       scope.listen(document, "contextmenu", onOrdersContextMenu);
       scope.listen(document, "input", onOrdersInput);
@@ -669,6 +685,8 @@ export async function mountPage({ scope, signal, historyState = null, navigation
       disposeNorthboundState();
       disposeChargerLeadState();
       disposeRevenueState();
+      ordersSearchRender?.cancel();
+      ordersSearchRender = null;
       data = null;
       unreadWatermarks = null;
       unread = null;

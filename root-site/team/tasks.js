@@ -22,6 +22,8 @@ import { closeTaskFeedbackMention, createTaskFeedbackDraft, removeTaskFeedbackMe
 import { pastedTaskFeedbackImages, revokeTaskFeedbackAttachmentDrafts, taskFeedbackAttachmentDraft } from "./tasks-clipboard.js";
 import { buildTaskSubtaskEcho, createTaskSubmitSubtaskDraft, createTaskSubmitSubtasks, normalizeTaskSubmitSubtasks } from "./tasks-submit-subtasks.js";
 import { callTeamTaskParser } from "../data/live-ai-parse.js";
+import { matchesSearchValues } from "../components/search-match.js";
+import { createDebouncedTask } from "../components/debounced-task.js";
 
 let data = null;
 let currentUser = null;
@@ -37,6 +39,7 @@ let activeMountId = 0;
 let taskLiveRefresh = null;
 let taskBoardReadTracker = null;
 let taskBoardColumnReadObserver = null;
+let taskSearchRender = null;
 const taskDueDatePanel = createDateRangePanel();
 const taskStartDatePanel = createDateRangePanel();
 
@@ -135,7 +138,8 @@ function createTaskState(nextData, historyState = null) {
     status: ["inProgress", "completed", "abandoned", "overdue"].includes(restored.status) ? restored.status : nextData.filters?.status ?? "inProgress",
     priority: ["all", "high", "medium", "low"].includes(restored.priority) ? restored.priority : nextData.filters?.priority ?? "all",
     view: ["board", "calendar"].includes(restored.view) ? restored.view : ["board", "calendar"].includes(storedViewMode) ? storedViewMode : nextData.filters?.view ?? "board",
-    member: typeof restored.member === "string" ? restored.member : initialView.member
+    member: typeof restored.member === "string" ? restored.member : initialView.member,
+    search: typeof restored.search === "string" ? restored.search : ""
   };
   return { state: nextState, filterState: nextFilterState };
 }
@@ -267,6 +271,41 @@ function renderMember(member, tasks, helpers) {
 // shell 每次重渲染都会调本函数(带最新 lang);捕获 helpers 供筛选联动就地重渲用
 let currentHelpers = null;
 
+export function taskMatchesSearch(task, query) {
+  return matchesSearchValues([
+    task.title,
+    task.note,
+    task.creator,
+    task.due,
+    task.visibility?.department,
+    (task.assignees ?? []).map((assignee) => assignee.name),
+    (task.feedback ?? []).map((feedback) => [feedback.author, feedback.body]),
+    (task.subtasks ?? []).map((subtask) => [subtask.title, subtask.note])
+  ], query);
+}
+
+function taskSearchResults(helpers) {
+  if (state.detailOpen) return renderTaskDetail({ state, helpers });
+  const searchedTasks = state.tasks.filter((task) => taskMatchesSearch(task, filterState.search));
+  if (filterState.view === "calendar") {
+    const calendarTasks = calendarRelatedTasks(searchedTasks, { onlyMine: state.onlyMine, currentUser: state.currentUser });
+    return renderTaskCalendar({ tasks: calendarTasks, state, helpers });
+  }
+  if (state.mode === "overview") {
+    const scopedTasks = state.onlyMine
+      ? searchedTasks.filter((task) => task.creatorId === state.currentUser.id || task.creator.toLocaleLowerCase() === state.currentUser.name.toLocaleLowerCase())
+      : searchedTasks;
+    return renderTaskOverview({
+      members: state.members,
+      tasks: scopedTasks,
+      expanded: state.overviewExpanded,
+      completedExpanded: state.overviewCompletedExpanded,
+      helpers
+    });
+  }
+  return `<div class="team-kanban-grid">${renderTaskBoardGrid({ state: { ...state, tasks: searchedTasks }, filterState, helpers })}</div>`;
+}
+
 export function renderTaskManagement(helpers) {
   currentHelpers = helpers;
   const { icon, escapeHtml, lang } = helpers;
@@ -277,26 +316,12 @@ export function renderTaskManagement(helpers) {
     { title: tt("tasks.stat.inProgress"), value: state.summary.inProgress, tone: "yellow" }
   ];
 
-  const scopedTasks = state.onlyMine
+  const memberTasks = state.onlyMine
     ? state.tasks.filter((task) => task.creatorId === state.currentUser.id || task.creator.toLocaleLowerCase() === state.currentUser.name.toLocaleLowerCase())
     : state.tasks;
-  const calendarTasks = calendarRelatedTasks(state.tasks, { onlyMine: state.onlyMine, currentUser: state.currentUser });
   const calendarView = filterState.view === "calendar" && !state.detailOpen;
   // Figma member-rail Add uses the generic add-surface component but has no authored flow; live P0 keeps it disabled.
-  const content = state.detailOpen
-    ? renderTaskDetail({ state, helpers })
-    : calendarView
-      ? renderTaskCalendar({ tasks: calendarTasks, state, helpers })
-      : state.mode === "overview"
-        ? renderTaskOverview({
-          members: state.members,
-          tasks: scopedTasks,
-          expanded: state.overviewExpanded,
-          completedExpanded: state.overviewCompletedExpanded,
-          helpers
-        })
-        : `<div class="team-kanban-grid">${renderTaskBoardGrid({ state, filterState, helpers })}</div>`;
-  return `<div class="team-task-page${state.detailOpen ? " team-task-page--detail" : ""}" data-task-view="${escapeHtml(filterState.view)}" data-task-mode="${escapeHtml(state.mode)}" data-only-mine="${state.onlyMine}">
+  return `<div class="team-task-page${state.detailOpen ? " team-task-page--detail" : ""}" data-task-view="${escapeHtml(filterState.view)}" data-task-mode="${escapeHtml(state.mode)}" data-only-mine="${state.onlyMine}" data-task-search-value="${escapeHtml(filterState.search)}">
     <h1 class="team-task-title" title="${escapeHtml(tt("tasks.title"))}">${escapeHtml(tt("tasks.title"))}</h1>
     ${state.writeError ? `<p class="team-task-write-error" role="alert">${escapeHtml(tt(state.writeError, state.writeErrorValues))}</p>` : ""}
     ${state.writeNotice ? `<p class="team-task-write-notice" role="status" aria-live="polite">${escapeHtml(tt(state.writeNotice))}</p>` : ""}
@@ -304,11 +329,11 @@ export function renderTaskManagement(helpers) {
     ${state.detailOpen ? "" : renderTaskToolbar({ state, filterState, members: state.members, featureAiBatch: data.featureAiBatch, helpers })}
     <section class="team-board${calendarView ? " team-board--calendar" : ""}">
       ${calendarView ? "" : `<aside class="team-member-rail">
-        <div class="team-member-list">${state.members.map((member) => renderMember(member, scopedTasks, helpers)).join("")}</div>
+        <div class="team-member-list">${state.members.map((member) => renderMember(member, memberTasks, helpers)).join("")}</div>
         ${state.permissions.canManageEmployees ? `<button type="button" class="team-member-add" data-task-members-manage aria-label="${escapeHtml(tt("tasks.members.manage"))}" title="${escapeHtml(tt("tasks.members.manage"))}">${icon("icon-add-surface-add")}</button>` : ""}
       </aside>`}
-      <main class="team-kanban${state.detailOpen ? " team-kanban--detail" : ""}">
-        ${content}
+      <main class="team-kanban${state.detailOpen ? " team-kanban--detail" : ""}" data-task-search-results>
+        ${taskSearchResults(helpers)}
       </main>
     </section>
     ${renderTaskSubmitDialog({ state, data: { ...data, members: state.members }, helpers })}
@@ -365,6 +390,14 @@ function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, foc
   }
   activeScope?.animationFrame(observeTaskBoardUnreadColumns);
   if (taskLiveRefresh?.pending) queueMicrotask(() => void taskLiveRefresh.flush());
+}
+
+function rerenderTaskSearchResults() {
+  const results = document.querySelector("[data-task-search-results]");
+  if (!results || !currentHelpers || state.detailOpen) return;
+  results.innerHTML = taskSearchResults(currentHelpers);
+  document.querySelector(".team-task-page")?.setAttribute("data-task-search-value", filterState.search);
+  activeScope?.animationFrame(observeTaskBoardUnreadColumns);
 }
 
 function clearTaskBoardColumnObservers() {
@@ -2178,6 +2211,12 @@ function syncTaskSubmitSegment(control) {
 }
 
 function onTaskInput(event) {
+  const search = event.target.closest("[data-task-search]");
+  if (search && !state.detailOpen) {
+    filterState.search = search.value;
+    taskSearchRender?.schedule();
+    return;
+  }
   const aiText = event.target.closest("[data-task-ai-text]");
   if (aiText) {
     state.ai.text = aiText.value;
@@ -2469,6 +2508,8 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
     },
     activate() {
       markRead("tasks", unreadWatermarks.tasks);
+      taskSearchRender = createDebouncedTask(rerenderTaskSearchResults);
+      scope.onCleanup(() => taskSearchRender?.cancel());
       scope.listen(document, "mousedown", onTaskMousedown);
       scope.listen(document, "click", onTaskClick);
       scope.listen(document, "keydown", onTaskKeydown);
@@ -2554,7 +2595,8 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
         status: filterState.status,
         priority: filterState.priority,
         view: filterState.view,
-        member: filterState.member
+        member: filterState.member,
+        search: filterState.search
       };
     },
     dispose() {
@@ -2571,6 +2613,8 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       taskMobileViewport = null;
       if (activeScope === scope) activeScope = null;
       taskLiveRefresh = null;
+      taskSearchRender?.cancel();
+      taskSearchRender = null;
       taskBoardReadTracker = null;
       clearTaskBoardColumnObservers();
       taskBoardColumnReadObserver = null;

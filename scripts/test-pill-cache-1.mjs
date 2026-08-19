@@ -82,7 +82,7 @@ assert.deepEqual(evictions, [["customers"], ["invoices"]],
   "each completed table refill must immediately evict its stale in-memory table promise");
 clock.run();
 await batcher.flush();
-assert.equal(invalidations.length, 1, "one stale-table burst must invalidate dependent snapshots once");
+assert.equal(invalidations.length, 1, "one stale-table burst must mark dependent snapshots once");
 assert.equal(updates.length, 1, "one stale-table burst must notify mounted pages once");
 assert.deepEqual(updates[0].tables, ["customers", "invoices"]);
 for (const snapshot of ["orders.json", "customers.json", "pending-deduction.json", "warranty.json", "home.json"]) {
@@ -99,8 +99,8 @@ assert.match(staleBranch, /writeLiveTableCache\([\s\S]*?if \(stored && typeof wi
 assert.equal((authSource.match(/new CustomEvent\(LIVE_TABLE_SWR_REFRESHED_EVENT/g) ?? []).length, 1,
   "fresh and cold table reads must not emit the stale-refill event");
 assert.equal(LIVE_TABLE_SWR_BATCH_DELAY_MS, 250);
-assert.match(utilsSource, /invalidateLiveSnapshotCache\(snapshots\)[\s\S]*detail: \{ tables, snapshots, source: "table-swr" \}/,
-  "the batcher must invalidate snapshots before using the existing updated-event chain");
+assert.match(utilsSource, /markLiveSnapshotCacheStale\(snapshots\)[\s\S]*detail: \{ tables, snapshots, source: "table-swr" \}/,
+  "the batcher must mark snapshots stale before using the existing updated-event chain");
 assert.match(tableCacheSource, /export const LIVE_TABLE_CACHE_TTL_MS = 10 \* 60_000;/,
   "PILL-cache-1 must not change the approved ten-minute table TTL");
 

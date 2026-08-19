@@ -11,6 +11,41 @@
   gap: var(--space-10);
 }
 
+.team-task-search {
+  display: flex;
+  width: min(260px, 100%);
+  height: 39px;
+  min-width: 180px;
+  flex: 0 1 260px;
+  align-items: center;
+  gap: var(--space-10);
+  padding: 0 var(--space-10);
+  border: 1px solid var(--gray-10);
+  border-radius: var(--radius-10);
+  color: var(--gray-40);
+  background: var(--white);
+}
+
+.team-task-search:focus-within {
+  border-color: var(--blue);
+}
+
+.team-task-search .icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+.team-task-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: var(--gray-80);
+  background: transparent;
+  font: inherit;
+}
+
 .team-only-mine {
   display: inline-flex;
   flex: none;
@@ -1151,6 +1186,13 @@
   .team-domain-toolbar .team-kanban-filters {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .team-domain-toolbar .team-task-search {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    grid-column: 1 / -1;
   }
 
   .team-domain-toolbar .team-only-mine {

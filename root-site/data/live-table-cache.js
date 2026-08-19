@@ -225,18 +225,6 @@ function removeIndexedValue(key) {
   });
 }
 
-function removeIndexedTables(tables) {
-  return runIndexedDbTransaction("readwrite", (store) => {
-    const request = store.openCursor();
-    request.onsuccess = () => {
-      const cursor = request.result;
-      if (!cursor) return;
-      if (tables.has(String(cursor.value?.table || ""))) cursor.delete();
-      cursor.continue();
-    };
-  });
-}
-
 function removeIndexedAuthValues() {
   return runIndexedDbTransaction("readwrite", (store) => {
     const request = store.openCursor();
@@ -299,11 +287,22 @@ function parseSnapshotPayload(value, expectedUserId, expectedSnapshot, expectedC
   return payload;
 }
 
-function payloadResult(payload) {
+function payloadResult(payload, versionStale = false) {
   return {
     rows: payload.rows,
-    stale: Date.now() - payload.cachedAt >= LIVE_TABLE_CACHE_TTL_MS
+    stale: versionStale || Date.now() - payload.cachedAt >= LIVE_TABLE_CACHE_TTL_MS
   };
+}
+
+function snapshotVersionState(payloadVersion, currentVersion) {
+  if (payloadVersion === undefined || payloadVersion === currentVersion) return "current";
+  const payloadParts = String(payloadVersion).split(":");
+  const currentParts = String(currentVersion).split(":");
+  if (payloadParts.length === 3 && currentParts.length === 3 &&
+    payloadParts[0] === currentParts[0] && payloadParts[1] === currentParts[1]) {
+    return "stale";
+  }
+  return "incompatible";
 }
 
 function versionChangedInThisPage(table) {
@@ -392,27 +391,21 @@ export async function readLiveTableCache({ userId, table, orderCol, ascending, s
   if (indexed.value) {
     try {
       const payload = parsePayload(indexed.value);
-      if (versionChangedInThisPage(table) && payload.version !== undefined && payload.version !== currentVersion) {
-        await removeIndexedValue(key);
-        return null;
-      }
-      return payloadResult(payload);
+      const versionStale = versionChangedInThisPage(table) && payload.version !== undefined && payload.version !== currentVersion;
+      return payloadResult(payload, versionStale);
     } catch {
       await removeIndexedValue(key);
     }
   }
   const fallback = fallbackPayload(key);
   if (!fallback) return null;
-  if (versionChangedInThisPage(table) && fallback.version !== undefined && fallback.version !== currentVersion) {
-    removeFallbackValue(key);
-    return null;
-  }
+  const versionStale = versionChangedInThisPage(table) && fallback.version !== undefined && fallback.version !== currentVersion;
   if (indexed.available) {
     const migrated = { ...fallback, key, userId: normalizedUserId, table: String(table || "") };
     const migration = await writeIndexedValue(migrated);
     if (migration.available) removeFallbackValue(key);
   }
-  return payloadResult(fallback);
+  return payloadResult(fallback, versionStale);
 }
 
 export function liveTableCacheVersion(table) {
@@ -438,7 +431,10 @@ export async function readLiveSnapshotCache({ userId, snapshot, companyId = "" }
   const key = snapshotCacheKey(normalizedUserId, normalizedSnapshot, normalizedCompanyId);
   const currentVersion = liveSnapshotCacheVersion(normalizedSnapshot);
   const usePayload = async (payload, remove) => {
-    if (snapshotVersionChangedInThisPage(normalizedSnapshot) && payload.version !== undefined && payload.version !== currentVersion) {
+    const versionState = snapshotVersionChangedInThisPage(normalizedSnapshot)
+      ? snapshotVersionState(payload.version, currentVersion)
+      : "current";
+    if (versionState === "incompatible") {
       await remove();
       return null;
     }
@@ -447,7 +443,7 @@ export async function readLiveSnapshotCache({ userId, snapshot, companyId = "" }
       value: payload.value,
       // Age never turns a usable snapshot into a blank screen. Entries beyond the
       // retention window remain stale and are replaced after a successful SWR refresh.
-      stale: age >= LIVE_SNAPSHOT_CACHE_TTL_MS || age >= LIVE_SNAPSHOT_CACHE_MAX_AGE_MS,
+      stale: versionState === "stale" || age >= LIVE_SNAPSHOT_CACHE_TTL_MS || age >= LIVE_SNAPSHOT_CACHE_MAX_AGE_MS,
       cachedAt: payload.cachedAt
     };
   };
@@ -527,6 +523,15 @@ export async function invalidateLiveSnapshotCache(...snapshots) {
     if (targets.has(decodeURIComponent(snapshot))) removeFallbackValue(key);
   });
   await removeIndexedSnapshots(targets);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(LIVE_SNAPSHOT_INVALIDATED_EVENT, { detail: { snapshots: [...targets] } }));
+  }
+}
+
+export function markLiveSnapshotCacheStale(...snapshots) {
+  const targets = new Set(snapshots.flat().map((snapshot) => String(snapshot || "")).filter(Boolean));
+  if (!targets.size) return;
+  targets.forEach((snapshot) => snapshotVersions.set(snapshot, (snapshotVersions.get(snapshot) || 0) + 1));
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(LIVE_SNAPSHOT_INVALIDATED_EVENT, { detail: { snapshots: [...targets] } }));
   }
@@ -662,16 +667,8 @@ export async function invalidateLiveTableCache(...tables) {
   const targets = new Set(tables.flat().map((table) => String(table || "")).filter(Boolean));
   if (!targets.size) return;
   targets.forEach((table) => tableVersions.set(table, (tableVersions.get(table) || 0) + 1));
-  fallbackKeys().forEach((key) => {
-    if (!key.startsWith(CACHE_ROWS_PREFIX)) return;
-    const [, table = ""] = key.slice(CACHE_ROWS_PREFIX.length).split(":");
-    if (targets.has(decodeURIComponent(table))) removeFallbackValue(key);
-  });
   const snapshots = snapshotsForTables(targets);
-  await Promise.all([
-    removeIndexedTables(targets),
-    snapshots.size ? invalidateLiveSnapshotCache([...snapshots]) : Promise.resolve()
-  ]);
+  if (snapshots.size) markLiveSnapshotCacheStale([...snapshots]);
 }
 
 export function clearLiveTableCache() {

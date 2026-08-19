@@ -2,8 +2,8 @@ import { fetchAllTable, getSession, TRANSIENT_AUTH_RESET_EVENT } from "./auth.js
 import {
   activateLiveTableCacheUser,
   invalidateLiveAuthCache,
-  invalidateLiveSnapshotCache,
-  invalidateLiveTableCache
+  invalidateLiveTableCache,
+  markLiveSnapshotCacheStale
 } from "./live-table-cache.js";
 import {
   LIVE_SNAPSHOT_UPDATED_EVENT,
@@ -178,7 +178,7 @@ export function createLiveTableSWRBatcher({
   cancelTimeout = clearTimeout,
   evictTables = evictLiveTablePromises,
   snapshotsFor = snapshotsForTables,
-  invalidateSnapshots = (snapshots) => invalidateLiveSnapshotCache(snapshots),
+  invalidateSnapshots = (snapshots) => markLiveSnapshotCacheStale(snapshots),
   dispatchUpdated = (tables, snapshots) => {
     if (typeof window === "undefined") return;
     window.dispatchEvent(new CustomEvent(LIVE_SNAPSHOT_UPDATED_EVENT, {

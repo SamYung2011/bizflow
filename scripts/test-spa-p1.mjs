@@ -932,6 +932,60 @@ async function verifyNavigationTimeoutSeparation() {
   }
 }
 
+async function verifyAssetFrameFirst() {
+  const browser = fakeBrowser("/asset-slow.html");
+  const frames = [];
+  let releaseStyles;
+  let releaseModule;
+  let markStylesStarted;
+  let markModuleStarted;
+  const stylesGate = new Promise((resolve) => { releaseStyles = resolve; });
+  const moduleGate = new Promise((resolve) => { releaseModule = resolve; });
+  const stylesStarted = new Promise((resolve) => { markStylesStarted = resolve; });
+  const moduleStarted = new Promise((resolve) => { markModuleStarted = resolve; });
+  const router = createAppRouter({
+    shell: {
+      setLoadingPage(frame) { frames.push(frame.title); },
+      setPage() {}
+    },
+    manifest: {
+      "/asset-slow.html": {
+        path: "/asset-slow.html",
+        section: "bizflow",
+        styles: ["asset-slow.css"],
+        frame: testFrame("asset-slow"),
+        async load() {
+          assert.deepEqual(frames, ["asset-slow"], "module download must start after the target frame is visible");
+          markModuleStarted();
+          await moduleGate;
+          return { async mountPage() { return { page: { data: {}, render: () => "asset-slow" } }; } };
+        }
+      }
+    },
+    allowlist: ["/asset-slow.html"],
+    windowRef: browser.windowRef,
+    documentRef: browser.documentRef,
+    styleManager: {
+      adopt() {},
+      async prepare() {
+        assert.deepEqual(frames, ["asset-slow"], "stylesheet download must start after the target frame is visible");
+        markStylesStarted();
+        await stylesGate;
+        return { commit() {}, rollback() {}, ensureActive() {} };
+      },
+      dispose() {}
+    }
+  });
+  const startedAt = Date.now();
+  const starting = router.start();
+  await Promise.all([stylesStarted, moduleStarted]);
+  assert.ok(Date.now() - startedAt < 300, "the loading frame must appear within 300ms before delayed assets resolve");
+  releaseStyles();
+  releaseModule();
+  assert.equal(await starting, true);
+  await router.dispose();
+}
+
 async function verifyShellAdapter() {
   const source = await readFile(path.join(rootDir, "root-site/shell/shell.js"), "utf8");
   assert.match(source, /export function setPage\(/, "shell must expose setPage");
@@ -971,6 +1025,7 @@ await verifyFrameHistoryNavigation();
 await verifySmartBackNavigation();
 await verifyFrameSupersedingNavigation();
 await verifyNavigationTimeoutSeparation();
+await verifyAssetFrameFirst();
 await verifyRouteGenerationRace();
 await verifyDataRaceGuards();
 await verifyWriteInvalidateRemount();

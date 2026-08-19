@@ -262,13 +262,12 @@ export function createAppRouter({
     return new URL("/bizflow/home.html", url);
   }
 
-  async function commitFrame({ route, url, styles, index, signal }) {
+  async function commitLoadingFrame({ route, url, index, signal }) {
     await currentController?.dispose?.();
     currentController = null;
     if (signal?.aborted) throw abortError();
     const update = () => {
       if (signal?.aborted) return;
-      styles.commit();
       shell.setLoadingPage(route.frame);
     };
     await commitViewUpdate(documentRef, update);
@@ -360,12 +359,6 @@ export function createAppRouter({
     let styles = null;
     let controller = null;
     try {
-      const [preparedStyles, module] = await withTimeout(Promise.all([
-        styleManager.prepare(route.styles, { signal: abortController.signal }),
-        route.load()
-      ]), navigationTimeoutMs, abortController.signal);
-      styles = preparedStyles;
-
       let targetIndex = historyDetails(historyState)?.index;
       if (!fromPopstate) {
         const previous = replace
@@ -379,13 +372,18 @@ export function createAppRouter({
         else windowRef.history.pushState(nextState, "", url.href);
         historyState = nextState;
       }
-      await commitFrame({
+      await commitLoadingFrame({
         route,
         url,
-        styles,
         index: targetIndex ?? currentIndex,
         signal: abortController.signal
       });
+      const [preparedStyles, module] = await withTimeout(Promise.all([
+        styleManager.prepare(route.styles, { signal: abortController.signal }),
+        route.load()
+      ]), navigationTimeoutMs, abortController.signal);
+      styles = preparedStyles;
+      styles.commit();
       controller = await waitForPageMount(mountPageModule(module, {
         url,
         route,

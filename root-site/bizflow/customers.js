@@ -18,6 +18,7 @@ import { renderNewCustomerFields } from "../components/new-customer-fields.js";
 import { safeSetSelectionRange, suggestEmail } from "../components/email-suggest.js";
 import { copyPhoneNumber } from "../components/phone-copy.js";
 import { matchesSearchValues } from "../components/search-match.js";
+import { createDebouncedTask } from "../components/debounced-task.js";
 import { createLiveOrderCustomer } from "../data/live-orders-writes.js";
 import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
@@ -219,6 +220,7 @@ let dateFilter = null;
 let resizeTimer = 0;
 let activeScope = null;
 let customersLiveRefresh = null;
+let customersSearchRender = null;
 
 const CUSTOMERS_LIVE_SNAPSHOTS = ["customers.json"];
 const CUSTOMERS_LIVE_TABLES = ["customers", "invoices", "customer_devices"];
@@ -395,7 +397,7 @@ function renderAddCustomerModal(helpers) {
   </div>`;
 }
 
-function renderCustomerList(helpers) {
+function renderCustomerSearchResults(helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const tt = (key) => pageT(lang, key);
   const filtered = filteredCustomers();
@@ -416,9 +418,17 @@ function renderCustomerList(helpers) {
     nextLabel: tt("customers.pager.next")
   });
 
-  return `<p class="customers-list-summary" data-customers-visible-count="${filtered.length}">${escapeHtml(pageTf(lang, "customers.count", { count: filtered.length }))}</p>
+  return {
+    summary: `<p class="customers-list-summary" data-customers-list-summary data-customers-visible-count="${filtered.length}">${escapeHtml(pageTf(lang, "customers.count", { count: filtered.length }))}</p>`,
+    list: `<div data-customers-search-results>${renderManagementList({ content: listHtml, pager: pagerHtml, paged: filtered.length > pageSize })}</div>`
+  };
+}
+
+function renderCustomerList(helpers) {
+  const results = renderCustomerSearchResults(helpers);
+  return `${results.summary}
     ${renderToolbar(helpers)}
-    ${renderManagementList({ content: listHtml, pager: pagerHtml, paged: filtered.length > pageSize })}
+    ${results.list}
     ${renderAddCustomerModal(helpers)}`;
 }
 
@@ -465,6 +475,20 @@ function rerenderCustomersPage({ focusModal = false, restoreAddFocus = false, pr
   restoreCustomersTextFocus(textFocus);
   if (focusModal) document.querySelector('[data-customers-modal-overlay] [data-new-customer-field="name"]')?.focus();
   if (restoreAddFocus) document.querySelector("[data-customers-modal-open]")?.focus();
+}
+
+function rerenderCustomerSearchResults() {
+  const results = document.querySelector("[data-customers-search-results]");
+  const summary = document.querySelector("[data-customers-list-summary]");
+  if (!results || !summary || !currentHelpers || state.tab !== "list") return;
+  const rendered = renderCustomerSearchResults(currentHelpers);
+  summary.outerHTML = rendered.summary;
+  results.outerHTML = rendered.list;
+  const page = document.querySelector("[data-customers-page]");
+  if (page) {
+    page.dataset.customersSearchValue = state.search;
+    page.dataset.currentPage = String(state.page);
+  }
 }
 
 function setCustomerNotice(message, type = "error") {
@@ -779,12 +803,7 @@ function onCustomersInput(event) {
   if (customerSearch && state.tab === "list") {
     state.search = customerSearch.value;
     state.page = 1;
-    rerenderCustomersPage();
-    const nextSearch = document.querySelector("[data-customers-search]");
-    if (nextSearch) {
-      nextSearch.focus();
-      nextSearch.setSelectionRange(nextSearch.value.length, nextSearch.value.length);
-    }
+    customersSearchRender?.schedule();
     return;
   }
   const search = event.target.closest("[data-warranty-search]");
@@ -885,6 +904,8 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       title: "Honnmono · Customers"
     },
     activate() {
+      customersSearchRender = createDebouncedTask(rerenderCustomerSearchResults);
+      scope.onCleanup(() => customersSearchRender?.cancel());
       scope.listen(document, "click", onCustomersClick);
       scope.listen(document, "contextmenu", onCustomersContextMenu);
       scope.listen(document, "input", onCustomersInput);
@@ -942,6 +963,8 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       customerSorter = null;
       dateFilter = null;
       customersLiveRefresh = null;
+      customersSearchRender?.cancel();
+      customersSearchRender = null;
       if (activeScope === scope) activeScope = null;
     }
   };
