@@ -2398,7 +2398,7 @@ function hasTaskUnsavedChanges() {
 function hasTaskRealtimeRefreshBlock() {
   if (state.writeBusy || state.submitOpen || state.aiOpen || state.feedbackEditingId || hasTaskUnsavedChanges()) return true;
   const active = document.activeElement;
-  return Boolean(active?.closest?.("[data-task-feedback-form], [data-task-feedback-edit-form], [data-task-subtask-form], [data-task-subtask-edit-form], [data-task-submit-form], [data-task-ai-form]"));
+  return Boolean(active?.closest?.("[data-task-search], [data-task-feedback-form], [data-task-feedback-edit-form], [data-task-subtask-form], [data-task-subtask-edit-form], [data-task-submit-form], [data-task-ai-form]"));
 }
 
 function currentTaskViewState() {
@@ -2415,7 +2415,8 @@ function currentTaskViewState() {
     status: filterState.status,
     priority: filterState.priority,
     view: filterState.view,
-    member: filterState.member
+    member: filterState.member,
+    search: filterState.search
   };
 }
 

@@ -48,9 +48,12 @@ await clearLiveTableCache();
 assert.equal(await readLiveTableCache(tableArgs), null, "logout-style cache clearing must still remove persisted rows");
 
 const source = await readFile(new URL("../root-site/data/live-table-cache.js", import.meta.url), "utf8");
-const tableInvalidation = source.slice(source.indexOf("export async function invalidateLiveTableCache"), source.indexOf("export function clearLiveTableCache"));
+const tableInvalidation = source.slice(
+  source.indexOf("export async function invalidateLiveTableCache"),
+  source.indexOf("export async function invalidateLiveTableCacheAfterWrite")
+);
 assert.doesNotMatch(tableInvalidation, /removeIndexed|removeFallbackValue/,
-  "ordinary realtime/write invalidation must never delete table or snapshot payloads");
+  "ordinary realtime invalidation must never delete table or snapshot payloads");
 assert.match(tableInvalidation, /markLiveSnapshotCacheStale/);
 
 console.log("Live cache stale contracts: PASS (serve stale, background generation, hard clear and race guard)");

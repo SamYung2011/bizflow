@@ -67,6 +67,12 @@ assert.match(taskInput, /taskSearchRender\?\.schedule\(\)/);
 assert.doesNotMatch(taskInput, /rerenderTaskPage|outerHTML/,
   "task typing must keep the toolbar and search input mounted");
 assert.match(tasks, /function rerenderTaskSearchResults[\s\S]*results\.innerHTML = taskSearchResults/);
+const realtimeBlock = tasks.slice(tasks.indexOf("function hasTaskRealtimeRefreshBlock"), tasks.indexOf("function currentTaskViewState"));
+assert.match(realtimeBlock, /\[data-task-search\]/,
+  "realtime refresh must defer while the task search input is active");
+const realtimeViewState = tasks.slice(tasks.indexOf("function currentTaskViewState"), tasks.indexOf("function applyRealtimeTaskData"));
+assert.match(realtimeViewState, /search: filterState\.search/,
+  "realtime task data must restore the live search term instead of clearing it");
 assert.match(taskBoard, /data-task-search/);
 for (const language of ["zh", "en", "fr"]) {
   assert.match(taskI18n, new RegExp(`${language}: \\{[\\s\\S]*?"tasks.search":`), `${language} task search copy must exist`);

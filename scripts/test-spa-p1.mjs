@@ -387,6 +387,7 @@ function fakeBrowser(pathname = "/a.html") {
   const windowTarget = eventTarget();
   const documentTarget = eventTarget();
   const assigned = [];
+  const replaced = [];
   const location = {
     href: `https://example.test${pathname}`,
     origin: "https://example.test",
@@ -396,6 +397,7 @@ function fakeBrowser(pathname = "/a.html") {
     },
     replace(value) {
       assigned.push(String(value));
+      replaced.push(String(value));
       this.href = new URL(value, this.href).href;
     }
   };
@@ -433,7 +435,7 @@ function fakeBrowser(pathname = "/a.html") {
     setTimeout
   };
   const documentRef = { ...documentTarget };
-  return { windowRef, documentRef, assigned, history };
+  return { windowRef, documentRef, assigned, replaced, history };
 }
 
 async function verifyDirectoryRouteNormalization() {
@@ -624,6 +626,8 @@ async function verifyRouter() {
   }
   assert.equal(warnings.length, 1, "route failure must emit one observable warning");
   assert.equal(browser.assigned.at(-1), "https://example.test/fail.html?tpSpa=0", "route failure must hard navigate to one-shot MPA mode");
+  assert.equal(browser.replaced.at(-1), "https://example.test/fail.html?tpSpa=0",
+    "route failure must replace its speculative target history entry");
   warnings.length = 0;
   console.warn = (...values) => warnings.push(values);
   try {
@@ -635,6 +639,7 @@ async function verifyRouter() {
   assert.equal(pages.at(-1), "b", "failed data mount must not commit a page controller");
   assert.equal(warnings.length, 1, "failed data mount must remain observable");
   assert.equal(browser.assigned.at(-1), "https://example.test/mount-fail.html?tpSpa=0");
+  assert.equal(browser.replaced.at(-1), "https://example.test/mount-fail.html?tpSpa=0");
   const frameCountBeforeDeniedRoute = frames.length;
   assert.equal(await router.navigate("/admin.html"), false);
   assert.equal(frames.length, frameCountBeforeDeniedRoute, "denied OCPP-style routes must not flash a loading frame");
@@ -931,6 +936,8 @@ async function verifyNavigationTimeoutSeparation() {
     assert.equal(await assetRouter.start(), false);
     assert.equal(assetWarnings.filter(([message]) => String(message).includes("navigation failed")).length, 1);
     assert.equal(assetBrowser.assigned.at(-1), "https://example.test/asset-timeout.html?tpSpa=0");
+    assert.equal(assetBrowser.replaced.at(-1), "https://example.test/asset-timeout.html?tpSpa=0",
+      "asset timeout fallback must replace the failed frame-first history entry");
   } finally {
     console.warn = originalWarn;
     await assetRouter.dispose();

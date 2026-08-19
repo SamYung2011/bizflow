@@ -225,6 +225,18 @@ function removeIndexedValue(key) {
   });
 }
 
+function removeIndexedTables(tables) {
+  return runIndexedDbTransaction("readwrite", (store) => {
+    const request = store.openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      if (tables.has(String(cursor.value?.table || ""))) cursor.delete();
+      cursor.continue();
+    };
+  });
+}
+
 function removeIndexedAuthValues() {
   return runIndexedDbTransaction("readwrite", (store) => {
     const request = store.openCursor();
@@ -663,12 +675,32 @@ export async function writeLiveTableCache({ userId, table, orderCol, ascending, 
   return true;
 }
 
-export async function invalidateLiveTableCache(...tables) {
+function advanceLiveTableCacheVersions(tables) {
   const targets = new Set(tables.flat().map((table) => String(table || "")).filter(Boolean));
-  if (!targets.size) return;
   targets.forEach((table) => tableVersions.set(table, (tableVersions.get(table) || 0) + 1));
+  return targets;
+}
+
+export async function invalidateLiveTableCache(...tables) {
+  const targets = advanceLiveTableCacheVersions(tables);
+  if (!targets.size) return;
   const snapshots = snapshotsForTables(targets);
   if (snapshots.size) markLiveSnapshotCacheStale([...snapshots]);
+}
+
+export async function invalidateLiveTableCacheAfterWrite(...tables) {
+  const targets = advanceLiveTableCacheVersions(tables);
+  if (!targets.size) return;
+  fallbackKeys().forEach((key) => {
+    if (!key.startsWith(CACHE_ROWS_PREFIX)) return;
+    const [, table = ""] = key.slice(CACHE_ROWS_PREFIX.length).split(":");
+    if (targets.has(decodeURIComponent(table))) removeFallbackValue(key);
+  });
+  const snapshots = snapshotsForTables(targets);
+  await Promise.all([
+    removeIndexedTables(targets),
+    snapshots.size ? invalidateLiveSnapshotCache([...snapshots]) : Promise.resolve()
+  ]);
 }
 
 export function clearLiveTableCache() {

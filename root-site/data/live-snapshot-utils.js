@@ -3,6 +3,7 @@ import {
   activateLiveTableCacheUser,
   invalidateLiveAuthCache,
   invalidateLiveTableCache,
+  invalidateLiveTableCacheAfterWrite,
   markLiveSnapshotCacheStale
 } from "./live-table-cache.js";
 import {
@@ -277,6 +278,7 @@ export async function invalidateLiveTableData(...tables) {
   const targets = liveTableTargets(tables);
   if (!targets.size) return;
   evictLiveTablePromises(targets);
+  // Realtime keeps persisted rows available while refreshLiveTables replaces them.
   await invalidateLiveTableCache([...targets]);
 }
 
@@ -284,8 +286,10 @@ export async function invalidateLiveTables(...tables) {
   const targets = liveTableTargets(tables);
   if (!targets.size) return;
   evictLiveTablePromises(targets);
+  // Write helpers call this only after their own mutation succeeds. Their next read
+  // must miss both table and derived-snapshot caches instead of replaying pre-write data.
   await Promise.all([
-    invalidateLiveTableCache([...targets]),
+    invalidateLiveTableCacheAfterWrite([...targets]),
     invalidateLiveAuthCache()
   ]);
 }

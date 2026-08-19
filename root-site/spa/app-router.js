@@ -407,7 +407,7 @@ export function createAppRouter({
         console.warn("[spa] navigation failed; falling back to document navigation", error);
         const fallbackUrl = new URL(url);
         fallbackUrl.searchParams.set("tpSpa", "0");
-        hardNavigate(fallbackUrl);
+        hardNavigate(fallbackUrl, { replace: true });
       }
       return false;
     }
