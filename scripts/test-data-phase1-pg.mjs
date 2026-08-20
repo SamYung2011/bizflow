@@ -12,6 +12,7 @@ const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const migrationPath = join(repoRoot, "migrations/102_bizflow_data_phase1.sql");
 const guardMigrationPath = join(repoRoot, "migrations/103_guard_non_array_invoice_items.sql");
 const repairMigrationPath = join(repoRoot, "migrations/104_bizflow_data_phase1_r5.sql");
+const patchMigrationPath = join(repoRoot, "migrations/105_bizflow_warranty_revenue_gate.sql");
 
 function executable(name) {
   for (const candidate of [`/opt/homebrew/bin/${name}`, `/usr/local/bin/${name}`, name]) {
@@ -339,7 +340,8 @@ try {
     GRANT EXECUTE ON FUNCTION auth.uid() TO authenticated, anon;
     CREATE TABLE public.employees (
       id uuid PRIMARY KEY, user_id uuid, name text, created_at timestamptz DEFAULT now(),
-      active boolean DEFAULT true, bizflow_main_access boolean DEFAULT false, is_admin boolean DEFAULT false
+      active boolean DEFAULT true, bizflow_main_access boolean DEFAULT false, is_admin boolean DEFAULT false,
+      can_view_revenue boolean NOT NULL DEFAULT false
     );
     CREATE FUNCTION public.has_bizflow_main_access() RETURNS boolean
       LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,auth
@@ -396,8 +398,8 @@ try {
       END LOOP;
     END $$;
 
-    INSERT INTO public.employees(id,user_id,name,bizflow_main_access)
-      VALUES ('10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','KC',true);
+    INSERT INTO public.employees(id,user_id,name,bizflow_main_access,can_view_revenue)
+      VALUES ('10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001','KC',true,true);
     INSERT INTO public.employee_companies(employee_id,company_id)
       VALUES ('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001');
     INSERT INTO public.customers(id,name,phone,phone_mainland,email,address)
@@ -497,7 +499,26 @@ try {
   delete postR5Home.warranty_items;
   assert.deepEqual(postR5Home, preR5Home,
     "the materialized Home plan must preserve every non-warranty metric and bounded widget");
+  const prePatchRevenue = JSON.parse(asAuthenticated("SELECT public.bizflow_order_revenue('all')::text;"));
+  const prePatchHome = JSON.parse(asAuthenticated(
+    "SELECT public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001')::text;"
+  ));
+  run(psql, psqlArgs(["-f", patchMigrationPath]), { quiet: true });
+  run(psql, psqlArgs(["-f", patchMigrationPath]), { quiet: true });
+  sql("ANALYZE;");
+  const postPatchRevenue = JSON.parse(asAuthenticated("SELECT public.bizflow_order_revenue('all')::text;"));
+  const postPatchHome = JSON.parse(asAuthenticated(
+    "SELECT public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001')::text;"
+  ));
+  delete prePatchHome.generated_at;
+  delete postPatchHome.generated_at;
+  assert.deepEqual(postPatchRevenue, prePatchRevenue,
+    "a revenue-authorized employee must receive the byte-equivalent reviewed aggregate after migration 105");
+  assert.deepEqual(postPatchHome, prePatchHome,
+    "migration 105 must preserve Home output when no dirty product-name whitespace is present");
   assert.equal(asAuthenticated("SELECT current_user;"), "authenticated", "performance gates must execute as authenticated");
+  assert.equal(sql("SELECT prosecdef FROM pg_proc WHERE oid='public.bizflow_order_revenue(text)'::regprocedure;"), "f",
+    "the revenue permission gate must remain SECURITY INVOKER");
   assert.equal(sql("SELECT has_function_privilege('anon','public.bizflow_jsonb_array(jsonb)','EXECUTE');"), "f");
   assert.equal(sql("SELECT has_function_privilege('authenticated','public.bizflow_jsonb_array(jsonb)','EXECUTE');"), "t");
   assert.equal(sql("SELECT has_function_privilege('anon','public.bizflow_customer_group_map()','EXECUTE');"), "f");
@@ -593,6 +614,8 @@ try {
     "M-A2 must turn the gate red when migration 103's production-failing order function is restored");
   run(psql, psqlArgs(["-f", repairMigrationPath]), { quiet: true });
   run(psql, psqlArgs(["-f", repairMigrationPath]), { quiet: true });
+  run(psql, psqlArgs(["-f", patchMigrationPath]), { quiet: true });
+  run(psql, psqlArgs(["-f", patchMigrationPath]), { quiet: true });
   sql("ANALYZE;");
   assertPageBoundedJsonExpansion(explainOrderPage(), 50);
 
@@ -653,6 +676,37 @@ try {
     '20000000-0000-0000-0000-000000000002',
     "SELECT public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001')->'counts'->>'warranty';"
   ));
+  const authorizedRevenueWithOrphan = JSON.parse(asAuthenticated(
+    "SELECT public.bizflow_order_revenue('all')::text;"
+  ));
+  const deniedUserOrderCount = Number(asAuthenticatedUser(
+    '20000000-0000-0000-0000-000000000002',
+    "SELECT public.bizflow_order_page(NULL,NULL,NULL,NULL,NULL,'newest',0,50)->>'total_count';"
+  ));
+  const deniedRevenue = JSON.parse(asAuthenticatedUser(
+    '20000000-0000-0000-0000-000000000002',
+    "SELECT public.bizflow_order_revenue('all')::text;"
+  ));
+  assert.ok(deniedUserOrderCount > 0,
+    "the negative revenue case must retain ordinary BizFlow/RLS invoice visibility");
+  assert.deepEqual(deniedRevenue, {
+    total_revenue: 0,
+    paid_count: 0,
+    average: 0,
+    unpaid_count: 0,
+    unpaid_amount: 0,
+    months: [],
+    products: [],
+    customers: [],
+    single_month: false
+  }, "a BizFlow employee without can_view_revenue must receive only the stable empty/zero revenue shape");
+  sql("UPDATE public.employees SET can_view_revenue=true WHERE user_id='20000000-0000-0000-0000-000000000002';");
+  const newlyAuthorizedRevenue = JSON.parse(asAuthenticatedUser(
+    '20000000-0000-0000-0000-000000000002',
+    "SELECT public.bizflow_order_revenue('all')::text;"
+  ));
+  assert.deepEqual(newlyAuthorizedRevenue, authorizedRevenueWithOrphan,
+    "the same employee must receive the unchanged aggregate immediately after can_view_revenue is granted");
   assert.equal(orphanHome.counts.orders, cleanHome.counts.orders + 1,
     "an orphan invoice remains a valid order");
   assert.equal(orphanHome.counts.warranty, cleanHome.counts.warranty,
@@ -800,7 +854,183 @@ try {
   assert.ok(scale4500.elapsedMs < scale2005.elapsedMs * 3.5,
     `255→4500 curve must stay far below quadratic growth: ${JSON.stringify(scale)}`);
 
-  console.log(`DATA-phase1 PG: PASS (dirty JSON string/object/null=empty; post-ANALYZE authenticated order first/later ${orderPage.elapsedMs.toFixed(1)}/${laterPage.elapsedMs.toFixed(1)}ms, search ${orderSearch.elapsedMs.toFixed(1)}ms, unread ${unread.elapsedMs.toFixed(1)}ms, Home ${home.elapsedMs.toFixed(1)}ms, ${orderPayloadBytes}B from ${(rawInvoiceItemBytes / 1048576).toFixed(1)}MiB raw; EXPLAIN JSON loops first/search ${firstPageExpansionLoops}/${searchExpansionLoops}<=50; mutations M-A/M-A2 red at loops ${preLimitMutationLoops}/${revertedR5Loops}; flat ${group.elapsedMs.toFixed(1)}ms, dirty ${dirty.elapsedMs.toFixed(1)}ms, clusters ${largeClusters.elapsedMs.toFixed(1)}ms, revenue ${revenue.elapsedMs.toFixed(1)}ms, warranty scope ${cleanHome.counts.warranty}=${orphanHome.counts.warranty}=${secondUserWarranty}, parity ${oldGroups.length}=${sqlGroups} exact, scale ${scale.map(({ size, elapsedMs }) => `${size}:${elapsedMs.toFixed(1)}ms`).join("/")})`);
++  // Replay the reviewer's exact 34-invoice adversarial set. These expected
+  // per-invoice row counts were produced independently by the legacy JS
+  // buildWarrantySnapshot path; querying the active Home CTE catches parity
+  // changes without copying the SQL under test into the oracle.
+  sql(`
+-- R8 adversarial warranty set: 12+ edge categories, old JS vs SQL@104
+TRUNCATE public.invoices, public.customers, public.products, public.warranty_renewals, public.inventory_stock;
+
+INSERT INTO public.customers(id,name,phone,phone_mainland,email,address,parent_id,merge_exclude) VALUES
+ -- merge group: Alpha One is primary (name sorts first), Alpha Two merges by name+phone+mainland
+ ('a0000000-0000-0000-0000-000000000001','Alpha One','852-1','86-1','a1@t','Addr A',NULL,'[]'),
+ ('a0000000-0000-0000-0000-000000000002','Alpha One','852-1','86-1','a2@t','Addr A2',NULL,'[]'),
+ -- physical child of Alpha One
+ ('a0000000-0000-0000-0000-000000000003','Alpha Child','852-9','86-9','a3@t','Addr A3','a0000000-0000-0000-0000-000000000001','[]'),
+ -- orphan physical child: parent_id points at a customer that does not exist
+ ('a0000000-0000-0000-0000-000000000006','Orphan Child','852-6','86-6','a6@t','Addr A6','a0000000-0000-0000-0000-0000000000ff','[]'),
+ -- plain customers for the rest
+ ('b0000000-0000-0000-0000-000000000001','Bravo','852-b1','86-b1','b1@t','Addr B1',NULL,'[]'),
+ ('b0000000-0000-0000-0000-000000000002','Charlie','852-b2','86-b2','b2@t','Addr B2',NULL,'[]'),
+ -- merge_exclude pair (would otherwise merge on name+phone+mainland)
+ ('c0000000-0000-0000-0000-000000000001','Excl','852-x','86-x','x1@t','Addr X1',NULL,'["c0000000-0000-0000-0000-000000000002"]'),
+ ('c0000000-0000-0000-0000-000000000002','Excl','852-x','86-x','x2@t','Addr X2',NULL,'[]'),
+ -- customer with empty name/phone -> display fallbacks
+ ('d0000000-0000-0000-0000-000000000001','','','','d1@t','Addr D1',NULL,'[]');
+
+INSERT INTO public.products(id,name,warranty_months,status) VALUES
+ ('90000000-0000-0000-0000-000000000001','Widget',12,'active'),
+ ('90000000-0000-0000-0000-000000000002','Gadget',0,'active'),
+ ('90000000-0000-0000-0000-000000000003','NullMonths',NULL,'active'),
+ ('90000000-0000-0000-0000-000000000004','NullMonths',12,'active'),   -- same name, months 12 (by_name twin)
+ ('90000000-0000-0000-0000-000000000005','Renewable',12,'active');
+
+-- helper: base purchase date is 12 months ago so a 12-month warranty lands ~today (inside -30/+365)
+INSERT INTO public.invoices(id,invoice_number,customer_id,salesperson_id,date,created_at,total,status,shipping_status,items) VALUES
+ -- adv-01 plain: product_id hit, months from product
+ ('adv-01','adv-01','b0000000-0000-0000-0000-000000000001',NULL,(current_date-interval '12 months')::date,now()-interval '1 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1}]'),
+ -- adv-02 item months override (24) -> expiry 12 months out, still inside window
+ ('adv-02','adv-02','b0000000-0000-0000-0000-000000000001',NULL,(current_date-interval '12 months')::date,now()-interval '2 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1,"warranty_months":24}]'),
+ -- adv-03 item months 0 -> excluded
+ ('adv-03','adv-03','b0000000-0000-0000-0000-000000000001',NULL,(current_date-interval '12 months')::date,now()-interval '3 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1,"warranty_months":0}]'),
+ -- adv-04 guest invoice (customer_id NULL) -> excluded
+ ('adv-04','adv-04',NULL,NULL,(current_date-interval '12 months')::date,now()-interval '4 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1}]'),
+ -- adv-05 invoice on the merged-away duplicate -> card must show GROUP PRIMARY name/phone
+ ('adv-05','adv-05','a0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '5 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1}]'),
+ -- adv-06 invoice on an orphan physical child (parent missing) -> excluded by old JS
+ ('adv-06','adv-06','a0000000-0000-0000-0000-000000000006',NULL,(current_date-interval '12 months')::date,now()-interval '6 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1}]'),
+ -- adv-07 invoice on a valid physical child -> included, mapped to parent group
+ ('adv-07','adv-07','a0000000-0000-0000-0000-000000000003',NULL,(current_date-interval '12 months')::date,now()-interval '7 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1}]'),
+ -- adv-08 no product_id, name resolves by name
+ ('adv-08','adv-08','b0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '8 min',1,'Paid','x',
+   '[{"name":"Widget","qty":1}]'),
+ -- adv-09 unknown product entirely -> months 0 -> excluded
+ ('adv-09','adv-09','b0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '9 min',1,'Paid','x',
+   '[{"name":"Unknown Thing","qty":1}]'),
+ -- adv-10 fee-ish names -> excluded by the name regex
+ ('adv-10','adv-10','b0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '10 min',1,'Paid','x',
+   '[{"name":"運費","product_id":"90000000-0000-0000-0000-000000000001","qty":1},{"name":"Shipping fee","product_id":"90000000-0000-0000-0000-000000000001","qty":1},{"name":"防水盒","product_id":"90000000-0000-0000-0000-000000000001","qty":1},{"name":"押金","product_id":"90000000-0000-0000-0000-000000000001","qty":1},{"name":"手續費","product_id":"90000000-0000-0000-0000-000000000001","qty":1}]'),
+ -- adv-11 warranty_months JSON null -> Number(null)=0 -> excluded
+ ('adv-11','adv-11','b0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '11 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1,"warranty_months":null}]'),
+ -- adv-12 warranty_months "" -> Number("")=0 -> excluded
+ ('adv-12','adv-12','b0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '12 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1,"warranty_months":""}]'),
+ -- adv-13 product_id resolves to a product with NULL months; same NAME also matches a 12-month twin
+ ('adv-13','adv-13','b0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '13 min',1,'Paid','x',
+   '[{"name":"NullMonths","product_id":"90000000-0000-0000-0000-000000000003","qty":1}]'),
+ -- adv-14 renewal overlay
+ ('adv-14','adv-14','b0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '14 min',1,'Paid','x',
+   '[{"name":"Renewable","product_id":"90000000-0000-0000-0000-000000000005","qty":1}]'),
+ -- adv-15 out of window (expiry 5 years out)
+ ('adv-15','adv-15','b0000000-0000-0000-0000-000000000002',NULL,current_date::date,now()-interval '15 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1,"warranty_months":60}]'),
+ -- adv-16a/16b duplicate invoice_number: older created_at wins in both engines
+ ('adv-16a','adv-16','b0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '30 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1}]'),
+ ('adv-16b','adv-16','b0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '16 min',1,'Paid','x',
+   '[{"name":"Gadget","product_id":"90000000-0000-0000-0000-000000000002","qty":1,"warranty_months":12}]'),
+ -- adv-17a/b/c non-array items
+ ('adv-17a','adv-17a','b0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '17 min',1,'Paid','x','"legacy string"'),
+ ('adv-17b','adv-17b','b0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '18 min',1,'Paid','x','{"name":"legacy object"}'),
+ ('adv-17c','adv-17c','b0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '19 min',1,'Paid','x','null'),
+ -- adv-18 numeric string months
+ ('adv-18','adv-18','b0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '20 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1,"warranty_months":"12"}]'),
+ -- adv-19 boolean true months -> JS Number(true)=1
+ ('adv-19','adv-19','b0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '1 month')::date,now()-interval '21 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1,"warranty_months":true}]'),
+ -- adv-20 fractional months "12.7"
+ ('adv-20','adv-20','b0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '22 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1,"warranty_months":"12.7"}]'),
+ -- adv-21 " - Default Title" suffix, resolved by name
+ ('adv-21','adv-21','b0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '23 min',1,'Paid','x',
+   '[{"name":"Widget - Default Title","qty":1}]'),
+ -- adv-22 merge_exclude pair: two separate groups, both invoices count separately
+ ('adv-22a','adv-22a','c0000000-0000-0000-0000-000000000001',NULL,(current_date-interval '12 months')::date,now()-interval '24 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1}]'),
+ ('adv-22b','adv-22b','c0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '25 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1}]'),
+ -- adv-23 empty item name
+ ('adv-23','adv-23','b0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '26 min',1,'Paid','x',
+   '[{"name":"","product_id":"90000000-0000-0000-0000-000000000001","qty":1}]'),
+ -- adv-24 negative months
+ ('adv-24','adv-24','b0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '27 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1,"warranty_months":-6}]'),
+ -- adv-25 months as an object -> Number({}) NaN -> asNumber falls back to product months
+ ('adv-25','adv-25','b0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '28 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1,"warranty_months":{"a":1}}]'),
+ -- adv-26 customer with empty name/phone -> card fallback text
+ ('adv-26','adv-26','d0000000-0000-0000-0000-000000000001',NULL,(current_date-interval '12 months')::date,now()-interval '29 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1}]'),
+ -- adv-27 dangling customer_id (customer row deleted)
+ ('adv-27','adv-27','e0000000-0000-0000-0000-0000000000ee',NULL,(current_date-interval '12 months')::date,now()-interval '31 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1}]'),
+ -- adv-28 date NULL -> dropped by both
+ ('adv-28','adv-28','b0000000-0000-0000-0000-000000000002',NULL,NULL,now()-interval '32 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1}]'),
+ -- adv-29 whitespace-padded product name (matches by name after trim/lower)
+ ('adv-29','adv-29','b0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '33 min',1,'Paid','x',
+   '[{"name":"  WIDGET  ","qty":1}]'),
+ -- adv-30 two identical lines on one invoice -> two warranty rows
+ ('adv-30','adv-30','b0000000-0000-0000-0000-000000000002',NULL,(current_date-interval '12 months')::date,now()-interval '34 min',1,'Paid','x',
+   '[{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1},{"name":"Widget","product_id":"90000000-0000-0000-0000-000000000001","qty":1}]');
+
+INSERT INTO public.warranty_renewals(id,invoice_id,product_id,months,paid_at,previous_end,new_end,created_at) VALUES
+ ('f0000000-0000-0000-0000-000000000001','adv-14','90000000-0000-0000-0000-000000000005',6,current_date-1,current_date,current_date+180,now());
+
+ANALYZE public.customers, public.invoices, public.products, public.warranty_renewals;
+  `);
+  let warrantyBody = activeFunctionBody("public.bizflow_home_dashboard(uuid)")
+    .replace(/\bp_company_id\b/g, "NULL::uuid");
+  const warrantySelectMarker = "\n  SELECT jsonb_build_object(\n    'generated_at', now(),";
+  const warrantySelectOffset = warrantyBody.indexOf(warrantySelectMarker);
+  assert.ok(warrantySelectOffset > 0, "the active Home function must expose its reviewed warranty CTEs");
+  const warrantyCtes = warrantyBody.slice(0, warrantySelectOffset).replace(/,\s*$/, "");
+  const warrantyParityRows = JSON.parse(asAuthenticated(`
+    ${warrantyCtes}
+    SELECT COALESCE(
+      jsonb_agg(jsonb_build_array(invoice_id, product, customer, phone) ORDER BY invoice_id, position),
+      '[]'::jsonb
+    )::text
+    FROM warranty;
+  `));
+  const expectedWarrantyRows = new Map([
+    ["adv-01", 1], ["adv-02", 1], ["adv-03", 0], ["adv-04", 0],
+    ["adv-05", 1], ["adv-06", 0], ["adv-07", 1], ["adv-08", 1],
+    ["adv-09", 0], ["adv-10", 0], ["adv-11", 0], ["adv-12", 0],
+    ["adv-13", 0], ["adv-14", 1], ["adv-15", 0],
+    ["adv-16a", 1], ["adv-16b", 0],
+    ["adv-17a", 0], ["adv-17b", 0], ["adv-17c", 0],
+    ["adv-18", 1], ["adv-19", 1], ["adv-20", 1], ["adv-21", 1],
+    ["adv-22a", 1], ["adv-22b", 1], ["adv-23", 0], ["adv-24", 0],
+    ["adv-25", 1], ["adv-26", 1], ["adv-27", 0], ["adv-28", 0],
+    ["adv-29", 1], ["adv-30", 2]
+  ]);
+  assert.equal(expectedWarrantyRows.size, 34, "the legacy differential oracle must retain all 34 reviewed cases");
+  const actualWarrantyRows = new Map();
+  for (const [invoiceId] of warrantyParityRows) {
+    actualWarrantyRows.set(invoiceId, (actualWarrantyRows.get(invoiceId) || 0) + 1);
+  }
+  assert.deepEqual(
+    [...expectedWarrantyRows].map(([invoiceId, expected]) => [invoiceId, actualWarrantyRows.get(invoiceId) || 0, expected]),
+    [...expectedWarrantyRows].map(([invoiceId, expected]) => [invoiceId, expected, expected]),
+    "all 34 warranty membership cases must remain row-for-row aligned with the legacy JS oracle"
+  );
+  const whitespaceWarranty = warrantyParityRows.find(([invoiceId]) => invoiceId === "adv-29");
+  assert.deepEqual(whitespaceWarranty, ["adv-29", "  WIDGET  ", "Charlie", "852-b2"],
+    "a whitespace-padded legacy item without product_id must resolve by trimmed product name");
+
+
+  console.log(`DATA-phase1 PG: PASS (dirty JSON string/object/null=empty; post-ANALYZE authenticated order first/later ${orderPage.elapsedMs.toFixed(1)}/${laterPage.elapsedMs.toFixed(1)}ms, search ${orderSearch.elapsedMs.toFixed(1)}ms, unread ${unread.elapsedMs.toFixed(1)}ms, Home ${home.elapsedMs.toFixed(1)}ms, ${orderPayloadBytes}B from ${(rawInvoiceItemBytes / 1048576).toFixed(1)}MiB raw; EXPLAIN JSON loops first/search ${firstPageExpansionLoops}/${searchExpansionLoops}<=50; mutations M-A/M-A2 red at loops ${preLimitMutationLoops}/${revertedR5Loops}; flat ${group.elapsedMs.toFixed(1)}ms, dirty ${dirty.elapsedMs.toFixed(1)}ms, clusters ${largeClusters.elapsedMs.toFixed(1)}ms, revenue ${revenue.elapsedMs.toFixed(1)}ms + allow/deny gate, warranty scope ${cleanHome.counts.warranty}=${orphanHome.counts.warranty}=${secondUserWarranty}, warranty differential 34/34, parity ${oldGroups.length}=${sqlGroups} exact, scale ${scale.map(({ size, elapsedMs }) => `${size}:${elapsedMs.toFixed(1)}ms`).join("/")})`);
 } finally {
   if (started) spawnSync(pgCtl, ["-D", dataDir, "-m", "immediate", "stop"], { encoding: "utf8" });
   rmSync(probeRoot, { recursive: true, force: true });
