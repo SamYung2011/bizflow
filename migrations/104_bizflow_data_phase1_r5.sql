@@ -938,11 +938,13 @@ NOTIFY pgrst, 'reload schema';
 
 COMMIT;
 
--- Rollback (manual, outside this migration): reapply migration 103 to restore
--- the reviewed phase-one function/view definitions, then drop the R7-only
--- helper/projection after no active request references them:
+-- Rollback (manual, outside this migration), after no active request references
+-- the R7-only helper/projection:
 --   DROP FUNCTION IF EXISTS public.bizflow_customer_group_map();
+--   DROP VIEW IF EXISTS public.bizflow_order_list, public.bizflow_warranty_rows;
 --   ALTER TABLE public.invoices DROP COLUMN IF EXISTS bizflow_item_search_text;
 --   DROP FUNCTION IF EXISTS public.bizflow_invoice_item_search(jsonb);
+-- Then reapply migration 102 followed by migration 103 to restore both views
+-- and the reviewed phase-one function/view definitions.
 -- Migration 103 remains in the chain because it creates bizflow_jsonb_array()
 -- and guards every legacy JSON expansion before these replacements install.
