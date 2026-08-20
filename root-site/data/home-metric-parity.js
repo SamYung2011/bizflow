@@ -33,14 +33,8 @@ const LIST_PATHS = Object.freeze([
   ["warrantyItems", (state) => state.data.warrantyItems]
 ]);
 
-function stableValue(value) {
-  if (Array.isArray(value)) return value.map(stableValue);
-  if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
-}
-
 function comparableList(value) {
-  return JSON.stringify(stableValue(Array.isArray(value) ? value : []));
+  return JSON.stringify(Array.isArray(value) ? value : []);
 }
 
 export function homeMetricVector(state) {

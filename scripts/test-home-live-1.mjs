@@ -12,8 +12,8 @@ const [home, customers, provider, snapshots, phaseMigration] = await Promise.all
 ]);
 
 assert.match(home, /import \{ attachLiveSnapshotRefresh \} from "\.\.\/data\/live-snapshot-listener\.js"/);
-assert.match(home, /const HOME_LIVE_SNAPSHOTS = \[[\s\S]*"home\.json"[\s\S]*"customers\.json"[\s\S]*\];/,
-  "the live dashboard must retain legacy snapshot retry wakeups for its RPC fallback path");
+assert.match(home, /const HOME_LIVE_SNAPSHOTS = \[\];/,
+  "the Home dashboard must no longer subscribe to full-table snapshot rebuilds");
 assert.match(home, /getHomeDashboardData\(\{ refresh \}\)/,
   "Home must refresh the bounded server dashboard query");
 for (const table of [
@@ -80,7 +80,7 @@ assert.match(customers, /captureState\(\) \{[\s\S]*search: state\.search,[\s\S]*
 assert.match(customers, /dispose\(\) \{[\s\S]*customersLiveRefresh = null;/,
   "customer page disposal must release its scoped refresh handle");
 
-assert.match(phaseMigration, /SECURITY INVOKER[\s\S]*bizflow_customer_group_count\(\)[\s\S]*WITH RECURSIVE normalized AS MATERIALIZED[\s\S]*edge_nodes/,
+assert.match(phaseMigration, /SECURITY INVOKER[\s\S]*bizflow_customer_group_count\(\)[\s\S]*WITH RECURSIVE independent/,
   "the Home customer KPI must preserve the virtual-group algorithm behind RLS");
 assert.match(provider, /const dashboardCustomerCount = grouped\.length;/,
   "the customer KPI must count every persisted customer group");

@@ -145,11 +145,7 @@ let homeLiveRefresh = null;
 let rebindHomeTeamActivity = null;
 
 const HOME_TASK_FILTERS = ["inProgress", "completed", "abandoned", "all"];
-// The live dashboard does not read these on its healthy RPC path, but keeping
-// the dependencies lets tail-0819 retry completion wake the legacy fallback.
-const HOME_LIVE_SNAPSHOTS = [
-  "home.json", "tasks.json", "home-order-metrics.json", "inventory.json", "warranty.json", "customers.json"
-];
+const HOME_LIVE_SNAPSHOTS = [];
 const HOME_LIVE_TABLES = [
   "invoices", "customers", "employees", "shipment_events", "customer_devices", "products",
   "employee_tasks", "task_assignees", "employee_task_feedbacks", "departments",

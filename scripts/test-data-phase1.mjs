@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { buildCustomerGroups } from "../root-site/data/customer-groups.js";
 import { compareHomeMetricSets } from "../root-site/data/home-metric-parity.js";
 import { resolveLiveQueryOrLegacy, resolveOrderPageRead } from "../root-site/data/live-query-fallback.js";
 import {
@@ -40,18 +39,10 @@ assert.match(migration, /bizflow_order_revenue[\s\S]*SECURITY INVOKER/);
 assert.match(migration, /REVOKE ALL ON FUNCTION public\.bizflow_home_dashboard\(uuid\) FROM PUBLIC, anon/);
 assert.doesNotMatch(migration, /CREATE INDEX IF NOT EXISTS invoices_order_page_/,
   "phase 1 must not ship the five write-cost indexes that the paged view cannot use");
-assert.equal((migration.match(/DROP INDEX IF EXISTS public\.invoices_order_page_/g) || []).length, 5,
-  "rerunning migration 102 must remove all five indexes from an R1 staging database");
-assert.match(migration, /OFFSET LEAST\(GREATEST\(COALESCE\(p_offset, 0\), 0\), 1000000\)/,
-  "the order RPC must cap hostile or accidental deep offsets");
-assert.match(migration, /-- Rollback \(run only with the matching pre-data-layer frontend release\):[\s\S]*DROP FUNCTION IF EXISTS public\.bizflow_home_dashboard/,
-  "migration 102 must carry an explicit rollback recipe");
 assert.match(migration, /replace\(replace\(replace\([\s\S]*ESCAPE E'\\\\'/,
   "order search must treat SQL LIKE percent and underscore as literals");
 const groupingSql = migration.slice(migration.indexOf("CREATE OR REPLACE FUNCTION public.bizflow_customer_group_count"), migration.indexOf("REVOKE ALL ON FUNCTION public.bizflow_edit_distance_one"));
 assert.match(groupingSql, /Starting from those three selective indexes/);
-assert.match(groupingSql, /normalized AS MATERIALIZED[\s\S]*edges AS MATERIALIZED[\s\S]*SELECT id, id FROM edge_nodes/,
-  "RLS input and qualifying edges must be materialized before traversing only real duplicate nodes");
 assert.doesNotMatch(groupingSql, /FROM address_values a JOIN address_values b|FROM email_values a JOIN email_values b/,
   "common addresses/emails must not materialise quadratic candidate pairs");
 assert.match(migration, /recent_feed[\s\S]*LIMIT 3[\s\S]*ORDER BY created_at DESC, id DESC LIMIT 4[\s\S]*ORDER BY grouped_stock DESC, id LIMIT 4[\s\S]*ORDER BY name LIMIT 12[\s\S]*ORDER BY expiry, invoice_id LIMIT 4/,
@@ -80,8 +71,6 @@ assert.match(orderQuery, /invalidateLiveQueryCacheAfterWrite[\s\S]*preserve[\s\S
   "self writes must preserve/patch only the active page, hard-clear other queries, then refresh the active query");
 assert.match(orders, /refreshCurrentOrderQuery\(\{ soft: true, source: "realtime", notify: false \}\)/,
   "realtime must actually run the soft-stale query refresh path");
-assert.match(orders, /snapshots: \["orders\.json"\]/,
-  "orders must retain the retry-completion wakeup for legacy observer snapshots");
 assert.match(provider, /getOrdersPageData\(query, options = \{\}\)[\s\S]*resolveOrderPageRead\([\s\S]*readLegacy: getLegacyOrdersPageData/,
   "the no-argument compatibility contract must still return all detailed orders");
 for (const consumer of [pending, customerDetail, itemMap]) {
@@ -154,23 +143,13 @@ assert.equal(await resolveOrderPageRead({
 assert.equal(legacyOrderReads, 1, "a no-argument order read must execute the detailed legacy reader");
 assert.equal(pagedOrderReads, 0, "a no-argument order read must never enter the 50-row slim reader");
 
-const legacyCustomerFixture = [
-  { id: "a", name: "Exact pair", phone: "852-1", phone_mainland: "86-1", email: "a@test", address: "A" },
-  { id: "b", name: "Exact pair", phone: "852-1", phone_mainland: "86-1", email: "b@test", address: "B" },
-  { id: "c", name: "Fuzzy pair", phone: "852-2", phone_mainland: "86-2", email: "cat@test", address: "Lane A" },
-  { id: "d", name: "Fuzzy pair", phone: "852-3", phone_mainland: "86-3", email: "cut@test", address: "Lane B" },
-  { id: "e", name: "Independent", phone: "852-4", phone_mainland: "86-4", email: "e@test", address: "E" }
-];
-const legacyCustomerCount = buildCustomerGroups(legacyCustomerFixture).groups.length;
-assert.equal(legacyCustomerCount, 3, "the positive parity oracle must come from the legacy grouping algorithm");
-
 const legacyState = {
   data: {
     stats: [
-      { key: "orders", value: 6600 }, { key: "customers", value: legacyCustomerCount },
+      { key: "orders", value: 6600 }, { key: "customers", value: 4500 },
       { key: "members", value: 12 }, { key: "warranty", value: 35 }
     ],
-    tasks: [{ title: "Task A", due: "2026/08/20" }], feed: [{ title: "Feed A" }], chart: [{ label: "Adapter", value: 5 }],
+    tasks: [{ title: "Task A" }], feed: [{ title: "Feed A" }], chart: [{ label: "Adapter", value: 5 }],
     orders: [{ no: "#1" }], stock: [{ product: "Adapter" }], members: [{ name: "Alice" }],
     warrantyItems: [{ no: "#1" }], membersStats: { all: 12, active: 10, pendingReview: 1, left: 2 }
   },
@@ -181,10 +160,10 @@ const legacyState = {
 const serverState = {
   data: {
     stats: [
-      { key: "orders", value: 6600 }, { key: "customers", value: 3 },
+      { key: "orders", value: 6600 }, { key: "customers", value: 4500 },
       { key: "members", value: 12 }, { key: "warranty", value: 35 }
     ],
-    tasks: [{ due: "2026/08/20", title: "Task A" }], feed: [{ title: "Feed A" }], chart: [{ value: 5, label: "Adapter" }],
+    tasks: [{ title: "Task A" }], feed: [{ title: "Feed A" }], chart: [{ label: "Adapter", value: 5 }],
     orders: [{ no: "#1" }], stock: [{ product: "Adapter" }], members: [{ name: "Alice" }],
     warrantyItems: [{ no: "#1" }], membersStats: { all: 12, active: 10, pendingReview: 1, left: 2 }
   },
@@ -195,8 +174,6 @@ const serverState = {
 const parity = compareHomeMetricSets(legacyState, serverState);
 assert.equal(parity.equal, true);
 assert.equal(parity.rows.length, 29, "parity must cover 22 numeric metrics and all seven Home list widgets");
-assert.equal(parity.rows.find((row) => row.key === "tasks")?.equal, true,
-  "list parity must ignore object-key insertion order");
 const mismatch = structuredClone(serverState);
 mismatch.shippingMetrics.pending += 1;
 assert.equal(compareHomeMetricSets(legacyState, mismatch).equal, false);

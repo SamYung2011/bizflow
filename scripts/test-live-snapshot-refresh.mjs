@@ -108,8 +108,8 @@ const [ordersSource, northboundSource, tasksControllerSource, whatsappSource, ta
   readFile(new URL("../root-site/bizflow/whatsapp.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/live-snapshot-utils.js", import.meta.url), "utf8")
 ]);
-assert.match(ordersSource, /snapshots:\s*\["orders\.json"\],[\s\S]*tables:\s*\["invoices", "customers", "employees", "shipment_events"\]/,
-  "paged orders must keep the legacy orders snapshot retry wakeup while refreshing the current server query");
+assert.match(ordersSource, /snapshots:\s*\[\],[\s\S]*tables:\s*\["invoices", "customers", "employees", "shipment_events"\]/,
+  "paged orders must refresh the current server query without rebuilding orders.json");
 assert.match(ordersSource, /getOrdersPageData\(currentOrderQuery\(\), \{ refresh: true \}\)/);
 assert.match(northboundSource, /snapshots:\s*\["northbound\.json"\]/);
 assert.match(tasksControllerSource, /snapshots:\s*\["tasks\.json"\]/);

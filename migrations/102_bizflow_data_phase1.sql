@@ -5,15 +5,6 @@
 
 BEGIN;
 
--- R1 briefly introduced these five indexes. Production never received that
--- draft, but staging databases may have; remove them so rerunning 102 converges
--- every environment to the reviewed shape.
-DROP INDEX IF EXISTS public.invoices_order_page_created_idx;
-DROP INDEX IF EXISTS public.invoices_order_page_date_idx;
-DROP INDEX IF EXISTS public.invoices_order_page_customer_idx;
-DROP INDEX IF EXISTS public.invoices_order_page_salesperson_idx;
-DROP INDEX IF EXISTS public.invoices_order_page_shipping_idx;
-
 CREATE OR REPLACE VIEW public.bizflow_order_list
 WITH (security_invoker = true)
 AS
@@ -165,7 +156,7 @@ AS $function$
       CASE WHEN p_sort NOT IN ('oldest', 'amount_desc', 'amount_asc') THEN created_at END DESC,
       CASE WHEN p_sort = 'oldest' THEN id::text END ASC,
       id::text DESC
-    OFFSET LEAST(GREATEST(COALESCE(p_offset, 0), 0), 1000000)
+    OFFSET GREATEST(COALESCE(p_offset, 0), 0)
     LIMIT LEAST(GREATEST(COALESCE(p_limit, 50), 1), 50)
   )
   SELECT jsonb_build_object(
@@ -221,27 +212,11 @@ AS $function$
       END AS date_to
     FROM clock
   ),
-  deduped_invoices AS MATERIALIZED (
-    SELECT DISTINCT ON (COALESCE(invoice.invoice_number::text, invoice.id::text))
-      invoice.id,
-      invoice.invoice_number,
-      invoice.customer_id,
-      invoice.date AS order_date,
-      invoice.created_at,
-      invoice.total,
-      invoice.status,
-      invoice.items
-    FROM public.invoices AS invoice
-    WHERE invoice.items IS NOT NULL AND invoice.date IS NOT NULL
-    ORDER BY COALESCE(invoice.invoice_number::text, invoice.id::text), invoice.created_at ASC, invoice.id ASC
-  ),
-  orders AS MATERIALIZED (
-    SELECT invoice.*,
-           COALESCE(NULLIF(customer.name, ''), '—') AS customer_name
-    FROM deduped_invoices AS invoice
+  orders AS (
+    SELECT row.*
+    FROM public.bizflow_order_list AS row
     CROSS JOIN bounds
-    LEFT JOIN public.customers AS customer ON customer.id = invoice.customer_id
-    WHERE invoice.order_date >= bounds.date_from AND invoice.order_date < bounds.date_to
+    WHERE row.order_date >= bounds.date_from AND row.order_date < bounds.date_to
   ),
   totals AS (
     SELECT
@@ -265,39 +240,20 @@ AS $function$
       COALESCE(NULLIF(line.value->>'qty', '')::numeric, 1) *
         COALESCE(NULLIF(line.value->>'price', '')::numeric, 0) AS amount
     FROM orders AS row
-    CROSS JOIN LATERAL jsonb_array_elements(COALESCE(row.items, '[]'::jsonb))
+    JOIN public.invoices AS invoice ON invoice.id = row.id
+    CROSS JOIN LATERAL jsonb_array_elements(COALESCE(invoice.items, '[]'::jsonb))
       WITH ORDINALITY AS line(value, position)
     WHERE row.status = 'Paid'
       AND COALESCE(line.value->>'name', '') <> ''
       AND COALESCE(line.value->>'name', '') !~* '運費|郵費|shipping|freight|押金|deposit|優惠|折扣|discount|手續費|service'
-  ),
-  aliases AS MATERIALIZED (
-    SELECT lower(btrim(alias.alias_name)) AS alias_key,
-           alias.skip,
-           alias.products
-    FROM public.line_item_aliases AS alias
-  ),
-  products_visible AS MATERIALIZED (
-    SELECT product.id,
-           product.name,
-           lower(btrim(regexp_replace(product.name, '\s*-\s*Default Title\s*$', '', 'i'))) AS normalized_name
-    FROM public.products AS product
-  ),
-  product_name_lookup AS MATERIALIZED (
-    SELECT DISTINCT ON (product.normalized_name)
-      product.normalized_name,
-      product.name
-    FROM products_visible AS product
-    WHERE product.normalized_name <> ''
-    ORDER BY product.normalized_name, product.id
   ),
   aliased_lines AS (
     SELECT line.*,
            alias.skip AS alias_skip,
            COALESCE(alias.products, '[]'::jsonb) AS alias_products
     FROM line_items AS line
-    LEFT JOIN aliases AS alias
-      ON alias.alias_key = lower(btrim(line.name))
+    LEFT JOIN public.line_item_aliases AS alias
+      ON lower(btrim(alias.alias_name)) = lower(btrim(line.name))
   ),
   mapped_sales AS (
     SELECT
@@ -310,15 +266,20 @@ AS $function$
              COALESCE(NULLIF(mapping.value->>'qty', '')::numeric, 1) AS quantity
       FROM jsonb_array_elements(line.alias_products) AS mapping(value)
     ) AS mapping
-    LEFT JOIN products_visible AS product ON product.id::text = mapping.value->>'product_id'
+    LEFT JOIN public.products AS product ON product.id::text = mapping.value->>'product_id'
     WHERE line.alias_skip IS NOT TRUE
   ),
   direct_sales AS (
     SELECT COALESCE(NULLIF(product.name, ''), regexp_replace(line.name, '\s*-\s*Default Title\s*$', '', 'i')) AS name,
            line.amount
     FROM aliased_lines AS line
-    LEFT JOIN product_name_lookup AS product
-      ON product.normalized_name = lower(btrim(regexp_replace(line.name, '\s*-\s*Default Title\s*$', '', 'i')))
+    LEFT JOIN LATERAL (
+      SELECT candidate.name
+      FROM public.products AS candidate
+      WHERE lower(btrim(candidate.name)) = lower(btrim(regexp_replace(line.name, '\s*-\s*Default Title\s*$', '', 'i')))
+      ORDER BY candidate.id
+      LIMIT 1
+    ) AS product ON true
     WHERE line.alias_skip IS NOT TRUE AND jsonb_array_length(line.alias_products) = 0
   ),
   product_totals AS (
@@ -413,7 +374,9 @@ STABLE
 SECURITY INVOKER
 SET search_path = ''
 AS $function$
-  WITH RECURSIVE normalized AS MATERIALIZED (
+  WITH RECURSIVE independent AS (
+    SELECT c.* FROM public.customers AS c WHERE c.parent_id IS NULL
+  ), normalized AS (
     SELECT
       row.id,
       lower(btrim(COALESCE(row.name, ''))) AS name_value,
@@ -438,15 +401,14 @@ AS $function$
         WHERE NULLIF(btrim(line.value), '') IS NOT NULL
       ) AS address_values,
       row.merge_exclude
-    FROM public.customers AS row
-    WHERE row.parent_id IS NULL
+    FROM independent AS row
   ), name_values AS (
     SELECT id, name_value AS value FROM normalized WHERE name_value <> ''
   ), phone_values AS (
     SELECT row.id, line.value FROM normalized AS row CROSS JOIN LATERAL unnest(row.phone_values) AS line(value)
   ), mainland_values AS (
     SELECT row.id, line.value FROM normalized AS row CROSS JOIN LATERAL unnest(row.mainland_values) AS line(value)
-  ), candidates AS MATERIALIZED (
+  ), candidates AS (
     -- A valid edge needs three of five fields. Email/address are the only two
     -- fuzzy fields, so every valid edge must also share an exact name/phone field.
     -- Starting from those three selective indexes avoids materialising a
@@ -478,17 +440,10 @@ AS $function$
     FROM candidates AS pair
     JOIN normalized AS left_row ON left_row.id = pair.left_id
     JOIN normalized AS right_row ON right_row.id = pair.right_id
-  ), edges AS MATERIALIZED (
+  ), edges AS (
     SELECT left_id, right_id FROM scored WHERE matches >= 3 AND NOT excluded
-  ), edge_nodes AS MATERIALIZED (
-    SELECT left_id AS id FROM edges
-    UNION
-    SELECT right_id AS id FROM edges
   ), reach(node, member) AS (
-    -- Only nodes which actually participate in a duplicate edge need graph
-    -- traversal. Starting recursion from every customer made a five-person
-    -- duplicate cluster quadratic in the entire customer book under RLS.
-    SELECT id, id FROM edge_nodes
+    SELECT id, id FROM normalized
     UNION
     SELECT reach.node,
       CASE WHEN edges.left_id = reach.member THEN edges.right_id ELSE edges.left_id END
@@ -497,10 +452,7 @@ AS $function$
   ), components AS (
     SELECT node, min(member::text) AS component FROM reach GROUP BY node
   )
-  SELECT
-    (SELECT count(*) FROM normalized)
-    - (SELECT count(*) FROM edge_nodes)
-    + (SELECT count(DISTINCT component) FROM components);
+  SELECT count(DISTINCT component)::bigint FROM components;
 $function$;
 
 REVOKE ALL ON FUNCTION public.bizflow_edit_distance_one(text, text) FROM PUBLIC, anon;
@@ -621,11 +573,7 @@ AS $function$
            date_trunc('month', now() AT TIME ZONE 'Asia/Hong_Kong')::date AS month_start,
            (date_trunc('month', now() AT TIME ZONE 'Asia/Hong_Kong') + interval '1 month')::date AS month_end
   ),
-  customers_visible AS MATERIALIZED (
-    SELECT customer.id, customer.name, customer.phone
-    FROM public.customers AS customer
-  ),
-  invoice_ranks AS MATERIALIZED (
+  invoice_ranks AS (
     SELECT invoice.*,
            row_number() OVER (
              PARTITION BY COALESCE(invoice.invoice_number::text, invoice.id::text)
@@ -634,43 +582,11 @@ AS $function$
     FROM public.invoices AS invoice
     WHERE invoice.items IS NOT NULL AND invoice.date IS NOT NULL
   ),
-  deduped_invoices AS MATERIALIZED (
+  deduped_invoices AS (
     SELECT * FROM invoice_ranks WHERE duplicate_rank = 1
   ),
-  orders AS MATERIALIZED (
-    SELECT
-      invoice.id,
-      invoice.invoice_number,
-      invoice.customer_id,
-      invoice.date AS order_date,
-      invoice.created_at,
-      invoice.total,
-      invoice.status,
-      invoice.items,
-      COALESCE(NULLIF(customer.name, ''), '—') AS customer_name,
-      COALESCE(customer.phone, '') AS customer_phone,
-      first_line.item AS first_item,
-      COALESCE(NULLIF(invoice.shipping_status, ''), 'unshipped') = 'unshipped'
-        AND invoice.date >= DATE '2026-05-05' AS shipping_pending,
-      COALESCE(invoice.shipping_status, '') IN ('已發貨', '在途', '派送中') AS shipping_in_transit,
-      COALESCE(invoice.shipping_status, '') = '異常'
-        OR (
-          COALESCE(invoice.shipping_status, '') IN ('已發貨', '在途', '派送中')
-          AND (invoice.shipped_at AT TIME ZONE 'Asia/Hong_Kong')::date < ((now() AT TIME ZONE 'Asia/Hong_Kong')::date - 14)
-        ) AS shipping_exception,
-      COALESCE(invoice.shipping_status, '') LIKE ANY (ARRAY['%簽收%', '%签收%']) AS shipping_delivered
-    FROM deduped_invoices AS invoice
-    LEFT JOIN customers_visible AS customer ON customer.id = invoice.customer_id
-    LEFT JOIN LATERAL (
-      SELECT jsonb_build_object(
-        'name', COALESCE(line.value->>'name', ''),
-        'qty', COALESCE(NULLIF(line.value->>'qty', '')::numeric, 1)
-      ) AS item
-      FROM jsonb_array_elements(COALESCE(invoice.items, '[]'::jsonb)) WITH ORDINALITY AS line(value, position)
-      WHERE COALESCE(line.value->>'name', '') !~* '運費|郵費|shipping|freight|押金|deposit|優惠|折扣|discount|手續費|service'
-      ORDER BY line.position
-      LIMIT 1
-    ) AS first_line ON true
+  orders AS (
+    SELECT * FROM public.bizflow_order_list
   ),
   revenue AS (
     SELECT
@@ -680,12 +596,9 @@ AS $function$
       COALESCE(sum(total) FILTER (WHERE COALESCE(status, '') <> 'Paid' AND order_date >= clock.month_start AND order_date < clock.month_end), 0) AS unpaid_amount
     FROM orders CROSS JOIN clock
   ),
-  all_products AS MATERIALIZED (
-    SELECT product.* FROM public.products AS product
-  ),
-  visible_products AS MATERIALIZED (
+  visible_products AS (
     SELECT p.*
-    FROM all_products AS p
+    FROM public.products AS p
     WHERE p.is_virtual IS NOT TRUE AND COALESCE(p.category, '') <> '_archived'
   ),
   own_stock AS (
@@ -720,7 +633,7 @@ AS $function$
            count(*) FILTER (WHERE COALESCE(status, 'active') <> 'discontinued' AND stock < 50) AS low_stock_count
     FROM carriers
   ),
-  company_members AS MATERIALIZED (
+  company_members AS (
     SELECT employee.*, binding.role_id, binding.is_company_admin, binding.joined_at,
            role.name AS role_name
     FROM public.employee_companies AS binding
@@ -728,75 +641,10 @@ AS $function$
     LEFT JOIN public.roles AS role ON role.id = binding.role_id
     WHERE p_company_id IS NULL OR binding.company_id = p_company_id
   ),
-  product_name_lookup AS MATERIALIZED (
-    SELECT DISTINCT ON (normalized_name) id, warranty_months, normalized_name
-    FROM (
-      SELECT product.id,
-             product.warranty_months,
-             lower(regexp_replace(product.name, '\s+-\s+Default Title$', '', 'i')) AS normalized_name
-      FROM all_products AS product
-    ) AS names
-    WHERE normalized_name <> ''
-    ORDER BY normalized_name, id
-  ),
-  latest_renewals AS MATERIALIZED (
-    SELECT DISTINCT ON (renewal.invoice_id, renewal.product_id)
-      renewal.invoice_id,
-      renewal.product_id,
-      renewal.months,
-      renewal.paid_at,
-      renewal.previous_end,
-      renewal.new_end
-    FROM public.warranty_renewals AS renewal
-    ORDER BY renewal.invoice_id, renewal.product_id, renewal.created_at DESC, renewal.id DESC
-  ),
-  warranty_resolved AS MATERIALIZED (
-    SELECT
-      invoice.id AS invoice_id,
-      invoice.invoice_number,
-      invoice.customer_id,
-      invoice.date AS purchase_date,
-      line.value AS item,
-      line.position,
-      COALESCE(product_by_id.id, product_by_name.id) AS resolved_product_id,
-      COALESCE(
-        NULLIF(line.value->>'warranty_months', '')::integer,
-        product_by_id.warranty_months,
-        product_by_name.warranty_months,
-        0
-      ) AS warranty_months
-    FROM deduped_invoices AS invoice
-    CROSS JOIN LATERAL jsonb_array_elements(COALESCE(invoice.items, '[]'::jsonb)) WITH ORDINALITY AS line(value, position)
-    LEFT JOIN all_products AS product_by_id
-      ON product_by_id.id::text = COALESCE(line.value->>'product_id', '')
-    LEFT JOIN product_name_lookup AS product_by_name
-      ON product_by_name.normalized_name = lower(regexp_replace(COALESCE(line.value->>'name', ''), '\s+-\s+Default Title$', '', 'i'))
-    WHERE COALESCE(line.value->>'name', '') <> ''
-      AND COALESCE(line.value->>'name', '') !~* '運費|郵費|shipping|freight|防水盒|防水袋|押金|手續費'
-  ),
-  warranty_effective AS MATERIALIZED (
-    SELECT resolved.*,
-           COALESCE(
-             renewal.new_end,
-             public.bizflow_add_months_clamped(resolved.purchase_date, resolved.warranty_months)
-           ) AS expiry
-    FROM warranty_resolved AS resolved
-    LEFT JOIN latest_renewals AS renewal
-      ON renewal.invoice_id = resolved.invoice_id
-     AND renewal.product_id = resolved.resolved_product_id
-    WHERE resolved.warranty_months > 0
-  ),
-  warranty AS MATERIALIZED (
-    SELECT effective.invoice_id,
-           CASE WHEN effective.invoice_number IS NULL THEN '#' || left(effective.invoice_id::text, 8) ELSE '#' || effective.invoice_number::text END AS no,
-           COALESCE(effective.item->>'name', '—') AS product,
-           COALESCE(NULLIF(customer.name, ''), '—') AS customer,
-           COALESCE(customer.phone, '') AS phone,
-           effective.expiry
-    FROM warranty_effective AS effective
-    CROSS JOIN clock
-    LEFT JOIN customers_visible AS customer ON customer.id = effective.customer_id
-    WHERE effective.expiry >= clock.today - 30 AND effective.expiry <= clock.today + 365
+  warranty AS (
+    SELECT row.*
+    FROM public.bizflow_warranty_rows AS row CROSS JOIN clock
+    WHERE row.expiry >= clock.today - 30 AND row.expiry <= clock.today + 365
   ),
   my_task_base AS (
     SELECT task.*,
@@ -1049,19 +897,3 @@ NOTIFY pgrst, 'reload schema';
 COMMIT;
 
 -- Production stop point: Helen/小屿 applies this migration after review. Codex does not run it.
-
--- Rollback (run only with the matching pre-data-layer frontend release):
--- BEGIN;
--- DROP FUNCTION IF EXISTS public.bizflow_unread_summary(uuid, timestamptz, timestamptz, timestamptz, text, timestamptz);
--- DROP FUNCTION IF EXISTS public.bizflow_home_dashboard(uuid);
--- DROP FUNCTION IF EXISTS public.bizflow_order_revenue(text);
--- DROP FUNCTION IF EXISTS public.bizflow_order_page(text, text, text, date, date, text, integer, integer);
--- DROP FUNCTION IF EXISTS public.bizflow_customer_group_count();
--- DROP FUNCTION IF EXISTS public.bizflow_edit_distance_one(text, text);
--- DROP VIEW IF EXISTS public.bizflow_warranty_rows;
--- DROP FUNCTION IF EXISTS public.bizflow_add_months_clamped(date, integer);
--- DROP VIEW IF EXISTS public.bizflow_order_list;
--- NOTIFY pgrst, 'reload schema';
--- COMMIT;
--- The five invoices_order_page_* indexes belonged only to an unshipped R1
--- draft and are intentionally not recreated by rollback.
