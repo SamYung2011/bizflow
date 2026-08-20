@@ -8,6 +8,8 @@ const calls = [];
 const errors = new Map();
 let heldRpc = "";
 let releaseHeld = null;
+let tableError = null;
+let sessionUserId = "test-user";
 
 function emptyQuery() {
   let proxy;
@@ -65,19 +67,25 @@ const currentUser = {
 };
 
 export async function getSupabaseClient() { return client; }
-export async function getSession() { return { user: { id: "test-user" } }; }
+export async function getSession() { return { user: { id: sessionUserId } }; }
 export async function getCurrentUser() { return currentUser; }
-export async function fetchAllTable() { return []; }
+export async function fetchAllTable() {
+  if (tableError) throw tableError;
+  return [];
+}
 
 export function __calls() { return calls.slice(); }
 export function __reset() {
   calls.length = 0;
   errors.clear();
+  tableError = null;
   heldRpc = "";
   if (releaseHeld) releaseHeld();
   releaseHeld = null;
 }
 export function __setRpcError(name, error) { errors.set(name, error); }
+export function __setTableError(error) { tableError = error; }
+export function __setSessionUser(id) { sessionUserId = id; }
 export function __holdNextRpc(name) { heldRpc = name; }
 export function __releaseRpc() { if (releaseHeld) releaseHeld(); }
 `;

@@ -1,12 +1,43 @@
--- 104: R5 production-shape repair for phase-one order paging and Home.
+-- 104: production-shape repair for phase-one order paging and Home.
 --
 -- The invoice JSON can contain multi-kilobyte Shopify payloads.  Keep the
--- deduplication/sort/aggregate legs narrow, and only detoast/expand items when
--- a search needs them, for the 50 selected order rows, or once for the Home
--- item-derived widgets.  Everything remains SECURITY INVOKER so table RLS is
--- still evaluated for the authenticated caller.
+-- deduplication/sort/aggregate legs narrow. Product-name search reads a stored,
+-- normalized projection instead of detoasting the Shopify payload; line-item
+-- expansion is limited to the selected order page or the Home item widgets.
+-- Everything remains SECURITY INVOKER so table RLS is still evaluated for the
+-- authenticated caller.
 
 BEGIN;
+
+-- The old search expression serialized and normalized every multi-kilobyte
+-- items value on every request. Keep only the user-visible item names in a
+-- small generated projection; PostgreSQL maintains it on invoice writes.
+CREATE OR REPLACE FUNCTION public.bizflow_invoice_item_search(input_value jsonb)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+SECURITY INVOKER
+SET search_path = ''
+AS $function$
+  SELECT lower(regexp_replace(
+    COALESCE(string_agg(COALESCE(line.value->>'name', ''), ' ' ORDER BY line.position), ''),
+    '[[:space:]-]+',
+    '',
+    'g'
+  ))
+  FROM jsonb_array_elements(
+    CASE WHEN jsonb_typeof(input_value) = 'array' THEN input_value ELSE '[]'::jsonb END
+  ) WITH ORDINALITY AS line(value, position);
+$function$;
+
+REVOKE ALL ON FUNCTION public.bizflow_invoice_item_search(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.bizflow_invoice_item_search(jsonb) TO authenticated, service_role;
+
+ALTER TABLE public.invoices
+  ADD COLUMN IF NOT EXISTS bizflow_item_search_text text
+  GENERATED ALWAYS AS (
+    public.bizflow_invoice_item_search(items)
+  ) STORED;
 
 CREATE OR REPLACE FUNCTION public.bizflow_order_page(
   p_search text DEFAULT NULL,
@@ -35,7 +66,7 @@ AS $function$
     WHERE invoice.items IS NOT NULL AND invoice.date IS NOT NULL
     ORDER BY COALESCE(invoice.invoice_number::text, invoice.id::text), invoice.created_at ASC, invoice.id ASC
   ),
-  base AS MATERIALIZED (
+  all_base AS MATERIALIZED (
     SELECT
       invoice.id,
       invoice.invoice_number,
@@ -47,8 +78,14 @@ AS $function$
       invoice.status,
       invoice.notes AS raw_notes,
       invoice.tracking_number,
+      COALESCE(invoice.bizflow_item_search_text, '') AS item_search_text,
       COALESCE(NULLIF(customer.name, ''), '—') AS customer_name,
       COALESCE(customer.phone, '') AS customer_phone,
+      COALESCE(customer.phone_mainland, '') AS customer_phone_mainland,
+      COALESCE(customer.email, '') AS customer_email,
+      COALESCE(customer.address, '') AS customer_address,
+      COALESCE(customer.car_make, '') AS customer_car_make,
+      COALESCE(customer.car_model, '') AS customer_car_model,
       COALESCE(employee.name, '') AS salesperson_name,
       CASE
         WHEN COALESCE(invoice.notes, '') LIKE '%__FORMS_BUY__%' THEN 'Framer'
@@ -68,18 +105,8 @@ AS $function$
       COALESCE(invoice.shipping_status, '') LIKE ANY (ARRAY['%簽收%', '%签收%']) AS shipping_delivered
     FROM invoice_keys AS selected
     JOIN public.invoices AS invoice ON invoice.id = selected.id
-    CROSS JOIN needle
     LEFT JOIN public.customers AS customer ON customer.id = invoice.customer_id
     LEFT JOIN public.employees AS employee ON employee.id = invoice.salesperson_id
-    LEFT JOIN LATERAL (
-      SELECT string_agg(btrim(segment.value), ' | ' ORDER BY segment.position) AS notes
-      FROM regexp_split_to_table(
-        regexp_replace(COALESCE(invoice.notes, ''), '__[A-Z_]+__(?::[[:alnum:]_-]+)?[[:space:]]*', '', 'g'),
-        E'[|\n]'
-      ) WITH ORDINALITY AS segment(value, position)
-      WHERE NULLIF(btrim(segment.value), '') IS NOT NULL
-        AND btrim(segment.value) !~ '^(Framer 表單意向([[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]+[0-9]{2}:[0-9]{2})?|Shopify order[[:space:]]+[^[:space:]]+|(financial|fulfillment)=[^[:space:]]*|batch=[^[:space:]]+([[:space:]]+idx=[^[:space:]]+)?([[:space:]]+raw_status=[^[:space:]]+)?)$'
-    ) AS visible_notes ON needle.value IS NOT NULL
     WHERE (p_source IS NULL OR (
       CASE
         WHEN COALESCE(invoice.notes, '') LIKE '%__FORMS_BUY__%' THEN 'Framer'
@@ -90,34 +117,55 @@ AS $function$
     ) = p_source)
       AND (p_date_from IS NULL OR invoice.date >= p_date_from)
       AND (p_date_to IS NULL OR invoice.date <= p_date_to)
-      AND (
-        needle.value IS NULL
-        OR lower(regexp_replace(concat_ws(' ',
-          invoice.id::text,
-          invoice.invoice_number::text,
-          '#' || COALESCE(invoice.invoice_number::text, left(invoice.id::text, 8)),
-          'DC' || CASE
-            WHEN COALESCE(invoice.invoice_number::text, invoice.id::text) ~* '^DC'
-              THEN substring(COALESCE(invoice.invoice_number::text, invoice.id::text) FROM 3)
-            WHEN COALESCE(invoice.invoice_number::text, invoice.id::text) ~ '^\d+$'
-              THEN lpad(COALESCE(invoice.invoice_number::text, invoice.id::text), 5, '0')
-            ELSE COALESCE(invoice.invoice_number::text, invoice.id::text)
-          END,
-          customer.name,
-          customer.phone,
-          customer.phone_mainland,
-          customer.email,
-          customer.address,
-          customer.car_make,
-          customer.car_model,
-          employee.name,
-          visible_notes.notes,
-          invoice.tracking_number,
-          invoice.items::text
-        ), '[[:space:]-]+', '', 'g')) LIKE '%' || replace(replace(replace(
-          needle.value, E'\\', E'\\\\'
-        ), '%', E'\\%'), '_', E'\\_') || '%' ESCAPE E'\\'
-      )
+  ),
+  base AS MATERIALIZED (
+    -- UNION ALL makes the no-search branch structurally unable to execute the
+    -- visible-note parser. PostgreSQL cannot pull that work back into mounts.
+    SELECT row.*
+    FROM all_base AS row
+    CROSS JOIN needle
+    WHERE needle.value IS NULL
+
+    UNION ALL
+
+    SELECT row.*
+    FROM all_base AS row
+    CROSS JOIN needle
+    LEFT JOIN LATERAL (
+      SELECT string_agg(btrim(segment.value), ' | ' ORDER BY segment.position) AS notes
+      FROM regexp_split_to_table(
+        regexp_replace(COALESCE(row.raw_notes, ''), '__[A-Z_]+__(?::[[:alnum:]_-]+)?[[:space:]]*', '', 'g'),
+        E'[|\n]'
+      ) WITH ORDINALITY AS segment(value, position)
+      WHERE NULLIF(btrim(segment.value), '') IS NOT NULL
+        AND btrim(segment.value) !~ '^(Framer 表單意向([[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]+[0-9]{2}:[0-9]{2})?|Shopify order[[:space:]]+[^[:space:]]+|(financial|fulfillment)=[^[:space:]]*|batch=[^[:space:]]+([[:space:]]+idx=[^[:space:]]+)?([[:space:]]+raw_status=[^[:space:]]+)?)$'
+    ) AS visible_notes ON true
+    WHERE needle.value IS NOT NULL
+      AND lower(regexp_replace(concat_ws(' ',
+        row.id::text,
+        row.invoice_number::text,
+        '#' || COALESCE(row.invoice_number::text, left(row.id::text, 8)),
+        'DC' || CASE
+          WHEN COALESCE(row.invoice_number::text, row.id::text) ~* '^DC'
+            THEN substring(COALESCE(row.invoice_number::text, row.id::text) FROM 3)
+          WHEN COALESCE(row.invoice_number::text, row.id::text) ~ '^\d+$'
+            THEN lpad(COALESCE(row.invoice_number::text, row.id::text), 5, '0')
+          ELSE COALESCE(row.invoice_number::text, row.id::text)
+        END,
+        row.customer_name,
+        row.customer_phone,
+        row.customer_phone_mainland,
+        row.customer_email,
+        row.customer_address,
+        row.customer_car_make,
+        row.customer_car_model,
+        row.salesperson_name,
+        visible_notes.notes,
+        row.tracking_number,
+        row.item_search_text
+      ), '[[:space:]-]+', '', 'g')) LIKE '%' || replace(replace(replace(
+        needle.value, E'\\', E'\\\\'
+      ), '%', E'\\%'), '_', E'\\_') || '%' ESCAPE E'\\'
   ),
   filtered AS MATERIALIZED (
     SELECT row.*
@@ -143,7 +191,7 @@ AS $function$
     SELECT count(*) AS total_count FROM filtered
   ),
   page_keys AS MATERIALIZED (
-    SELECT row.id
+    SELECT row.*
     FROM filtered AS row
     ORDER BY
       CASE WHEN p_sort = 'oldest' THEN row.created_at END ASC,
@@ -171,9 +219,8 @@ AS $function$
       first_line.item AS first_item,
       second_line.item AS second_item,
       row.created_at
-    FROM page_keys AS page
-    JOIN filtered AS row ON row.id = page.id
-    JOIN public.invoices AS invoice ON invoice.id = page.id
+    FROM page_keys AS row
+    JOIN public.invoices AS invoice ON invoice.id = row.id
     LEFT JOIN LATERAL (
       SELECT string_agg(btrim(segment.value), ' | ' ORDER BY segment.position) AS notes
       FROM regexp_split_to_table(
@@ -232,6 +279,181 @@ $function$;
 REVOKE ALL ON FUNCTION public.bizflow_order_page(text, text, text, date, date, text, integer, integer) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.bizflow_order_page(text, text, text, date, date, text, integer, integer) TO authenticated;
 
+-- Home needs the same customer membership map as the legacy JS grouper, not
+-- merely the group count. In particular, a physical child with a missing
+-- parent is intentionally absent, and warranty cards use the group primary.
+CREATE OR REPLACE FUNCTION public.bizflow_customer_group_map()
+RETURNS TABLE(member_id uuid, primary_id uuid, primary_name text, primary_phone text)
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = ''
+AS $function$
+  WITH RECURSIVE trim_chars AS MATERIALIZED (
+    SELECT concat(
+      chr(9), chr(10), chr(11), chr(12), chr(13), chr(32), chr(160), chr(5760),
+      chr(8192), chr(8193), chr(8194), chr(8195), chr(8196), chr(8197),
+      chr(8198), chr(8199), chr(8200), chr(8201), chr(8202), chr(8232),
+      chr(8233), chr(8239), chr(8287), chr(12288), chr(65279)
+    ) AS value
+  ), normalized AS MATERIALIZED (
+    SELECT
+      row.id,
+      lower(btrim(COALESCE(row.name, ''), trim_chars.value)) AS name_value,
+      ARRAY(
+        SELECT DISTINCT lower(btrim(line.value, trim_chars.value))
+        FROM regexp_split_to_table(COALESCE(row.phone, ''), E'\n+') AS line(value)
+        WHERE NULLIF(btrim(line.value, trim_chars.value), '') IS NOT NULL
+      ) AS phone_values,
+      ARRAY(
+        SELECT DISTINCT lower(btrim(line.value, trim_chars.value))
+        FROM regexp_split_to_table(COALESCE(row.phone_mainland, ''), E'\n+') AS line(value)
+        WHERE NULLIF(btrim(line.value, trim_chars.value), '') IS NOT NULL
+      ) AS mainland_values,
+      ARRAY(
+        SELECT DISTINCT lower(btrim(line.value, trim_chars.value))
+        FROM regexp_split_to_table(COALESCE(row.email, ''), E'\n+') AS line(value)
+        WHERE NULLIF(btrim(line.value, trim_chars.value), '') IS NOT NULL
+      ) AS email_values,
+      ARRAY(
+        SELECT DISTINCT lower(btrim(line.value, trim_chars.value))
+        FROM regexp_split_to_table(COALESCE(row.address, ''), E'\n+') AS line(value)
+        WHERE NULLIF(btrim(line.value, trim_chars.value), '') IS NOT NULL
+      ) AS address_values,
+      row.merge_exclude
+    FROM public.customers AS row
+    CROSS JOIN trim_chars
+    WHERE row.parent_id IS NULL
+  ), name_values AS (
+    SELECT id, name_value AS value FROM normalized WHERE name_value <> ''
+  ), phone_values AS (
+    SELECT row.id, line.value FROM normalized AS row CROSS JOIN LATERAL unnest(row.phone_values) AS line(value)
+  ), mainland_values AS (
+    SELECT row.id, line.value FROM normalized AS row CROSS JOIN LATERAL unnest(row.mainland_values) AS line(value)
+  ), candidates AS MATERIALIZED (
+    SELECT LEAST(a.id, b.id) AS left_id, GREATEST(a.id, b.id) AS right_id FROM name_values a JOIN name_values b USING (value) WHERE a.id < b.id
+    UNION
+    SELECT LEAST(a.id, b.id), GREATEST(a.id, b.id) FROM phone_values a JOIN phone_values b USING (value) WHERE a.id < b.id
+    UNION
+    SELECT LEAST(a.id, b.id), GREATEST(a.id, b.id) FROM mainland_values a JOIN mainland_values b USING (value) WHERE a.id < b.id
+  ), scored AS MATERIALIZED (
+    SELECT pair.left_id, pair.right_id,
+      (CASE WHEN left_row.name_value <> '' AND left_row.name_value = right_row.name_value THEN 1 ELSE 0 END)
+      + (CASE WHEN left_row.phone_values && right_row.phone_values THEN 1 ELSE 0 END)
+      + (CASE WHEN left_row.mainland_values && right_row.mainland_values THEN 1 ELSE 0 END)
+      + (CASE WHEN EXISTS (
+          SELECT 1 FROM unnest(left_row.email_values) AS a(value)
+          CROSS JOIN unnest(right_row.email_values) AS b(value)
+          WHERE public.bizflow_edit_distance_one(a.value, b.value)
+        ) THEN 1 ELSE 0 END)
+      + (CASE WHEN EXISTS (
+          SELECT 1 FROM unnest(left_row.address_values) AS a(value)
+          CROSS JOIN unnest(right_row.address_values) AS b(value)
+          WHERE public.bizflow_edit_distance_one(a.value, b.value)
+        ) THEN 1 ELSE 0 END) AS matches,
+      COALESCE(to_jsonb(left_row.merge_exclude), '[]'::jsonb) ? pair.right_id::text
+        OR COALESCE(to_jsonb(right_row.merge_exclude), '[]'::jsonb) ? pair.left_id::text AS excluded
+    FROM candidates AS pair
+    JOIN normalized AS left_row ON left_row.id = pair.left_id
+    JOIN normalized AS right_row ON right_row.id = pair.right_id
+  ), edges AS MATERIALIZED (
+    SELECT left_id, right_id FROM scored WHERE matches >= 3 AND NOT excluded
+  ), edge_nodes AS MATERIALIZED (
+    SELECT left_id AS id FROM edges
+    UNION
+    SELECT right_id AS id FROM edges
+  ), bidirectional_edges AS MATERIALIZED (
+    SELECT left_id AS source_id, right_id AS target_id FROM edges
+    UNION ALL
+    SELECT right_id AS source_id, left_id AS target_id FROM edges
+  ), component_roots AS MATERIALIZED (
+    SELECT node.id
+    FROM edge_nodes AS node
+    WHERE NOT EXISTS (SELECT 1 FROM edges WHERE edges.right_id = node.id)
+  ), reach(root, member) AS (
+    SELECT id, id FROM component_roots
+    UNION
+    SELECT reach.root, bidirectional_edges.target_id
+    FROM reach
+    JOIN bidirectional_edges ON bidirectional_edges.source_id = reach.member
+  ), components AS (
+    SELECT member AS node, min(root::text) AS component FROM reach GROUP BY member
+  ), independent_groups AS MATERIALIZED (
+    SELECT normalized.id, COALESCE(components.component, normalized.id::text) AS component
+    FROM normalized
+    LEFT JOIN components ON components.node = normalized.id
+  ), group_primary AS MATERIALIZED (
+    SELECT DISTINCT ON (grouped.component)
+      grouped.component,
+      customer.id AS primary_id,
+      customer.name,
+      customer.phone
+    FROM independent_groups AS grouped
+    JOIN public.customers AS customer ON customer.id = grouped.id
+    CROSS JOIN trim_chars
+    ORDER BY grouped.component,
+      CASE WHEN NULLIF(btrim(COALESCE(customer.name, ''), trim_chars.value), '') IS NULL THEN 1 ELSE 0 END,
+      customer.name ASC NULLS LAST,
+      customer.id
+  ), ordered_group_rows AS MATERIALIZED (
+    SELECT grouped.component,
+           independent.name AS parent_name,
+           independent.id AS parent_id,
+           0 AS child_rank,
+           independent.name AS member_name,
+           independent.id AS member_id,
+           independent.phone
+    FROM independent_groups AS grouped
+    JOIN public.customers AS independent ON independent.id = grouped.id
+    UNION ALL
+    SELECT grouped.component,
+           independent.name,
+           independent.id,
+           1,
+           child.name,
+           child.id,
+           child.phone
+    FROM independent_groups AS grouped
+    JOIN public.customers AS independent ON independent.id = grouped.id
+    JOIN public.customers AS child ON child.parent_id = independent.id
+  ), group_fallbacks AS MATERIALIZED (
+    SELECT row.component,
+           (array_agg(btrim(row.member_name, trim_chars.value) ORDER BY
+             row.parent_name ASC NULLS LAST, row.parent_id, row.child_rank, row.member_name ASC NULLS LAST, row.member_id
+           ) FILTER (WHERE NULLIF(btrim(COALESCE(row.member_name, ''), trim_chars.value), '') IS NOT NULL))[1] AS first_name,
+           (array_agg(btrim(line.value, trim_chars.value) ORDER BY
+             row.parent_name ASC NULLS LAST, row.parent_id, row.child_rank, row.member_name ASC NULLS LAST, row.member_id, line.position
+           ) FILTER (WHERE NULLIF(btrim(line.value, trim_chars.value), '') IS NOT NULL))[1] AS first_phone
+    FROM ordered_group_rows AS row
+    CROSS JOIN trim_chars
+    LEFT JOIN LATERAL regexp_split_to_table(COALESCE(row.phone, ''), E'\n+') WITH ORDINALITY AS line(value, position) ON true
+    GROUP BY row.component
+  ), group_display AS MATERIALIZED (
+    SELECT primary_row.component,
+           primary_row.primary_id,
+           COALESCE(NULLIF(primary_row.name, ''), fallback.first_name, '') AS primary_name,
+           COALESCE(NULLIF(primary_row.phone, ''), fallback.first_phone, '') AS primary_phone
+    FROM group_primary AS primary_row
+    JOIN group_fallbacks AS fallback USING (component)
+  ), independent_members AS MATERIALIZED (
+    SELECT grouped.id AS member_id,
+           display.primary_id,
+           display.primary_name,
+           display.primary_phone
+    FROM independent_groups AS grouped
+    JOIN group_display AS display USING (component)
+  )
+  SELECT member_id, primary_id, primary_name, primary_phone
+  FROM independent_members
+  UNION ALL
+  SELECT child.id, parent.primary_id, parent.primary_name, parent.primary_phone
+  FROM public.customers AS child
+  JOIN independent_members AS parent ON parent.member_id = child.parent_id;
+$function$;
+
+REVOKE ALL ON FUNCTION public.bizflow_customer_group_map() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.bizflow_customer_group_map() TO authenticated;
+
 CREATE OR REPLACE FUNCTION public.bizflow_home_dashboard(p_company_id uuid DEFAULT NULL)
 RETURNS jsonb
 LANGUAGE sql
@@ -248,6 +470,9 @@ AS $function$
   customers_visible AS MATERIALIZED (
     SELECT customer.id, customer.name, customer.phone
     FROM public.customers AS customer
+  ),
+  customer_groups AS MATERIALIZED (
+    SELECT * FROM public.bizflow_customer_group_map()
   ),
   invoice_keys AS MATERIALIZED (
     SELECT DISTINCT ON (COALESCE(invoice.invoice_number::text, invoice.id::text))
@@ -375,24 +600,38 @@ AS $function$
     SELECT
       invoice.id AS invoice_id,
       invoice.invoice_number,
-      invoice.customer_id,
+      customer_group.primary_id AS customer_id,
+      customer_group.primary_name AS customer_name,
+      customer_group.primary_phone AS customer_phone,
       invoice.order_date AS purchase_date,
       line.item,
       line.position,
       COALESCE(product_by_id.id, product_by_name.id) AS resolved_product_id,
-      COALESCE(
-        NULLIF(line.item->>'warranty_months', '')::integer,
-        product_by_id.warranty_months,
-        product_by_name.warranty_months,
-        0
-      ) AS warranty_months
+      CASE
+        -- JS Number(''), Number(null), and Number(false) are zero. Missing or
+        -- non-numeric values use the one resolved product's month value.
+        WHEN line.item ? 'warranty_months'
+          AND jsonb_typeof(line.item->'warranty_months') IN ('null', 'boolean')
+          THEN CASE WHEN line.item->>'warranty_months' = 'true' THEN 1 ELSE 0 END
+        WHEN line.item ? 'warranty_months'
+          AND btrim(COALESCE(line.item->>'warranty_months', '')) = ''
+          THEN 0
+        WHEN line.item ? 'warranty_months'
+          AND btrim(line.item->>'warranty_months') ~ '^[+-]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][+-]?[0-9]+)?$'
+          THEN trunc((line.item->>'warranty_months')::numeric)::integer
+        ELSE CASE
+          WHEN product_by_id.id IS NOT NULL THEN COALESCE(product_by_id.warranty_months, 0)
+          ELSE COALESCE(product_by_name.warranty_months, 0)
+        END
+      END AS warranty_months
     FROM orders AS invoice
-    JOIN customers_visible AS known_customer ON known_customer.id = invoice.customer_id
+    JOIN customer_groups AS customer_group ON customer_group.member_id = invoice.customer_id
     JOIN invoice_lines AS line ON line.invoice_id = invoice.id
     LEFT JOIN all_products AS product_by_id
       ON product_by_id.id::text = COALESCE(line.item->>'product_id', '')
     LEFT JOIN product_name_lookup AS product_by_name
-      ON product_by_name.normalized_name = lower(regexp_replace(COALESCE(line.item->>'name', ''), '\s+-\s+Default Title$', '', 'i'))
+      ON product_by_id.id IS NULL
+     AND product_by_name.normalized_name = lower(regexp_replace(COALESCE(line.item->>'name', ''), '\s+-\s+Default Title$', '', 'i'))
     WHERE COALESCE(line.item->>'name', '') <> ''
       AND COALESCE(line.item->>'name', '') !~* '運費|郵費|shipping|freight|防水盒|防水袋|押金|手續費'
   ),
@@ -410,15 +649,15 @@ AS $function$
   ),
   warranty AS MATERIALIZED (
     SELECT effective.invoice_id,
+           effective.position,
            CASE WHEN effective.invoice_number IS NULL THEN '#' || left(effective.invoice_id::text, 8)
                 ELSE '#' || effective.invoice_number::text END AS no,
            COALESCE(effective.item->>'name', '—') AS product,
-           COALESCE(NULLIF(customer.name, ''), '—') AS customer,
-           COALESCE(customer.phone, '') AS phone,
+           COALESCE(NULLIF(effective.customer_name, ''), '—') AS customer,
+           COALESCE(effective.customer_phone, '') AS phone,
            effective.expiry
     FROM warranty_effective AS effective
     CROSS JOIN clock
-    JOIN customers_visible AS customer ON customer.id = effective.customer_id
     WHERE effective.expiry >= clock.today - 30 AND effective.expiry <= clock.today + 365
   ),
   my_task_base AS (
@@ -489,7 +728,7 @@ AS $function$
     'generated_at', now(),
     'counts', jsonb_build_object(
       'orders', shipping.all_count,
-      'customers', public.bizflow_customer_group_count(),
+      'customers', (SELECT count(DISTINCT primary_id) FROM customer_groups),
       'members', (SELECT count(*) FROM company_members),
       'tasks', (SELECT count(*) FROM public.employee_tasks AS task WHERE p_company_id IS NULL OR task.company_id = p_company_id),
       'warranty', (SELECT count(*) FROM warranty)
@@ -600,8 +839,8 @@ AS $function$
         'customer', row.customer,
         'phone', row.phone,
         'date', to_char(row.expiry, 'YYYY/MM/DD')
-      ) ORDER BY row.expiry, row.invoice_id)
-      FROM (SELECT * FROM warranty ORDER BY expiry, invoice_id LIMIT 4) AS row
+      ) ORDER BY row.expiry, row.invoice_id, row.position)
+      FROM (SELECT * FROM warranty ORDER BY expiry, invoice_id, position LIMIT 4) AS row
     ), '[]'::jsonb)
   )
   FROM shipping;
@@ -610,11 +849,100 @@ $function$;
 REVOKE ALL ON FUNCTION public.bizflow_home_dashboard(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.bizflow_home_dashboard(uuid) TO authenticated;
 
+-- Unread counts only need timestamps and stock keys. Reading SELECT * from the
+-- order-list view used to expand and normalize every invoice JSON payload on
+-- both Home and Orders mounts.
+CREATE OR REPLACE FUNCTION public.bizflow_unread_summary(
+  p_company_id uuid DEFAULT NULL,
+  p_tasks_read timestamptz DEFAULT NULL,
+  p_orders_read timestamptz DEFAULT NULL,
+  p_messages_read timestamptz DEFAULT NULL,
+  p_inventory_read text DEFAULT NULL,
+  p_updates_read timestamptz DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = ''
+AS $function$
+  WITH
+  tasks AS MATERIALIZED (
+    SELECT task.id,
+           task.created_at,
+           date_trunc('minute', task.created_at AT TIME ZONE 'Asia/Hong_Kong') AT TIME ZONE 'Asia/Hong_Kong' AS read_at
+    FROM public.employee_tasks AS task
+    WHERE p_company_id IS NULL OR task.company_id = p_company_id
+  ),
+  feed AS MATERIALIZED (
+    SELECT read_at FROM tasks ORDER BY created_at DESC, id DESC LIMIT 3
+  ),
+  orders AS MATERIALIZED (
+    SELECT selected.order_date::timestamp AT TIME ZONE 'Asia/Hong_Kong' AS read_at
+    FROM (
+      SELECT DISTINCT ON (COALESCE(invoice.invoice_number::text, invoice.id::text))
+        invoice.id,
+        invoice.date AS order_date
+      FROM public.invoices AS invoice
+      WHERE invoice.items IS NOT NULL AND invoice.date IS NOT NULL
+      ORDER BY COALESCE(invoice.invoice_number::text, invoice.id::text), invoice.created_at ASC, invoice.id ASC
+    ) AS selected
+  ),
+  visible_products AS MATERIALIZED (
+    SELECT product.id, product.parent_product_id, product.status
+    FROM public.products AS product
+    WHERE product.is_virtual IS NOT TRUE AND COALESCE(product.category, '') <> '_archived'
+  ),
+  product_stock AS MATERIALIZED (
+    SELECT product.id, product.parent_product_id, product.status,
+           COALESCE(sum(stock.qty), 0)::bigint AS stock,
+           EXISTS (SELECT 1 FROM visible_products AS child WHERE child.parent_product_id = product.id) AS has_children
+    FROM visible_products AS product
+    LEFT JOIN public.inventory_stock AS stock ON stock.product_id = product.id
+    GROUP BY product.id, product.parent_product_id, product.status
+  ),
+  inventory AS (
+    SELECT count(*) AS item_count,
+           COALESCE(string_agg(id::text, '|' ORDER BY id::text), '') AS fingerprint
+    FROM product_stock
+    WHERE (parent_product_id IS NOT NULL OR NOT has_children)
+      AND COALESCE(status, 'active') <> 'discontinued'
+      AND stock < 50
+  ),
+  updates AS MATERIALIZED (
+    SELECT date_trunc('minute', log.created_at AT TIME ZONE 'Asia/Hong_Kong') AT TIME ZONE 'Asia/Hong_Kong' AS read_at
+    FROM public.team_update_logs AS log
+  )
+  SELECT jsonb_build_object(
+    'unread', jsonb_build_object(
+      'tasks', (SELECT count(*) FROM tasks WHERE p_tasks_read IS NULL OR read_at > p_tasks_read),
+      'orders', (SELECT count(*) FROM orders WHERE p_orders_read IS NULL OR read_at > p_orders_read),
+      'messages', (SELECT count(*) FROM feed WHERE p_messages_read IS NULL OR read_at > p_messages_read),
+      'inventory', (SELECT CASE WHEN COALESCE(p_inventory_read, '') = fingerprint THEN 0 ELSE item_count END FROM inventory),
+      'updates', (SELECT count(*) FROM updates WHERE p_updates_read IS NULL OR read_at > p_updates_read)
+    ),
+    'watermarks', jsonb_build_object(
+      'tasks', (SELECT max(read_at) FROM tasks),
+      'orders', (SELECT max(read_at) FROM orders),
+      'messages', (SELECT max(read_at) FROM feed),
+      'inventory', (SELECT fingerprint FROM inventory),
+      'updates', (SELECT max(read_at) FROM updates)
+    )
+  );
+$function$;
+
+REVOKE ALL ON FUNCTION public.bizflow_unread_summary(uuid, timestamptz, timestamptz, timestamptz, text, timestamptz) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.bizflow_unread_summary(uuid, timestamptz, timestamptz, timestamptz, text, timestamptz) TO authenticated;
+
 NOTIFY pgrst, 'reload schema';
 
 COMMIT;
 
 -- Rollback (manual, outside this migration): reapply migration 103 to restore
--- the reviewed phase-one definitions.  Migration 103 remains intentionally in
--- the chain because it creates bizflow_jsonb_array() and guards every legacy
--- JSON expansion before these R5 replacements are installed.
+-- the reviewed phase-one function/view definitions, then drop the R7-only
+-- helper/projection after no active request references them:
+--   DROP FUNCTION IF EXISTS public.bizflow_customer_group_map();
+--   ALTER TABLE public.invoices DROP COLUMN IF EXISTS bizflow_item_search_text;
+--   DROP FUNCTION IF EXISTS public.bizflow_invoice_item_search(jsonb);
+-- Migration 103 remains in the chain because it creates bizflow_jsonb_array()
+-- and guards every legacy JSON expansion before these replacements install.

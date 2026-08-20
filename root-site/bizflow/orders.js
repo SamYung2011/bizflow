@@ -52,6 +52,7 @@ const dict = {
     "orders.prevPage": "上一頁",
     "orders.nextPage": "下一頁",
     "orders.empty": "此條件暫無訂單",
+    "orders.unavailable": "暫時取不到數據，請稍後再試",
     "orders.search": "搜索單號、客戶或產品",
     "orders.loading": "正在載入訂單…",
     "orders.sort": "排序",
@@ -86,6 +87,7 @@ const dict = {
     "orders.prevPage": "Previous page",
     "orders.nextPage": "Next page",
     "orders.empty": "No orders match the filters",
+    "orders.unavailable": "Order data is temporarily unavailable. Please try again later.",
     "orders.search": "Search order, customer or product",
     "orders.loading": "Loading orders…",
     "orders.sort": "Sort",
@@ -120,6 +122,7 @@ const dict = {
     "orders.prevPage": "Page précédente",
     "orders.nextPage": "Page suivante",
     "orders.empty": "Aucune commande ne correspond",
+    "orders.unavailable": "Les données des commandes sont temporairement indisponibles. Réessayez plus tard.",
     "orders.search": "Rechercher commande, client ou produit",
     "orders.loading": "Chargement des commandes…",
     "orders.sort": "Trier",
@@ -345,9 +348,10 @@ function renderOrderResults(helpers) {
   if (state.page > pages) state.page = pages;
   if (state.page < 1) state.page = 1;
   const rows = currentPageOrders();
+  const emptyKey = data?.unavailable ? "orders.unavailable" : "orders.empty";
   const listHtml = rows.length
     ? rows.map((order) => renderOrderCard(order, helpers)).join("")
-    : ordersLoading ? "" : `<p class="management-list__empty orders-empty">${e(tt("orders.empty"))}</p>`;
+    : ordersLoading ? "" : `<p class="management-list__empty orders-empty">${e(tt(emptyKey))}</p>`;
   const pagerHtml = renderManagementPager({
     page: state.page,
     pages,

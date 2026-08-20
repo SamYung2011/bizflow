@@ -1479,7 +1479,8 @@ export async function getLegacyOrdersPageData() {
   return {
     orders: withOrderIds(source.orders),
     dateRange: { ...source.dateRange },
-    sources: source.sources.slice()
+    sources: source.sources.slice(),
+    unavailable: !homeOrdersValid
   };
 }
 
@@ -1536,6 +1537,15 @@ function offlineOrdersPage(source, query) {
   };
 }
 
+function unavailableOrdersPage(query) {
+  return offlineOrdersPage({
+    orders: [],
+    dateRange: { from: "", to: "" },
+    sources: [],
+    unavailable: true
+  }, query);
+}
+
 export async function getOrdersPageData(query, options = {}) {
   return resolveOrderPageRead({
     query,
@@ -1549,18 +1559,16 @@ export async function getOrdersPageData(query, options = {}) {
       } catch (error) {
         console.warn("[provider] Order page RPC failed; falling back to the legacy data path", error);
         try {
-          return offlineOrdersPage(await getLegacyOrdersPageData(), nextQuery);
+          const legacy = await getLegacyOrdersPageData();
+          return legacy.unavailable ? unavailableOrdersPage(nextQuery) : offlineOrdersPage(legacy, nextQuery);
         } catch (legacyError) {
-          console.warn("[provider] Legacy order fallback failed; using the bounded offline sample", legacyError);
+          console.warn("[provider] Legacy order fallback failed; showing the unavailable state", legacyError);
+          return unavailableOrdersPage(nextQuery);
         }
       }
-      // Static/no-session mode is a bounded demo too. Do not download the
-      // multi-megabyte snapshot just to render a 50-row sample page.
-      return offlineOrdersPage({
-        orders: withOrderIds(ordersPageMock.orders),
-        dateRange: { ...ordersPageMock.dateRange },
-        sources: ordersPageMock.sources.slice()
-      }, nextQuery);
+      // A signed read with neither RPC nor legacy data must never render the
+      // 40-row Figma sample as if it were real order data.
+      return unavailableOrdersPage(nextQuery);
     }
   });
 }

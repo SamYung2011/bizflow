@@ -75,4 +75,20 @@ assert.deepEqual(Object.keys(unread).sort(), ["inventory", "messages", "orders",
   "an unread timeout must return the legacy counter shape instead of rejecting Home mount");
 assert.deepEqual(auth.__calls().map((call) => call.name), ["bizflow_unread_summary"]);
 
+window.dispatchEvent(new CustomEvent("tp:live-snapshot-invalidated", {
+  detail: { snapshots: ["orders.json", "home.json"] }
+}));
+window.dispatchEvent(new Event("tp:auth-transient-reset"));
+queryCache.clearLiveQueryCache();
+auth.__reset();
+auth.__setSessionUser("unavailable-user");
+auth.__setRpcError("bizflow_order_page", { code: "57014", status: 500, message: "statement timeout" });
+auth.__setTableError(new Error("legacy snapshots unavailable"));
+const unavailableOrders = await provider.getOrdersPageData(orderQuery.normalizeOrderQuery({ page: 1 }), { refresh: true });
+assert.equal(unavailableOrders.unavailable, true,
+  "RPC plus legacy failure must carry an explicit unavailable marker");
+assert.deepEqual(unavailableOrders.orders, [],
+  "RPC plus legacy failure must render no fake demo orders");
+assert.equal(unavailableOrders.totalCount, 0);
+
 console.log("DATA-phase1 runtime: PASS (observer compatibility, realtime soft stale, order/dashboard/unread fallback)");

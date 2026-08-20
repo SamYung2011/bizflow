@@ -1,32 +1,31 @@
-function isTransientFirstRequest(error) {
+const RETRYABLE_PASSWORD_CODES = new Set([
+  "hook_timeout",
+  "hook_timeout_after_retry",
+  "request_timeout",
+  "unexpected_failure"
+]);
+
+function isProvableTransientAuthFailure(error) {
   const status = Number(error?.status);
   const code = String(error?.code || "").toLowerCase();
-  return status === 400 && !["invalid_credentials", "email_not_confirmed", "weak_password"].includes(code);
+  return status >= 400 && RETRYABLE_PASSWORD_CODES.has(code);
 }
 
-// Password authentication can finish while the first PostgREST profile read is
-// still observing the pre-login browser session. Retry that read once inside
-// the same submit; credential errors are never retried.
-export async function readSignedInUser(readCurrentUser, defer = () => new Promise((resolve) => setTimeout(resolve, 0))) {
-  try {
-    return await readCurrentUser();
-  } catch (error) {
-    if (!isTransientFirstRequest(error)) throw error;
-    await defer();
-    return readCurrentUser();
-  }
+// PostgREST errors do not expose the HTTP status used by the former retry
+// predicate. Keep this read single-shot instead of retaining a dead branch.
+export function readSignedInUser(readCurrentUser) {
+  return readCurrentUser();
 }
 
 export async function completePasswordSignIn({ signIn, readCurrentUser, defer }) {
-  // A first 400 that is not a credential verdict is the browser-session race
-  // observed after bundling. Absorb it once inside this click; an explicit
-  // invalid password/email verdict still returns immediately.
+  // A password is resent only for explicit Auth server timeout/failure codes.
+  // Missing/legacy codes and every credential/account verdict stay single-shot.
   try {
     await signIn();
   } catch (error) {
-    if (!isTransientFirstRequest(error)) throw error;
-    await (defer?.() ?? new Promise((resolve) => setTimeout(resolve, 0)));
+    if (!isProvableTransientAuthFailure(error)) throw error;
+    await (defer?.() ?? new Promise((resolve) => setTimeout(resolve, 100)));
     await signIn();
   }
-  return readSignedInUser(readCurrentUser, defer);
+  return readSignedInUser(readCurrentUser);
 }

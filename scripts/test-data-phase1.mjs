@@ -35,14 +35,28 @@ const [migration, guardMigration, repairMigration, orders, revenue, orderQuery, 
   read("root-site/bizflow/inventory-item-map.js")
 ]);
 
-assert.doesNotMatch(repairMigration.replace(/^--.*$/gm, ""), /SECURITY\s+DEFINER/i,
+function stripSqlComments(sql) {
+  return sql.replace(/\/\*[\s\S]*?\*\//g, "").replace(/--.*$/gm, "");
+}
+
+const executableRepairMigration = stripSqlComments(repairMigration);
+assert.doesNotMatch(executableRepairMigration, /SECURITY\s+DEFINER/i,
   "R5 must not bypass table RLS");
-assert.match(repairMigration, /invoice_keys AS MATERIALIZED[\s\S]*page_keys AS MATERIALIZED/,
+assert.match(executableRepairMigration, /invoice_keys AS MATERIALIZED[\s\S]*page_keys AS MATERIALIZED/,
   "order paging must deduplicate and page narrow invoice keys before expanding fat items");
-assert.match(repairMigration, /invoice_lines AS MATERIALIZED/,
+assert.match(executableRepairMigration, /invoice_lines AS MATERIALIZED/,
   "Home must expand fat invoice JSON once and reuse the materialized line set");
-assert.match(repairMigration, /JOIN customers_visible AS known_customer ON known_customer\.id = invoice\.customer_id/,
-  "the warranty KPI must retain the legacy known-customer scope");
+assert.match(executableRepairMigration, /bizflow_item_search_text[\s\S]*GENERATED ALWAYS AS/,
+  "item search must read a write-time normalized projection instead of fat invoice JSON");
+assert.doesNotMatch(executableRepairMigration, /invoice\.items::text/,
+  "order search must never serialize every Shopify payload at request time");
+assert.match(executableRepairMigration, /CREATE OR REPLACE FUNCTION public\.bizflow_unread_summary[\s\S]*FROM public\.invoices/,
+  "unread counts must use narrow invoice keys directly");
+const repairedUnread = executableRepairMigration.slice(executableRepairMigration.indexOf("CREATE OR REPLACE FUNCTION public.bizflow_unread_summary"));
+assert.doesNotMatch(repairedUnread, /bizflow_order_list/,
+  "unread counts must not re-enter the fat legacy order view");
+assert.match(executableRepairMigration, /JOIN customer_groups AS customer_group ON customer_group\.member_id = invoice\.customer_id/,
+  "the warranty KPI must use the exact legacy customer-group membership map");
 
 assert.doesNotMatch(migration.replace(/^--.*$/gm, ""), /SECURITY\s+DEFINER/i, "phase 1 must not bypass RLS");
 assert.match(migration, /bizflow_order_list[\s\S]*security_invoker = true/);
@@ -131,8 +145,17 @@ assert.match(orders, /snapshots: \["orders\.json"\]/,
   "orders must retain the retry-completion wakeup for legacy observer snapshots");
 assert.match(provider, /getOrdersPageData\(query, options = \{\}\)[\s\S]*resolveOrderPageRead\([\s\S]*readLegacy: getLegacyOrdersPageData/,
   "the no-argument compatibility contract must still return all detailed orders");
-assert.match(provider, /Order page RPC failed; falling back to the legacy data path[\s\S]*offlineOrdersPage\(await getLegacyOrdersPageData\(\), nextQuery\)/,
+assert.match(provider, /Order page RPC failed; falling back to the legacy data path[\s\S]*const legacy = await getLegacyOrdersPageData\(\)[\s\S]*offlineOrdersPage\(legacy, nextQuery\)/,
   "an order-page RPC failure must return a mountable page from the legacy source");
+assert.match(provider, /legacy\.unavailable \? unavailableOrdersPage\(nextQuery\)[\s\S]*Legacy order fallback failed; showing the unavailable state/,
+  "RPC plus legacy failure must return an explicit empty unavailable page, never demo orders");
+assert.doesNotMatch(provider.slice(provider.indexOf("export async function getOrdersPageData"), provider.indexOf("const orderDetailSample")), /withOrderIds\(ordersPageMock\.orders\)/,
+  "the signed paged-order path must never render the 40-row Figma sample");
+for (const message of [
+  "暫時取不到數據，請稍後再試",
+  "Order data is temporarily unavailable. Please try again later.",
+  "Les données des commandes sont temporairement indisponibles. Réessayez plus tard."
+]) assert.ok(orders.includes(message), `orders unavailable state must include: ${message}`);
 for (const consumer of [pending, customerDetail, itemMap]) {
   assert.match(consumer, /getOrdersPageData\(\)/, "legacy observers must keep using the no-argument detailed-order contract");
 }
@@ -203,41 +226,39 @@ assert.equal(await resolveOrderPageRead({
 assert.equal(legacyOrderReads, 1, "a no-argument order read must execute the detailed legacy reader");
 assert.equal(pagedOrderReads, 0, "a no-argument order read must never enter the 50-row slim reader");
 
-let signedInReads = 0;
-const signedInUser = await readSignedInUser(async () => {
-  signedInReads += 1;
-  if (signedInReads === 1) throw { status: 400, code: "session_not_ready" };
-  return { id: "approved-user" };
-}, async () => {});
-assert.deepEqual(signedInUser, { id: "approved-user" });
-assert.equal(signedInReads, 2, "one login submit must absorb the transient first post-login 400");
-let credentialReads = 0;
+let profileReads = 0;
 await assert.rejects(() => readSignedInUser(async () => {
-  credentialReads += 1;
-  throw { status: 400, code: "invalid_credentials" };
-}), (error) => error?.code === "invalid_credentials");
-assert.equal(credentialReads, 1, "credential failures must never be retried");
+  profileReads += 1;
+  throw { code: "22P02", message: "bad profile read" };
+}), (error) => error?.code === "22P02");
+assert.equal(profileReads, 1, "PostgREST profile reads must remain single-shot without a provable retry signal");
 let signInAttempts = 0;
 const recoveredLogin = await completePasswordSignIn({
   signIn: async () => {
     signInAttempts += 1;
-    if (signInAttempts === 1) throw { status: 400, code: "session_not_ready" };
+    if (signInAttempts === 1) throw { status: 400, code: "request_timeout" };
   },
   readCurrentUser: async () => ({ id: "approved-user" }),
   defer: async () => {}
 });
 assert.deepEqual(recoveredLogin, { id: "approved-user" });
-assert.equal(signInAttempts, 2, "one submit must absorb one non-credential first-login 400");
-let invalidSignInAttempts = 0;
-await assert.rejects(() => completePasswordSignIn({
-  signIn: async () => {
-    invalidSignInAttempts += 1;
-    throw { status: 400, code: "invalid_credentials" };
-  },
-  readCurrentUser: async () => null,
-  defer: async () => {}
-}), (error) => error?.code === "invalid_credentials");
-assert.equal(invalidSignInAttempts, 1, "a wrong password must still make exactly one auth request");
+assert.equal(signInAttempts, 2, "one submit may absorb an explicit Auth timeout once");
+for (const error of [
+  { status: 400, code: "invalid_credentials" },
+  { status: 400, code: "invalid_grant" },
+  { status: 400, msg: "Invalid login credentials" },
+  { status: 400, code: "session_not_ready" },
+  { status: 400, code: "user_banned" },
+  { status: 400, code: "validation_failed" }
+]) {
+  let attempts = 0;
+  await assert.rejects(() => completePasswordSignIn({
+    signIn: async () => { attempts += 1; throw error; },
+    readCurrentUser: async () => null,
+    defer: async () => {}
+  }), (received) => received === error);
+  assert.equal(attempts, 1, `password error ${error.code || "without-code"} must never be resent`);
+}
 
 const legacyCustomerFixture = [
   { id: "a", name: "Exact pair", phone: "852-1", phone_mainland: "86-1", email: "a@test", address: "A" },
