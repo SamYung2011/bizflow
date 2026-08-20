@@ -10,6 +10,7 @@ import { buildCustomerGroups } from "../root-site/data/customer-groups.js";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const migrationPath = join(repoRoot, "migrations/102_bizflow_data_phase1.sql");
+const guardMigrationPath = join(repoRoot, "migrations/103_guard_non_array_invoice_items.sql");
 
 function executable(name) {
   for (const candidate of [`/opt/homebrew/bin/${name}`, `/usr/local/bin/${name}`, name]) {
@@ -352,10 +353,14 @@ try {
 
   run(psql, psqlArgs(["-f", migrationPath]), { quiet: true });
   run(psql, psqlArgs(["-f", migrationPath]), { quiet: true });
+  run(psql, psqlArgs(["-f", guardMigrationPath]), { quiet: true });
+  run(psql, psqlArgs(["-f", guardMigrationPath]), { quiet: true });
   assert.equal(sql("SELECT count(*) FROM pg_indexes WHERE indexname LIKE 'invoices_order_page_%';"), "0",
     "migration reruns must remove all five R1 staging indexes");
   sql("ANALYZE;");
   assert.equal(asAuthenticated("SELECT current_user;"), "authenticated", "performance gates must execute as authenticated");
+  assert.equal(sql("SELECT has_function_privilege('anon','public.bizflow_jsonb_array(jsonb)','EXECUTE');"), "f");
+  assert.equal(sql("SELECT has_function_privilege('authenticated','public.bizflow_jsonb_array(jsonb)','EXECUTE');"), "t");
 
   const group = timedAuthenticated("SELECT public.bizflow_customer_group_count();");
   assert.equal(Number(group.value), 4496, "a five-person duplicate cluster must collapse without counting 450 shared addresses");
@@ -372,6 +377,61 @@ try {
   const revenue = timedAuthenticated("SELECT public.bizflow_order_revenue('all')->>'paid_count';");
   assert.equal(Number(revenue.value), 5283);
   assert.ok(revenue.elapsedMs < 4000, `authenticated all-time revenue RPC must stay below 4s, got ${revenue.elapsedMs.toFixed(1)}ms`);
+
+  const helperShapes = JSON.parse(asAuthenticated(`
+    SELECT jsonb_build_array(
+      public.bizflow_jsonb_array('[1]'::jsonb),
+      public.bizflow_jsonb_array('"legacy string"'::jsonb),
+      public.bizflow_jsonb_array('{"name":"legacy object"}'::jsonb),
+      public.bizflow_jsonb_array('null'::jsonb),
+      public.bizflow_jsonb_array(NULL::jsonb)
+    )::text;
+  `));
+  assert.deepEqual(helperShapes, [[1], [], [], [], []],
+    "the guard must preserve arrays and treat string, object, JSON null, and SQL null as empty arrays");
+
+  const cleanRevenue = JSON.parse(asAuthenticated("SELECT public.bizflow_order_revenue('all')::text;"));
+  const cleanHome = JSON.parse(asAuthenticated("SELECT public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001')::text;"));
+  const cleanWarrantyCount = Number(asAuthenticated("SELECT count(*) FROM public.bizflow_warranty_rows;"));
+  sql(`
+    INSERT INTO public.invoices(id,invoice_number,customer_id,salesperson_id,date,created_at,total,status,shipping_status,items) VALUES
+      ('dirty-items-string','dirty-string',md5('customer-1')::uuid,'10000000-0000-0000-0000-000000000001',current_date,now()+interval '3 seconds',101,'Paid','unshipped','"legacy string"'::jsonb),
+      ('dirty-items-object','dirty-object',md5('customer-2')::uuid,'10000000-0000-0000-0000-000000000001',current_date,now()+interval '2 seconds',102,'Paid','unshipped','{"name":"legacy object"}'::jsonb),
+      ('dirty-items-null','dirty-null',md5('customer-3')::uuid,'10000000-0000-0000-0000-000000000001',current_date,now()+interval '1 second',103,'Paid','unshipped','null'::jsonb);
+    ANALYZE public.invoices;
+  `);
+
+  const dirtyOrderRows = JSON.parse(asAuthenticated(`
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('id',id,'first',first_item,'second',second_item) ORDER BY id),'[]'::jsonb)::text
+    FROM public.bizflow_order_list WHERE id LIKE 'dirty-items-%';
+  `));
+  assert.equal(dirtyOrderRows.length, 3);
+  assert.ok(dirtyOrderRows.every((row) => row.first === null && row.second === null),
+    "string, object, and JSON-null items must render as invoices with no line-item previews");
+
+  const dirtyPage = JSON.parse(asAuthenticated("SELECT public.bizflow_order_page('dirty-items',NULL,NULL,NULL,NULL,'newest',0,50)::text;"));
+  assert.equal(dirtyPage.total_count, 3);
+  assert.deepEqual(dirtyPage.rows.map((row) => row.id).sort(), ['dirty-items-null','dirty-items-object','dirty-items-string']);
+  assert.ok(dirtyPage.rows.every((row) => row.first_item === null && row.second_item === null));
+
+  const dirtyRevenue = JSON.parse(asAuthenticated("SELECT public.bizflow_order_revenue('all')::text;"));
+  assert.equal(dirtyRevenue.paid_count, cleanRevenue.paid_count + 3);
+  assert.equal(dirtyRevenue.total_revenue, cleanRevenue.total_revenue + 306);
+  assert.deepEqual(dirtyRevenue.products, cleanRevenue.products,
+    "non-array items must still count invoice totals but contribute no product lines");
+  assert.equal(Number(asAuthenticated("SELECT count(*) FROM public.bizflow_warranty_rows;")), cleanWarrantyCount,
+    "non-array items must contribute no warranty lines");
+
+  const dirtyHome = JSON.parse(asAuthenticated("SELECT public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001')::text;"));
+  assert.equal(dirtyHome.counts.orders, cleanHome.counts.orders + 3);
+  assert.equal(dirtyHome.revenue.paid_count, cleanHome.revenue.paid_count + 3);
+  assert.equal(dirtyHome.revenue.total_revenue, cleanHome.revenue.total_revenue + 306);
+  assert.deepEqual(dirtyHome.chart, cleanHome.chart,
+    "non-array items must leave the Home item chart unchanged");
+  const dirtyHomeOrders = dirtyHome.orders.filter((row) => ['#dirty-string','#dirty-object','#dirty-null'].includes(row.no));
+  assert.equal(dirtyHomeOrders.length, 3);
+  assert.ok(dirtyHomeOrders.every((row) => row.product === '—'),
+    "Home recent orders must show no product for non-array items");
 
   const fixture = semanticFixture();
   const oldGroups = buildCustomerGroups(fixture).groups;
@@ -413,7 +473,7 @@ try {
   assert.ok(scale4500.elapsedMs < scale2005.elapsedMs * 3.5,
     `255→4500 curve must stay far below quadratic growth: ${JSON.stringify(scale)}`);
 
-  console.log(`DATA-phase1 PG: PASS (post-ANALYZE authenticated flat ${group.elapsedMs.toFixed(1)}ms, dirty ${dirty.elapsedMs.toFixed(1)}ms, clusters ${largeClusters.elapsedMs.toFixed(1)}ms, Home ${home.elapsedMs.toFixed(1)}ms, revenue ${revenue.elapsedMs.toFixed(1)}ms, parity ${oldGroups.length}=${sqlGroups} exact, scale ${scale.map(({ size, elapsedMs }) => `${size}:${elapsedMs.toFixed(1)}ms`).join("/")})`);
+  console.log(`DATA-phase1 PG: PASS (dirty JSON string/object/null=empty; post-ANALYZE authenticated flat ${group.elapsedMs.toFixed(1)}ms, dirty ${dirty.elapsedMs.toFixed(1)}ms, clusters ${largeClusters.elapsedMs.toFixed(1)}ms, Home ${home.elapsedMs.toFixed(1)}ms, revenue ${revenue.elapsedMs.toFixed(1)}ms, parity ${oldGroups.length}=${sqlGroups} exact, scale ${scale.map(({ size, elapsedMs }) => `${size}:${elapsedMs.toFixed(1)}ms`).join("/")})`);
 } finally {
   if (started) spawnSync(pgCtl, ["-D", dataDir, "-m", "immediate", "stop"], { encoding: "utf8" });
   rmSync(probeRoot, { recursive: true, force: true });

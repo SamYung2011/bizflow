@@ -16,8 +16,9 @@ import {
 import { normalizeOrderQuery, ORDER_PAGE_SIZE } from "../root-site/data/live-orders-query.js";
 
 const read = (relative) => readFile(new URL(`../${relative}`, import.meta.url), "utf8");
-const [migration, orders, revenue, orderQuery, orderWrites, liveHome, provider, home, customers, tasks, pending, customerDetail, itemMap] = await Promise.all([
+const [migration, guardMigration, orders, revenue, orderQuery, orderWrites, liveHome, provider, home, customers, tasks, pending, customerDetail, itemMap] = await Promise.all([
   read("migrations/102_bizflow_data_phase1.sql"),
+  read("migrations/103_guard_non_array_invoice_items.sql"),
   read("root-site/bizflow/orders.js"),
   read("root-site/bizflow/orders-revenue.js"),
   read("root-site/data/live-orders-query.js"),
@@ -58,6 +59,39 @@ assert.doesNotMatch(groupingSql, /FROM address_values a JOIN address_values b|FR
   "common addresses/emails must not materialise quadratic candidate pairs");
 assert.match(migration, /recent_feed[\s\S]*LIMIT 3[\s\S]*ORDER BY created_at DESC, id DESC LIMIT 4[\s\S]*ORDER BY grouped_stock DESC, id LIMIT 4[\s\S]*ORDER BY name LIMIT 12[\s\S]*ORDER BY expiry, invoice_id LIMIT 4/,
   "every Home list widget must be bounded in SQL");
+
+assert.doesNotMatch(guardMigration.replace(/^--.*$/gm, ""), /SECURITY\s+DEFINER/i,
+  "the dirty-JSON guard must not bypass RLS");
+assert.match(guardMigration, /FUNCTION public\.bizflow_jsonb_array\(input_value jsonb\)[\s\S]*IMMUTABLE[\s\S]*SECURITY INVOKER[\s\S]*jsonb_typeof\(input_value\) = 'array'[\s\S]*ELSE '\[\]'::jsonb/,
+  "the helper must preserve arrays and map every other JSONB shape to an empty array");
+assert.match(guardMigration, /REVOKE ALL ON FUNCTION public\.bizflow_jsonb_array\(jsonb\) FROM PUBLIC, anon[\s\S]*GRANT EXECUTE ON FUNCTION public\.bizflow_jsonb_array\(jsonb\) TO authenticated/,
+  "the helper must keep the same authenticated-only execution boundary as the phase-one RPCs");
+assert.equal((guardMigration.match(/jsonb_array_elements\(/g) || []).length, 8,
+  "migration 103 must cover exactly the eight phase-one JSONB expansions");
+assert.equal((guardMigration.match(/jsonb_array_elements\(public\.bizflow_jsonb_array\(/g) || []).length, 8,
+  "every copied expansion must pass through the non-array guard");
+
+const guardReplacements = [
+  ["jsonb_array_elements(COALESCE(i.items, '[]'::jsonb))", "jsonb_array_elements(public.bizflow_jsonb_array(i.items))"],
+  ["jsonb_array_elements(COALESCE(row.items, '[]'::jsonb))", "jsonb_array_elements(public.bizflow_jsonb_array(row.items))"],
+  ["jsonb_array_elements(line.alias_products)", "jsonb_array_elements(public.bizflow_jsonb_array(line.alias_products))"],
+  ["jsonb_array_elements(COALESCE(invoice.items, '[]'::jsonb))", "jsonb_array_elements(public.bizflow_jsonb_array(invoice.items))"]
+];
+function objectBlock(sql, start, end) {
+  return sql.slice(sql.indexOf(start), sql.indexOf(end, sql.indexOf(start))).trim();
+}
+function guardArrayExpansions(sql) {
+  return guardReplacements.reduce((result, [from, to]) => result.replaceAll(from, to), sql);
+}
+for (const [start, oldEnd, newEnd] of [
+  ["CREATE OR REPLACE VIEW public.bizflow_order_list", "CREATE OR REPLACE FUNCTION public.bizflow_order_page", "CREATE OR REPLACE FUNCTION public.bizflow_order_revenue"],
+  ["CREATE OR REPLACE FUNCTION public.bizflow_order_revenue", "CREATE OR REPLACE FUNCTION public.bizflow_edit_distance_one", "CREATE OR REPLACE VIEW public.bizflow_warranty_rows"],
+  ["CREATE OR REPLACE VIEW public.bizflow_warranty_rows", "CREATE OR REPLACE FUNCTION public.bizflow_home_dashboard", "CREATE OR REPLACE FUNCTION public.bizflow_home_dashboard"],
+  ["CREATE OR REPLACE FUNCTION public.bizflow_home_dashboard", "CREATE OR REPLACE FUNCTION public.bizflow_unread_summary", "COMMENT ON FUNCTION public.bizflow_jsonb_array"]
+]) {
+  assert.equal(objectBlock(guardMigration, start, newEnd), guardArrayExpansions(objectBlock(migration, start, oldEnd)),
+    `${start} must remain byte-equivalent to migration 102 apart from guarded array inputs`);
+}
 
 assert.equal(ORDER_PAGE_SIZE, 50);
 assert.deepEqual(normalizeOrderQuery({ page: -2, sort: "bogus", shipping: "bogus", source: "bogus" }), {
