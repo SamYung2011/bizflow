@@ -14,7 +14,7 @@ const [home, customers, provider, snapshots, phaseMigration] = await Promise.all
 assert.match(home, /import \{ attachLiveSnapshotRefresh \} from "\.\.\/data\/live-snapshot-listener\.js"/);
 assert.match(home, /const HOME_LIVE_SNAPSHOTS = \[\];/,
   "the Home dashboard must no longer subscribe to full-table snapshot rebuilds");
-assert.match(home, /getHomeDashboardData\(\{ refresh \}\)/,
+assert.match(home, /getHomeDashboardData\(\)/,
   "Home must refresh the bounded server dashboard query");
 for (const table of [
   "invoices",
@@ -34,7 +34,7 @@ const attachment = home.slice(
   home.indexOf("if (typeof MutationObserver", home.indexOf("homeLiveRefresh = attachLiveSnapshotRefresh"))
 );
 assert.match(attachment, /scope,[\s\S]*snapshots: HOME_LIVE_SNAPSHOTS,[\s\S]*tables: HOME_LIVE_TABLES,[\s\S]*isBlocked: isHomeRefreshBlocked/);
-assert.match(attachment, /const refreshedState = await loadHomeViewState\(\{ refresh: true \}\)[\s\S]*if \(!isCurrent\(\)\) return;[\s\S]*if \(isHomeRefreshBlocked\(\)\) \{[\s\S]*defer\(\);[\s\S]*return;[\s\S]*applyHomeViewState\(refreshedState\)[\s\S]*rerenderHome\(\)/,
+assert.match(attachment, /const refreshedState = await loadHomeViewState\(\)[\s\S]*if \(!isCurrent\(\)\) return;[\s\S]*if \(isHomeRefreshBlocked\(\)\) \{[\s\S]*defer\(\);[\s\S]*return;[\s\S]*applyHomeViewState\(refreshedState\)[\s\S]*rerenderHome\(\)/,
   "Home must refetch, defer if UI became busy, then atomically rerender while the page is current");
 assert.match(attachment, /rerenderHome\(\);[\s\S]*window\.dispatchEvent\(new CustomEvent\("tp:unread-change"\)\)/,
   "Home refresh must also resync the shell unread indicators");

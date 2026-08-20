@@ -32,7 +32,7 @@ assert.match(ordersSource, /const counts = data\?\.shippingCounts[\s\S]*const ro
   "the server response must feed status pills and the current page atomically");
 assert.doesNotMatch(ordersSource, /function shippingListView|function ordersBeforeShipping/,
   "orders.js must not filter a downloaded whole table after server pagination");
-assert.match(ordersSource, /const nextData = await refreshCurrentOrderQuery\(\{ soft: true, source: "realtime", notify: false \}\)[\s\S]*?data = nextData;[\s\S]*?rerenderOrderSearchResults\(\);/,
+assert.match(ordersSource, /const nextData = await getOrdersPageData\(currentOrderQuery\(\), \{ refresh: true \}\);[\s\S]*?data = nextData;[\s\S]*?rerenderOrderSearchResults\(\);/,
   "realtime must replace only the current query before the partial list rerender");
 assert.match(snapshotsSource, /async function buildOrdersSnapshot\(\)[\s\S]*?const source = await orderSourceData\(\);[\s\S]*?const orders = source\.invoices\.map/,
   "orders snapshot rows and counts must retain one deduped invoice source");

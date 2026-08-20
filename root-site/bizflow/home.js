@@ -156,9 +156,9 @@ const HOME_LIVE_TABLES = [
 
 const STAT_TONE_CLASS = { "": "", blue: "board-card--blue", green: "board-card--green", yellow: "board-card--yellow" };
 
-async function loadHomeViewState({ refresh = false } = {}) {
+async function loadHomeViewState() {
   const [dashboard, unread, unreadWatermarks] = await Promise.all([
-    getHomeDashboardData({ refresh }),
+    getHomeDashboardData(),
     getUnread(),
     getUnreadWatermarks()
   ]);
@@ -549,7 +549,7 @@ export async function mountPage({ scope, signal, historyState = null }) {
         tables: HOME_LIVE_TABLES,
         isBlocked: isHomeRefreshBlocked,
         async refresh({ defer, isCurrent }) {
-          const refreshedState = await loadHomeViewState({ refresh: true });
+          const refreshedState = await loadHomeViewState();
           if (!isCurrent()) return;
           if (isHomeRefreshBlocked()) {
             defer();

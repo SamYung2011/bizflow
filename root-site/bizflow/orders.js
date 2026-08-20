@@ -2,7 +2,7 @@
 // 各子页按需载入自己的快照，避免列表页和 Home 承担无关数据请求。
 
 import {
-  getOrderDetailData, getOrdersPageData, getUnread, getUnreadWatermarks, getCurrentUser
+  getLegacyOrdersPageData, getOrderDetailData, getOrdersPageData, getUnread, getUnreadWatermarks, getCurrentUser
 } from "../data/provider.js";
 import { markRead } from "../data/read-state.js";
 import { createDateRangeFilter } from "../components/date-range-filter.js";
@@ -17,11 +17,7 @@ import { createDebouncedTask } from "../components/debounced-task.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
 import { liveQueryKey } from "../data/live-query-cache.js";
-import {
-  normalizeOrderQuery,
-  ORDER_QUERY_UPDATED_EVENT,
-  refreshCurrentOrderQuery
-} from "../data/live-orders-query.js";
+import { normalizeOrderQuery, ORDER_QUERY_UPDATED_EVENT } from "../data/live-orders-query.js";
 import {
   attachNorthboundBehaviors, captureNorthboundState, disposeNorthboundState, ensureNorthboundData,
   hasNorthboundRefreshBlock, hasNorthboundUnsavedChanges, renderNorthbound, restoreNorthboundState
@@ -439,18 +435,6 @@ function currentOrderQuery() {
   });
 }
 
-function createOrdersDateFilter(initialDate = "") {
-  return createDateRangeFilter({
-    id: "orders",
-    initialDate,
-    onChange({ filterChanged }) {
-      if (filterChanged) state.page = 1;
-      rerenderOrdersPage();
-      if (filterChanged) void loadCurrentOrderPage();
-    }
-  });
-}
-
 async function loadCurrentOrderPage({ refresh = false } = {}) {
   const sequence = ++orderRequestSequence;
   ordersLoading = true;
@@ -500,7 +484,8 @@ async function onOrdersClick(event) {
     if (tab === "northbound") await ensureNorthboundData({ scope });
     if (tab === "chargerLeads") await ensureChargerLeadsData({ scope });
     if (tab === "revenue" && canViewRevenue) {
-      await ensureRevenueData({ scope });
+      const revenueSource = await getLegacyOrdersPageData();
+      await ensureRevenueData(revenueSource.orders, { scope });
     }
     if (!isCurrentOrdersScope(scope)) return;
     rerenderOrdersPage();
@@ -654,7 +639,8 @@ async function ensureActiveDomainData(signal) {
   if (state.tab === "northbound") await ensureNorthboundData({ scope, signal });
   if (state.tab === "chargerLeads") await ensureChargerLeadsData({ scope, signal });
   if (state.tab === "revenue" && canViewRevenue) {
-    await ensureRevenueData({ scope, signal });
+    const revenueSource = await getLegacyOrdersPageData();
+    await ensureRevenueData(revenueSource.orders, { scope, signal });
   }
   if (!isCurrentOrdersScope(scope)) throw new DOMException("Orders page superseded", "AbortError");
   throwIfPageAborted(signal);
@@ -683,12 +669,17 @@ export async function mountPage({ scope, signal, historyState = null, navigation
   restoreNorthboundState(historyState?.northbound);
   restoreChargerLeadState(historyState?.chargerLeads);
   restoreRevenueState(historyState?.revenue);
-  dateFilter = createOrdersDateFilter();
+  dateFilter = createDateRangeFilter({
+    id: "orders",
+    initialDate: "",
+    onChange({ filterChanged }) {
+      if (filterChanged) state.page = 1;
+      rerenderOrdersPage();
+      if (filterChanged) void loadCurrentOrderPage();
+    }
+  });
   dateFilter.restoreState?.(historyState?.dateFilter);
   data = await getOrdersPageData(currentOrderQuery());
-  const restoredDateFilterState = dateFilter.captureState();
-  dateFilter = createOrdersDateFilter(data.dateRange?.to || "");
-  dateFilter.restoreState(restoredDateFilterState);
   throwIfPageAborted(signal, scope);
   printDialog = createPrintDialog({ getLang: () => currentHelpers?.lang ?? "zh", scope });
   await ensureActiveDomainData(signal);
@@ -720,12 +711,12 @@ export async function mountPage({ scope, signal, historyState = null, navigation
         isBlocked: hasNorthboundRefreshBlock,
         async refresh({ defer, isCurrent }) {
           if (state.tab === "revenue" && canViewRevenue) {
-            await ensureRevenueData({ scope, refresh: true });
+            const revenueSource = await getLegacyOrdersPageData();
+            await ensureRevenueData(revenueSource.orders, { scope });
             if (isCurrent()) rerenderOrdersPage();
             return;
           }
-          const nextData = await refreshCurrentOrderQuery({ soft: true, source: "realtime", notify: false })
-            ?? await getOrdersPageData(currentOrderQuery(), { refresh: true });
+          const nextData = await getOrdersPageData(currentOrderQuery(), { refresh: true });
           if (!isCurrent()) return;
           if (hasNorthboundRefreshBlock()) {
             defer();

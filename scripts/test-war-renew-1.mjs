@@ -71,7 +71,7 @@ assert.match(tableCache, /SNAPSHOT_CONTRACT_GENERATIONS[\s\S]*\["home\.json", [1
 assert.match(snapshots, /LIVE_SNAPSHOT_INVALIDATED_EVENT[\s\S]*invalidateProviderSnapshotMemo\(snapshots\)[\s\S]*LIVE_BUILDERS\.delete/,
   "snapshot invalidation must also evict provider and live-builder memory state");
 assert.match(provider, /item\.invoiceId[\s\S]*item\.productId[\s\S]*item\.latestRenewal[\s\S]*\[12, 24\]\.includes\(item\.latestRenewal\.months\)/);
-assert.match(home, /getHomeDashboardData\(\{ refresh \}\)/,
+assert.match(home, /getHomeDashboardData\(\)/,
   "Home must load its warranty count and bounded rows with the server dashboard payload");
 assert.match(phaseMigration, /bizflow_warranty_rows[\s\S]*security_invoker = true[\s\S]*warranty_renewals[\s\S]*'warranty', \(SELECT count\(\*\) FROM warranty\)[\s\S]*warranty_items[\s\S]*LIMIT 4/,
   "the server dashboard must derive one warranty source for both the count and top-four widget");

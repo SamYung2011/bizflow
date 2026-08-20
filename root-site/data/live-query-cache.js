@@ -2,9 +2,7 @@
 // table cache this stores only bounded result pages, so an offline fallback can
 // never grow back into a whole-table download.
 
-const CACHE_FAMILY_PREFIX = "tp-live-query:";
-const CACHE_VERSION = 2;
-const CACHE_PREFIX = `${CACHE_FAMILY_PREFIX}v${CACHE_VERSION}:`;
+const CACHE_PREFIX = "tp-live-query:v1:";
 const MEMORY_CACHE = new Map();
 const MAX_ENTRIES_PER_SCOPE = 12;
 const FRESH_MS = 60_000;
@@ -38,7 +36,7 @@ function cacheKey(userId, namespace, query) {
 function parseEntry(raw) {
   try {
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" && parsed.version === CACHE_VERSION && parsed.value != null ? parsed : null;
+    return parsed && typeof parsed === "object" && parsed.value != null ? parsed : null;
   } catch {
     return null;
   }
@@ -107,7 +105,7 @@ export function readLiveQueryCache({ userId, namespace, query, now = Date.now() 
 export function writeLiveQueryCache({ userId, namespace, query, value, stale = false, now = Date.now() }) {
   if (!userId || !namespace || value == null) return false;
   const key = cacheKey(userId, namespace, query);
-  writeRaw(key, JSON.stringify({ version: CACHE_VERSION, cachedAt: now, stale: stale === true, value }));
+  writeRaw(key, JSON.stringify({ cachedAt: now, stale: stale === true, value }));
   trimScope(userId, namespace);
   return true;
 }
@@ -132,11 +130,10 @@ export function invalidateLiveQueryCacheAfterWrite({ userId, namespace, preserve
 }
 
 export function clearLiveQueryCache() {
-  storedKeys(CACHE_FAMILY_PREFIX).forEach(removeRaw);
+  storedKeys().forEach(removeRaw);
 }
 
 export const liveQueryCachePolicy = Object.freeze({
-  version: CACHE_VERSION,
   freshMs: FRESH_MS,
   maxEntriesPerScope: MAX_ENTRIES_PER_SCOPE
 });
