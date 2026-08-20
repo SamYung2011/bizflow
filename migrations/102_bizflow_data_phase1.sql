@@ -413,32 +413,43 @@ STABLE
 SECURITY INVOKER
 SET search_path = ''
 AS $function$
-  WITH RECURSIVE normalized AS MATERIALIZED (
+  WITH RECURSIVE trim_chars AS MATERIALIZED (
+    -- Match ECMAScript String.prototype.trim(), which the legacy JS grouper
+    -- applies before comparing every field. PostgreSQL's one-argument btrim()
+    -- only removes ASCII spaces and splits groups containing dirty whitespace.
+    SELECT concat(
+      chr(9), chr(10), chr(11), chr(12), chr(13), chr(32), chr(160), chr(5760),
+      chr(8192), chr(8193), chr(8194), chr(8195), chr(8196), chr(8197),
+      chr(8198), chr(8199), chr(8200), chr(8201), chr(8202), chr(8232),
+      chr(8233), chr(8239), chr(8287), chr(12288), chr(65279)
+    ) AS value
+  ), normalized AS MATERIALIZED (
     SELECT
       row.id,
-      lower(btrim(COALESCE(row.name, ''))) AS name_value,
+      lower(btrim(COALESCE(row.name, ''), trim_chars.value)) AS name_value,
       ARRAY(
-        SELECT DISTINCT lower(btrim(line.value))
+        SELECT DISTINCT lower(btrim(line.value, trim_chars.value))
         FROM regexp_split_to_table(COALESCE(row.phone, ''), E'\n+') AS line(value)
-        WHERE NULLIF(btrim(line.value), '') IS NOT NULL
+        WHERE NULLIF(btrim(line.value, trim_chars.value), '') IS NOT NULL
       ) AS phone_values,
       ARRAY(
-        SELECT DISTINCT lower(btrim(line.value))
+        SELECT DISTINCT lower(btrim(line.value, trim_chars.value))
         FROM regexp_split_to_table(COALESCE(row.phone_mainland, ''), E'\n+') AS line(value)
-        WHERE NULLIF(btrim(line.value), '') IS NOT NULL
+        WHERE NULLIF(btrim(line.value, trim_chars.value), '') IS NOT NULL
       ) AS mainland_values,
       ARRAY(
-        SELECT DISTINCT lower(btrim(line.value))
+        SELECT DISTINCT lower(btrim(line.value, trim_chars.value))
         FROM regexp_split_to_table(COALESCE(row.email, ''), E'\n+') AS line(value)
-        WHERE NULLIF(btrim(line.value), '') IS NOT NULL
+        WHERE NULLIF(btrim(line.value, trim_chars.value), '') IS NOT NULL
       ) AS email_values,
       ARRAY(
-        SELECT DISTINCT lower(btrim(line.value))
+        SELECT DISTINCT lower(btrim(line.value, trim_chars.value))
         FROM regexp_split_to_table(COALESCE(row.address, ''), E'\n+') AS line(value)
-        WHERE NULLIF(btrim(line.value), '') IS NOT NULL
+        WHERE NULLIF(btrim(line.value, trim_chars.value), '') IS NOT NULL
       ) AS address_values,
       row.merge_exclude
     FROM public.customers AS row
+    CROSS JOIN trim_chars
     WHERE row.parent_id IS NULL
   ), name_values AS (
     SELECT id, name_value AS value FROM normalized WHERE name_value <> ''
@@ -456,7 +467,7 @@ AS $function$
     SELECT LEAST(a.id, b.id), GREATEST(a.id, b.id) FROM phone_values a JOIN phone_values b USING (value) WHERE a.id < b.id
     UNION
     SELECT LEAST(a.id, b.id), GREATEST(a.id, b.id) FROM mainland_values a JOIN mainland_values b USING (value) WHERE a.id < b.id
-  ), scored AS (
+  ), scored AS MATERIALIZED (
     SELECT pair.left_id, pair.right_id,
       (CASE WHEN left_row.name_value <> '' AND left_row.name_value = right_row.name_value THEN 1 ELSE 0 END)
       + (CASE WHEN left_row.phone_values && right_row.phone_values THEN 1 ELSE 0 END)
@@ -484,18 +495,27 @@ AS $function$
     SELECT left_id AS id FROM edges
     UNION
     SELECT right_id AS id FROM edges
-  ), reach(node, member) AS (
-    -- Only nodes which actually participate in a duplicate edge need graph
-    -- traversal. Starting recursion from every customer made a five-person
-    -- duplicate cluster quadratic in the entire customer book under RLS.
-    SELECT id, id FROM edge_nodes
+  ), bidirectional_edges AS MATERIALIZED (
+    SELECT left_id AS source_id, right_id AS target_id FROM edges
+    UNION ALL
+    SELECT right_id AS source_id, left_id AS target_id FROM edges
+  ), component_roots AS MATERIALIZED (
+    -- Because every edge is stored least-id first, the minimum id in each
+    -- component can never be a right endpoint. Seed from those local minima
+    -- instead of traversing the same dense component once per member.
+    SELECT node.id
+    FROM edge_nodes AS node
+    WHERE NOT EXISTS (SELECT 1 FROM edges WHERE edges.right_id = node.id)
+  ), reach(root, member) AS (
+    -- The two-way edge list keeps the recursive predicate as an equality join
+    -- instead of an OR nested loop on large duplicate sets.
+    SELECT id, id FROM component_roots
     UNION
-    SELECT reach.node,
-      CASE WHEN edges.left_id = reach.member THEN edges.right_id ELSE edges.left_id END
+    SELECT reach.root, bidirectional_edges.target_id
     FROM reach
-    JOIN edges ON edges.left_id = reach.member OR edges.right_id = reach.member
+    JOIN bidirectional_edges ON bidirectional_edges.source_id = reach.member
   ), components AS (
-    SELECT node, min(member::text) AS component FROM reach GROUP BY node
+    SELECT member AS node, min(root::text) AS component FROM reach GROUP BY member
   )
   SELECT
     (SELECT count(*) FROM normalized)

@@ -50,8 +50,10 @@ assert.match(migration, /replace\(replace\(replace\([\s\S]*ESCAPE E'\\\\'/,
   "order search must treat SQL LIKE percent and underscore as literals");
 const groupingSql = migration.slice(migration.indexOf("CREATE OR REPLACE FUNCTION public.bizflow_customer_group_count"), migration.indexOf("REVOKE ALL ON FUNCTION public.bizflow_edit_distance_one"));
 assert.match(groupingSql, /Starting from those three selective indexes/);
-assert.match(groupingSql, /normalized AS MATERIALIZED[\s\S]*edges AS MATERIALIZED[\s\S]*SELECT id, id FROM edge_nodes/,
-  "RLS input and qualifying edges must be materialized before traversing only real duplicate nodes");
+assert.match(groupingSql, /normalized AS MATERIALIZED[\s\S]*scored AS MATERIALIZED[\s\S]*edges AS MATERIALIZED[\s\S]*bidirectional_edges AS MATERIALIZED[\s\S]*JOIN bidirectional_edges ON bidirectional_edges\.source_id = reach\.member/,
+  "RLS input, scoring, qualifying edges, and bidirectional traversal must remain materialized and indexable");
+assert.doesNotMatch(groupingSql, /JOIN edges ON edges\.left_id = reach\.member OR edges\.right_id = reach\.member/,
+  "large duplicate clusters must not restore the recursive OR join");
 assert.doesNotMatch(groupingSql, /FROM address_values a JOIN address_values b|FROM email_values a JOIN email_values b/,
   "common addresses/emails must not materialise quadratic candidate pairs");
 assert.match(migration, /recent_feed[\s\S]*LIMIT 3[\s\S]*ORDER BY created_at DESC, id DESC LIMIT 4[\s\S]*ORDER BY grouped_stock DESC, id LIMIT 4[\s\S]*ORDER BY name LIMIT 12[\s\S]*ORDER BY expiry, invoice_id LIMIT 4/,

@@ -80,7 +80,7 @@ assert.match(customers, /captureState\(\) \{[\s\S]*search: state\.search,[\s\S]*
 assert.match(customers, /dispose\(\) \{[\s\S]*customersLiveRefresh = null;/,
   "customer page disposal must release its scoped refresh handle");
 
-assert.match(phaseMigration, /SECURITY INVOKER[\s\S]*bizflow_customer_group_count\(\)[\s\S]*WITH RECURSIVE normalized AS MATERIALIZED[\s\S]*edge_nodes/,
+assert.match(phaseMigration, /SECURITY INVOKER[\s\S]*bizflow_customer_group_count\(\)[\s\S]*WITH RECURSIVE trim_chars AS MATERIALIZED[\s\S]*normalized AS MATERIALIZED[\s\S]*edge_nodes/,
   "the Home customer KPI must preserve the virtual-group algorithm behind RLS");
 assert.match(provider, /const dashboardCustomerCount = grouped\.length;/,
   "the customer KPI must count every persisted customer group");
