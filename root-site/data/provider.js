@@ -4,6 +4,19 @@
 // 权限靠生产 RLS + RBAC 双层;provider 只用 anon session,前端门控不构成安全边界。
 
 import { getCurrentUser as getAuthCurrentUser, getSession } from "./auth.js";
+import {
+  getLiveOrderDetail,
+  getLiveOrderRevenue,
+  getLiveOrdersPage,
+  LIVE_ORDER_QUERY_MISS,
+  normalizeOrderQuery,
+  ORDER_PAGE_SIZE
+} from "./live-orders-query.js";
+import {
+  getLiveHomeDashboard,
+  getLiveUnreadState,
+  LIVE_HOME_QUERY_MISS
+} from "./live-home-query.js";
 import { getLiveSnapshot, LIVE_SNAPSHOT_MISS } from "./live-snapshots.js";
 import { loadProviderSnapshot, providerSnapshotRevision } from "./provider-snapshot-cache.js";
 import {
@@ -17,8 +30,17 @@ import {
 import { getReadState, rememberUnreadWatermarks, setReadStateAccount } from "./read-state.js";
 import { buildCustomerGroups } from "./customer-groups.js";
 import { customerSourceFromInvoices } from "./customer-source.js";
+import { compareHomeMetricSets } from "./home-metric-parity.js";
+import { resolveLiveQueryOrLegacy, resolveOrderPageRead } from "./live-query-fallback.js";
+import { invalidateLiveTables } from "./live-snapshot-utils.js";
 import { featureAiBatchForCompany } from "./team-feature-flags.js";
 import { rootSiteUrl } from "../components/root-site-url.js";
+import {
+  aggregateInventoryStock,
+  aggregateRevenue,
+  aggregateShippingCounts,
+  deriveShippingListView
+} from "../components/order-metrics.js";
 
 function warnProviderFallback(snapshot, fallback) {
   console.warn(`[provider] ${snapshot} invalid → fallback ${fallback}`);
@@ -184,6 +206,55 @@ export async function getHomeData() {
   return mergeSnapshot(await loadSnapshot());
 }
 
+export async function getHomeDashboardData(options = {}) {
+  return resolveLiveQueryOrLegacy({
+    readLive: () => getLiveHomeDashboard(options),
+    miss: LIVE_HOME_QUERY_MISS,
+    readLegacy: getLegacyHomeDashboardData,
+    onError: (error) => console.warn("[provider] Home dashboard RPC failed; falling back to the legacy data path", error)
+  });
+}
+
+export async function getLegacyHomeDashboardData() {
+  const [homeData, orderRows, inventoryProducts, warrantyData, customerData, currentUser] = await Promise.all([
+    getHomeData(), getHomeOrderMetricRows(), getInventoryMetricProducts(), getWarrantyData(),
+    getCustomersPageData(), getCurrentUser()
+  ]);
+  return {
+    data: {
+      ...homeData,
+      stats: homeData.stats.map((stat) => {
+        if (stat.key === "warranty") return { ...stat, value: warrantyData.items.length, alert: warrantyData.items.length > 0 };
+        if (stat.key === "customers") return { ...stat, value: customerData.dashboardCustomerCount };
+        return stat;
+      }),
+      warrantyItems: warrantyData.items.slice(0, 4).map((item) => ({
+        no: item.no, product: item.product, customer: item.customer, phone: item.phone, date: item.expiry
+      }))
+    },
+    revenueMetrics: orderRows
+      ? aggregateRevenue(orderRows, { aliases: [], customers: [], products: [] }, "thisMonth")
+      : null,
+    shippingMetrics: orderRows ? aggregateShippingCounts(orderRows) : null,
+    inventoryMetrics: inventoryProducts ? aggregateInventoryStock(inventoryProducts) : null,
+    currentUser
+  };
+}
+
+// Manual post-DDL acceptance hook. It deliberately performs the old expensive
+// calculation once, then the new RPC once, and is never called by a page mount.
+export async function compareHomeDashboardWithLegacy() {
+  await invalidateLiveTables(
+    "invoices", "customers", "products", "inventory_stock", "warranty_renewals",
+    "employee_tasks", "task_assignees", "employee_task_feedbacks", "employees",
+    "employee_companies", "departments", "employee_departments", "roles", "task_pending"
+  );
+  const legacy = await getLegacyHomeDashboardData();
+  const server = await getLiveHomeDashboard({ refresh: true });
+  if (server === LIVE_HOME_QUERY_MISS) throw new Error("Home parity check requires an authenticated live session");
+  return compareHomeMetricSets(legacy, server);
+}
+
 export async function getUnread() {
   const { unread } = await buildUnreadState();
   return unread;
@@ -282,6 +353,12 @@ async function buildUnreadState() {
 }
 
 async function computeUnreadState(read) {
+  try {
+    const live = await getLiveUnreadState();
+    if (live !== LIVE_HOME_QUERY_MISS) return live;
+  } catch (error) {
+    console.warn("[provider] Home unread RPC failed; falling back to the legacy data path", error);
+  }
   const [tasksSnapshot, orderMetricRows, homeSnapshot, inventorySnapshot, teamUpdateLogsSnapshot] = await Promise.all([
     loadTasksSnapshot(),
     getHomeOrderMetricRows(),
@@ -1383,7 +1460,7 @@ function isOrdersPageSnapshot(source) {
     Array.isArray(source.sources) && (source.__live === true || source.sources.length > 0) && source.sources.every((value) => typeof value === "string");
 }
 
-export async function getOrdersPageData() {
+export async function getLegacyOrdersPageData() {
   const ordersSnapshot = await loadOrdersSnapshot();
   if (isOrdersPageSnapshot(ordersSnapshot)) {
     return {
@@ -1402,8 +1479,98 @@ export async function getOrdersPageData() {
   return {
     orders: withOrderIds(source.orders),
     dateRange: { ...source.dateRange },
-    sources: source.sources.slice()
+    sources: source.sources.slice(),
+    unavailable: !homeOrdersValid
   };
+}
+
+export async function getOrderRevenueData(range = "12m", options = {}) {
+  return resolveLiveQueryOrLegacy({
+    readLive: () => getLiveOrderRevenue(range, options),
+    miss: LIVE_ORDER_QUERY_MISS,
+    readLegacy: async () => {
+      const [orders, support] = await Promise.all([getLegacyOrdersPageData(), getOrderRevenueSupportData()]);
+      return aggregateRevenue(orders.orders, support, range);
+    },
+    onError: (error) => console.warn("[provider] Revenue RPC failed; falling back to the legacy data path", error)
+  });
+}
+
+function offlineOrderMatches(order, query) {
+  const needle = String(query || "").trim().toLocaleLowerCase().replace(/[\s-]+/g, "");
+  if (!needle) return true;
+  return [
+    order.dcNumber, order.invoiceNumber, order.detail?.orderNo, order.customer, order.phone,
+    order.product, order.detail?.salesperson, order.detail?.carModel, order.detail?.note,
+    order.detail?.trackingNo, ...(order.detail?.items ?? []).map((item) => item?.name)
+  ].some((value) => String(value || "").toLocaleLowerCase().replace(/[\s-]+/g, "").includes(needle));
+}
+
+function offlineOrdersPage(source, query) {
+  const normalized = normalizeOrderQuery(query);
+  const filtered = source.orders.filter((order) => {
+    if (normalized.source !== "all" && order.channel !== normalized.source) return false;
+    const date = String(order.date || "").replaceAll("/", "-");
+    if (normalized.from && date < normalized.from) return false;
+    if (normalized.to && date > normalized.to) return false;
+    return offlineOrderMatches(order, normalized.search);
+  });
+  const shippingView = deriveShippingListView(filtered, normalized.shipping);
+  const sorted = shippingView.orders.slice().sort((left, right) => {
+    if (normalized.sort === "oldest") return left.date.localeCompare(right.date);
+    if (normalized.sort === "amount_desc" || normalized.sort === "amount_asc") {
+      const amount = Number(String(left.amount).replace(/[^\d.-]/g, "")) - Number(String(right.amount).replace(/[^\d.-]/g, ""));
+      return normalized.sort === "amount_desc" ? -amount : amount;
+    }
+    return right.date.localeCompare(left.date);
+  });
+  const start = (normalized.page - 1) * ORDER_PAGE_SIZE;
+  return {
+    ...source,
+    orders: sorted.slice(start, start + ORDER_PAGE_SIZE),
+    totalCount: sorted.length,
+    page: normalized.page,
+    pageSize: ORDER_PAGE_SIZE,
+    pages: Math.max(1, Math.ceil(sorted.length / ORDER_PAGE_SIZE)),
+    shippingCounts: shippingView.counts,
+    query: normalized
+  };
+}
+
+function unavailableOrdersPage(query) {
+  return offlineOrdersPage({
+    orders: [],
+    dateRange: { from: "", to: "" },
+    sources: [],
+    unavailable: true
+  }, query);
+}
+
+export async function getOrdersPageData(query, options = {}) {
+  return resolveOrderPageRead({
+    query,
+    // Compatibility contract for non-list consumers that still need every
+    // detailed order (pending deduction, customer printing, item-map audit).
+    readLegacy: getLegacyOrdersPageData,
+    readPage: async (nextQuery) => {
+      try {
+        const live = await getLiveOrdersPage(nextQuery, options);
+        if (live !== LIVE_ORDER_QUERY_MISS) return live;
+      } catch (error) {
+        console.warn("[provider] Order page RPC failed; falling back to the legacy data path", error);
+        try {
+          const legacy = await getLegacyOrdersPageData();
+          return legacy.unavailable ? unavailableOrdersPage(nextQuery) : offlineOrdersPage(legacy, nextQuery);
+        } catch (legacyError) {
+          console.warn("[provider] Legacy order fallback failed; showing the unavailable state", legacyError);
+          return unavailableOrdersPage(nextQuery);
+        }
+      }
+      // A signed read with neither RPC nor legacy data must never render the
+      // 40-row Figma sample as if it were real order data.
+      return unavailableOrdersPage(nextQuery);
+    }
+  });
 }
 
 const orderDetailSample = {
@@ -1461,7 +1628,11 @@ function cloneOrderDetail(detail) {
 }
 
 export async function getOrderDetailData(id) {
-  const ordersPage = await getOrdersPageData();
+  const live = await getLiveOrderDetail(id);
+  if (live !== LIVE_ORDER_QUERY_MISS) return live;
+  const ordersPage = {
+    orders: withOrderIds(ordersPageMock.orders)
+  };
   const order = ordersPage.orders.find((row) => row.id === id);
   if (!order) return null;
   const detailValid = isValidOrderDetail(order?.detail);

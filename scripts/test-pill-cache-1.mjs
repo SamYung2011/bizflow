@@ -28,12 +28,12 @@ assert.equal(before.counts.all, before.orders.length);
 assert.equal(after.counts.all, after.orders.length);
 assert.equal(after.counts.all, before.counts.all + 1,
   "one inserted order must increment the all-status pill and visible all-list in the same derivation");
-assert.match(ordersSource, /function shippingListView\(\) \{\s*return deriveShippingListView\(ordersBeforeShipping\(\), state\.shipping\);\s*\}[\s\S]*?const view = shippingListView\(\);[\s\S]*?const filtered = view\.orders;[\s\S]*?renderShippingFilters\(helpers, view\.counts\)/,
-  "one render pass must feed status pills and rows from the same shipping-list view");
-assert.doesNotMatch(ordersSource, /ordersBeforeShipping\(\)\.filter\(\(order\) => matchesShippingFilter/,
-  "orders.js must not retain a second shipping-filter derivation outside the shared view");
-assert.match(ordersSource, /const nextData = await getOrdersPageData\(\);[\s\S]*?data = nextData;[\s\S]*?rerenderOrdersPage\(\);/,
-  "orders snapshot refresh must replace the data source before the full-page rerender");
+assert.match(ordersSource, /const counts = data\?\.shippingCounts[\s\S]*const rows = currentPageOrders\(\)[\s\S]*renderShippingFilters\(helpers, counts\)/,
+  "the server response must feed status pills and the current page atomically");
+assert.doesNotMatch(ordersSource, /function shippingListView|function ordersBeforeShipping/,
+  "orders.js must not filter a downloaded whole table after server pagination");
+assert.match(ordersSource, /const nextData = await refreshCurrentOrderQuery\(\{ soft: true, source: "realtime", notify: false \}\)[\s\S]*?data = nextData;[\s\S]*?rerenderOrderSearchResults\(\);/,
+  "realtime must replace only the current query before the partial list rerender");
 assert.match(snapshotsSource, /async function buildOrdersSnapshot\(\)[\s\S]*?const source = await orderSourceData\(\);[\s\S]*?const orders = source\.invoices\.map/,
   "orders snapshot rows and counts must retain one deduped invoice source");
 

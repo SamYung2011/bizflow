@@ -121,10 +121,9 @@ const dict = {
   }
 };
 
-import { getCustomersPageData, getHomeData, getCurrentUser, getHomeOrderMetricRows, getInventoryMetricProducts, getUnread, getUnreadWatermarks, getWarrantyData } from "../data/provider.js";
+import { getHomeDashboardData, getUnread, getUnreadWatermarks } from "../data/provider.js";
 import { markRead } from "../data/read-state.js";
 import { renderBarChart } from "../components/bar-chart.js";
-import { aggregateInventoryStock, aggregateRevenue, aggregateShippingCounts } from "../components/order-metrics.js";
 import { navigationPresetKeys, setNavigationPreset } from "../components/navigation-presets.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { availableQuickCreateActions } from "../components/quick-create.js";
@@ -146,6 +145,8 @@ let homeLiveRefresh = null;
 let rebindHomeTeamActivity = null;
 
 const HOME_TASK_FILTERS = ["inProgress", "completed", "abandoned", "all"];
+// The live dashboard does not read these on its healthy RPC path, but keeping
+// the dependencies lets tail-0819 retry completion wake the legacy fallback.
 const HOME_LIVE_SNAPSHOTS = [
   "home.json", "tasks.json", "home-order-metrics.json", "inventory.json", "warranty.json", "customers.json"
 ];
@@ -159,40 +160,16 @@ const HOME_LIVE_TABLES = [
 
 const STAT_TONE_CLASS = { "": "", blue: "board-card--blue", green: "board-card--green", yellow: "board-card--yellow" };
 
-async function loadHomeViewState() {
-  const [homeData, orderMetricRows, inventoryMetricProducts, warrantyData, customerData, currentUser, unread, unreadWatermarks] = await Promise.all([
-    getHomeData(),
-    getHomeOrderMetricRows(),
-    getInventoryMetricProducts(),
-    getWarrantyData(),
-    getCustomersPageData(),
-    getCurrentUser(),
+async function loadHomeViewState({ refresh = false } = {}) {
+  const [dashboard, unread, unreadWatermarks] = await Promise.all([
+    getHomeDashboardData({ refresh }),
     getUnread(),
     getUnreadWatermarks()
   ]);
+  const homeData = dashboard.data;
   return {
-    data: {
-      ...homeData,
-      unread: { ...(homeData.unread ?? {}), ...unread },
-      stats: homeData.stats.map((stat) => {
-        if (stat.key === "warranty") return { ...stat, value: warrantyData.items.length, alert: warrantyData.items.length > 0 };
-        if (stat.key === "customers") return { ...stat, value: customerData.dashboardCustomerCount };
-        return stat;
-      }),
-      warrantyItems: warrantyData.items.slice(0, 4).map((item) => ({
-        no: item.no,
-        product: item.product,
-        customer: item.customer,
-        phone: item.phone,
-        date: item.expiry
-      }))
-    },
-    revenueMetrics: orderMetricRows
-      ? aggregateRevenue(orderMetricRows, { aliases: [], customers: [], products: [] }, "thisMonth")
-      : null,
-    shippingMetrics: orderMetricRows ? aggregateShippingCounts(orderMetricRows) : null,
-    inventoryMetrics: inventoryMetricProducts ? aggregateInventoryStock(inventoryMetricProducts) : null,
-    currentUser,
+    ...dashboard,
+    data: { ...homeData, unread: { ...(homeData.unread ?? {}), ...unread } },
     unread,
     unreadWatermarks
   };
@@ -411,7 +388,7 @@ export function renderHome({ icon, escapeHtml, lang }) {
       <section class="home-card home-card--members" data-home-members tabindex="0" role="link">
         <div class="home-card__head">
           <h2 class="home-card__title">${e(th("home.members"))}</h2>
-          <span class="home-card__count">${data.members.length}</span>
+          <span class="home-card__count">${data.membersStats?.all ?? data.members.length}</span>
         </div>
         <div class="home-members-grid">${data.members.slice(0, 12).map(memberCell).join("")}</div>
       </section>
@@ -576,7 +553,7 @@ export async function mountPage({ scope, signal, historyState = null }) {
         tables: HOME_LIVE_TABLES,
         isBlocked: isHomeRefreshBlocked,
         async refresh({ defer, isCurrent }) {
-          const refreshedState = await loadHomeViewState();
+          const refreshedState = await loadHomeViewState({ refresh: true });
           if (!isCurrent()) return;
           if (isHomeRefreshBlocked()) {
             defer();

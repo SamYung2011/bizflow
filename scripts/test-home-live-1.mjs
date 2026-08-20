@@ -3,24 +3,19 @@ import { readFile } from "node:fs/promises";
 import { getCustomersPageData } from "../root-site/data/provider.js";
 import { updateProviderSnapshotMemo } from "../root-site/data/provider-snapshot-cache.js";
 
-const [home, customers, provider, snapshots] = await Promise.all([
+const [home, customers, provider, snapshots, phaseMigration] = await Promise.all([
   readFile(new URL("../root-site/bizflow/home.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/bizflow/customers.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/provider.js", import.meta.url), "utf8"),
-  readFile(new URL("../root-site/data/live-snapshots.js", import.meta.url), "utf8")
+  readFile(new URL("../root-site/data/live-snapshots.js", import.meta.url), "utf8"),
+  readFile(new URL("../migrations/102_bizflow_data_phase1.sql", import.meta.url), "utf8")
 ]);
 
 assert.match(home, /import \{ attachLiveSnapshotRefresh \} from "\.\.\/data\/live-snapshot-listener\.js"/);
-for (const snapshot of [
-  "home.json",
-  "tasks.json",
-  "home-order-metrics.json",
-  "inventory.json",
-  "warranty.json",
-  "customers.json"
-]) {
-  assert.match(home, new RegExp(`HOME_LIVE_SNAPSHOTS[\\s\\S]*"${snapshot.replace(".", "\\.")}"`), `${snapshot} must refresh Home`);
-}
+assert.match(home, /const HOME_LIVE_SNAPSHOTS = \[[\s\S]*"home\.json"[\s\S]*"customers\.json"[\s\S]*\];/,
+  "the live dashboard must retain legacy snapshot retry wakeups for its RPC fallback path");
+assert.match(home, /getHomeDashboardData\(\{ refresh \}\)/,
+  "Home must refresh the bounded server dashboard query");
 for (const table of [
   "invoices",
   "employees",
@@ -39,7 +34,7 @@ const attachment = home.slice(
   home.indexOf("if (typeof MutationObserver", home.indexOf("homeLiveRefresh = attachLiveSnapshotRefresh"))
 );
 assert.match(attachment, /scope,[\s\S]*snapshots: HOME_LIVE_SNAPSHOTS,[\s\S]*tables: HOME_LIVE_TABLES,[\s\S]*isBlocked: isHomeRefreshBlocked/);
-assert.match(attachment, /const refreshedState = await loadHomeViewState\(\)[\s\S]*if \(!isCurrent\(\)\) return;[\s\S]*if \(isHomeRefreshBlocked\(\)\) \{[\s\S]*defer\(\);[\s\S]*return;[\s\S]*applyHomeViewState\(refreshedState\)[\s\S]*rerenderHome\(\)/,
+assert.match(attachment, /const refreshedState = await loadHomeViewState\(\{ refresh: true \}\)[\s\S]*if \(!isCurrent\(\)\) return;[\s\S]*if \(isHomeRefreshBlocked\(\)\) \{[\s\S]*defer\(\);[\s\S]*return;[\s\S]*applyHomeViewState\(refreshedState\)[\s\S]*rerenderHome\(\)/,
   "Home must refetch, defer if UI became busy, then atomically rerender while the page is current");
 assert.match(attachment, /rerenderHome\(\);[\s\S]*window\.dispatchEvent\(new CustomEvent\("tp:unread-change"\)\)/,
   "Home refresh must also resync the shell unread indicators");
@@ -55,7 +50,7 @@ assert.ok((home.match(/flushHomeLiveRefresh\(\);/g) ?? []).length >= 4,
 
 assert.match(home, /function rerenderHome[\s\S]*page\.outerHTML = renderHome\(homeHelpers\);[\s\S]*rebindHomeTeamActivity\?\.\(\)/,
   "rerendered team activity must retain its visible-read observer");
-assert.match(home, /data-home-members[\s\S]*data\.members\.length[\s\S]*data\.members\.slice/,
+assert.match(home, /data-home-members[\s\S]*data\.membersStats\?\.all \?\? data\.members\.length[\s\S]*data\.members\.slice/,
   "the team widget must render from refreshed Home members");
 assert.match(home, /data\.orders\.map\(orderRow\)/,
   "the order card must render from refreshed Home orders");
@@ -85,8 +80,8 @@ assert.match(customers, /captureState\(\) \{[\s\S]*search: state\.search,[\s\S]*
 assert.match(customers, /dispose\(\) \{[\s\S]*customersLiveRefresh = null;/,
   "customer page disposal must release its scoped refresh handle");
 
-assert.match(home, /stat\.key === "customers"[\s\S]*value: customerData\.dashboardCustomerCount/,
-  "Home must override the customer KPI from the refreshed customer provider");
+assert.match(phaseMigration, /SECURITY INVOKER[\s\S]*bizflow_customer_group_count\(\)[\s\S]*WITH RECURSIVE trim_chars AS MATERIALIZED[\s\S]*normalized AS MATERIALIZED[\s\S]*edge_nodes/,
+  "the Home customer KPI must preserve the virtual-group algorithm behind RLS");
 assert.match(provider, /const dashboardCustomerCount = grouped\.length;/,
   "the customer KPI must count every persisted customer group");
 assert.doesNotMatch(provider.slice(provider.indexOf("export async function getCustomersPageData"), provider.indexOf("export async function getCustomerMergeCandidates")),
