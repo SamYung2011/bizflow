@@ -6,6 +6,7 @@
 import { getCurrentUser as getAuthCurrentUser, getSession } from "./auth.js";
 import {
   getLiveOrderDetail,
+  getLiveOrderRevenue,
   getLiveOrdersPage,
   LIVE_ORDER_QUERY_MISS,
   normalizeOrderQuery,
@@ -30,6 +31,7 @@ import { getReadState, rememberUnreadWatermarks, setReadStateAccount } from "./r
 import { buildCustomerGroups } from "./customer-groups.js";
 import { customerSourceFromInvoices } from "./customer-source.js";
 import { compareHomeMetricSets } from "./home-metric-parity.js";
+import { resolveLiveQueryOrLegacy, resolveOrderPageRead } from "./live-query-fallback.js";
 import { invalidateLiveTables } from "./live-snapshot-utils.js";
 import { featureAiBatchForCompany } from "./team-feature-flags.js";
 import { rootSiteUrl } from "../components/root-site-url.js";
@@ -204,10 +206,13 @@ export async function getHomeData() {
   return mergeSnapshot(await loadSnapshot());
 }
 
-export async function getHomeDashboardData() {
-  const live = await getLiveHomeDashboard();
-  if (live !== LIVE_HOME_QUERY_MISS) return live;
-  return getLegacyHomeDashboardData();
+export async function getHomeDashboardData(options = {}) {
+  return resolveLiveQueryOrLegacy({
+    readLive: () => getLiveHomeDashboard(options),
+    miss: LIVE_HOME_QUERY_MISS,
+    readLegacy: getLegacyHomeDashboardData,
+    onError: (error) => console.warn("[provider] Home dashboard RPC failed; falling back to the legacy data path", error)
+  });
 }
 
 export async function getLegacyHomeDashboardData() {
@@ -245,7 +250,7 @@ export async function compareHomeDashboardWithLegacy() {
     "employee_companies", "departments", "employee_departments", "roles", "task_pending"
   );
   const legacy = await getLegacyHomeDashboardData();
-  const server = await getLiveHomeDashboard();
+  const server = await getLiveHomeDashboard({ refresh: true });
   if (server === LIVE_HOME_QUERY_MISS) throw new Error("Home parity check requires an authenticated live session");
   return compareHomeMetricSets(legacy, server);
 }
@@ -348,8 +353,12 @@ async function buildUnreadState() {
 }
 
 async function computeUnreadState(read) {
-  const live = await getLiveUnreadState();
-  if (live !== LIVE_HOME_QUERY_MISS) return live;
+  try {
+    const live = await getLiveUnreadState();
+    if (live !== LIVE_HOME_QUERY_MISS) return live;
+  } catch (error) {
+    console.warn("[provider] Home unread RPC failed; falling back to the legacy data path", error);
+  }
   const [tasksSnapshot, orderMetricRows, homeSnapshot, inventorySnapshot, teamUpdateLogsSnapshot] = await Promise.all([
     loadTasksSnapshot(),
     getHomeOrderMetricRows(),
@@ -1474,6 +1483,18 @@ export async function getLegacyOrdersPageData() {
   };
 }
 
+export async function getOrderRevenueData(range = "12m", options = {}) {
+  return resolveLiveQueryOrLegacy({
+    readLive: () => getLiveOrderRevenue(range, options),
+    miss: LIVE_ORDER_QUERY_MISS,
+    readLegacy: async () => {
+      const [orders, support] = await Promise.all([getLegacyOrdersPageData(), getOrderRevenueSupportData()]);
+      return aggregateRevenue(orders.orders, support, range);
+    },
+    onError: (error) => console.warn("[provider] Revenue RPC failed; falling back to the legacy data path", error)
+  });
+}
+
 function offlineOrderMatches(order, query) {
   const needle = String(query || "").trim().toLocaleLowerCase().replace(/[\s-]+/g, "");
   if (!needle) return true;
@@ -1515,16 +1536,24 @@ function offlineOrdersPage(source, query) {
   };
 }
 
-export async function getOrdersPageData(query = {}, options = {}) {
-  const live = await getLiveOrdersPage(query, options);
-  if (live !== LIVE_ORDER_QUERY_MISS) return live;
-  // Static/no-session mode is a bounded demo too. Do not download the archived
-  // multi-megabyte orders snapshot just to render a 50-row sample page.
-  return offlineOrdersPage({
-    orders: withOrderIds(ordersPageMock.orders),
-    dateRange: { ...ordersPageMock.dateRange },
-    sources: ordersPageMock.sources.slice()
-  }, query);
+export async function getOrdersPageData(query, options = {}) {
+  return resolveOrderPageRead({
+    query,
+    // Compatibility contract for non-list consumers that still need every
+    // detailed order (pending deduction, customer printing, item-map audit).
+    readLegacy: getLegacyOrdersPageData,
+    readPage: async (nextQuery) => {
+      const live = await getLiveOrdersPage(nextQuery, options);
+      if (live !== LIVE_ORDER_QUERY_MISS) return live;
+      // Static/no-session mode is a bounded demo too. Do not download the
+      // multi-megabyte snapshot just to render a 50-row sample page.
+      return offlineOrdersPage({
+        orders: withOrderIds(ordersPageMock.orders),
+        dateRange: { ...ordersPageMock.dateRange },
+        sources: ordersPageMock.sources.slice()
+      }, nextQuery);
+    }
+  });
 }
 
 const orderDetailSample = {

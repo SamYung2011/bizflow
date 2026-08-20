@@ -1,8 +1,5 @@
-import { getOrderRevenueSupportData } from "../data/provider.js";
+import { getOrderRevenueData } from "../data/provider.js";
 import { renderBarChart } from "../components/bar-chart.js";
-import { aggregateRevenue } from "../components/order-metrics.js";
-
-export { aggregateRevenue } from "../components/order-metrics.js";
 
 const ranges = ["thisMonth", "lastMonth", "3m", "12m", "year", "all"];
 const pieColors = [
@@ -73,7 +70,7 @@ const copy = {
   }
 };
 
-const state = { loaded: false, loading: false, orders: [], support: { aliases: [], customers: [], products: [] }, range: "12m" };
+const state = { loaded: false, loading: false, data: null, range: "12m" };
 let rerender = () => {};
 let dataLoadVersion = 0;
 
@@ -123,21 +120,31 @@ function renderRanking(items, helpers, valueKey, tone) {
   }).join("")}</div>`;
 }
 
-export async function ensureRevenueData(orders, { scope = null, signal = scope?.signal } = {}) {
-  state.orders = orders;
-  if (state.loaded || state.loading) return;
+export async function ensureRevenueData({ scope = null, signal = scope?.signal, refresh = false } = {}) {
+  if ((state.loaded && !refresh) || state.loading) return;
   const version = dataLoadVersion;
+  const range = state.range;
   state.loading = true;
   rerender();
-  state.support = await getOrderRevenueSupportData();
-  if (version !== dataLoadVersion || signal?.aborted || (scope && !scope.isCurrent())) return;
-  state.loading = false;
-  state.loaded = true;
+  try {
+    const data = await getOrderRevenueData(range, { refresh });
+    if (version !== dataLoadVersion || range !== state.range || signal?.aborted || (scope && !scope.isCurrent())) return;
+    state.data = data;
+    state.loaded = true;
+  } finally {
+    if (version === dataLoadVersion && range === state.range) {
+      state.loading = false;
+      if (!scope || scope.isCurrent()) rerender();
+    }
+  }
 }
 
 export function renderRevenue(helpers) {
   const { escapeHtml, lang } = helpers;
-  const data = aggregateRevenue(state.orders, state.support, state.range);
+  const data = state.data ?? {
+    totalRevenue: 0, paidCount: 0, average: 0, unpaidCount: 0, unpaidAmount: 0,
+    months: [], products: [], customers: [], singleMonth: state.range === "thisMonth" || state.range === "lastMonth"
+  };
   const productTop = data.products.slice(0, 10);
   // 权限由 orders.js 的 tab 与视图双重门控，该渲染器不单独暴露入口。
   return `<section class="orders-domain-panel revenue-page" data-revenue-page data-range="${state.range}">
@@ -177,8 +184,12 @@ export function attachRevenueBehaviors({ rerender: nextRerender, scope }) {
     if (!button) return;
     const range = button.getAttribute("data-revenue-range");
     if (!ranges.includes(range)) return;
+    dataLoadVersion += 1;
     state.range = range;
-    rerender();
+    state.loaded = false;
+    state.loading = false;
+    state.data = null;
+    void ensureRevenueData({ scope });
   });
 }
 
@@ -195,7 +206,6 @@ export function disposeRevenueState() {
   dataLoadVersion += 1;
   state.loaded = false;
   state.loading = false;
-  state.orders = [];
-  state.support = { aliases: [], customers: [], products: [] };
+  state.data = null;
   rerender = () => {};
 }

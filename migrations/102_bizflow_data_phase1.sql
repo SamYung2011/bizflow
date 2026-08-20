@@ -5,17 +5,6 @@
 
 BEGIN;
 
-CREATE INDEX IF NOT EXISTS invoices_order_page_created_idx
-  ON public.invoices (created_at DESC, id);
-CREATE INDEX IF NOT EXISTS invoices_order_page_date_idx
-  ON public.invoices (date DESC, id);
-CREATE INDEX IF NOT EXISTS invoices_order_page_customer_idx
-  ON public.invoices (customer_id);
-CREATE INDEX IF NOT EXISTS invoices_order_page_salesperson_idx
-  ON public.invoices (salesperson_id);
-CREATE INDEX IF NOT EXISTS invoices_order_page_shipping_idx
-  ON public.invoices (shipping_status, date DESC, shipped_at);
-
 CREATE OR REPLACE VIEW public.bizflow_order_list
 WITH (security_invoker = true)
 AS
@@ -144,7 +133,10 @@ AS $function$
       AND (p_date_to IS NULL OR row.order_date <= p_date_to)
       AND (
         NULLIF(btrim(p_search), '') IS NULL
-        OR row.search_text LIKE '%' || lower(regexp_replace(btrim(p_search), '[[:space:]-]+', '', 'g')) || '%'
+        OR row.search_text LIKE '%' || replace(replace(replace(
+          lower(regexp_replace(btrim(p_search), '[[:space:]-]+', '', 'g')),
+          E'\\', E'\\\\'
+        ), '%', E'\\%'), '_', E'\\_') || '%' ESCAPE E'\\'
       )
   ), filtered AS (
     SELECT base.*
@@ -190,6 +182,149 @@ $function$;
 
 REVOKE ALL ON FUNCTION public.bizflow_order_page(text, text, text, date, date, text, integer, integer) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.bizflow_order_page(text, text, text, date, date, text, integer, integer) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.bizflow_order_revenue(p_range text DEFAULT '12m')
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = ''
+AS $function$
+  WITH
+  clock AS (
+    SELECT (now() AT TIME ZONE 'Asia/Hong_Kong')::date AS today,
+           date_trunc('month', now() AT TIME ZONE 'Asia/Hong_Kong')::date AS month_start
+  ),
+  bounds AS (
+    SELECT
+      CASE p_range
+        WHEN 'all' THEN DATE '2000-01-01'
+        WHEN 'year' THEN make_date(extract(year FROM today)::integer, 1, 1)
+        WHEN 'thisMonth' THEN month_start
+        WHEN 'lastMonth' THEN (month_start - interval '1 month')::date
+        WHEN '3m' THEN (today - interval '3 months')::date
+        ELSE (today - interval '12 months')::date
+      END AS date_from,
+      CASE p_range
+        WHEN 'thisMonth' THEN (month_start + interval '1 month')::date
+        WHEN 'lastMonth' THEN month_start
+        ELSE today + 1
+      END AS date_to
+    FROM clock
+  ),
+  orders AS (
+    SELECT row.*
+    FROM public.bizflow_order_list AS row
+    CROSS JOIN bounds
+    WHERE row.order_date >= bounds.date_from AND row.order_date < bounds.date_to
+  ),
+  totals AS (
+    SELECT
+      COALESCE(sum(total) FILTER (WHERE status = 'Paid'), 0) AS total_revenue,
+      count(*) FILTER (WHERE status = 'Paid') AS paid_count,
+      count(*) FILTER (WHERE COALESCE(status, '') <> 'Paid') AS unpaid_count,
+      COALESCE(sum(total) FILTER (WHERE COALESCE(status, '') <> 'Paid'), 0) AS unpaid_amount
+    FROM orders
+  ),
+  month_rows AS (
+    SELECT to_char(order_date, 'YYYY-MM') AS label, sum(total) AS value
+    FROM orders
+    WHERE status = 'Paid'
+    GROUP BY to_char(order_date, 'YYYY-MM')
+  ),
+  line_items AS (
+    SELECT
+      row.id AS order_id,
+      line.position,
+      COALESCE(line.value->>'name', '') AS name,
+      COALESCE(NULLIF(line.value->>'qty', '')::numeric, 1) *
+        COALESCE(NULLIF(line.value->>'price', '')::numeric, 0) AS amount
+    FROM orders AS row
+    JOIN public.invoices AS invoice ON invoice.id = row.id
+    CROSS JOIN LATERAL jsonb_array_elements(COALESCE(invoice.items, '[]'::jsonb))
+      WITH ORDINALITY AS line(value, position)
+    WHERE row.status = 'Paid'
+      AND COALESCE(line.value->>'name', '') <> ''
+      AND COALESCE(line.value->>'name', '') !~* '運費|郵費|shipping|freight|押金|deposit|優惠|折扣|discount|手續費|service'
+  ),
+  aliased_lines AS (
+    SELECT line.*,
+           alias.skip AS alias_skip,
+           COALESCE(alias.products, '[]'::jsonb) AS alias_products
+    FROM line_items AS line
+    LEFT JOIN public.line_item_aliases AS alias
+      ON lower(btrim(alias.alias_name)) = lower(btrim(line.name))
+  ),
+  mapped_sales AS (
+    SELECT
+      COALESCE(NULLIF(product.name, ''), line.name) AS name,
+      line.amount * mapping.quantity /
+        NULLIF(sum(mapping.quantity) OVER (PARTITION BY line.order_id, line.position), 0) AS amount
+    FROM aliased_lines AS line
+    CROSS JOIN LATERAL (
+      SELECT mapping.value,
+             COALESCE(NULLIF(mapping.value->>'qty', '')::numeric, 1) AS quantity
+      FROM jsonb_array_elements(line.alias_products) AS mapping(value)
+    ) AS mapping
+    LEFT JOIN public.products AS product ON product.id::text = mapping.value->>'product_id'
+    WHERE line.alias_skip IS NOT TRUE
+  ),
+  direct_sales AS (
+    SELECT COALESCE(NULLIF(product.name, ''), regexp_replace(line.name, '\s*-\s*Default Title\s*$', '', 'i')) AS name,
+           line.amount
+    FROM aliased_lines AS line
+    LEFT JOIN LATERAL (
+      SELECT candidate.name
+      FROM public.products AS candidate
+      WHERE lower(btrim(candidate.name)) = lower(btrim(regexp_replace(line.name, '\s*-\s*Default Title\s*$', '', 'i')))
+      ORDER BY candidate.id
+      LIMIT 1
+    ) AS product ON true
+    WHERE line.alias_skip IS NOT TRUE AND jsonb_array_length(line.alias_products) = 0
+  ),
+  product_totals AS (
+    SELECT name, sum(amount) AS amount
+    FROM (SELECT * FROM mapped_sales UNION ALL SELECT * FROM direct_sales) AS sale
+    WHERE NULLIF(btrim(name), '') IS NOT NULL
+    GROUP BY name
+    ORDER BY sum(amount) DESC, name
+    LIMIT 100
+  ),
+  customer_totals AS (
+    SELECT COALESCE(row.customer_id::text, 'order:' || lower(btrim(row.customer_name))) AS id,
+           COALESCE(NULLIF(row.customer_name, ''), '—') AS name,
+           sum(row.total) AS total_amount
+    FROM orders AS row
+    GROUP BY COALESCE(row.customer_id::text, 'order:' || lower(btrim(row.customer_name))),
+             COALESCE(NULLIF(row.customer_name, ''), '—')
+    ORDER BY sum(row.total) DESC, name
+    LIMIT 10
+  )
+  SELECT jsonb_build_object(
+    'total_revenue', totals.total_revenue,
+    'paid_count', totals.paid_count,
+    'average', CASE WHEN totals.paid_count > 0 THEN round(totals.total_revenue / totals.paid_count) ELSE 0 END,
+    'unpaid_count', totals.unpaid_count,
+    'unpaid_amount', totals.unpaid_amount,
+    'months', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object('label', label, 'value', value) ORDER BY label)
+      FROM month_rows
+    ), '[]'::jsonb),
+    'products', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object('name', name, 'amount', amount) ORDER BY amount DESC, name)
+      FROM product_totals
+    ), '[]'::jsonb),
+    'customers', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object('id', id, 'name', name, 'totalAmount', total_amount) ORDER BY total_amount DESC, name)
+      FROM customer_totals
+    ), '[]'::jsonb),
+    'single_month', p_range IN ('thisMonth', 'lastMonth')
+  )
+  FROM totals;
+$function$;
+
+REVOKE ALL ON FUNCTION public.bizflow_order_revenue(text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.bizflow_order_revenue(text) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.bizflow_edit_distance_one(left_value text, right_value text)
 RETURNS boolean
@@ -241,48 +376,74 @@ SET search_path = ''
 AS $function$
   WITH RECURSIVE independent AS (
     SELECT c.* FROM public.customers AS c WHERE c.parent_id IS NULL
+  ), normalized AS (
+    SELECT
+      row.id,
+      lower(btrim(COALESCE(row.name, ''))) AS name_value,
+      ARRAY(
+        SELECT DISTINCT lower(btrim(line.value))
+        FROM regexp_split_to_table(COALESCE(row.phone, ''), E'\n+') AS line(value)
+        WHERE NULLIF(btrim(line.value), '') IS NOT NULL
+      ) AS phone_values,
+      ARRAY(
+        SELECT DISTINCT lower(btrim(line.value))
+        FROM regexp_split_to_table(COALESCE(row.phone_mainland, ''), E'\n+') AS line(value)
+        WHERE NULLIF(btrim(line.value), '') IS NOT NULL
+      ) AS mainland_values,
+      ARRAY(
+        SELECT DISTINCT lower(btrim(line.value))
+        FROM regexp_split_to_table(COALESCE(row.email, ''), E'\n+') AS line(value)
+        WHERE NULLIF(btrim(line.value), '') IS NOT NULL
+      ) AS email_values,
+      ARRAY(
+        SELECT DISTINCT lower(btrim(line.value))
+        FROM regexp_split_to_table(COALESCE(row.address, ''), E'\n+') AS line(value)
+        WHERE NULLIF(btrim(line.value), '') IS NOT NULL
+      ) AS address_values,
+      row.merge_exclude
+    FROM independent AS row
   ), name_values AS (
-    SELECT id, lower(btrim(name)) AS value FROM independent WHERE NULLIF(btrim(name), '') IS NOT NULL
+    SELECT id, name_value AS value FROM normalized WHERE name_value <> ''
   ), phone_values AS (
-    SELECT id, lower(btrim(lines.value)) AS value FROM independent, LATERAL regexp_split_to_table(COALESCE(phone, ''), E'\n+') AS lines(value) WHERE NULLIF(btrim(lines.value), '') IS NOT NULL
+    SELECT row.id, line.value FROM normalized AS row CROSS JOIN LATERAL unnest(row.phone_values) AS line(value)
   ), mainland_values AS (
-    SELECT id, lower(btrim(lines.value)) AS value FROM independent, LATERAL regexp_split_to_table(COALESCE(phone_mainland, ''), E'\n+') AS lines(value) WHERE NULLIF(btrim(lines.value), '') IS NOT NULL
-  ), email_values AS (
-    SELECT id, lower(btrim(lines.value)) AS value FROM independent, LATERAL regexp_split_to_table(COALESCE(email, ''), E'\n+') AS lines(value) WHERE NULLIF(btrim(lines.value), '') IS NOT NULL
-  ), address_values AS (
-    SELECT id, lower(btrim(lines.value)) AS value FROM independent, LATERAL regexp_split_to_table(COALESCE(address, ''), E'\n+') AS lines(value) WHERE NULLIF(btrim(lines.value), '') IS NOT NULL
+    SELECT row.id, line.value FROM normalized AS row CROSS JOIN LATERAL unnest(row.mainland_values) AS line(value)
   ), candidates AS (
+    -- A valid edge needs three of five fields. Email/address are the only two
+    -- fuzzy fields, so every valid edge must also share an exact name/phone field.
+    -- Starting from those three selective indexes avoids materialising a
+    -- quadratic pair set for common addresses such as the shop address.
     SELECT LEAST(a.id, b.id) AS left_id, GREATEST(a.id, b.id) AS right_id FROM name_values a JOIN name_values b USING (value) WHERE a.id < b.id
     UNION
     SELECT LEAST(a.id, b.id), GREATEST(a.id, b.id) FROM phone_values a JOIN phone_values b USING (value) WHERE a.id < b.id
     UNION
     SELECT LEAST(a.id, b.id), GREATEST(a.id, b.id) FROM mainland_values a JOIN mainland_values b USING (value) WHERE a.id < b.id
-    UNION
-    SELECT LEAST(a.id, b.id), GREATEST(a.id, b.id) FROM email_values a JOIN email_values b USING (value) WHERE a.id < b.id
-    UNION
-    SELECT LEAST(a.id, b.id), GREATEST(a.id, b.id) FROM address_values a JOIN address_values b USING (value) WHERE a.id < b.id
   ), scored AS (
     SELECT pair.left_id, pair.right_id,
-      (CASE WHEN NULLIF(lower(btrim(left_row.name)), '') IS NOT NULL AND lower(btrim(left_row.name)) = lower(btrim(right_row.name)) THEN 1 ELSE 0 END)
-      + (CASE WHEN EXISTS (SELECT 1 FROM phone_values a JOIN phone_values b USING (value) WHERE a.id = pair.left_id AND b.id = pair.right_id) THEN 1 ELSE 0 END)
-      + (CASE WHEN EXISTS (SELECT 1 FROM mainland_values a JOIN mainland_values b USING (value) WHERE a.id = pair.left_id AND b.id = pair.right_id) THEN 1 ELSE 0 END)
+      (CASE WHEN left_row.name_value <> '' AND left_row.name_value = right_row.name_value THEN 1 ELSE 0 END)
+      + (CASE WHEN left_row.phone_values && right_row.phone_values THEN 1 ELSE 0 END)
+      + (CASE WHEN left_row.mainland_values && right_row.mainland_values THEN 1 ELSE 0 END)
       + (CASE WHEN EXISTS (
-          SELECT 1 FROM email_values a CROSS JOIN email_values b
-          WHERE a.id = pair.left_id AND b.id = pair.right_id AND public.bizflow_edit_distance_one(a.value, b.value)
+          SELECT 1
+          FROM unnest(left_row.email_values) AS a(value)
+          CROSS JOIN unnest(right_row.email_values) AS b(value)
+          WHERE public.bizflow_edit_distance_one(a.value, b.value)
         ) THEN 1 ELSE 0 END)
       + (CASE WHEN EXISTS (
-          SELECT 1 FROM address_values a CROSS JOIN address_values b
-          WHERE a.id = pair.left_id AND b.id = pair.right_id AND public.bizflow_edit_distance_one(a.value, b.value)
+          SELECT 1
+          FROM unnest(left_row.address_values) AS a(value)
+          CROSS JOIN unnest(right_row.address_values) AS b(value)
+          WHERE public.bizflow_edit_distance_one(a.value, b.value)
         ) THEN 1 ELSE 0 END) AS matches,
       COALESCE(to_jsonb(left_row.merge_exclude), '[]'::jsonb) ? pair.right_id::text
         OR COALESCE(to_jsonb(right_row.merge_exclude), '[]'::jsonb) ? pair.left_id::text AS excluded
     FROM candidates AS pair
-    JOIN independent AS left_row ON left_row.id = pair.left_id
-    JOIN independent AS right_row ON right_row.id = pair.right_id
+    JOIN normalized AS left_row ON left_row.id = pair.left_id
+    JOIN normalized AS right_row ON right_row.id = pair.right_id
   ), edges AS (
     SELECT left_id, right_id FROM scored WHERE matches >= 3 AND NOT excluded
   ), reach(node, member) AS (
-    SELECT id, id FROM independent
+    SELECT id, id FROM normalized
     UNION
     SELECT reach.node,
       CASE WHEN edges.left_id = reach.member THEN edges.right_id ELSE edges.left_id END
@@ -726,6 +887,8 @@ COMMENT ON VIEW public.bizflow_order_list IS
   'SECURITY INVOKER slim order rows; underlying invoices/customers/employees RLS remains authoritative.';
 COMMENT ON FUNCTION public.bizflow_order_page(text, text, text, date, date, text, integer, integer) IS
   'RLS-preserving order search/filter/sort/pagination. Hard limit 50 rows.';
+COMMENT ON FUNCTION public.bizflow_order_revenue(text) IS
+  'RLS-preserving server aggregation for the on-demand revenue tab; no full invoice download.';
 COMMENT ON FUNCTION public.bizflow_home_dashboard(uuid) IS
   'RLS-preserving Home aggregates plus individually bounded widgets.';
 

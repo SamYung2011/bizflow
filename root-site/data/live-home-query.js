@@ -1,15 +1,19 @@
 import { getCurrentUser, getSession, getSupabaseClient } from "./auth.js";
 import { getReadState, rememberUnreadWatermarks, setReadStateAccount } from "./read-state.js";
 import { asArray, asNumber, asText } from "./live-snapshot-utils.js";
+import { liveQueryKey, readLiveQueryCache, writeLiveQueryCache } from "./live-query-cache.js";
 
 export const LIVE_HOME_QUERY_MISS = Symbol("live-home-query-miss");
+
+const HOME_DASHBOARD_NAMESPACE = "home-dashboard";
+const HOME_REQUESTS = new Map();
 
 async function context() {
   const [client, session, currentUser] = await Promise.all([
     getSupabaseClient(), getSession(), getCurrentUser()
   ]);
   if (!client || !session?.user?.id || !currentUser) return null;
-  return { client, currentUser };
+  return { client, currentUser, userId: session.user.id };
 }
 
 function metricNumber(source, key) {
@@ -78,14 +82,52 @@ function mapDashboard(payload, currentUser) {
   };
 }
 
-export async function getLiveHomeDashboard() {
+async function fetchHomeDashboard(live, query) {
+  const requestKey = `${live.userId}:${liveQueryKey(query)}`;
+  if (HOME_REQUESTS.has(requestKey)) return HOME_REQUESTS.get(requestKey);
+  const promise = live.client.rpc("bizflow_home_dashboard", {
+    p_company_id: query.companyId || null
+  }).then((result) => {
+    if (result.error) throw result.error;
+    const value = mapDashboard(result.data, live.currentUser);
+    writeLiveQueryCache({
+      userId: live.userId,
+      namespace: HOME_DASHBOARD_NAMESPACE,
+      query,
+      value
+    });
+    return value;
+  }).finally(() => {
+    HOME_REQUESTS.delete(requestKey);
+  });
+  HOME_REQUESTS.set(requestKey, promise);
+  return promise;
+}
+
+function backgroundHomeRefresh(live, query) {
+  void fetchHomeDashboard(live, query)
+    .catch((error) => console.warn("[home-query] background refresh failed", error));
+}
+
+export async function getLiveHomeDashboard({ refresh = false } = {}) {
   const live = await context();
   if (!live) return LIVE_HOME_QUERY_MISS;
-  const result = await live.client.rpc("bizflow_home_dashboard", {
-    p_company_id: live.currentUser.activeCompanyId || null
+  const query = { companyId: live.currentUser.activeCompanyId || "" };
+  const cached = readLiveQueryCache({
+    userId: live.userId,
+    namespace: HOME_DASHBOARD_NAMESPACE,
+    query
   });
-  if (result.error) throw result.error;
-  return mapDashboard(result.data, live.currentUser);
+  if (cached && !refresh) {
+    backgroundHomeRefresh(live, query);
+    return { ...cached.value, cached: true, stale: cached.stale };
+  }
+  try {
+    return await fetchHomeDashboard(live, query);
+  } catch (error) {
+    if (cached) return { ...cached.value, cached: true, stale: true, offline: true };
+    throw error;
+  }
 }
 
 export async function getLiveUnreadState() {

@@ -14,11 +14,14 @@ export const ORDER_PAGE_SIZE = 50;
 
 const ORDER_NAMESPACE = "orders-page";
 const ORDER_DETAIL_NAMESPACE = "order-detail";
+const ORDER_REVENUE_NAMESPACE = "order-revenue";
 const ORDER_SOURCES = Object.freeze(["Framer", "Broadway", "Online Store", "Manual"]);
+const ORDER_REVENUE_RANGES = new Set(["thisMonth", "lastMonth", "3m", "12m", "year", "all"]);
 const ORDER_SORTS = new Set(["newest", "oldest", "amount_desc", "amount_asc"]);
 const SHIPPING_FILTERS = new Set(["all", "pending", "in_transit", "exception", "delivered"]);
 const FEE_PATTERN = /運費|郵費|shipping|freight|押金|deposit|優惠|折扣|discount|手續費|service/i;
 const NETWORK_REQUESTS = new Map();
+const REVENUE_REQUESTS = new Map();
 let activeQuery = null;
 let activeUserId = "";
 let orderQueryGeneration = 0;
@@ -29,6 +32,7 @@ if (typeof window !== "undefined") {
     activeQuery = null;
     activeUserId = "";
     NETWORK_REQUESTS.clear();
+    REVENUE_REQUESTS.clear();
   });
 }
 
@@ -226,14 +230,73 @@ export async function getLiveOrdersPage(query = {}, { refresh = false } = {}) {
   }
 }
 
-export async function refreshCurrentOrderQuery({ soft = true, source = "realtime" } = {}) {
+export async function refreshCurrentOrderQuery({ soft = true, source = "realtime", notify = true } = {}) {
   if (!activeQuery || !activeUserId) return null;
   const context = await liveContext();
   if (!context || context.userId !== activeUserId) return null;
   if (soft) markLiveQueryCacheStale({ userId: context.userId, namespace: ORDER_NAMESPACE, query: activeQuery });
   const value = await fetchOrderPage(context, activeQuery);
-  dispatchQueryUpdate(activeQuery, value, source);
+  if (notify) dispatchQueryUpdate(activeQuery, value, source);
   return value;
+}
+
+function mapRevenuePayload(payload, range) {
+  return {
+    __live: true,
+    range,
+    totalRevenue: asNumber(payload?.total_revenue),
+    paidCount: asNumber(payload?.paid_count),
+    average: asNumber(payload?.average),
+    unpaidCount: asNumber(payload?.unpaid_count),
+    unpaidAmount: asNumber(payload?.unpaid_amount),
+    months: asArray(payload?.months).map((row) => ({ label: asText(row?.label), value: asNumber(row?.value) })),
+    products: asArray(payload?.products).map((row) => ({ name: asText(row?.name), amount: asNumber(row?.amount) })),
+    customers: asArray(payload?.customers).map((row) => ({
+      id: asText(row?.id),
+      name: asText(row?.name, "—"),
+      totalAmount: asNumber(row?.totalAmount)
+    })),
+    singleMonth: payload?.single_month === true
+  };
+}
+
+async function fetchOrderRevenue(context, query) {
+  const generation = orderQueryGeneration;
+  const requestKey = `${context.userId}:${generation}:${liveQueryKey(query)}`;
+  if (REVENUE_REQUESTS.has(requestKey)) return REVENUE_REQUESTS.get(requestKey);
+  const promise = context.client.rpc("bizflow_order_revenue", { p_range: query.range })
+    .then((result) => {
+      if (result.error) throw result.error;
+      if (generation !== orderQueryGeneration) throw new DOMException("Order revenue superseded", "AbortError");
+      const value = mapRevenuePayload(result.data, query.range);
+      writeLiveQueryCache({ userId: context.userId, namespace: ORDER_REVENUE_NAMESPACE, query, value });
+      return value;
+    })
+    .finally(() => {
+      REVENUE_REQUESTS.delete(requestKey);
+    });
+  REVENUE_REQUESTS.set(requestKey, promise);
+  return promise;
+}
+
+export async function getLiveOrderRevenue(range = "12m", { refresh = false } = {}) {
+  const context = await liveContext();
+  if (!context) return LIVE_ORDER_QUERY_MISS;
+  const query = { range: ORDER_REVENUE_RANGES.has(range) ? range : "12m" };
+  const cached = readLiveQueryCache({ userId: context.userId, namespace: ORDER_REVENUE_NAMESPACE, query });
+  if (cached && !refresh) {
+    void fetchOrderRevenue(context, query)
+      .catch((error) => {
+        if (error?.name !== "AbortError") console.warn("[order-revenue] background refresh failed", error);
+      });
+    return { ...cached.value, cached: true, stale: cached.stale };
+  }
+  try {
+    return await fetchOrderRevenue(context, query);
+  } catch (error) {
+    if (cached) return { ...cached.value, cached: true, stale: true, offline: true };
+    throw error;
+  }
 }
 
 function patchListRow(order, invoice) {
@@ -270,6 +333,7 @@ export async function invalidateOrderQueriesAfterWrite(invoice = null) {
     }
   }
   invalidateLiveQueryCacheAfterWrite({ userId: context.userId, namespace: ORDER_NAMESPACE, preserve });
+  invalidateLiveQueryCacheAfterWrite({ userId: context.userId, namespace: ORDER_REVENUE_NAMESPACE });
   if (invoice?.id) invalidateLiveQueryCacheAfterWrite({ userId: context.userId, namespace: ORDER_DETAIL_NAMESPACE });
   if (preserve) dispatchQueryUpdate(activeQuery, preserve.value, "write");
   if (activeQuery) backgroundRefresh(context, activeQuery, "write-refresh");
