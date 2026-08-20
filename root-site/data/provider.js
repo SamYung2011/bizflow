@@ -1543,8 +1543,17 @@ export async function getOrdersPageData(query, options = {}) {
     // detailed order (pending deduction, customer printing, item-map audit).
     readLegacy: getLegacyOrdersPageData,
     readPage: async (nextQuery) => {
-      const live = await getLiveOrdersPage(nextQuery, options);
-      if (live !== LIVE_ORDER_QUERY_MISS) return live;
+      try {
+        const live = await getLiveOrdersPage(nextQuery, options);
+        if (live !== LIVE_ORDER_QUERY_MISS) return live;
+      } catch (error) {
+        console.warn("[provider] Order page RPC failed; falling back to the legacy data path", error);
+        try {
+          return offlineOrdersPage(await getLegacyOrdersPageData(), nextQuery);
+        } catch (legacyError) {
+          console.warn("[provider] Legacy order fallback failed; using the bounded offline sample", legacyError);
+        }
+      }
       // Static/no-session mode is a bounded demo too. Do not download the
       // multi-megabyte snapshot just to render a 50-row sample page.
       return offlineOrdersPage({

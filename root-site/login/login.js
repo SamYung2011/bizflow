@@ -10,6 +10,7 @@ import {
   verifyRecoveryOtp
 } from "../data/auth.js";
 import { LANGUAGE_CODES, persistLanguagePreference, resolveLanguagePreference } from "../data/language-preference.js";
+import { completePasswordSignIn } from "./signed-in-user.js";
 
 (function () {
   const dictionaries = {
@@ -504,8 +505,10 @@ import { LANGUAGE_CODES, persistLanguagePreference, resolveLanguagePreference } 
     try {
       if (state.view === "login") {
         if (!email || !password) throw { messageKey: "auth.required" };
-        await signInWithPassword({ email, password });
-        const user = await getCurrentUser({ refresh: true });
+        const user = await completePasswordSignIn({
+          signIn: () => signInWithPassword({ email, password }),
+          readCurrentUser: () => getCurrentUser({ refresh: true })
+        });
         if (!user) {
           await signOut();
           throw { messageKey: "auth.pending" };

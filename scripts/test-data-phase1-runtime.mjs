@@ -53,6 +53,15 @@ const afterRefresh = queryCache.readLiveQueryCache({
 assert.equal(afterRefresh?.stale, false, "a successful realtime refresh must replace the stale cache entry");
 
 auth.__reset();
+auth.__setRpcError("bizflow_order_page", { code: "57014", status: 500, message: "statement timeout" });
+const fallbackQuery = orderQuery.normalizeOrderQuery({ page: 1, source: "Framer" });
+const fallbackOrders = await provider.getOrdersPageData(fallbackQuery, { refresh: true });
+assert.ok(Array.isArray(fallbackOrders.orders),
+  "an order RPC timeout must return a mountable legacy page instead of rejecting route mount");
+assert.equal(fallbackOrders.pageSize, 50);
+assert.deepEqual(auth.__calls().map((call) => call.name), ["bizflow_order_page"]);
+
+auth.__reset();
 auth.__setRpcError("bizflow_home_dashboard", { code: "57014", message: "statement timeout" });
 const home = await provider.getHomeDashboardData({ refresh: true });
 assert.deepEqual(home.data.stats.map((row) => row.key), ["orders", "customers", "members", "warranty"],
@@ -66,4 +75,4 @@ assert.deepEqual(Object.keys(unread).sort(), ["inventory", "messages", "orders",
   "an unread timeout must return the legacy counter shape instead of rejecting Home mount");
 assert.deepEqual(auth.__calls().map((call) => call.name), ["bizflow_unread_summary"]);
 
-console.log("DATA-phase1 runtime: PASS (observer compatibility, realtime soft stale, dashboard/unread fallback)");
+console.log("DATA-phase1 runtime: PASS (observer compatibility, realtime soft stale, order/dashboard/unread fallback)");

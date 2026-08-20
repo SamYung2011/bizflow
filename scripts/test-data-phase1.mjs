@@ -14,11 +14,13 @@ import {
   writeLiveQueryCache
 } from "../root-site/data/live-query-cache.js";
 import { normalizeOrderQuery, ORDER_PAGE_SIZE } from "../root-site/data/live-orders-query.js";
+import { completePasswordSignIn, readSignedInUser } from "../root-site/login/signed-in-user.js";
 
 const read = (relative) => readFile(new URL(`../${relative}`, import.meta.url), "utf8");
-const [migration, guardMigration, orders, revenue, orderQuery, orderWrites, liveHome, provider, home, customers, tasks, pending, customerDetail, itemMap] = await Promise.all([
+const [migration, guardMigration, repairMigration, orders, revenue, orderQuery, orderWrites, liveHome, provider, home, customers, tasks, pending, customerDetail, itemMap] = await Promise.all([
   read("migrations/102_bizflow_data_phase1.sql"),
   read("migrations/103_guard_non_array_invoice_items.sql"),
+  read("migrations/104_bizflow_data_phase1_r5.sql"),
   read("root-site/bizflow/orders.js"),
   read("root-site/bizflow/orders-revenue.js"),
   read("root-site/data/live-orders-query.js"),
@@ -32,6 +34,15 @@ const [migration, guardMigration, orders, revenue, orderQuery, orderWrites, live
   read("root-site/bizflow/customer-detail.js"),
   read("root-site/bizflow/inventory-item-map.js")
 ]);
+
+assert.doesNotMatch(repairMigration.replace(/^--.*$/gm, ""), /SECURITY\s+DEFINER/i,
+  "R5 must not bypass table RLS");
+assert.match(repairMigration, /invoice_keys AS MATERIALIZED[\s\S]*page_keys AS MATERIALIZED/,
+  "order paging must deduplicate and page narrow invoice keys before expanding fat items");
+assert.match(repairMigration, /invoice_lines AS MATERIALIZED/,
+  "Home must expand fat invoice JSON once and reuse the materialized line set");
+assert.match(repairMigration, /JOIN customers_visible AS known_customer ON known_customer\.id = invoice\.customer_id/,
+  "the warranty KPI must retain the legacy known-customer scope");
 
 assert.doesNotMatch(migration.replace(/^--.*$/gm, ""), /SECURITY\s+DEFINER/i, "phase 1 must not bypass RLS");
 assert.match(migration, /bizflow_order_list[\s\S]*security_invoker = true/);
@@ -120,6 +131,8 @@ assert.match(orders, /snapshots: \["orders\.json"\]/,
   "orders must retain the retry-completion wakeup for legacy observer snapshots");
 assert.match(provider, /getOrdersPageData\(query, options = \{\}\)[\s\S]*resolveOrderPageRead\([\s\S]*readLegacy: getLegacyOrdersPageData/,
   "the no-argument compatibility contract must still return all detailed orders");
+assert.match(provider, /Order page RPC failed; falling back to the legacy data path[\s\S]*offlineOrdersPage\(await getLegacyOrdersPageData\(\), nextQuery\)/,
+  "an order-page RPC failure must return a mountable page from the legacy source");
 for (const consumer of [pending, customerDetail, itemMap]) {
   assert.match(consumer, /getOrdersPageData\(\)/, "legacy observers must keep using the no-argument detailed-order contract");
 }
@@ -189,6 +202,42 @@ assert.equal(await resolveOrderPageRead({
 }), legacyOrders);
 assert.equal(legacyOrderReads, 1, "a no-argument order read must execute the detailed legacy reader");
 assert.equal(pagedOrderReads, 0, "a no-argument order read must never enter the 50-row slim reader");
+
+let signedInReads = 0;
+const signedInUser = await readSignedInUser(async () => {
+  signedInReads += 1;
+  if (signedInReads === 1) throw { status: 400, code: "session_not_ready" };
+  return { id: "approved-user" };
+}, async () => {});
+assert.deepEqual(signedInUser, { id: "approved-user" });
+assert.equal(signedInReads, 2, "one login submit must absorb the transient first post-login 400");
+let credentialReads = 0;
+await assert.rejects(() => readSignedInUser(async () => {
+  credentialReads += 1;
+  throw { status: 400, code: "invalid_credentials" };
+}), (error) => error?.code === "invalid_credentials");
+assert.equal(credentialReads, 1, "credential failures must never be retried");
+let signInAttempts = 0;
+const recoveredLogin = await completePasswordSignIn({
+  signIn: async () => {
+    signInAttempts += 1;
+    if (signInAttempts === 1) throw { status: 400, code: "session_not_ready" };
+  },
+  readCurrentUser: async () => ({ id: "approved-user" }),
+  defer: async () => {}
+});
+assert.deepEqual(recoveredLogin, { id: "approved-user" });
+assert.equal(signInAttempts, 2, "one submit must absorb one non-credential first-login 400");
+let invalidSignInAttempts = 0;
+await assert.rejects(() => completePasswordSignIn({
+  signIn: async () => {
+    invalidSignInAttempts += 1;
+    throw { status: 400, code: "invalid_credentials" };
+  },
+  readCurrentUser: async () => null,
+  defer: async () => {}
+}), (error) => error?.code === "invalid_credentials");
+assert.equal(invalidSignInAttempts, 1, "a wrong password must still make exactly one auth request");
 
 const legacyCustomerFixture = [
   { id: "a", name: "Exact pair", phone: "852-1", phone_mainland: "86-1", email: "a@test", address: "A" },

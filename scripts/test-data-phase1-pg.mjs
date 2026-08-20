@@ -11,6 +11,7 @@ import { buildCustomerGroups } from "../root-site/data/customer-groups.js";
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const migrationPath = join(repoRoot, "migrations/102_bizflow_data_phase1.sql");
 const guardMigrationPath = join(repoRoot, "migrations/103_guard_non_array_invoice_items.sql");
+const repairMigrationPath = join(repoRoot, "migrations/104_bizflow_data_phase1_r5.sql");
 
 function executable(name) {
   for (const candidate of [`/opt/homebrew/bin/${name}`, `/usr/local/bin/${name}`, name]) {
@@ -55,9 +56,13 @@ function sql(input) {
 }
 
 function asAuthenticated(statement) {
+  return asAuthenticatedUser('20000000-0000-0000-0000-000000000001', statement);
+}
+
+function asAuthenticatedUser(userId, statement) {
   return sql(`
     SET ROLE authenticated;
-    SET request.jwt.claim.sub = '20000000-0000-0000-0000-000000000001';
+    SET request.jwt.claim.sub = '${userId}';
     SET statement_timeout = '8s';
     ${statement}
   `).split("\n").filter(Boolean).at(-1);
@@ -67,6 +72,26 @@ function timedAuthenticated(statement) {
   const startedAt = performance.now();
   const value = asAuthenticated(statement);
   return { value, elapsedMs: performance.now() - startedAt };
+}
+
+function expectAuthenticatedTimeout(statement) {
+  const startedAt = performance.now();
+  const result = spawnSync(psql, psqlArgs(), {
+    cwd: repoRoot,
+    encoding: "utf8",
+    input: `
+      SET ROLE authenticated;
+      SET request.jwt.claim.sub = '20000000-0000-0000-0000-000000000001';
+      SET statement_timeout = '8s';
+      ${statement}
+    `,
+    maxBuffer: 64 * 1024 * 1024
+  });
+  const elapsedMs = performance.now() - startedAt;
+  assert.notEqual(result.status, 0,
+    `the authenticated 8s statement-timeout control must be cut off; it finished in ${elapsedMs.toFixed(1)}ms`);
+  assert.match(`${result.stdout}\n${result.stderr}`, /canceling statement due to statement timeout/,
+    "the negative performance control must be killed by PostgreSQL statement_timeout");
 }
 
 function customerId(index) {
@@ -338,7 +363,24 @@ try {
            100+(i%1000), CASE WHEN i%5=0 THEN 'Unpaid' ELSE 'Paid' END,
            CASE WHEN i%4=0 THEN '簽收' ELSE 'unshipped' END,
            jsonb_build_array(
-             jsonb_build_object('name','Product '||(((i-1)%100)+1),'product_id',(md5('product-'||(((i-1)%100)+1))::uuid)::text,'qty',1,'price',100+(i%100),'warranty_months',12),
+             jsonb_build_object(
+               'name','Product '||(((i-1)%100)+1),
+               'product_id',(md5('product-'||(((i-1)%100)+1))::uuid)::text,
+               'qty',1,'price',100+(i%100),'warranty_months',12,
+               'shopify_payload',jsonb_build_object(
+                 'properties',jsonb_build_array(
+                   jsonb_build_object('name','engraving','value',(
+                     SELECT string_agg(md5('fat-a-'||i||'-'||part), '') FROM generate_series(1,48) AS part
+                   )),
+                   jsonb_build_object('name','checkout','value',(
+                     SELECT string_agg(md5('fat-b-'||i||'-'||part), '') FROM generate_series(1,48) AS part
+                   ))
+                 ),
+                 'nested',jsonb_build_object('raw',(
+                   SELECT string_agg(md5('fat-c-'||i||'-'||part), '') FROM generate_series(1,32) AS part
+                 ))
+               )
+             ),
              jsonb_build_object('name','Product '||((i%100)+1),'product_id',(md5('product-'||((i%100)+1))::uuid)::text,'qty',1,'price',50+(i%50),'warranty_months',12)
            )
     FROM generate_series(1,6603) AS i;
@@ -358,6 +400,42 @@ try {
   assert.equal(sql("SELECT count(*) FROM pg_indexes WHERE indexname LIKE 'invoices_order_page_%';"), "0",
     "migration reruns must remove all five R1 staging indexes");
   sql("ANALYZE;");
+  assert.ok(Number(sql("SELECT min(octet_length(items::text)) FROM public.invoices;")) >= 2048,
+    "the performance fixture must contain at least 2KB of nested Shopify JSON per invoice");
+  assert.ok(Number(sql("SELECT min(pg_column_size(items)) FROM public.invoices;")) >= 2048,
+    "the production-shape JSON must stay physically fat after TOAST compression");
+  // A real over-budget statement proves the same authenticated connection used
+  // by the measurements is actually governed by PostgreSQL's 8s cutoff.
+  expectAuthenticatedTimeout("SELECT pg_sleep(9);");
+  const preR5OrderPage = JSON.parse(asAuthenticated(
+    "SELECT public.bizflow_order_page(NULL,NULL,NULL,NULL,NULL,'newest',0,50)::text;"
+  ));
+  const preR5OrderSearch = JSON.parse(asAuthenticated(
+    "SELECT public.bizflow_order_page('Product 1',NULL,NULL,NULL,NULL,'newest',50,50)::text;"
+  ));
+  const preR5Home = JSON.parse(asAuthenticated(
+    "SELECT public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001')::text;"
+  ));
+  run(psql, psqlArgs(["-f", repairMigrationPath]), { quiet: true });
+  run(psql, psqlArgs(["-f", repairMigrationPath]), { quiet: true });
+  sql("ANALYZE;");
+  const postR5OrderPage = JSON.parse(asAuthenticated(
+    "SELECT public.bizflow_order_page(NULL,NULL,NULL,NULL,NULL,'newest',0,50)::text;"
+  ));
+  const postR5OrderSearch = JSON.parse(asAuthenticated(
+    "SELECT public.bizflow_order_page('Product 1',NULL,NULL,NULL,NULL,'newest',50,50)::text;"
+  ));
+  const postR5Home = JSON.parse(asAuthenticated(
+    "SELECT public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001')::text;"
+  ));
+  assert.deepEqual(postR5OrderPage, preR5OrderPage,
+    "the narrow R5 order plan must preserve the reviewed page payload exactly");
+  assert.deepEqual(postR5OrderSearch, preR5OrderSearch,
+    "the narrow R5 order plan must preserve backend item-search and second-page semantics exactly");
+  delete preR5Home.generated_at;
+  delete postR5Home.generated_at;
+  assert.deepEqual(postR5Home, preR5Home,
+    "the materialized R5 Home plan must preserve every pre-R5 metric and bounded widget");
   assert.equal(asAuthenticated("SELECT current_user;"), "authenticated", "performance gates must execute as authenticated");
   assert.equal(sql("SELECT has_function_privilege('anon','public.bizflow_jsonb_array(jsonb)','EXECUTE');"), "f");
   assert.equal(sql("SELECT has_function_privilege('authenticated','public.bizflow_jsonb_array(jsonb)','EXECUTE');"), "t");
@@ -369,6 +447,22 @@ try {
   const home = timedAuthenticated("SELECT public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001')->'counts'->>'customers';");
   assert.equal(Number(home.value), 4496);
   assert.ok(home.elapsedMs < 2000, `authenticated Home RPC must stay below 2s, got ${home.elapsedMs.toFixed(1)}ms`);
+
+  const orderPage = timedAuthenticated("SELECT public.bizflow_order_page(NULL,NULL,NULL,NULL,NULL,'newest',0,50)->>'total_count';");
+  assert.equal(Number(orderPage.value), 6603);
+  assert.ok(orderPage.elapsedMs < 1000,
+    `ANALYZE'd authenticated production-shape order page must stay below 1s, got ${orderPage.elapsedMs.toFixed(1)}ms`);
+  const orderSearch = timedAuthenticated("SELECT public.bizflow_order_page('Product 1',NULL,NULL,NULL,NULL,'newest',50,50)->>'total_count';");
+  assert.ok(Number(orderSearch.value) > 0);
+  assert.ok(orderSearch.elapsedMs < 1000,
+    `ANALYZE'd authenticated fat-JSON search page must stay below 1s, got ${orderSearch.elapsedMs.toFixed(1)}ms`);
+  const orderPayloadBytes = Number(asAuthenticated(
+    "SELECT octet_length(public.bizflow_order_page(NULL,NULL,NULL,NULL,NULL,'newest',0,50)::text);"
+  ));
+  const rawInvoiceItemBytes = Number(asAuthenticated("SELECT sum(octet_length(items::text)) FROM public.invoices;"));
+  assert.ok(orderPayloadBytes < 100000, `the 50-row payload must stay page-sized, got ${orderPayloadBytes} bytes`);
+  assert.ok(rawInvoiceItemBytes > orderPayloadBytes * 100,
+    `the paged response must be at least 100x smaller than the raw invoice JSON (${rawInvoiceItemBytes}/${orderPayloadBytes})`);
 
   const cappedOffset = JSON.parse(asAuthenticated("SELECT public.bizflow_order_page(NULL,NULL,NULL,NULL,NULL,'newest',2147483647,50)::text;"));
   assert.equal(cappedOffset.total_count, 6603);
@@ -393,6 +487,32 @@ try {
   const cleanRevenue = JSON.parse(asAuthenticated("SELECT public.bizflow_order_revenue('all')::text;"));
   const cleanHome = JSON.parse(asAuthenticated("SELECT public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001')::text;"));
   const cleanWarrantyCount = Number(asAuthenticated("SELECT count(*) FROM public.bizflow_warranty_rows;"));
+  sql(`
+    INSERT INTO public.employees(id,user_id,name,bizflow_main_access)
+      VALUES ('10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002','Second BizFlow user',true);
+    INSERT INTO public.invoices(id,invoice_number,customer_id,salesperson_id,date,created_at,total,status,shipping_status,items)
+      VALUES (
+        'orphan-warranty','orphan-warranty',NULL,'10000000-0000-0000-0000-000000000001',current_date-1,now(),100,'Paid','unshipped',
+        jsonb_build_array(jsonb_build_object(
+          'name','Product 1','product_id',(md5('product-1')::uuid)::text,'qty',1,'price',100,'warranty_months',12
+        ))
+      );
+    ANALYZE public.invoices, public.employees;
+  `);
+  const orphanHome = JSON.parse(asAuthenticated(
+    "SELECT public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001')::text;"
+  ));
+  const secondUserWarranty = Number(asAuthenticatedUser(
+    '20000000-0000-0000-0000-000000000002',
+    "SELECT public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001')->'counts'->>'warranty';"
+  ));
+  assert.equal(orphanHome.counts.orders, cleanHome.counts.orders + 1,
+    "an orphan invoice remains a valid order");
+  assert.equal(orphanHome.counts.warranty, cleanHome.counts.warranty,
+    "the warranty KPI must match the legacy known-customer scope and exclude orphan Shopify invoices");
+  assert.equal(secondUserWarranty, cleanHome.counts.warranty,
+    "BizFlow-authorized accounts must see the same warranty KPI regardless of company selection context");
+  sql("DELETE FROM public.invoices WHERE id='orphan-warranty'; DELETE FROM public.employees WHERE id='10000000-0000-0000-0000-000000000002'; ANALYZE public.invoices, public.employees;");
   sql(`
     INSERT INTO public.invoices(id,invoice_number,customer_id,salesperson_id,date,created_at,total,status,shipping_status,items) VALUES
       ('dirty-items-string','dirty-string',md5('customer-1')::uuid,'10000000-0000-0000-0000-000000000001',current_date,now()+interval '3 seconds',101,'Paid','unshipped','"legacy string"'::jsonb),
@@ -473,7 +593,7 @@ try {
   assert.ok(scale4500.elapsedMs < scale2005.elapsedMs * 3.5,
     `255→4500 curve must stay far below quadratic growth: ${JSON.stringify(scale)}`);
 
-  console.log(`DATA-phase1 PG: PASS (dirty JSON string/object/null=empty; post-ANALYZE authenticated flat ${group.elapsedMs.toFixed(1)}ms, dirty ${dirty.elapsedMs.toFixed(1)}ms, clusters ${largeClusters.elapsedMs.toFixed(1)}ms, Home ${home.elapsedMs.toFixed(1)}ms, revenue ${revenue.elapsedMs.toFixed(1)}ms, parity ${oldGroups.length}=${sqlGroups} exact, scale ${scale.map(({ size, elapsedMs }) => `${size}:${elapsedMs.toFixed(1)}ms`).join("/")})`);
+  console.log(`DATA-phase1 PG: PASS (dirty JSON string/object/null=empty; post-ANALYZE authenticated order ${orderPage.elapsedMs.toFixed(1)}ms/search ${orderSearch.elapsedMs.toFixed(1)}ms/${orderPayloadBytes}B from ${(rawInvoiceItemBytes / 1048576).toFixed(1)}MiB raw, Home ${home.elapsedMs.toFixed(1)}ms, flat ${group.elapsedMs.toFixed(1)}ms, dirty ${dirty.elapsedMs.toFixed(1)}ms, clusters ${largeClusters.elapsedMs.toFixed(1)}ms, revenue ${revenue.elapsedMs.toFixed(1)}ms, warranty scope ${cleanHome.counts.warranty}=${orphanHome.counts.warranty}=${secondUserWarranty}, parity ${oldGroups.length}=${sqlGroups} exact, scale ${scale.map(({ size, elapsedMs }) => `${size}:${elapsedMs.toFixed(1)}ms`).join("/")})`);
 } finally {
   if (started) spawnSync(pgCtl, ["-D", dataDir, "-m", "immediate", "stop"], { encoding: "utf8" });
   rmSync(probeRoot, { recursive: true, force: true });
