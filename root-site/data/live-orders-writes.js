@@ -1,5 +1,4 @@
 import { getCurrentUser, getSession, getSupabaseClient } from "./auth.js";
-import { invalidateOrderQueriesAfterWrite } from "./live-orders-query.js";
 import { allRows, invalidateLiveTables } from "./live-snapshot-utils.js";
 
 const COMMISSION_CUTOFF = "2026-05-09";
@@ -218,7 +217,6 @@ export async function createLiveOrderCustomer(values) {
     }
   }
   await invalidateOrderReads("customers", "customer_devices");
-  await invalidateOrderQueriesAfterWrite();
   return { customer: result.data, deviceConflicts: deviceResult.conflicts, deviceError };
 }
 
@@ -246,7 +244,6 @@ export async function updateLiveOrderCustomer(customerId, values, { preserveCarM
     }
   }
   await invalidateOrderReads("customers", "customer_devices");
-  await invalidateOrderQueriesAfterWrite();
   return { customer: result.data, deviceConflicts: deviceResult.conflicts, deviceError };
 }
 
@@ -553,7 +550,6 @@ async function payLiveOrderRecord(context, invoice, { deleteInvoiceOnFailure = f
       "inventory",
       "customer_devices"
     );
-    await invalidateOrderQueriesAfterWrite(claimResult.data);
     return { invoice: claimResult.data, deviceConflicts: imeiResult.conflicts, alreadyPaid: false };
   } catch (error) {
     const recoveryFailures = await restoreAfterPaidFailure(client, recovery);
@@ -565,7 +561,6 @@ async function payLiveOrderRecord(context, invoice, { deleteInvoiceOnFailure = f
       "inventory",
       "customer_devices"
     );
-    await invalidateOrderQueriesAfterWrite();
     if (recoveryFailures.length) {
       console.error("[orders] paid-order recovery failed", recoveryFailures);
       const recoveryError = new Error("Order payment failed and automatic recovery was incomplete");
@@ -589,7 +584,6 @@ export async function createLiveOrder({ customerId, salespersonId, items, fees, 
   });
   if (normalizedStatus === "unpaid") {
     await invalidateOrderReads("invoices");
-    await invalidateOrderQueriesAfterWrite(invoice);
     return { invoice, deviceConflicts: [], alreadyPaid: false };
   }
   return payLiveOrderRecord(context, invoice, { deleteInvoiceOnFailure: true, paymentPlan });
@@ -638,7 +632,6 @@ export async function updateLiveOrder(invoiceId, { items, fees, salespersonId, t
     deviceError = error;
   }
   await invalidateOrderReads("invoices", "customer_devices");
-  await invalidateOrderQueriesAfterWrite(result.data);
   return { invoice: result.data, deviceConflicts: imeiResult.conflicts, deviceError };
 }
 
@@ -649,6 +642,5 @@ export async function updateLiveOrderShipping(invoiceId, { mode, trackingNumber 
   const result = await client.from("invoices").update(updates).eq("id", invoiceId).select("*").single();
   throwIfError(result.error);
   await invalidateOrderReads("invoices");
-  await invalidateOrderQueriesAfterWrite(result.data);
   return result.data;
 }

@@ -1,13 +1,12 @@
 // bizflow 訂單域：既有订单列表 + R11 港車北上、充電樁意向、營收分析子页。
 // 各子页按需载入自己的快照，避免列表页和 Home 承担无关数据请求。
 
-import {
-  getLegacyOrdersPageData, getOrderDetailData, getOrdersPageData, getUnread, getUnreadWatermarks, getCurrentUser
-} from "../data/provider.js";
+import { getOrdersPageData, getUnread, getUnreadWatermarks, getCurrentUser } from "../data/provider.js";
 import { markRead } from "../data/read-state.js";
-import { createDateRangeFilter } from "../components/date-range-filter.js";
-import { renderManagementList, renderManagementPager } from "../components/management-list.js";
+import { createDateRangeFilter, latestDateInput } from "../components/date-range-filter.js";
+import { managementPageSize, renderManagementList, renderManagementPager } from "../components/management-list.js";
 import { renderSegment as renderSharedSegment } from "../components/segment.js";
+import { deriveShippingListView } from "../components/order-metrics.js";
 import { consumeNavigationPreset, navigationPresetKeys } from "../components/navigation-presets.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
@@ -16,8 +15,6 @@ import { matchesSearchValues } from "../components/search-match.js";
 import { createDebouncedTask } from "../components/debounced-task.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
-import { liveQueryKey } from "../data/live-query-cache.js";
-import { normalizeOrderQuery, ORDER_QUERY_UPDATED_EVENT } from "../data/live-orders-query.js";
 import {
   attachNorthboundBehaviors, captureNorthboundState, disposeNorthboundState, ensureNorthboundData,
   hasNorthboundRefreshBlock, hasNorthboundUnsavedChanges, renderNorthbound, restoreNorthboundState
@@ -49,12 +46,6 @@ const dict = {
     "orders.nextPage": "下一頁",
     "orders.empty": "此條件暫無訂單",
     "orders.search": "搜索單號、客戶或產品",
-    "orders.loading": "正在載入訂單…",
-    "orders.sort": "排序",
-    "orders.sort.newest": "最新在前",
-    "orders.sort.oldest": "最早在前",
-    "orders.sort.amount_desc": "金額由高至低",
-    "orders.sort.amount_asc": "金額由低至高",
     "orders.salesperson": "負責銷售",
     "orders.note": "備註",
     "orders.shipping.all": "全部",
@@ -83,12 +74,6 @@ const dict = {
     "orders.nextPage": "Next page",
     "orders.empty": "No orders match the filters",
     "orders.search": "Search order, customer or product",
-    "orders.loading": "Loading orders…",
-    "orders.sort": "Sort",
-    "orders.sort.newest": "Newest first",
-    "orders.sort.oldest": "Oldest first",
-    "orders.sort.amount_desc": "Amount: high to low",
-    "orders.sort.amount_asc": "Amount: low to high",
     "orders.salesperson": "Salesperson",
     "orders.note": "Note",
     "orders.shipping.all": "All",
@@ -117,12 +102,6 @@ const dict = {
     "orders.nextPage": "Page suivante",
     "orders.empty": "Aucune commande ne correspond",
     "orders.search": "Rechercher commande, client ou produit",
-    "orders.loading": "Chargement des commandes…",
-    "orders.sort": "Trier",
-    "orders.sort.newest": "Plus récentes",
-    "orders.sort.oldest": "Plus anciennes",
-    "orders.sort.amount_desc": "Montant décroissant",
-    "orders.sort.amount_asc": "Montant croissant",
     "orders.salesperson": "Commercial",
     "orders.note": "Remarque",
     "orders.shipping.all": "Tous",
@@ -155,20 +134,18 @@ let state = {
   source: "all",
   shipping: "all",
   search: "",
-  sort: "newest",
   page: 1
 };
 
 let currentHelpers = null;
 let printDialog = null;
 let dateFilter = null;
+let resizeTimer = 0;
 let activeScope = null;
 let activeNavigation = null;
 let ordersLiveRefresh = null;
 let northboundLiveRefresh = null;
 let ordersSearchRender = null;
-let ordersLoading = false;
-let orderRequestSequence = 0;
 
 function isCurrentOrdersScope(scope = activeScope) {
   return Boolean(scope && scope === activeScope && scope.isCurrent());
@@ -219,12 +196,34 @@ export function orderMatchesSearch(order, query) {
   ], query);
 }
 
-function totalPages() {
-  return Math.max(1, Number(data?.pages) || 1);
+function ordersBeforeShipping() {
+  return data.orders.filter((order) => {
+    if (state.source !== "all" && order.channel !== state.source) return false;
+    if (!dateFilter.matches(order.date)) return false;
+    return orderMatchesSearch(order, state.search);
+  });
 }
 
-function currentPageOrders() {
-  return Array.isArray(data?.orders) ? data.orders : [];
+function shippingListView() {
+  return deriveShippingListView(ordersBeforeShipping(), state.shipping);
+}
+
+function filteredOrders() {
+  return shippingListView().orders;
+}
+
+function currentPageSize() {
+  return managementPageSize();
+}
+
+function totalPages(orders = filteredOrders(), pageSize = currentPageSize()) {
+  return Math.max(1, Math.ceil(orders.length / pageSize));
+}
+
+function currentPageOrders(orders = filteredOrders(), pageSize = currentPageSize()) {
+  if (orders.length <= pageSize) return orders;
+  const start = (state.page - 1) * pageSize;
+  return orders.slice(start, start + pageSize);
 }
 
 export function renderOrderCard(order, helpers) {
@@ -233,9 +232,9 @@ export function renderOrderCard(order, helpers) {
   const cancelled = order.status === "cancelled";
   const phone = String(order.phone || "").trim();
   const dcNumber = String(order.dcNumber || order.detail?.orderNo || "").replace(/^#/, "");
-  const salesperson = String(order.salesperson ?? order.detail?.salesperson ?? "").trim();
-  const note = String(order.note ?? order.detail?.note ?? "").trim();
-  const secondItem = order.secondItem ?? (Array.isArray(order.detail?.items) ? order.detail.items[1] : null);
+  const salesperson = String(order.detail?.salesperson || "").trim();
+  const note = String(order.detail?.note || "").trim();
+  const secondItem = Array.isArray(order.detail?.items) ? order.detail.items[1] : null;
   const statusLabel = pageT(lang, STATUS_KEY[order.status] ?? "orders.status.completed");
   return `<article class="management-list__row order-card" data-order-card data-order-id="${e(order.id)}"${phone ? ` data-order-phone="${e(phone)}"` : ""} tabindex="0" role="link" title="${e(order.customer)}">
     <div class="order-card__lead">
@@ -320,30 +319,21 @@ function renderOrderSearch(helpers) {
   </label>`;
 }
 
-function renderOrderSort(helpers) {
-  const { escapeHtml, lang } = helpers;
-  const options = ["newest", "oldest", "amount_desc", "amount_asc"];
-  return `<label class="orders-sort">
-    <span class="sr-only">${escapeHtml(pageT(lang, "orders.sort"))}</span>
-    <select class="orders-source__trigger" data-orders-sort aria-label="${escapeHtml(pageT(lang, "orders.sort"))}">
-      ${options.map((value) => `<option value="${value}"${state.sort === value ? " selected" : ""}>${escapeHtml(pageT(lang, `orders.sort.${value}`))}</option>`).join("")}
-    </select>
-  </label>`;
-}
-
 function renderOrderResults(helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const e = escapeHtml;
   const tt = (key) => pageT(lang, key);
-  const counts = data?.shippingCounts ?? { all: 0, pending: 0, in_transit: 0, exception: 0, delivered: 0 };
-  const pages = totalPages();
-  const shouldPaginate = pages > 1;
+  const view = shippingListView();
+  const filtered = view.orders;
+  const pageSize = currentPageSize();
+  const pages = totalPages(filtered, pageSize);
+  const shouldPaginate = filtered.length > pageSize;
   if (state.page > pages) state.page = pages;
   if (state.page < 1) state.page = 1;
-  const rows = currentPageOrders();
+  const rows = currentPageOrders(filtered, pageSize);
   const listHtml = rows.length
     ? rows.map((order) => renderOrderCard(order, helpers)).join("")
-    : ordersLoading ? "" : `<p class="management-list__empty orders-empty">${e(tt("orders.empty"))}</p>`;
+    : `<p class="management-list__empty orders-empty">${e(tt("orders.empty"))}</p>`;
   const pagerHtml = renderManagementPager({
     page: state.page,
     pages,
@@ -353,16 +343,15 @@ function renderOrderResults(helpers) {
     previousLabel: tt("orders.prevPage"),
     nextLabel: tt("orders.nextPage")
   });
-  return `<div data-orders-search-results aria-busy="${ordersLoading}">
-    ${renderShippingFilters(helpers, counts)}
-    ${ordersLoading ? `<p class="tp-muted orders-loading" role="status">${e(tt("orders.loading"))}</p>` : ""}
+  return `<div data-orders-search-results>
+    ${renderShippingFilters(helpers, view.counts)}
     ${renderManagementList({ content: listHtml, pager: pagerHtml, paged: shouldPaginate })}
   </div>`;
 }
 
 function renderOrderList(helpers) {
   return `<div class="orders-list-panel" data-orders-list-panel>
-    <div class="orders-toolbar">${dateFilter.render(helpers)}${renderSourceFilter(helpers)}${renderOrderSort(helpers)}${renderOrderSearch(helpers)}</div>
+    <div class="orders-toolbar">${dateFilter.render(helpers)}${renderSourceFilter(helpers)}${renderOrderSearch(helpers)}</div>
     ${renderOrderResults(helpers)}
   </div>`;
 }
@@ -422,48 +411,6 @@ function rerenderOrderSearchResults() {
   }
 }
 
-function currentOrderQuery() {
-  const range = dateFilter?.captureState?.() ?? {};
-  return normalizeOrderQuery({
-    page: state.page,
-    search: state.search,
-    source: state.source,
-    shipping: state.shipping,
-    sort: state.sort,
-    from: range.from,
-    to: range.to
-  });
-}
-
-async function loadCurrentOrderPage({ refresh = false } = {}) {
-  const sequence = ++orderRequestSequence;
-  ordersLoading = true;
-  rerenderOrderSearchResults();
-  try {
-    let nextData = await getOrdersPageData(currentOrderQuery(), { refresh });
-    if (sequence !== orderRequestSequence || !isCurrentOrdersScope()) return;
-    if (state.page > nextData.pages) {
-      state.page = Math.max(1, nextData.pages);
-      nextData = await getOrdersPageData(currentOrderQuery(), { refresh: true });
-      if (sequence !== orderRequestSequence || !isCurrentOrdersScope()) return;
-    }
-    data = nextData;
-  } finally {
-    if (sequence === orderRequestSequence && isCurrentOrdersScope()) {
-      ordersLoading = false;
-      rerenderOrderSearchResults();
-    }
-  }
-}
-
-function onOrderQueryUpdated(event) {
-  if (state.tab !== "list" || !event.detail?.value) return;
-  if (event.detail.queryKey !== liveQueryKey(currentOrderQuery())) return;
-  data = event.detail.value;
-  ordersLoading = false;
-  rerenderOrderSearchResults();
-}
-
 async function onOrdersClick(event) {
   const domainTab = event.target.closest("[data-orders-domain-tab]");
   if (domainTab) {
@@ -483,10 +430,7 @@ async function onOrdersClick(event) {
     rerenderOrdersPage();
     if (tab === "northbound") await ensureNorthboundData({ scope });
     if (tab === "chargerLeads") await ensureChargerLeadsData({ scope });
-    if (tab === "revenue" && canViewRevenue) {
-      const revenueSource = await getLegacyOrdersPageData();
-      await ensureRevenueData(revenueSource.orders, { scope });
-    }
+    if (tab === "revenue" && canViewRevenue) await ensureRevenueData(data.orders, { scope });
     if (!isCurrentOrdersScope(scope)) return;
     rerenderOrdersPage();
     return;
@@ -522,7 +466,6 @@ async function onOrdersClick(event) {
       state.source = value;
       state.page = 1;
       rerenderOrdersPage();
-      await loadCurrentOrderPage();
     }
     return;
   }
@@ -534,7 +477,6 @@ async function onOrdersClick(event) {
       state.shipping = value;
       state.page = 1;
       rerenderOrdersPage();
-      await loadCurrentOrderPage();
     }
     return;
   }
@@ -546,7 +488,6 @@ async function onOrdersClick(event) {
     if (direction === "next" && state.page < totalPages()) state.page += 1;
     dateFilter.close();
     rerenderOrdersPage();
-    await loadCurrentOrderPage();
     return;
   }
 
@@ -562,9 +503,8 @@ async function onOrdersClick(event) {
   if (printBtn && !printBtn.disabled) {
     event.stopPropagation();
     const orderId = printBtn.closest("[data-order-card]")?.getAttribute("data-order-id");
-    const detailData = orderId ? await getOrderDetailData(orderId) : null;
-    if (!isCurrentOrdersScope()) return;
-    printDialog.open(detailData?.order ? toPrintableOrder(detailData.order) : null, "both", printBtn);
+    const order = data.orders.find((item) => item.id === orderId);
+    printDialog.open(order ? toPrintableOrder(order) : null, "both", printBtn);
     return;
   }
 
@@ -594,14 +534,6 @@ function onOrdersInput(event) {
   ordersSearchRender?.schedule();
 }
 
-function onOrdersChange(event) {
-  const sort = event.target.closest("[data-orders-sort]");
-  if (!sort || state.sort === sort.value) return;
-  state.sort = sort.value;
-  state.page = 1;
-  void loadCurrentOrderPage();
-}
-
 function onOrdersKeydown(event) {
   if (event.key === "Escape") {
     closeSourceMenu();
@@ -612,6 +544,18 @@ function onOrdersKeydown(event) {
     const card = event.target.closest("[data-order-card]");
     navigateTo(`./orders-detail.html?id=${encodeURIComponent(card.getAttribute("data-order-id"))}`);
   }
+}
+
+function onOrdersResize() {
+  window.clearTimeout(resizeTimer);
+  const scope = activeScope;
+  resizeTimer = window.setTimeout(() => {
+    resizeTimer = 0;
+    if (!isCurrentOrdersScope(scope)) return;
+    const pages = totalPages();
+    if (state.page > pages) state.page = pages;
+    rerenderOrdersPage();
+  }, 120);
 }
 
 function navigateTo(relative) {
@@ -629,7 +573,6 @@ function restoredState(value, presets) {
     source: typeof next.source === "string" ? next.source : "all",
     shipping: shippingFilters.includes(next.shipping) ? next.shipping : shippingFilters.includes(presets.shipping) ? presets.shipping : "all",
     search: typeof next.search === "string" ? next.search : presets.search,
-    sort: ["newest", "oldest", "amount_desc", "amount_asc"].includes(next.sort) ? next.sort : "newest",
     page: Number.isInteger(next.page) && next.page > 0 ? next.page : 1
   };
 }
@@ -638,10 +581,7 @@ async function ensureActiveDomainData(signal) {
   const scope = activeScope;
   if (state.tab === "northbound") await ensureNorthboundData({ scope, signal });
   if (state.tab === "chargerLeads") await ensureChargerLeadsData({ scope, signal });
-  if (state.tab === "revenue" && canViewRevenue) {
-    const revenueSource = await getLegacyOrdersPageData();
-    await ensureRevenueData(revenueSource.orders, { scope, signal });
-  }
+  if (state.tab === "revenue" && canViewRevenue) await ensureRevenueData(data.orders, { scope, signal });
   if (!isCurrentOrdersScope(scope)) throw new DOMException("Orders page superseded", "AbortError");
   throwIfPageAborted(signal);
 }
@@ -654,10 +594,11 @@ export async function mountPage({ scope, signal, historyState = null, navigation
     shipping: consumeNavigationPreset(navigationPresetKeys.ordersShipping),
     search: consumeNavigationPreset(navigationPresetKeys.ordersSearch) ?? ""
   };
-  const [nextUnreadWatermarks, nextCurrentUser, nextUnread] = await Promise.all([
-    getUnreadWatermarks(), getCurrentUser(), getUnread()
+  const [nextData, nextUnreadWatermarks, nextCurrentUser, nextUnread] = await Promise.all([
+    getOrdersPageData(), getUnreadWatermarks(), getCurrentUser(), getUnread()
   ]);
   throwIfPageAborted(signal, scope);
+  data = nextData;
   unreadWatermarks = nextUnreadWatermarks;
   currentUser = nextCurrentUser;
   unread = nextUnread;
@@ -671,16 +612,13 @@ export async function mountPage({ scope, signal, historyState = null, navigation
   restoreRevenueState(historyState?.revenue);
   dateFilter = createDateRangeFilter({
     id: "orders",
-    initialDate: "",
+    initialDate: latestDateInput(data.orders.map((order) => order.date)),
     onChange({ filterChanged }) {
       if (filterChanged) state.page = 1;
       rerenderOrdersPage();
-      if (filterChanged) void loadCurrentOrderPage();
     }
   });
   dateFilter.restoreState?.(historyState?.dateFilter);
-  data = await getOrdersPageData(currentOrderQuery());
-  throwIfPageAborted(signal, scope);
   printDialog = createPrintDialog({ getLang: () => currentHelpers?.lang ?? "zh", scope });
   await ensureActiveDomainData(signal);
 
@@ -693,30 +631,23 @@ export async function mountPage({ scope, signal, historyState = null, navigation
     },
     activate() {
       if (state.tab === "list") markRead("orders", unreadWatermarks.orders);
-      ordersSearchRender = createDebouncedTask(() => void loadCurrentOrderPage());
+      ordersSearchRender = createDebouncedTask(rerenderOrderSearchResults);
       scope.onCleanup(() => ordersSearchRender?.cancel());
       scope.listen(document, "click", onOrdersClick);
       scope.listen(document, "contextmenu", onOrdersContextMenu);
       scope.listen(document, "input", onOrdersInput);
-      scope.listen(document, "change", onOrdersChange);
       scope.listen(document, "keydown", onOrdersKeydown);
-      scope.listen(window, ORDER_QUERY_UPDATED_EVENT, onOrderQueryUpdated);
+      scope.listen(window, "resize", onOrdersResize);
       northboundLiveRefresh = attachNorthboundBehaviors({ rerender: rerenderOrdersPage, scope });
       attachChargerLeadBehaviors({ rerender: rerenderOrdersPage, scope });
       attachRevenueBehaviors({ rerender: rerenderOrdersPage, scope });
       ordersLiveRefresh = attachLiveSnapshotRefresh({
         scope,
-        snapshots: [],
-        tables: ["invoices", "customers", "employees", "shipment_events"],
+        snapshots: ["orders.json"],
+        tables: ["invoices"],
         isBlocked: hasNorthboundRefreshBlock,
         async refresh({ defer, isCurrent }) {
-          if (state.tab === "revenue" && canViewRevenue) {
-            const revenueSource = await getLegacyOrdersPageData();
-            await ensureRevenueData(revenueSource.orders, { scope });
-            if (isCurrent()) rerenderOrdersPage();
-            return;
-          }
-          const nextData = await getOrdersPageData(currentOrderQuery(), { refresh: true });
+          const nextData = await getOrdersPageData();
           if (!isCurrent()) return;
           if (hasNorthboundRefreshBlock()) {
             defer();
@@ -724,8 +655,9 @@ export async function mountPage({ scope, signal, historyState = null, navigation
           }
           data = nextData;
           state.page = Math.min(state.page, totalPages());
+          if (state.tab === "revenue" && canViewRevenue) await ensureRevenueData(data.orders, { scope });
           if (!isCurrent()) return;
-          if (state.tab === "list") rerenderOrderSearchResults();
+          rerenderOrdersPage();
         }
       });
     },
@@ -744,7 +676,8 @@ export async function mountPage({ scope, signal, historyState = null, navigation
       };
     },
     dispose() {
-      orderRequestSequence += 1;
+      window.clearTimeout(resizeTimer);
+      resizeTimer = 0;
       closeSourceMenu();
       dateFilter?.close();
       printDialog?.dispose();
@@ -754,7 +687,6 @@ export async function mountPage({ scope, signal, historyState = null, navigation
       disposeRevenueState();
       ordersSearchRender?.cancel();
       ordersSearchRender = null;
-      ordersLoading = false;
       data = null;
       unreadWatermarks = null;
       unread = null;
