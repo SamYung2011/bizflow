@@ -715,7 +715,9 @@ export async function mountPage({ scope, signal, historyState = null, navigation
       attachRevenueBehaviors({ rerender: rerenderOrdersPage, scope });
       ordersLiveRefresh = attachLiveSnapshotRefresh({
         scope,
-        snapshots: [],
+        // The live list reads the paged RPC; orders.json remains subscribed so
+        // retry completion also refreshes the three legacy observer pages.
+        snapshots: ["orders.json"],
         tables: ["invoices", "customers", "employees", "shipment_events"],
         isBlocked: hasNorthboundRefreshBlock,
         async refresh({ defer, isCurrent }) {
