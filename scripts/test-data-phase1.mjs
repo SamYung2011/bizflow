@@ -17,10 +17,11 @@ import { normalizeOrderQuery, ORDER_PAGE_SIZE } from "../root-site/data/live-ord
 import { completePasswordSignIn, readSignedInUser } from "../root-site/login/signed-in-user.js";
 
 const read = (relative) => readFile(new URL(`../${relative}`, import.meta.url), "utf8");
-const [migration, guardMigration, repairMigration, orders, revenue, orderQuery, orderWrites, liveHome, provider, home, customers, tasks, pending, customerDetail, itemMap] = await Promise.all([
+const [migration, guardMigration, repairMigration, patchMigration, orders, revenue, orderQuery, orderWrites, liveHome, provider, home, customers, tasks, pending, customerDetail, itemMap] = await Promise.all([
   read("migrations/102_bizflow_data_phase1.sql"),
   read("migrations/103_guard_non_array_invoice_items.sql"),
   read("migrations/104_bizflow_data_phase1_r5.sql"),
+  read("migrations/105_bizflow_warranty_revenue_gate.sql"),
   read("root-site/bizflow/orders.js"),
   read("root-site/bizflow/orders-revenue.js"),
   read("root-site/data/live-orders-query.js"),
@@ -57,6 +58,18 @@ assert.doesNotMatch(repairedUnread, /bizflow_order_list/,
   "unread counts must not re-enter the fat legacy order view");
 assert.match(executableRepairMigration, /JOIN customer_groups AS customer_group ON customer_group\.member_id = invoice\.customer_id/,
   "the warranty KPI must use the exact legacy customer-group membership map");
+
+const executablePatchMigration = stripSqlComments(patchMigration);
+assert.doesNotMatch(executablePatchMigration, /SECURITY\s+DEFINER/i,
+  "the warranty/revenue patch must not bypass table RLS");
+assert.equal((executablePatchMigration.match(/CREATE OR REPLACE FUNCTION/g) || []).length, 2,
+  "migration 105 must only replace the reviewed revenue and Home functions");
+assert.match(executablePatchMigration,
+  /CREATE OR REPLACE FUNCTION public\.bizflow_order_revenue[\s\S]*employee\.user_id = auth\.uid\(\)[\s\S]*employee\.is_admin = true OR employee\.can_view_revenue = true[\s\S]*WHERE access\.allowed/,
+  "the revenue RPC must gate its original aggregate on the signed-in employee's UI-equivalent permission");
+assert.match(executablePatchMigration,
+  /warranty_trim_chars AS MATERIALIZED[\s\S]*lower\(btrim\([\s\S]*product\.name[\s\S]*lower\(btrim\([\s\S]*line\.item->>'name'/,
+  "both product and legacy item names must use the ECMAScript-trim character set before warranty matching");
 
 assert.doesNotMatch(migration.replace(/^--.*$/gm, ""), /SECURITY\s+DEFINER/i, "phase 1 must not bypass RLS");
 assert.match(migration, /bizflow_order_list[\s\S]*security_invoker = true/);
