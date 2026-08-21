@@ -854,7 +854,7 @@ try {
   assert.ok(scale4500.elapsedMs < scale2005.elapsedMs * 3.5,
     `255→4500 curve must stay far below quadratic growth: ${JSON.stringify(scale)}`);
 
-+  // Replay the reviewer's exact 34-invoice adversarial set. These expected
+  // Replay the reviewer's exact 34-invoice adversarial set. These expected
   // per-invoice row counts were produced independently by the legacy JS
   // buildWarrantySnapshot path; querying the active Home CTE catches parity
   // changes without copying the SQL under test into the oracle.
