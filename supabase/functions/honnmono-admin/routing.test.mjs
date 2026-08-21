@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  isAllowedFlashAdminBase,
   isAllowedHonnmonoApiBase,
   isAllowedHonnmonoUpstream,
   isAllowedOtaAdminBase,
   mapHonnmonoAdminPath,
+  mapFlashAdminPath,
   mapOtaAdminPath,
   stripFunctionPrefix,
   validateOtaAdminBody,
@@ -55,6 +57,18 @@ test("maps only the OTA package read and replace routes", () => {
   assert.equal(mapOtaAdminPath("/ota/package", "DELETE"), "");
   assert.equal(mapOtaAdminPath("/ota/backups", "GET"), "");
   assert.equal(mapOtaAdminPath("/package", "GET"), "");
+});
+
+
+test("maps only the flash-device key-rotation write to the HK test-server", () => {
+  assert.equal(
+    mapFlashAdminPath("/devices/flash/CERT_1/unbind", "POST"),
+    "/internal/admin/devices/flash/CERT_1/unbind",
+  );
+  assert.equal(mapFlashAdminPath("/devices/flash/CERT_1/unbind/", "POST"), "/internal/admin/devices/flash/CERT_1/unbind");
+  assert.equal(mapFlashAdminPath("/devices/flash/CERT_1/unbind", "GET"), "");
+  assert.equal(mapFlashAdminPath("/devices/dc-pro/CERT_1/unbind", "POST"), "");
+  assert.equal(mapFlashAdminPath("/devices/flash/CERT_1/actions", "POST"), "");
 });
 
 
@@ -115,9 +129,19 @@ test("pins the bridge to the Shenzhen app-api host and JSON endpoints", () => {
 
 test("accepts a clean internal OTA service base and rejects unsafe URL shapes", () => {
   assert.equal(isAllowedOtaAdminBase("http://172.18.0.1:8086"), true);
-  assert.equal(isAllowedOtaAdminBase("http://127.0.0.1:8086/"), true);
+  assert.equal(isAllowedOtaAdminBase("http://127.0.0.1:8086/"), false);
   assert.equal(isAllowedOtaAdminBase("ftp://172.18.0.1:8086"), false);
   assert.equal(isAllowedOtaAdminBase("http://user:pass@172.18.0.1:8086"), false);
   assert.equal(isAllowedOtaAdminBase("http://172.18.0.1:8086/base"), false);
   assert.equal(isAllowedOtaAdminBase("http://172.18.0.1:8086?next=evil"), false);
+});
+
+
+test("pins the flash admin service to the HK Docker bridge", () => {
+  assert.equal(isAllowedFlashAdminBase("http://172.18.0.1:8090"), true);
+  assert.equal(isAllowedFlashAdminBase("http://127.0.0.1:8090"), false);
+  assert.equal(isAllowedFlashAdminBase("https://172.18.0.1:8090"), false);
+  assert.equal(isAllowedFlashAdminBase("http://user:pass@172.18.0.1:8090"), false);
+  assert.equal(isAllowedFlashAdminBase("http://172.18.0.1:8090/base"), false);
+  assert.equal(isAllowedFlashAdminBase("http://172.18.0.1:8090?next=evil"), false);
 });

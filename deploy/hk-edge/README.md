@@ -22,6 +22,8 @@ HONNMONO_ADMIN_API_URL=https://app-api.honnmono.top
 HONNMONO_ADMIN_INTERNAL_TOKEN=<same random secret as Shenzhen>
 OTA_ADMIN_URL=http://172.18.0.1:8086
 OTA_ADMIN_TOKEN=<same random secret as the HK OTA admin service>
+FLASH_ADMIN_URL=http://172.18.0.1:8090
+FLASH_ADMIN_TOKEN=<same random secret as the HK test-server admin endpoint>
 ```
 
 No secret belongs in this repository. `HONNMONO_ADMIN_INTERNAL_TOKEN` must be
@@ -29,6 +31,11 @@ at least 32 characters and must exactly match the Shenzhen backend's
 `HONNMONO_ADMIN_INTERNAL_TOKEN`. `OTA_ADMIN_URL` is deliberately restricted by
 the Edge function to `http://172.18.0.1:8086`; do not expose that service on a
 public address.
+
+`FLASH_ADMIN_URL` is likewise pinned to the Docker bridge address for the HK
+test-server. `FLASH_ADMIN_TOKEN` must be at least 32 characters and match
+`HONNMONO_TEST_ADMIN_INTERNAL_TOKEN` on that service. The browser never receives
+either internal token.
 
 For a Functions-only recreate, the required command shape is:
 

@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 import {
+  isAllowedFlashAdminBase,
   isAllowedHonnmonoUpstream,
   isAllowedOtaAdminBase,
   mapHonnmonoAdminPath,
+  mapFlashAdminPath,
   mapOtaAdminPath,
 } from "../supabase/functions/honnmono-admin/routing.mjs";
 
@@ -103,6 +105,12 @@ assert.equal(
   "/devices/flash/CERT_1/actions",
 );
 assert.equal(
+  mapFlashAdminPath("/devices/flash/CERT_1/unbind", "POST"),
+  "/internal/admin/devices/flash/CERT_1/unbind",
+);
+assert.equal(mapFlashAdminPath("/devices/flash/CERT_1/unbind", "GET"), "");
+assert.equal(mapFlashAdminPath("/devices/dc-pro/CERT_1/unbind", "POST"), "");
+assert.equal(
   mapOtaAdminPath("/ota/legacy-packages/150001", "POST"),
   "/legacy-packages/150001",
 );
@@ -110,6 +118,10 @@ assert.equal(isAllowedOtaAdminBase("http://172.18.0.1:8086"), true);
 assert.equal(isAllowedOtaAdminBase("http://172.18.0.1:8086/base"), false);
 assert.equal(isAllowedOtaAdminBase("https://172.18.0.1:8086"), false);
 assert.equal(isAllowedOtaAdminBase("http://public.example:8086"), false);
+assert.equal(isAllowedFlashAdminBase("http://172.18.0.1:8090"), true);
+assert.equal(isAllowedFlashAdminBase("http://127.0.0.1:8090"), false);
+assert.equal(isAllowedFlashAdminBase("https://172.18.0.1:8090"), false);
+assert.equal(isAllowedFlashAdminBase("http://172.18.0.1:8090/base"), false);
 assert.equal(
   isAllowedHonnmonoUpstream(
     new URL("https://app-api.honnmono.top/internal/admin/feedback-log/token"),
@@ -130,11 +142,22 @@ assert.match(edge, /Deno\.env\.get\("OTA_ADMIN_TOKEN"\)/);
 assert.match(edge, /"X-Internal-Token": OTA_ADMIN_TOKEN/);
 assert.match(edge, /mapOtaAdminPath\(subPath, req\.method\)/);
 assert.match(edge, /OTA admin service unavailable/);
+assert.match(edge, /Deno\.env\.get\("FLASH_ADMIN_URL"\)/);
+assert.match(edge, /Deno\.env\.get\("FLASH_ADMIN_TOKEN"\)/);
+assert.match(edge, /mapFlashAdminPath\(subPath, req\.method\)/);
+assert.match(edge, /"X-Internal-Token": FLASH_ADMIN_TOKEN/);
+assert.match(edge, /"X-Operator-Email": guard\.operatorEmail/);
+assert.match(edge, /Flash admin service unavailable/);
 assert.match(edge, /MAX_OTA_REQUEST_JSON_BYTES = 2_800_000/);
 assert.ok(
   edge.indexOf("const guard: GuardResult = await verifyAdmin(req)") <
     edge.indexOf("if (isOtaRequest)"),
   "OTA routing must remain behind the existing JWT/admin guard",
+);
+assert.ok(
+  edge.indexOf("const guard: GuardResult = await verifyAdmin(req)") <
+    edge.indexOf("if (isFlashAdminRequest)"),
+  "flash key rotation must remain behind the existing JWT/admin guard",
 );
 assert.match(
   edge,
@@ -149,6 +172,8 @@ for (const key of [
   "HONNMONO_ADMIN_INTERNAL_TOKEN",
   "OTA_ADMIN_URL",
   "OTA_ADMIN_TOKEN",
+  "FLASH_ADMIN_URL",
+  "FLASH_ADMIN_TOKEN",
 ]) {
   assert.match(override, new RegExp(`\\b${key}:`), `override missing ${key}`);
 }

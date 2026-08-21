@@ -12,6 +12,7 @@
 //   GET  /honnmono-admin/devices/{kind}/{certid}/sessions
 //   GET  /honnmono-admin/devices/flash/{certid}/uploads/{id}
 //   POST /honnmono-admin/devices/flash/{certid}/actions
+//   POST /honnmono-admin/devices/flash/{certid}/unbind
 //   GET  /honnmono-admin/ota/legacy-packages
 //   POST /honnmono-admin/ota/legacy-packages/{slot}
 //
@@ -20,10 +21,12 @@
 // directly, so files up to 200 MB never traverse the HK Edge Function.
 
 import {
+  isAllowedFlashAdminBase,
   isAllowedHonnmonoApiBase,
   isAllowedHonnmonoUpstream,
   isAllowedOtaAdminBase,
   mapHonnmonoAdminPath,
+  mapFlashAdminPath,
   mapOtaAdminPath,
   stripFunctionPrefix,
   validateOtaAdminBody,
@@ -40,6 +43,8 @@ const HONNMONO_ADMIN_INTERNAL_TOKEN =
   Deno.env.get("HONNMONO_ADMIN_INTERNAL_TOKEN") ?? "";
 const OTA_ADMIN_URL = (Deno.env.get("OTA_ADMIN_URL") ?? "").replace(/\/+$/, "");
 const OTA_ADMIN_TOKEN = Deno.env.get("OTA_ADMIN_TOKEN") ?? "";
+const FLASH_ADMIN_URL = (Deno.env.get("FLASH_ADMIN_URL") ?? "").replace(/\/+$/, "");
+const FLASH_ADMIN_TOKEN = Deno.env.get("FLASH_ADMIN_TOKEN") ?? "";
 const UPSTREAM_TIMEOUT_MS = 10_000;
 const DEVICE_UNBIND_TIMEOUT_MS = 90_000;
 const MAX_JSON_BYTES = 2_000_000;
@@ -156,19 +161,89 @@ Deno.serve(async (req) => {
   const isLegacyPackageWrite =
     req.method === "POST" &&
     /^\/ota\/legacy-packages\/(150001|150002|150003|150004)$/.test(subPath);
+  const isFlashAdminRequest =
+    req.method === "POST" &&
+    /^\/devices\/flash\/[A-Za-z0-9_-]{1,64}\/unbind\/?$/.test(subPath);
   const isOtaRequest =
     subPath === "/ota/package" ||
-    subPath.startsWith("/devices/flash") ||
+    (subPath.startsWith("/devices/flash") && !isFlashAdminRequest) ||
     isLegacyPackageWrite;
+  const needsHonnmonoEnv =
+    (!isOtaRequest && !isFlashAdminRequest) || isLegacyPackageWrite;
   if (
     !requireAuthEnv() ||
-    ((!isOtaRequest || isLegacyPackageWrite) && !requireEnv())
+    (needsHonnmonoEnv && !requireEnv())
   ) {
     return json({ error: "Server misconfigured" }, 500);
   }
 
   const guard: GuardResult = await verifyAdmin(req);
   if (!guard.ok) return json({ error: guard.error }, guard.status);
+
+  if (isFlashAdminRequest) {
+    const flashPath = mapFlashAdminPath(subPath, req.method);
+    if (!flashPath) return json({ error: "Not found" }, 404);
+    if (
+      FLASH_ADMIN_TOKEN.length < 32 ||
+      !isAllowedFlashAdminBase(FLASH_ADMIN_URL)
+    ) {
+      return json({ error: "Flash admin service unavailable" }, 503);
+    }
+
+    const requestLength = Number(req.headers.get("content-length") ?? "0");
+    if (
+      Number.isFinite(requestLength) &&
+      requestLength > MAX_REQUEST_JSON_BYTES
+    ) {
+      return json({ error: "Request body too large" }, 413);
+    }
+    const flashBody = await req.text();
+    if (
+      new TextEncoder().encode(flashBody).byteLength > MAX_REQUEST_JSON_BYTES
+    ) {
+      return json({ error: "Request body too large" }, 413);
+    }
+    try {
+      const parsed = JSON.parse(flashBody);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return json({ error: "Invalid JSON body" }, 400);
+      }
+    } catch (_) {
+      return json({ error: "Invalid JSON body" }, 400);
+    }
+
+    const flashUrl = new URL(flashPath, `${FLASH_ADMIN_URL}/`);
+    let flashUpstream: Response;
+    try {
+      flashUpstream = await fetch(flashUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Internal-Token": FLASH_ADMIN_TOKEN,
+          "X-Operator-Email": guard.operatorEmail,
+        },
+        body: flashBody,
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      });
+    } catch (_) {
+      return json({ error: "Flash admin service timeout" }, 504);
+    }
+
+    const flashText = await flashUpstream.text();
+    if (new TextEncoder().encode(flashText).byteLength > MAX_JSON_BYTES) {
+      return json({ error: "Flash admin service response too large" }, 502);
+    }
+    let flashResponse: unknown = null;
+    try {
+      flashResponse = flashText ? JSON.parse(flashText) : null;
+    } catch (_) {
+      return json({ error: "Flash admin service invalid response" }, 502);
+    }
+    if (flashUpstream.status === 401 || flashUpstream.status === 403) {
+      return json({ error: "Flash admin service unavailable" }, 502);
+    }
+    return json(flashResponse, flashUpstream.status);
+  }
 
   if (isOtaRequest) {
     const otaPath = mapOtaAdminPath(subPath, req.method);

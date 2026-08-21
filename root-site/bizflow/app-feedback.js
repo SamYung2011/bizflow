@@ -116,10 +116,36 @@ function adapterPageCount() {
 
 export function adapterActionsForKind(kind) {
   return kind === "flash"
-    ? ["force_ota", "lock", "unlock"]
+    ? ["unbind", "force_ota", "lock", "unlock"]
     : kind === "dc-pro"
       ? ["unbind"]
       : [];
+}
+
+export function flashUnbindDisabled(device) {
+  const certid = String(device?.certid ?? "").trim();
+  const expectedUserId = String(device?.binding?.userId ?? "").trim();
+  return (
+    !certid ||
+    !expectedUserId ||
+    expectedUserId === "0" ||
+    device?.charging === true
+  );
+}
+
+export function flashUnbindRequest(device) {
+  if (device?.charging === true) {
+    throw new HonnmonoAdminError("device_charging", 409);
+  }
+  const certid = String(device?.certid ?? "").trim();
+  const expectedUserId = String(device?.binding?.userId ?? "").trim();
+  if (!certid || !expectedUserId || expectedUserId === "0") {
+    throw new HonnmonoAdminError("requestError");
+  }
+  return {
+    path: `/devices/flash/${encodeURIComponent(certid)}/unbind`,
+    body: { expectedUserId },
+  };
 }
 
 export function adapterSessionSubPath({ kind, certid, date, page = 1 }) {
@@ -169,6 +195,7 @@ function deviceErrorCopy(error) {
   if (error instanceof HonnmonoAdminError) {
     if (error.code === "imeiValidation") return t("imeiValidation");
     if (error.code === "imei_ambiguous") return t("imeiAmbiguousError");
+    if (error.code === "device_charging") return t("flashUnbindChargingBlocked");
     if (error.status === 404) return t("deviceNotFoundError");
     if (error.status === 409) return t("bindingChangedError");
   }
@@ -474,7 +501,11 @@ function renderAdapterCards() {
           : { software: device?.firmware };
       const bindingUserId = String(device?.binding?.userId ?? "").trim();
       const unbindDisabled =
-        !/^\d{15}$/.test(imei) || !bindingUserId || bindingUserId === "0";
+        kind === "flash"
+          ? flashUnbindDisabled(device)
+          : !/^\d{15}$/.test(imei) || !bindingUserId || bindingUserId === "0";
+      const unbindLabelKey =
+        kind === "flash" ? "flashUnbindDevice" : "unbindDevice";
       const availableActions = adapterActionsForKind(kind);
       const actionBusy =
         state.adapters.actionLoading || state.adapters.actionLookupId === id;
@@ -505,7 +536,7 @@ function renderAdapterCards() {
         </section>
         <div class="app-feedback-adapter-actions">
           <button type="button" class="app-feedback-button" data-adapter-detail="${rawE(id)}"${!device.certid || actionBusy ? " disabled" : ""}>${rawE(t("viewSessions"))}</button>
-          ${availableActions.includes("unbind") ? `<button type="button" class="app-feedback-button app-feedback-button--danger" data-adapter-action="unbind" data-adapter-id="${rawE(id)}"${unbindDisabled || actionBusy ? " disabled" : ""}>${rawE(t("unbindDevice"))}</button>` : ""}
+          ${availableActions.includes("unbind") ? `<button type="button" class="app-feedback-button app-feedback-button--danger" data-adapter-action="unbind" data-adapter-id="${rawE(id)}"${kind === "flash" && device.charging ? ` title="${rawE(t("flashUnbindChargingBlocked"))}"` : ""}${unbindDisabled || actionBusy ? " disabled" : ""}>${rawE(t(unbindLabelKey))}</button>` : ""}
           ${availableActions.includes("force_ota") ? `<button type="button" class="app-feedback-button" data-adapter-action="force_ota" data-adapter-id="${rawE(id)}"${actionBusy ? " disabled" : ""}>${rawE(t("forceOta"))}</button>
           <button type="button" class="app-feedback-button" data-adapter-action="lock" data-adapter-id="${rawE(id)}"${actionBusy ? " disabled" : ""}>${rawE(t("lockDevice"))}</button>
           <button type="button" class="app-feedback-button" data-adapter-action="unlock" data-adapter-id="${rawE(id)}"${actionBusy ? " disabled" : ""}>${rawE(t("unlockDevice"))}</button>` : ""}
@@ -521,7 +552,7 @@ function renderAdapterActionConfirm() {
   const device = confirm.device;
   const packages = Array.isArray(confirm.packages) ? confirm.packages : [];
   const actionKey = {
-    unbind: "unbindDevice",
+    unbind: state.adapters.kind === "flash" ? "flashUnbindDevice" : "unbindDevice",
     force_ota: "forceOta",
     lock: "lockDevice",
     unlock: "unlockDevice",
@@ -529,7 +560,7 @@ function renderAdapterActionConfirm() {
   return `<div class="app-feedback-overlay app-feedback-device-confirm-overlay" data-adapter-confirm-overlay>
     <section class="app-feedback-device-confirm" role="alertdialog" aria-modal="true" aria-labelledby="app-feedback-adapter-confirm-title">
       <h2 id="app-feedback-adapter-confirm-title">${rawE(t("actionConfirmTitle"))}</h2>
-      <p>${rawE(t("actionConfirmText"))}</p>
+      <p>${rawE(t(confirm.action === "unbind" && state.adapters.kind === "flash" ? "flashUnbindConfirmText" : "actionConfirmText"))}</p>
       <dl class="app-feedback-device-confirm__details">
         ${detailRow("actions", t(actionKey))}
         ${detailRow("uuid", adapterDeviceId(device), { mono: true })}
@@ -626,7 +657,7 @@ function renderAdapterPanel() {
       </div>
       ${adapters.error ? `<div class="app-feedback-alert">${rawE(t("deviceListError", { message: errorCopy(adapters.error) }))}</div>` : ""}
       ${adapters.actionError && !adapters.actionConfirm ? `<div class="app-feedback-alert">${rawE(t("deviceActionError", { message: deviceErrorCopy(adapters.actionError) }))}</div>` : ""}
-      ${adapters.actionResult ? `<div class="app-feedback-ota-success"><strong>${rawE(t("deviceActionSuccess"))}</strong></div>` : ""}
+      ${adapters.actionResult ? `<div class="app-feedback-ota-success"><strong>${rawE(t(adapters.actionResult?.status === "unbound" ? "flashUnbindSuccess" : "deviceActionSuccess"))}</strong></div>` : ""}
       ${renderAdapterCards()}
       <nav class="app-feedback-pager" aria-label="${rawE(t("page", { page: adapters.page, pages }))}">
         <span>${rawE(t("page", { page: adapters.page, pages }))}</span>
@@ -1025,6 +1056,19 @@ async function beginAdapterAction(action, id) {
   state.adapters.actionError = null;
   state.adapters.actionResult = null;
   if (action === "unbind") {
+    if (state.adapters.kind === "flash") {
+      if (device.charging === true) {
+        state.adapters.actionError = new HonnmonoAdminError(
+          "device_charging",
+          409,
+        );
+        rerender();
+        return;
+      }
+      state.adapters.actionConfirm = { action, device };
+      rerender();
+      return;
+    }
     state.adapters.actionLookupId = adapterDeviceId(device);
     rerender();
     try {
@@ -1070,11 +1114,24 @@ async function submitAdapterAction() {
   let path;
   let body;
   if (confirm.action === "unbind") {
-    if (state.adapters.kind !== "dc-pro") return;
-    const expectedUserId = Number(confirm.binding?.dev_cloud?.userid);
-    if (!Number.isSafeInteger(expectedUserId) || expectedUserId <= 0) return;
-    path = "/device/unbind";
-    body = { imei: confirm.device.imei, expected_userid: expectedUserId };
+    if (state.adapters.kind === "dc-pro") {
+      const expectedUserId = Number(confirm.binding?.dev_cloud?.userid);
+      if (!Number.isSafeInteger(expectedUserId) || expectedUserId <= 0) return;
+      path = "/device/unbind";
+      body = { imei: confirm.device.imei, expected_userid: expectedUserId };
+    } else if (state.adapters.kind === "flash") {
+      let request;
+      try {
+        request = flashUnbindRequest(confirm.device);
+      } catch (error) {
+        state.adapters.actionError = error;
+        rerender();
+        return;
+      }
+      ({ path, body } = request);
+    } else {
+      return;
+    }
   } else {
     path = `/devices/flash/${encodeURIComponent(confirm.device.certid)}/actions`;
     body = { action: confirm.action };

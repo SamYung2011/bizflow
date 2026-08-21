@@ -16,6 +16,8 @@ import {
   adapterOtaPackages,
   adapterSessionMinDate,
   adapterSessionSubPath,
+  flashUnbindDisabled,
+  flashUnbindRequest,
 } from "../root-site/bizflow/app-feedback.js";
 import {
   createDeviceUnbindController,
@@ -153,6 +155,7 @@ for (const [method, subPath] of [
   ["GET", "/devices/dc-pro/CERT_2/sessions?date=2026-08-17&page=1&pageSize=20"],
   ["GET", "/devices/flash/CERT_1/uploads/9"],
   ["POST", "/devices/flash/CERT_1/actions"],
+  ["POST", "/devices/flash/CERT_1/unbind"],
 ]) {
   assert.doesNotThrow(() => assertHonnmonoAdminRequest(subPath, method));
 }
@@ -177,6 +180,7 @@ for (const [method, subPath] of [
   ["POST", "/ota/legacy-packages/150005"],
   ["GET", "/devices/flash/CERT_1/uploads/0"],
   ["POST", "/devices/dc-pro/CERT_2/actions"],
+  ["POST", "/devices/dc-pro/CERT_2/unbind"],
 ]) {
   assert.throws(
     () => assertHonnmonoAdminRequest(subPath, method),
@@ -212,12 +216,38 @@ assert.match(formatFeedbackTime(1_700_000_000, "zh"), /\d/);
 assert.equal(formatFeedbackTime("not-a-timestamp", "en"), "not-a-timestamp");
 
 assert.deepEqual(adapterActionsForKind("flash"), [
+  "unbind",
   "force_ota",
   "lock",
   "unlock",
 ]);
 assert.deepEqual(adapterActionsForKind("dc-pro"), ["unbind"]);
 assert.deepEqual(adapterActionsForKind("unknown"), []);
+const boundIdleFlash = {
+  certid: "0D99170909940000102020D3",
+  charging: false,
+  binding: { userId: "owner-42" },
+};
+assert.equal(flashUnbindDisabled(boundIdleFlash), false);
+assert.deepEqual(flashUnbindRequest(boundIdleFlash), {
+  path: "/devices/flash/0D99170909940000102020D3/unbind",
+  body: { expectedUserId: "owner-42" },
+});
+assert.equal(
+  flashUnbindDisabled({ ...boundIdleFlash, charging: true }),
+  true,
+);
+assert.throws(
+  () => flashUnbindRequest({ ...boundIdleFlash, charging: true }),
+  (error) =>
+    error instanceof HonnmonoAdminError &&
+    error.code === "device_charging" &&
+    error.status === 409,
+);
+assert.equal(
+  flashUnbindDisabled({ ...boundIdleFlash, binding: { userId: "" } }),
+  true,
+);
 assert.equal(
   adapterSessionSubPath({
     kind: "dc-pro",
@@ -271,6 +301,10 @@ for (const language of feedbackLanguages) {
   assert.equal(typeof appFeedbackCopy[language].otaVersionFormat, "string");
   assert.equal(typeof appFeedbackCopy[language].otaMd5Hint, "string");
   assert.equal(typeof appFeedbackCopy[language].otaPermissionError, "string");
+  assert.equal(typeof appFeedbackCopy[language].flashUnbindDevice, "string");
+  assert.equal(typeof appFeedbackCopy[language].flashUnbindConfirmText, "string");
+  assert.equal(typeof appFeedbackCopy[language].flashUnbindSuccess, "string");
+  assert.equal(typeof appFeedbackCopy[language].flashUnbindChargingBlocked, "string");
   assert.match(appFeedbackCopy[language].chargeCount, /90/);
 }
 
@@ -365,6 +399,7 @@ assert.doesNotMatch(pageSource, /HONNMONO_ADMIN_INTERNAL_TOKEN/);
 assert.doesNotMatch(pageSource, /app-api/i);
 assert.doesNotMatch(apiSource, /HONNMONO_ADMIN_INTERNAL_TOKEN/);
 assert.doesNotMatch(apiSource, /app-api/i);
+assert.doesNotMatch(`${pageSource}\n${apiSource}`, /FLASH_ADMIN_(?:URL|TOKEN)/);
 assert.doesNotMatch(deviceSource, /HONNMONO_ADMIN_INTERNAL_TOKEN/);
 assert.doesNotMatch(deviceSource, /app-api/i);
 assert.doesNotMatch(otaSource, /HONNMONO_ADMIN_INTERNAL_TOKEN/);
@@ -375,8 +410,9 @@ assert.match(apiSource, /apikey:\s*context\.anonKey/);
 assert.match(apiSource, /signal,/);
 assert.match(apiSource, /"Content-Type":\s*"application\/json"/);
 assert.match(apiSource, /body:\s*serializedBody/);
-assert.match(apiSource, /backendCode === "imei_ambiguous"/);
+assert.match(apiSource, /allowedBackendCodes\.has\(backendCode\)/);
 assert.match(pageSource, /error\.code === "imei_ambiguous"/);
+assert.match(pageSource, /error\.code === "device_charging"/);
 assert.match(pageSource, /data-app-feedback-tab="feedback"/);
 assert.match(pageSource, /data-app-feedback-tab="device"/);
 assert.match(pageSource, /data-app-feedback-tab="devices"/);
@@ -385,6 +421,8 @@ assert.match(pageSource, /data-adapter-kind="dc-pro"/);
 assert.match(pageSource, /data-adapter-action="force_ota"/);
 assert.match(pageSource, /data-adapter-action="lock"/);
 assert.match(pageSource, /data-adapter-action="unlock"/);
+assert.match(pageSource, /data-adapter-action="unbind"/);
+assert.match(pageSource, /flashUnbindConfirmText/);
 assert.match(pageSource, /data-adapter-report=/);
 assert.match(pageSource, /pageSize:\s*String\(PAGE_SIZE\)/);
 assert.match(pageSource, /activeOtaController\?\.load\(\)/);

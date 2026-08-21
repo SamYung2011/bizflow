@@ -15,6 +15,7 @@ const ALLOWED_REQUESTS = [
   { method: "GET", path: /^\/devices\/(flash|dc-pro)\/[A-Za-z0-9_-]{1,64}\/sessions(?:\?[^#]*)?$/ },
   { method: "GET", path: /^\/devices\/flash\/[A-Za-z0-9_-]{1,64}\/uploads\/[1-9]\d*$/ },
   { method: "POST", path: /^\/devices\/flash\/[A-Za-z0-9_-]{1,64}\/actions$/ },
+  { method: "POST", path: /^\/devices\/flash\/[A-Za-z0-9_-]{1,64}\/unbind$/ },
 ];
 
 export class HonnmonoAdminError extends Error {
@@ -95,8 +96,14 @@ export async function callHonnmonoAdmin(
   }
   if (!response.ok) {
     const backendCode = parsed?.detail?.code;
+    const allowedBackendCodes = new Set([
+      "imei_ambiguous",
+      "binding_changed",
+      "device_charging",
+      "device_not_found",
+    ]);
     throw new HonnmonoAdminError(
-      backendCode === "imei_ambiguous" ? backendCode : "upstreamError",
+      allowedBackendCodes.has(backendCode) ? backendCode : "upstreamError",
       response.status,
     );
   }

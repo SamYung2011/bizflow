@@ -75,6 +75,17 @@ export function mapOtaAdminPath(pathname, method) {
   return "";
 }
 
+export function mapFlashAdminPath(pathname, method) {
+  const normalized = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+  if (
+    method === "POST" &&
+    /^\/devices\/flash\/[A-Za-z0-9_-]{1,64}\/unbind$/.test(normalized)
+  ) {
+    return `/internal/admin${normalized}`;
+  }
+  return "";
+}
+
 export function validateOtaAdminBody(rawBody) {
   const parsed = JSON.parse(rawBody);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -129,6 +140,24 @@ export function isAllowedOtaAdminBase(value) {
       url.protocol === "http:" &&
       url.hostname === "172.18.0.1" &&
       url.port === "8086" &&
+      url.username === "" &&
+      url.password === "" &&
+      (url.pathname === "" || url.pathname === "/") &&
+      url.search === "" &&
+      url.hash === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function isAllowedFlashAdminBase(value) {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "http:" &&
+      url.hostname === "172.18.0.1" &&
+      url.port === "8090" &&
       url.username === "" &&
       url.password === "" &&
       (url.pathname === "" || url.pathname === "/") &&
