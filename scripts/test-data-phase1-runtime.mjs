@@ -24,6 +24,7 @@ const auth = await import("../root-site/data/auth.js");
 const provider = await import("../root-site/data/provider.js");
 const orderQuery = await import("../root-site/data/live-orders-query.js");
 const queryCache = await import("../root-site/data/live-query-cache.js");
+const homePage = await import("../root-site/bizflow/home.js");
 
 auth.__reset();
 const legacyOrders = await provider.getOrdersPageData();
@@ -91,4 +92,61 @@ assert.deepEqual(unavailableOrders.orders, [],
   "RPC plus legacy failure must render no fake demo orders");
 assert.equal(unavailableOrders.totalCount, 0);
 
-console.log("DATA-phase1 runtime: PASS (observer compatibility, realtime soft stale, order/dashboard/unread fallback)");
+const visibleHomePayload = {
+  generated_at: "2026-08-25T00:00:00Z",
+  counts: { orders: 12, customers: 3, members: 2, tasks: 1, warranty: 0 },
+  revenue: { total_revenue: 1200, paid_count: 8, average: 150, unpaid_count: 2, unpaid_amount: 300 },
+  shipping: { all: 12, pending: 2, in_transit: 1, exception: 0, delivered: 9 },
+  inventory: { carrier_count: 4, active_sku_count: 3, total_quantity: 20, low_stock_count: 1 },
+  tasks: [],
+  feed: [],
+  chart: [{ label: "Adapter", value: 5 }],
+  orders: [],
+  stock: [],
+  members: [],
+  members_stats: { all: 2, active: 2, pending_review: 0, left: 0 },
+  warranty_items: []
+};
+
+async function renderHomeForPermission({ canViewRevenue, payload, userId }) {
+  auth.__reset();
+  auth.__setSessionUser(userId);
+  auth.__setCanViewRevenue(canViewRevenue);
+  auth.__setRpcData("bizflow_home_dashboard", payload);
+  const mounted = await homePage.mountPage({ scope: { isCurrent: () => true }, signal: null });
+  const html = mounted.page.render({
+    icon: () => "",
+    escapeHtml: (value) => String(value),
+    lang: "en"
+  });
+  mounted.dispose();
+  return html;
+}
+
+const revenueAllowedHome = await renderHomeForPermission({
+  canViewRevenue: true,
+  payload: visibleHomePayload,
+  userId: "home-revenue-allowed"
+});
+const revenueDeniedHome = await renderHomeForPermission({
+  canViewRevenue: false,
+  payload: {
+    ...visibleHomePayload,
+    counts: { ...visibleHomePayload.counts, orders: 0 },
+    revenue: { total_revenue: 0, paid_count: 0, average: 0, unpaid_count: 0, unpaid_amount: 0 },
+    chart: []
+  },
+  userId: "home-revenue-denied"
+});
+assert.match(revenueAllowedHome, /<span class="tp-title" title="Orders">Orders<\/span>/,
+  "an authorized Home render must keep the order-count card");
+assert.match(revenueAllowedHome, /<h2 class="home-card__title">Orders \(chart\)<\/h2>/,
+  "an authorized Home render must keep the monthly sales chart");
+assert.doesNotMatch(revenueDeniedHome, /<span class="tp-title" title="Orders">Orders<\/span>/,
+  "a denied Home render must omit the whole order-count card instead of showing zero");
+assert.doesNotMatch(revenueDeniedHome, /<h2 class="home-card__title">Orders \(chart\)<\/h2>/,
+  "a denied Home render must omit the whole sales-chart card instead of showing an empty chart");
+assert.match(revenueDeniedHome, /<h2 class="home-card__title">Orders \(list\)<\/h2>/,
+  "hiding sales signals must not remove the unrelated recent-orders list");
+
+console.log("DATA-phase1 runtime: PASS (observer compatibility, realtime soft stale, order/dashboard/unread fallback, Home sales-signal visibility)");

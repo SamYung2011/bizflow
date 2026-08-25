@@ -17,12 +17,13 @@ import { normalizeOrderQuery, ORDER_PAGE_SIZE } from "../root-site/data/live-ord
 import { completePasswordSignIn, readSignedInUser } from "../root-site/login/signed-in-user.js";
 
 const read = (relative) => readFile(new URL(`../${relative}`, import.meta.url), "utf8");
-const [migration, guardMigration, repairMigration, patchMigration, homeRevenueGateMigration, orders, revenue, orderQuery, orderWrites, liveHome, provider, home, customers, tasks, pending, customerDetail, itemMap] = await Promise.all([
+const [migration, guardMigration, repairMigration, patchMigration, homeRevenueGateMigration, homeSalesGateMigration, orders, revenue, orderQuery, orderWrites, liveHome, provider, home, customers, tasks, pending, customerDetail, itemMap] = await Promise.all([
   read("migrations/102_bizflow_data_phase1.sql"),
   read("migrations/103_guard_non_array_invoice_items.sql"),
   read("migrations/104_bizflow_data_phase1_r5.sql"),
   read("migrations/105_bizflow_warranty_revenue_gate.sql"),
   read("migrations/106_bizflow_home_revenue_gate.sql"),
+  read("migrations/107_bizflow_home_sales_gate.sql"),
   read("root-site/bizflow/orders.js"),
   read("root-site/bizflow/orders-revenue.js"),
   read("root-site/data/live-orders-query.js"),
@@ -86,6 +87,18 @@ assert.match(executableHomeRevenueGateMigration,
 assert.match(executableHomeRevenueGateMigration,
   /'revenue', \(SELECT jsonb_build_object\([\s\S]*'total_revenue'[\s\S]*'paid_count'[\s\S]*'average'[\s\S]*'unpaid_count'[\s\S]*'unpaid_amount'/,
   "the Home revenue wire object must keep its five-key structure");
+
+const executableHomeSalesGateMigration = stripSqlComments(homeSalesGateMigration);
+assert.doesNotMatch(executableHomeSalesGateMigration, /SECURITY\s+DEFINER/i,
+  "the Home sales-signal gate must not bypass table RLS");
+assert.equal((executableHomeSalesGateMigration.match(/CREATE OR REPLACE FUNCTION/g) || []).length, 1,
+  "migration 107 must only replace the reviewed Home function");
+assert.match(executableHomeSalesGateMigration,
+  /'orders', CASE WHEN \(SELECT allowed FROM revenue_access\) THEN shipping\.all_count ELSE 0 END/,
+  "the Home order count must be zeroed by the revenue permission result");
+assert.match(executableHomeSalesGateMigration,
+  /'chart', CASE WHEN \(SELECT allowed FROM revenue_access\) THEN COALESCE\([\s\S]*FROM chart_rows[\s\S]*ELSE '\[\]'::jsonb END/,
+  "the Home monthly product-sales chart must be emptied by the revenue permission result");
 
 assert.doesNotMatch(migration.replace(/^--.*$/gm, ""), /SECURITY\s+DEFINER/i, "phase 1 must not bypass RLS");
 assert.match(migration, /bizflow_order_list[\s\S]*security_invoker = true/);
@@ -154,6 +167,12 @@ assert.deepEqual(normalizeOrderQuery({ page: -2, sort: "bogus", shipping: "bogus
 assert.match(orderQuery, /client\.rpc\("bizflow_order_page"[\s\S]*p_offset: \(query\.page - 1\) \* ORDER_PAGE_SIZE[\s\S]*p_limit: ORDER_PAGE_SIZE/);
 assert.match(orderQuery, /client\.rpc\("bizflow_order_revenue"/,
   "the revenue tab must use a server aggregate instead of downloading every detailed order");
+assert.match(home,
+  /const bannerStats = data\.stats\.filter\(\(stat\) =>[\s\S]*showRevenue \|\| stat\.key !== "orders"/,
+  "Home must omit the order-count card instead of rendering a denied zero");
+assert.match(home,
+  /\$\{showRevenue \? `<section class="home-card">[\s\S]*home\.ordersChart[\s\S]*data\.chart\.map[\s\S]*<\/section>` : ""\}/,
+  "Home must omit the whole sales-chart card when revenue access is denied");
 assert.match(revenue, /getOrderRevenueData\(range, \{ refresh \}\)/);
 assert.doesNotMatch(orders, /getLegacyOrdersPageData/);
 assert.match(orderQuery, /from\("invoices"\)[\s\S]*select\("id,invoice_number[\s\S]*from\("shipment_events"\)[\s\S]*limit\(6\)/,

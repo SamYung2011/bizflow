@@ -262,7 +262,9 @@ export function renderHome({ icon, escapeHtml, lang }) {
     .slice(0, 4);
   const taskFilterOptions = HOME_TASK_FILTERS.map((key) => `<button type="button" class="dropdown-item${homeTaskFilter === key ? " dropdown-item--selected" : ""}" role="option" aria-selected="${homeTaskFilter === key}" data-home-task-filter-option="${key}">${e(th(`home.filter.${key}`))}</button>`).join("");
   const hasQuickCreate = availableQuickCreateActions(homeCurrentUser).length > 0;
-  const bannerStats = data.stats.filter((stat) => stat.key !== "members");
+  const bannerStats = data.stats.filter((stat) =>
+    stat.key !== "members" && (showRevenue || stat.key !== "orders")
+  );
 
   const feedRow = ({ name, action, title, date, time, avatar }) => `
     <div class="home-feed-row">
@@ -362,7 +364,7 @@ export function renderHome({ icon, escapeHtml, lang }) {
         <div class="home-card__list">${data.feed.map(feedRow).join("")}</div>
       </section>
 
-      <section class="home-card">
+      ${showRevenue ? `<section class="home-card">
         <h2 class="home-card__title">${e(th("home.ordersChart"))}</h2>
         <div class="home-chart">${renderBarChart({
           items: data.chart.map((item) => typeof item === "number" ? { label: "", value: item } : item),
@@ -373,7 +375,7 @@ export function renderHome({ icon, escapeHtml, lang }) {
           barClass: "home-chart__bar",
           labelClass: "home-chart__label"
         })}</div>
-      </section>
+      </section>` : ""}
 
       <section class="home-card">
         <div class="home-card__head"><h2 class="home-card__title">${e(th("home.ordersList"))}</h2><a class="home-card__link" href="./orders.html">${e(th("home.viewAll"))}</a></div>
