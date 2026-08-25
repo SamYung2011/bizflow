@@ -6,6 +6,12 @@ import {
 } from "../data/provider.js";
 import { ocppCommandClient } from "../data/live-ocpp-commands.js";
 import {
+  getLiveOcppPileLogsPage,
+  getLiveOcppRecentLogsPage,
+  OCPP_CACHE_SNAPSHOTS,
+} from "../data/live-ocpp.js";
+import { LIVE_SNAPSHOT_UPDATED_EVENT } from "../data/live-snapshot-dependencies.js";
+import {
   createDateRangeFilter,
   latestDateInput,
 } from "../components/date-range-filter.js";
@@ -104,7 +110,8 @@ function renderLogs() {
       return `<tr class="ocpp-click-row" data-ocpp-log="${e(row.id)}"><td>${e(formatUnix(row.ts, h.lang))}</td><td>${statusChip(row.dir === "in" ? "normal" : "unknown", { helpers: h, t, labelKey: row.dir === "in" ? "inbound" : "outbound" })}</td><td class="ocpp-mono">${e(row.pileNo)}</td><td>${e(row.action)}</td><td class="ocpp-mono">${e(row.messageId)}</td><td class="ocpp-preview">${e(row.dataPreview)}</td></tr>${open ? `<tr class="ocpp-expanded"><td colspan="6"><pre>${e(row.dataPreview)}</pre></td></tr>` : ""}`;
     })
     .join("");
-  return `<div class="ocpp-toolbar"><div>${controls}</div><strong>${e(t("visible", { count: visible.length, total: filtered.length }))}</strong></div>${renderTable([t("time"), t("direction"), t("pileNo"), t("action"), t("messageId"), t("payload")], rows, { emptyText: t("noLogs"), helpers: h, minWidth: "xwide", attrs: `data-ocpp-log-total="${filtered.length}" data-ocpp-log-visible="${visible.length}"` })}${visible.length < filtered.length ? `<button type="button" class="ocpp-primary" data-ocpp-log-more>${e(t("loadMore"))}</button>` : ""}`;
+  const hasMore = visible.length < filtered.length || state.logPage?.hasMore === true;
+  return `<div class="ocpp-toolbar"><div>${controls}</div><strong>${e(t("visible", { count: visible.length, total: filtered.length }))}</strong></div>${renderTable([t("time"), t("direction"), t("pileNo"), t("action"), t("messageId"), t("payload")], rows, { emptyText: t("noLogs"), helpers: h, minWidth: "xwide", attrs: `data-ocpp-log-total="${filtered.length}" data-ocpp-log-visible="${visible.length}"` })}${hasMore ? `<button type="button" class="ocpp-primary" data-ocpp-log-more>${e(t("loadMore"))}</button>` : ""}`;
 }
 
 async function loadLiveLogs() {
@@ -117,15 +124,88 @@ async function loadLiveLogs() {
     const result = await getOcppMonitorLogsData();
     if (instance !== activeInstance || !scope?.isCurrent()) return;
     data.logs = result.logs;
+    data.recentLogs = result.logs;
+    data.recentLogsPage = result.logsPage ?? null;
     data.isLive = result.isLive;
     data.logsScope = result.logsScope;
     data.generatedAt = result.generatedAt;
+    state.logPage = result.logsPage ?? null;
+    state.activePileNo = "";
     state.logsLoaded = true;
   } finally {
     if (instance !== activeInstance || !scope?.isCurrent()) return;
     state.logsLoading = false;
     rerender();
   }
+}
+
+function exactPileNo() {
+  const query = state.pileQuery.trim().toLowerCase();
+  if (!query) return "";
+  return data.piles.find((pile) => String(pile.pileNo || "").toLowerCase() === query)?.pileNo || "";
+}
+
+async function loadPileLogs() {
+  const pileNo = exactPileNo();
+  if (!pileNo) {
+    state.activePileNo = "";
+    data.logs = Array.isArray(data.recentLogs) ? data.recentLogs : data.logs;
+    state.logPage = data.recentLogsPage ?? state.logPage;
+    rerender();
+    return;
+  }
+  const instance = activeInstance;
+  const scope = activeScope;
+  const to = Math.floor(Date.now() / 1000);
+  const from = to - 86_400;
+  state.logsLoading = true;
+  rerender();
+  try {
+    const result = await getLiveOcppPileLogsPage({ pileNo, from, to });
+    if (instance !== activeInstance || !scope?.isCurrent()) return;
+    data.logs = result.rows;
+    state.activePileNo = pileNo;
+    state.logFrom = from;
+    state.logTo = to;
+    state.logPage = result.page;
+    state.logLimit = 50;
+  } finally {
+    if (instance !== activeInstance || !scope?.isCurrent()) return;
+    state.logsLoading = false;
+    rerender();
+  }
+}
+
+async function loadMoreLogs() {
+  const query = state.pileQuery.trim().toLowerCase();
+  const filteredCount = data.logs.filter((row) =>
+    (!query || String(row.pileNo).toLowerCase().includes(query)) &&
+    (state.direction === "all" || row.dir === state.direction) &&
+    logDate.matches(dateInputFromUnix(row.ts))).length;
+  if (state.logLimit < filteredCount) {
+    state.logLimit += 50;
+    rerender();
+    return;
+  }
+  if (!state.logPage?.hasMore) return;
+  const beforeId = state.logPage.nextBeforeId || data.logs.at(-1)?.id || "";
+  const result = state.activePileNo
+    ? await getLiveOcppPileLogsPage({
+        pileNo: state.activePileNo,
+        beforeId,
+        from: state.logFrom,
+        to: state.logTo,
+      })
+    : await getLiveOcppRecentLogsPage({ beforeId });
+  if (!Array.isArray(result?.rows) || !activeScope?.isCurrent()) return;
+  data.logs.push(...result.rows);
+  if (!state.activePileNo) {
+    data.recentLogs = data.logs;
+    data.recentLogsPage = result.page;
+  }
+  state.logPage = result.page;
+  state.logLimit += 50;
+  rerender();
 }
 
 function renderCommands() {
@@ -381,7 +461,7 @@ function scheduleAutoRefresh() {
     scheduleAutoRefresh();
   }, OCPP_AUTO_REFRESH_INTERVAL_MS);
 }
-function onMonitorClick(event) {
+async function onMonitorClick(event) {
   if (event.target.closest("[data-ocpp-toast-close]")) {
     state.commandToast = { message: "", kind: "info" };
     rerender();
@@ -441,8 +521,7 @@ function onMonitorClick(event) {
     return;
   }
   if (event.target.closest("[data-ocpp-log-more]")) {
-    state.logLimit += 50;
-    rerender();
+    await loadMoreLogs();
   }
 }
 function onMonitorInput(event) {
@@ -468,7 +547,7 @@ function onMonitorChange(event) {
   }
   if (event.target.matches("[data-ocpp-pile-query]")) {
     state.logLimit = 50;
-    rerender();
+    void loadPileLogs();
   }
   if (event.target.matches("[data-ocpp-direction]")) {
     state.direction = event.target.value;
@@ -479,7 +558,7 @@ function onMonitorChange(event) {
 function onMonitorKeydown(event) {
   if (event.key === "Enter" && event.target.matches("[data-ocpp-pile-query]")) {
     state.logLimit = 50;
-    rerender();
+    void loadPileLogs();
     return;
   }
   if (event.key === "Escape") {
@@ -499,6 +578,10 @@ function createState(historyState, logsDeferred, commandOverview) {
     logLimit: Number.isInteger(saved.logLimit) && saved.logLimit > 0 ? saved.logLimit : 50,
     logsLoading: false,
     logsLoaded: !logsDeferred,
+    logPage: null,
+    activePileNo: "",
+    logFrom: 0,
+    logTo: 0,
     expandedLog: saved.expandedLog == null ? null : String(saved.expandedLog),
     commandAuthenticated: commandOverview.authenticated === true,
     commandStatus: commandOverview.status,
@@ -525,6 +608,8 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
   activeInstance = instance;
   activeScope = scope;
   data = { ...initialData };
+  data.recentLogs = data.logs;
+  data.recentLogsPage = null;
   context = makeOcppContext();
   state = createState(historyState, data.logsDeferred, commandOverview);
   syncTabs();
@@ -552,6 +637,22 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
       scope.listen(document, "input", onMonitorInput);
       scope.listen(document, "change", onMonitorChange);
       scope.listen(document, "keydown", onMonitorKeydown);
+      scope.listen(window, LIVE_SNAPSHOT_UPDATED_EVENT, (event) => {
+        const value = event.detail?.value;
+        if (!value) return;
+        if (event.detail.snapshot === OCPP_CACHE_SNAPSHOTS.monitor) {
+          data = { ...data, ...value, logs: data.logs, recentLogs: data.recentLogs };
+          syncTabs();
+          rerender();
+        }
+        if (event.detail.snapshot === OCPP_CACHE_SNAPSHOTS.logs && !state.activePileNo) {
+          data.logs = value.logs;
+          data.recentLogs = value.logs;
+          data.recentLogsPage = value.logsPage ?? null;
+          state.logPage = value.logsPage ?? null;
+          rerender();
+        }
+      });
       if (state.tab === "logs") void loadLiveLogs();
       scheduleAutoRefresh();
     },

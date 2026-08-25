@@ -11,10 +11,14 @@ import { renderMoneyText } from "../components/money-text.js";
 import {
   dateInputFromUnix,
   formatUnix,
+  OCPP_PAGE_SIZE,
   paginate,
+  paginateWithTotal,
   pileTypeKey,
   textMatch,
 } from "./ocpp-model.js";
+import { getLiveOcppOrdersPage, OCPP_CACHE_SNAPSHOTS } from "../data/live-ocpp.js";
+import { LIVE_SNAPSHOT_UPDATED_EVENT } from "../data/live-snapshot-dependencies.js";
 import {
   detailGrid,
   filterInput,
@@ -149,14 +153,8 @@ function renderShare() {
 }
 
 function renderOrders() {
-  const filtered = data.orders.filter(
-    (r) =>
-      (state.operator === "all" || String(r.operatorId) === state.operator) &&
-      (state.status === "all" || String(r.stationId) === state.status) &&
-      textMatch(r, state.query, ["orderId", "userId", "pileNo", "pileName"]) &&
-      orderDate.matches(dateInputFromUnix(r.createdAt)),
-  );
-  const result = paginate(filtered, state.orderPage);
+  const filtered = filteredOrders();
+  const result = paginateWithTotal(filtered, state.orderPage, data.orderTotal);
   const controls = `${filterSelect({ helpers: h(), value: state.operator, attribute: "ocpp-operator", options: options(data.operators, "operatorId", "name") })}${filterSelect({ helpers: h(), value: state.status, attribute: "ocpp-status", options: options(data.stations, "stationId", "name") })}${filterInput({ helpers: h(), t, value: state.query, attribute: "ocpp-query", placeholderKey: "orderSearch" })}${orderDate.render(h())}`;
   const rows = result.rows
     .map((r) => {
@@ -177,6 +175,28 @@ function renderOrders() {
     })
     .join("");
   return `${toolbar(controls, result.rows.length, result.total)}${renderTable([t("orderNo"), t("userId"), t("pileNo"), t("connectorNo"), t("transactionId"), t("capacity"), t("amount"), t("time"), t("details")], rows, { emptyText: t("empty"), helpers: h(), minWidth: "wide", attrs: `data-ocpp-orders-total="${result.total}" data-ocpp-orders-page-size="${result.rows.length}"` })}${renderPager(result, { helpers: h(), t, attribute: "ocpp-order-page" })}`;
+}
+
+function filteredOrders() {
+  return data.orders.filter(
+    (r) =>
+      (state.operator === "all" || String(r.operatorId) === state.operator) &&
+      (state.status === "all" || String(r.stationId) === state.status) &&
+      textMatch(r, state.query, ["orderId", "userId", "pileNo", "pileName"]) &&
+      orderDate.matches(dateInputFromUnix(r.createdAt)),
+  );
+}
+
+async function ensureOrdersForPage(targetPage) {
+  const needed = targetPage * OCPP_PAGE_SIZE;
+  for (let guard = 0; filteredOrders().length < needed && data.orders.length < data.orderTotal && guard < 10; guard += 1) {
+    const page = await getLiveOcppOrdersPage({ offset: data.orders.length });
+    if (!Array.isArray(page?.rows) || !page.rows.length) break;
+    data.orders.push(...page.rows);
+    data.orderPage = page.page;
+    data.orderTotal = Number(page.page?.total) || data.orderTotal;
+    if (!page.page?.hasMore) break;
+  }
 }
 function renderReports() {
   const rows = data.reports[state.reportPeriod] || [];
@@ -272,7 +292,7 @@ function reset() {
   state.expandedShare = null;
   state.page = state.sharePage = state.orderPage = state.reportPage = 1;
 }
-function onChargingClick(event) {
+async function onChargingClick(event) {
   const dateRoot = event.target.closest?.("[data-date-range-filter]");
   if (dateRoot) {
     if (orderDate.handleClick(event)) return;
@@ -301,8 +321,9 @@ function onChargingClick(event) {
   ]) {
     const button = event.target.closest(selector);
     if (button && button.tagName === "BUTTON") {
-      state[key] =
-        Number(button.getAttribute(selector.slice(1, -1).split("=")[0])) || 1;
+      const targetPage = Number(button.getAttribute(selector.slice(1, -1).split("=")[0])) || 1;
+      if (key === "orderPage") await ensureOrdersForPage(targetPage);
+      state[key] = targetPage;
       rerender();
       return;
     }
@@ -419,7 +440,7 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
     { key: "piles", labelKey: "pilesTab" },
     { key: "stations", labelKey: "stationsTab" },
     { key: "share", labelKey: "shareTab" },
-    { key: "orders", labelKey: "ordersTab", badge: data.orders.length },
+    { key: "orders", labelKey: "ordersTab", badge: data.orderTotal },
     { key: "reports", labelKey: "reportsTab" },
     { key: "operators", labelKey: "operatorsTab" },
   ];
@@ -440,6 +461,13 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
       scope.listen(document, "input", onChargingInput);
       scope.listen(document, "change", onChargingChange);
       scope.listen(document, "keydown", onChargingKeydown);
+      scope.listen(window, LIVE_SNAPSHOT_UPDATED_EVENT, (event) => {
+        if (event.detail?.snapshot !== OCPP_CACHE_SNAPSHOTS.charging || !event.detail?.value) return;
+        data = event.detail.value;
+        const orderTab = tabs.find((tab) => tab.key === "orders");
+        if (orderTab) orderTab.badge = data.orderTotal;
+        rerender();
+      });
     },
     captureState: () => ({ ...state, orderDate: orderDate.captureState() }),
     dispose() {

@@ -25,6 +25,18 @@ export function paginate(rows, page, pageSize = OCPP_PAGE_SIZE) {
   };
 }
 
+export function paginateWithTotal(rows, page, total, pageSize = OCPP_PAGE_SIZE) {
+  const normalizedTotal = Math.max(rows.length, Number(total) || 0);
+  const pages = Math.max(1, Math.ceil(normalizedTotal / pageSize));
+  const safePage = Math.min(Math.max(1, page), pages);
+  return {
+    page: safePage,
+    pages,
+    rows: rows.slice((safePage - 1) * pageSize, safePage * pageSize),
+    total: normalizedTotal,
+  };
+}
+
 export function dateInputFromUnix(value) {
   const number = Number(value);
   if (!Number.isFinite(number) || number <= 0) return "";

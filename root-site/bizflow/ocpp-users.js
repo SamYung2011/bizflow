@@ -4,7 +4,9 @@ import {
   getUnread,
 } from "../data/provider.js";
 import { renderMoneyText } from "../components/money-text.js";
-import { formatUnix, paginate, textMatch } from "./ocpp-model.js";
+import { formatUnix, OCPP_PAGE_SIZE, paginate, paginateWithTotal, textMatch } from "./ocpp-model.js";
+import { getLiveOcppUsersPage, OCPP_CACHE_SNAPSHOTS } from "../data/live-ocpp.js";
+import { LIVE_SNAPSHOT_UPDATED_EVENT } from "../data/live-snapshot-dependencies.js";
 import {
   detailGrid,
   filterInput,
@@ -40,18 +42,8 @@ function toolbar(controls, count, total) {
   return `<div class="ocpp-toolbar"><div>${controls}</div><strong>${e(t("visible", { count, total }))}</strong></div>`;
 }
 function renderUsers() {
-  const filtered = data.users.filter(
-    (r) =>
-      (state.status === "all" || r.status === state.status) &&
-      textMatch(r, state.query, [
-        "userId",
-        "email",
-        "nickname",
-        "username",
-        "mobile",
-      ]),
-  );
-  const result = paginate(filtered, state.page);
+  const filtered = filteredUsers();
+  const result = paginateWithTotal(filtered, state.page, data.userTotal);
   const controls = `${filterSelect({
     helpers: h(),
     value: state.status,
@@ -91,6 +83,32 @@ function renderUsers() {
     })
     .join("");
   return `${toolbar(controls, result.rows.length, result.total)}${renderTable([t("userId"), t("email"), t("nickname"), t("money"), t("status"), t("profile")], rows, { emptyText: t("empty"), helpers: h(), minWidth: "wide", attrs: `data-ocpp-users-total="${result.total}" data-ocpp-users-page-size="${result.rows.length}"` })}${renderPager(result, { helpers: h(), t, attribute: "ocpp-user-page" })}`;
+}
+
+function filteredUsers() {
+  return data.users.filter(
+    (r) =>
+      (state.status === "all" || r.status === state.status) &&
+      textMatch(r, state.query, [
+        "userId",
+        "email",
+        "nickname",
+        "username",
+        "mobile",
+      ]),
+  );
+}
+
+async function ensureUsersForPage(targetPage) {
+  const needed = targetPage * OCPP_PAGE_SIZE;
+  for (let guard = 0; filteredUsers().length < needed && data.users.length < data.userTotal && guard < 10; guard += 1) {
+    const page = await getLiveOcppUsersPage({ offset: data.users.length, status: "all" });
+    if (!Array.isArray(page?.rows) || !page.rows.length) break;
+    data.users.push(...page.rows);
+    data.userPage = page.page;
+    data.userTotal = Number(page.page?.total) || data.userTotal;
+    if (!page.page?.hasMore) break;
+  }
 }
 function renderTags() {
   const filtered = data.tags.filter(
@@ -151,7 +169,7 @@ function rerender() {
   const page = document.querySelector('[data-ocpp-route="users"]');
   if (page && h()) page.outerHTML = render(h());
 }
-function onUsersClick(event) {
+async function onUsersClick(event) {
   const tab = event.target.closest("[data-ocpp-users-tab]");
   if (tab) {
     state.tab = tab.getAttribute("data-ocpp-users-tab");
@@ -164,7 +182,9 @@ function onUsersClick(event) {
   }
   const pager = event.target.closest("button[data-ocpp-user-page]");
   if (pager) {
-    state.page = Number(pager.getAttribute("data-ocpp-user-page")) || 1;
+    const targetPage = Number(pager.getAttribute("data-ocpp-user-page")) || 1;
+    if (state.tab === "users") await ensureUsersForPage(targetPage);
+    state.page = targetPage;
     rerender();
     return;
   }
@@ -224,7 +244,7 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
   context = makeOcppContext();
   state = createState(historyState);
   tabs = [
-    { key: "users", labelKey: "userInfoTab", badge: data.users.length },
+    { key: "users", labelKey: "userInfoTab", badge: data.userTotal },
     { key: "tags", labelKey: "rfidTab", badge: data.tags.length },
   ];
   return {
@@ -234,6 +254,13 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
       scope.listen(document, "input", onUsersInput);
       scope.listen(document, "change", onUsersChange);
       scope.listen(document, "keydown", onUsersKeydown);
+      scope.listen(window, LIVE_SNAPSHOT_UPDATED_EVENT, (event) => {
+        if (event.detail?.snapshot !== OCPP_CACHE_SNAPSHOTS.users || !event.detail?.value) return;
+        data = event.detail.value;
+        tabs.find((tab) => tab.key === "users").badge = data.userTotal;
+        tabs.find((tab) => tab.key === "tags").badge = data.tags.length;
+        rerender();
+      });
     },
     captureState: () => ({ ...state }),
     dispose() {

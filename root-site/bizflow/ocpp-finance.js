@@ -4,7 +4,9 @@ import {
   getUnread,
 } from "../data/provider.js";
 import { moneyTone, renderMoneyText } from "../components/money-text.js";
-import { flowTypeLabel, formatUnix, paginate, textMatch } from "./ocpp-model.js";
+import { flowTypeLabel, formatUnix, OCPP_PAGE_SIZE, paginateWithTotal, textMatch } from "./ocpp-model.js";
+import { getLiveOcppFinancePage, OCPP_CACHE_SNAPSHOTS } from "../data/live-ocpp.js";
+import { LIVE_SNAPSHOT_UPDATED_EVENT } from "../data/live-snapshot-dependencies.js";
 import {
   detailGrid,
   filterInput,
@@ -86,6 +88,7 @@ function statusOptions(rows, key) {
 function config() {
   if (state.tab === "refunds")
     return {
+      key: "refunds",
       rows: data.refunds,
       id: "orderId",
       filterKey: "stateKey",
@@ -118,6 +121,7 @@ function config() {
     };
   if (state.tab === "userMoney")
     return {
+      key: "userMoneyLogs",
       rows: data.userMoneyLogs,
       id: "logId",
       filterKey: "typeKey",
@@ -149,6 +153,7 @@ function config() {
     };
   if (state.tab === "operatorMoney")
     return {
+      key: "operatorMoneyLogs",
       rows: data.operatorMoneyLogs,
       id: "logId",
       filterKey: "typeKey",
@@ -175,6 +180,7 @@ function config() {
     };
   if (state.tab === "platformMoney")
     return {
+      key: "platformMoneyLogs",
       rows: data.platformMoneyLogs,
       id: "logId",
       filterKey: null,
@@ -191,6 +197,7 @@ function config() {
     };
   if (state.tab === "withdrawals")
     return {
+      key: "withdrawals",
       rows: data.withdrawals,
       id: "withdrawalId",
       filterKey: "statusKey",
@@ -218,6 +225,7 @@ function config() {
       ],
     };
   return {
+    key: "recharges",
     rows: data.recharges,
     id: "rechargeId",
     filterKey: "status",
@@ -259,12 +267,8 @@ function config() {
 }
 function renderFinance() {
   const cfg = config();
-  const filtered = cfg.rows.filter(
-    (r) =>
-      (!cfg.filterKey || state.filter === "all" || String(r[cfg.filterKey]) === state.filter) &&
-      textMatch(r, state.query, cfg.search),
-  );
-  const result = paginate(filtered, state.page);
+  const filtered = filteredFinanceRows(cfg);
+  const result = paginateWithTotal(filtered, state.page, data.financeTotals?.[cfg.key]);
   const controls = `${cfg.filterKey ? filterSelect({ helpers: h(), value: state.filter, attribute: "ocpp-finance-filter", options: statusOptions(cfg.rows, cfg.filterKey) }) : ""}${filterInput({ helpers: h(), t, value: state.query, attribute: "ocpp-finance-query", placeholderKey: "financeSearch" })}`;
   const rows = result.rows
     .map((r) => {
@@ -275,6 +279,28 @@ function renderFinance() {
     })
     .join("");
   return `<div class="ocpp-toolbar"><div>${controls}</div><strong>${e(t("visible", { count: result.rows.length, total: result.total }))}</strong></div>${renderTable([...cfg.headers.map((key) => t(key)), t("details")], rows, { emptyText: t("empty"), helpers: h(), minWidth: "wide", attrs: `data-ocpp-finance-total="${result.total}" data-ocpp-finance-page-size="${result.rows.length}"` })}${renderPager(result, { helpers: h(), t, attribute: "ocpp-finance-page" })}`;
+}
+
+function filteredFinanceRows(cfg = config()) {
+  return cfg.rows.filter(
+    (r) =>
+      (!cfg.filterKey || state.filter === "all" || String(r[cfg.filterKey]) === state.filter) &&
+      textMatch(r, state.query, cfg.search),
+  );
+}
+
+async function ensureFinanceForPage(targetPage) {
+  const cfg = config();
+  const total = Number(data.financeTotals?.[cfg.key]) || cfg.rows.length;
+  const needed = targetPage * OCPP_PAGE_SIZE;
+  for (let guard = 0; filteredFinanceRows(cfg).length < needed && cfg.rows.length < total && guard < 10; guard += 1) {
+    const page = await getLiveOcppFinancePage(cfg.key, { offset: cfg.rows.length });
+    if (!Array.isArray(page?.rows) || !page.rows.length) break;
+    cfg.rows.push(...page.rows);
+    data.financePages[cfg.key] = page.page;
+    data.financeTotals[cfg.key] = Number(page.page?.total) || total;
+    if (!page.page?.hasMore) break;
+  }
 }
 function render(helpers) {
   context.setHelpers(helpers);
@@ -294,7 +320,7 @@ function rerender() {
   const page = document.querySelector('[data-ocpp-route="finance"]');
   if (page && h()) page.outerHTML = render(h());
 }
-function onFinanceClick(event) {
+async function onFinanceClick(event) {
   const tab = event.target.closest("[data-ocpp-finance-tab]");
   if (tab) {
     state.tab = tab.getAttribute("data-ocpp-finance-tab");
@@ -307,7 +333,9 @@ function onFinanceClick(event) {
   }
   const pager = event.target.closest("button[data-ocpp-finance-page]");
   if (pager) {
-    state.page = Number(pager.getAttribute("data-ocpp-finance-page")) || 1;
+    const targetPage = Number(pager.getAttribute("data-ocpp-finance-page")) || 1;
+    await ensureFinanceForPage(targetPage);
+    state.page = targetPage;
     rerender();
     return;
   }
@@ -368,12 +396,12 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
   context = makeOcppContext();
   state = createState(historyState);
   tabs = [
-    { key: "recharges", labelKey: "rechargesTab", badge: data.recharges.length },
-    { key: "refunds", labelKey: "refundsTab", badge: data.refunds.length || null },
+    { key: "recharges", labelKey: "rechargesTab", badge: data.financeTotals.recharges },
+    { key: "refunds", labelKey: "refundsTab", badge: data.financeTotals.refunds || null },
     { key: "userMoney", labelKey: "userMoneyTab" },
     { key: "operatorMoney", labelKey: "operatorMoneyTab" },
     { key: "platformMoney", labelKey: "platformMoneyTab" },
-    { key: "withdrawals", labelKey: "withdrawalsTab", badge: data.withdrawals.length || null },
+    { key: "withdrawals", labelKey: "withdrawalsTab", badge: data.financeTotals.withdrawals || null },
   ];
   return {
     page: createOcppPage({ activeKey: "ocpp-finance", currentUser, unread, render, title: "OCPP 財務" }),
@@ -382,6 +410,14 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
       scope.listen(document, "input", onFinanceInput);
       scope.listen(document, "change", onFinanceChange);
       scope.listen(document, "keydown", onFinanceKeydown);
+      scope.listen(window, LIVE_SNAPSHOT_UPDATED_EVENT, (event) => {
+        if (event.detail?.snapshot !== OCPP_CACHE_SNAPSHOTS.finance || !event.detail?.value) return;
+        data = event.detail.value;
+        tabs.find((tab) => tab.key === "recharges").badge = data.financeTotals.recharges;
+        tabs.find((tab) => tab.key === "refunds").badge = data.financeTotals.refunds || null;
+        tabs.find((tab) => tab.key === "withdrawals").badge = data.financeTotals.withdrawals || null;
+        rerender();
+      });
     },
     captureState: () => ({ ...state }),
     dispose() {
