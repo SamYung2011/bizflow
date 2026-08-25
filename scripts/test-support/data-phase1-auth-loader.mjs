@@ -6,6 +6,7 @@ export const RBAC_KEYS = Object.freeze([]);
 
 const calls = [];
 const errors = new Map();
+const rpcData = new Map();
 let heldRpc = "";
 let releaseHeld = null;
 let tableError = null;
@@ -52,6 +53,7 @@ const client = {
       releaseHeld = null;
     }
     if (errors.has(name)) return { data: null, error: errors.get(name) };
+    if (rpcData.has(name)) return { data: rpcData.get(name), error: null };
     if (name === "bizflow_order_page") return { data: orderPage(), error: null };
     if (name === "bizflow_unread_summary") return {
       data: { unread: {}, watermarks: {} }, error: null
@@ -62,7 +64,7 @@ const client = {
 
 const currentUser = {
   id: "employee-test", name: "KC", email: "kc@example.test", role: "member",
-  activeCompanyId: "company-test", bizflowMainAccess: true, canViewRevenue: true,
+  activeCompanyId: "company-test", bizflowMainAccess: true, isBfAdmin: false, canViewRevenue: true,
   hasPermission() { return true; }
 };
 
@@ -78,12 +80,17 @@ export function __calls() { return calls.slice(); }
 export function __reset() {
   calls.length = 0;
   errors.clear();
+  rpcData.clear();
   tableError = null;
   heldRpc = "";
   if (releaseHeld) releaseHeld();
   releaseHeld = null;
+  currentUser.isBfAdmin = false;
+  currentUser.canViewRevenue = true;
 }
 export function __setRpcError(name, error) { errors.set(name, error); }
+export function __setRpcData(name, data) { rpcData.set(name, data); }
+export function __setCanViewRevenue(value) { currentUser.canViewRevenue = value === true; }
 export function __setTableError(error) { tableError = error; }
 export function __setSessionUser(id) { sessionUserId = id; }
 export function __holdNextRpc(name) { heldRpc = name; }

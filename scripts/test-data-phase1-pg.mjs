@@ -14,6 +14,7 @@ const guardMigrationPath = join(repoRoot, "migrations/103_guard_non_array_invoic
 const repairMigrationPath = join(repoRoot, "migrations/104_bizflow_data_phase1_r5.sql");
 const patchMigrationPath = join(repoRoot, "migrations/105_bizflow_warranty_revenue_gate.sql");
 const homeRevenueGateMigrationPath = join(repoRoot, "migrations/106_bizflow_home_revenue_gate.sql");
+const homeSalesGateMigrationPath = join(repoRoot, "migrations/107_bizflow_home_sales_gate.sql");
 
 function executable(name) {
   for (const candidate of [`/opt/homebrew/bin/${name}`, `/usr/local/bin/${name}`, name]) {
@@ -721,6 +722,47 @@ try {
   assert.equal(sql("SELECT has_function_privilege('anon','public.bizflow_home_dashboard(uuid)','EXECUTE');"), "f");
   assert.equal(sql("SELECT has_function_privilege('authenticated','public.bizflow_home_dashboard(uuid)','EXECUTE');"), "t");
 
+  assert.ok(Number(deniedHomeAfterGate.counts.orders) > 0,
+    "the migration-106 pre-state must reproduce the denied Home order-count leak");
+  assert.ok(deniedHomeAfterGate.chart.length > 0,
+    "the migration-106 pre-state must reproduce the denied Home sales-chart leak");
+  const authorizedHomeBeforeSalesGate = asAuthenticated(
+    "SELECT (public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001') - 'generated_at')::text;"
+  );
+  const deniedHomeNonSalesBeforeGate = asAuthenticatedUser(
+    '20000000-0000-0000-0000-000000000002',
+    "SELECT ((public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001') - 'generated_at' - 'chart') #- '{counts,orders}')::text;"
+  );
+
+  run(psql, psqlArgs(["-f", homeSalesGateMigrationPath]), { quiet: true });
+  run(psql, psqlArgs(["-f", homeSalesGateMigrationPath]), { quiet: true });
+  sql("ANALYZE;");
+
+  const authorizedHomeAfterSalesGate = JSON.parse(asAuthenticated(
+    "SELECT public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001')::text;"
+  ));
+  const authorizedHomeAfterSalesGateStable = asAuthenticated(
+    "SELECT (public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001') - 'generated_at')::text;"
+  );
+  const deniedHomeAfterSalesGate = JSON.parse(asAuthenticatedUser(
+    '20000000-0000-0000-0000-000000000002',
+    "SELECT public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001')::text;"
+  ));
+  const deniedHomeNonSalesAfterGate = asAuthenticatedUser(
+    '20000000-0000-0000-0000-000000000002',
+    "SELECT ((public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001') - 'generated_at' - 'chart') #- '{counts,orders}')::text;"
+  );
+  assert.equal(authorizedHomeAfterSalesGateStable, authorizedHomeBeforeSalesGate,
+    "a revenue-authorized employee must receive byte-identical stable Home JSON after migration 107");
+  assert.equal(deniedHomeAfterSalesGate.counts.orders, 0,
+    "a denied employee must receive a zero Home order count");
+  assert.deepEqual(deniedHomeAfterSalesGate.chart, [],
+    "a denied employee must receive an empty Home sales chart");
+  assert.deepEqual(deniedHomeAfterSalesGate.revenue, deniedHomeAfterGate.revenue,
+    "migration 107 must retain migration 106's denied all-zero revenue object");
+  assert.equal(deniedHomeNonSalesAfterGate, deniedHomeNonSalesBeforeGate,
+    "migration 107 must preserve every denied Home field outside chart and counts.orders byte-for-byte");
+
   const secondUserWarranty = Number(asAuthenticatedUser(
     '20000000-0000-0000-0000-000000000002',
     "SELECT public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001')->'counts'->>'warranty';"
@@ -754,8 +796,16 @@ try {
     '20000000-0000-0000-0000-000000000002',
     "SELECT (public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001')->'revenue')::text;"
   );
+  const adminHomeSales = JSON.parse(asAuthenticatedUser(
+    '20000000-0000-0000-0000-000000000002',
+    "SELECT jsonb_build_object('orders', public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001')->'counts'->'orders', 'chart', public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001')->'chart')::text;"
+  ));
   assert.equal(adminHomeRevenue, authorizedHomeRevenueAfterGate,
     "is_admin alone must retain the unchanged Home revenue payload");
+  assert.deepEqual(adminHomeSales, {
+    orders: authorizedHomeAfterSalesGate.counts.orders,
+    chart: authorizedHomeAfterSalesGate.chart
+  }, "is_admin alone must retain the unchanged Home sales signals");
   sql("UPDATE public.employees SET is_admin=false, can_view_revenue=true WHERE user_id='20000000-0000-0000-0000-000000000002';");
   const newlyAuthorizedRevenue = JSON.parse(asAuthenticatedUser(
     '20000000-0000-0000-0000-000000000002',
@@ -765,10 +815,18 @@ try {
     '20000000-0000-0000-0000-000000000002',
     "SELECT (public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001')->'revenue')::text;"
   );
+  const newlyAuthorizedHomeSales = JSON.parse(asAuthenticatedUser(
+    '20000000-0000-0000-0000-000000000002',
+    "SELECT jsonb_build_object('orders', public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001')->'counts'->'orders', 'chart', public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001')->'chart')::text;"
+  ));
   assert.deepEqual(newlyAuthorizedRevenue, authorizedRevenueWithOrphan,
     "the same employee must receive the unchanged aggregate immediately after can_view_revenue is granted");
   assert.equal(newlyAuthorizedHomeRevenue, authorizedHomeRevenueAfterGate,
     "can_view_revenue alone must retain the unchanged Home revenue payload");
+  assert.deepEqual(newlyAuthorizedHomeSales, {
+    orders: authorizedHomeAfterSalesGate.counts.orders,
+    chart: authorizedHomeAfterSalesGate.chart
+  }, "can_view_revenue alone must retain the unchanged Home sales signals");
   assert.equal(orphanHome.counts.orders, cleanHome.counts.orders + 1,
     "an orphan invoice remains a valid order");
   assert.equal(orphanHome.counts.warranty, cleanHome.counts.warranty,
