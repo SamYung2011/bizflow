@@ -338,6 +338,24 @@ function loadAllFinanceRows(cfg = config()) {
   return entry.promise;
 }
 
+function preloadFinanceFilters() {
+  const target = data;
+  const cfg = config();
+  if (!filterNeedsAllRows({
+    loaded: cfg.rows.length,
+    total: target.financeTotals?.[cfg.key],
+    active: financeFiltersActive(cfg),
+  })) return;
+  markFinanceBusy(true);
+  void loadAllFinanceRows(cfg)
+    .catch((error) => {
+      console.warn("OCPP finance filter preload failed", error);
+    })
+    .finally(() => {
+      if (data === target && state && config().key === cfg.key) markFinanceBusy(false);
+    });
+}
+
 async function refreshFinanceFilters() {
   const sequence = ++financeFilterSequence;
   const target = data;
@@ -422,7 +440,7 @@ async function onFinanceClick(event) {
 function onFinanceInput(event) {
   if (event.target.matches("[data-ocpp-finance-query]")) {
     state.query = event.target.value;
-    void refreshFinanceFilters();
+    preloadFinanceFilters();
   }
 }
 function onFinanceChange(event) {

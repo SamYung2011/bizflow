@@ -148,6 +148,23 @@ function loadAllUsers() {
   return entry.promise;
 }
 
+function preloadUserFilters() {
+  const target = data;
+  if (!filterNeedsAllRows({
+    loaded: target.users.length,
+    total: target.userTotal,
+    active: userFiltersActive(),
+  })) return;
+  markUsersBusy(true);
+  void loadAllUsers()
+    .catch((error) => {
+      console.warn("OCPP user filter preload failed", error);
+    })
+    .finally(() => {
+      if (data === target && state && state.tab === "users") markUsersBusy(false);
+    });
+}
+
 async function refreshUserFilters() {
   const sequence = ++userFilterSequence;
   const target = data;
@@ -269,7 +286,7 @@ async function onUsersClick(event) {
 function onUsersInput(event) {
   if (event.target.matches("[data-ocpp-user-query]")) {
     state.query = event.target.value;
-    if (state.tab === "users") void refreshUserFilters();
+    if (state.tab === "users") preloadUserFilters();
   }
 }
 function onUsersChange(event) {

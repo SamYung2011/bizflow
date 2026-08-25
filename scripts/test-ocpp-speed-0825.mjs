@@ -61,9 +61,28 @@ assert.equal(filterNeedsAllRows({ loaded: 200, total: 904, active: true }), true
   "an active filter over a partial first page must preload the remaining rows");
 assert.equal(filterNeedsAllRows({ loaded: 200, total: 904, active: false }), false,
   "an untouched first screen must keep its one-request contract");
-assert.match(sourceSection(charging, "function onChargingInput", "function onChargingChange"), /refreshOrderFilters/);
-assert.match(sourceSection(finance, "function onFinanceInput", "function onFinanceChange"), /refreshFinanceFilters/);
-assert.match(sourceSection(users, "function onUsersInput", "function onUsersChange"), /refreshUserFilters/);
+const inputContracts = [
+  [
+    sourceSection(charging, "function onChargingInput", "function onChargingChange"),
+    sourceSection(charging, "function preloadOrderFilters", "async function refreshOrderFilters"),
+    "preloadOrderFilters",
+  ],
+  [
+    sourceSection(finance, "function onFinanceInput", "function onFinanceChange"),
+    sourceSection(finance, "function preloadFinanceFilters", "async function refreshFinanceFilters"),
+    "preloadFinanceFilters",
+  ],
+  [
+    sourceSection(users, "function onUsersInput", "function onUsersChange"),
+    sourceSection(users, "function preloadUserFilters", "async function refreshUserFilters"),
+    "preloadUserFilters",
+  ],
+];
+for (const [inputHandler, preloadHandler, preloader] of inputContracts) {
+  assert.match(inputHandler, new RegExp(preloader), "typing must start the silent full-table preload");
+  assert.doesNotMatch(`${inputHandler}\n${preloadHandler}`, /refresh\w*Filters|rerender\s*\(/,
+    "typing must not replace the page DOM and drop input focus");
+}
 
 const remainingRows = Array.from({ length: 200 }, (_, id) => ({ id }));
 const requestedOffsets = [];

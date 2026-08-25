@@ -237,6 +237,23 @@ function loadAllOrders() {
   return entry.promise;
 }
 
+function preloadOrderFilters() {
+  const target = data;
+  if (!filterNeedsAllRows({
+    loaded: target.orders.length,
+    total: target.orderTotal,
+    active: orderFiltersActive(),
+  })) return;
+  markOrdersBusy(true);
+  void loadAllOrders()
+    .catch((error) => {
+      console.warn("OCPP order filter preload failed", error);
+    })
+    .finally(() => {
+      if (data === target && state) markOrdersBusy(false);
+    });
+}
+
 async function refreshOrderFilters() {
   const sequence = ++orderFilterSequence;
   const target = data;
@@ -431,7 +448,7 @@ async function onChargingClick(event) {
 function onChargingInput(event) {
   if (event.target.matches("[data-ocpp-query]")) {
     state.query = event.target.value;
-    if (state.tab === "orders") void refreshOrderFilters();
+    if (state.tab === "orders") preloadOrderFilters();
   }
 }
 function onChargingChange(event) {
