@@ -4,7 +4,16 @@ import {
   getUnread,
 } from "../data/provider.js";
 import { moneyTone, renderMoneyText } from "../components/money-text.js";
-import { flowTypeLabel, formatUnix, OCPP_PAGE_SIZE, paginateWithTotal, textMatch } from "./ocpp-model.js";
+import {
+  appendRemainingPages,
+  filterNeedsAllRows,
+  filteredPaginationTotal,
+  flowTypeLabel,
+  formatUnix,
+  OCPP_PAGE_SIZE,
+  paginateWithTotal,
+  textMatch,
+} from "./ocpp-model.js";
 import { getLiveOcppFinancePage, OCPP_CACHE_SNAPSHOTS } from "../data/live-ocpp.js";
 import { LIVE_SNAPSHOT_UPDATED_EVENT } from "../data/live-snapshot-dependencies.js";
 import {
@@ -25,6 +34,8 @@ let data = null;
 let context = null;
 let state = null;
 let tabs = [];
+let financeFullLoads = new Map();
+let financeFilterSequence = 0;
 const defaultFilterForTab = (tab) => tab === "recharges" ? "1" : "all";
 function h() {
   return context.helpers();
@@ -268,7 +279,16 @@ function config() {
 function renderFinance() {
   const cfg = config();
   const filtered = filteredFinanceRows(cfg);
-  const result = paginateWithTotal(filtered, state.page, data.financeTotals?.[cfg.key]);
+  const result = paginateWithTotal(
+    filtered,
+    state.page,
+    filteredPaginationTotal({
+      loaded: cfg.rows.length,
+      total: data.financeTotals?.[cfg.key],
+      filtered: filtered.length,
+      active: financeFiltersActive(cfg),
+    }),
+  );
   const controls = `${cfg.filterKey ? filterSelect({ helpers: h(), value: state.filter, attribute: "ocpp-finance-filter", options: statusOptions(cfg.rows, cfg.filterKey) }) : ""}${filterInput({ helpers: h(), t, value: state.query, attribute: "ocpp-finance-query", placeholderKey: "financeSearch" })}`;
   const rows = result.rows
     .map((r) => {
@@ -287,6 +307,58 @@ function filteredFinanceRows(cfg = config()) {
       (!cfg.filterKey || state.filter === "all" || String(r[cfg.filterKey]) === state.filter) &&
       textMatch(r, state.query, cfg.search),
   );
+}
+
+function financeFiltersActive(cfg = config()) {
+  return Boolean(state.query.trim() || (cfg.filterKey && state.filter !== "all"));
+}
+
+function markFinanceBusy(busy) {
+  document.querySelector('[data-ocpp-route="finance"]')?.setAttribute("aria-busy", busy ? "true" : "false");
+}
+
+function loadAllFinanceRows(cfg = config()) {
+  const target = data;
+  const total = Number(target.financeTotals?.[cfg.key]) || cfg.rows.length;
+  if (!filterNeedsAllRows({ loaded: cfg.rows.length, total, active: true })) return Promise.resolve();
+  const current = financeFullLoads.get(cfg.key);
+  if (current?.target === target) return current.promise;
+  const entry = { target, promise: null };
+  entry.promise = (async () => {
+    target.financeTotals[cfg.key] = await appendRemainingPages({
+      rows: cfg.rows,
+      total: target.financeTotals[cfg.key],
+      fetchPage: (offset) => getLiveOcppFinancePage(cfg.key, { offset }),
+      onPage: (page) => { target.financePages[cfg.key] = page.page; },
+    });
+  })().finally(() => {
+    if (financeFullLoads.get(cfg.key) === entry) financeFullLoads.delete(cfg.key);
+  });
+  financeFullLoads.set(cfg.key, entry);
+  return entry.promise;
+}
+
+async function refreshFinanceFilters() {
+  const sequence = ++financeFilterSequence;
+  const target = data;
+  const cfg = config();
+  const needsLoad = filterNeedsAllRows({
+    loaded: cfg.rows.length,
+    total: target.financeTotals?.[cfg.key],
+    active: financeFiltersActive(cfg),
+  });
+  if (needsLoad) markFinanceBusy(true);
+  try {
+    if (needsLoad) await loadAllFinanceRows(cfg);
+  } catch (error) {
+    console.warn("OCPP finance filter preload failed", error);
+  } finally {
+    if (sequence === financeFilterSequence && data === target && state && config().key === cfg.key) {
+      markFinanceBusy(false);
+      state.page = 1;
+      rerender();
+    }
+  }
 }
 
 async function ensureFinanceForPage(targetPage) {
@@ -329,6 +401,7 @@ async function onFinanceClick(event) {
     state.page = 1;
     state.expanded = null;
     rerender();
+    if (financeFiltersActive()) void refreshFinanceFilters();
     return;
   }
   const pager = event.target.closest("button[data-ocpp-finance-page]");
@@ -347,18 +420,20 @@ async function onFinanceClick(event) {
   }
 }
 function onFinanceInput(event) {
-  if (event.target.matches("[data-ocpp-finance-query]"))
+  if (event.target.matches("[data-ocpp-finance-query]")) {
     state.query = event.target.value;
+    void refreshFinanceFilters();
+  }
 }
 function onFinanceChange(event) {
   if (event.target.matches("[data-ocpp-finance-query]")) {
     state.page = 1;
-    rerender();
+    void refreshFinanceFilters();
   }
   if (event.target.matches("[data-ocpp-finance-filter]")) {
     state.filter = event.target.value;
     state.page = 1;
-    rerender();
+    void refreshFinanceFilters();
   }
 }
 function onFinanceKeydown(event) {
@@ -367,7 +442,7 @@ function onFinanceKeydown(event) {
     event.target.matches("[data-ocpp-finance-query]")
   ) {
     state.page = 1;
-    rerender();
+    void refreshFinanceFilters();
   }
 }
 
@@ -421,6 +496,8 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
     },
     captureState: () => ({ ...state }),
     dispose() {
+      financeFilterSequence += 1;
+      financeFullLoads = new Map();
       data = null;
       context = null;
       state = null;

@@ -37,6 +37,31 @@ export function paginateWithTotal(rows, page, total, pageSize = OCPP_PAGE_SIZE) 
   };
 }
 
+export function filterNeedsAllRows({ loaded, total, active }) {
+  return active === true && Math.max(0, Number(loaded) || 0) < Math.max(0, Number(total) || 0);
+}
+
+export function filteredPaginationTotal({ loaded, total, filtered, active }) {
+  const normalizedTotal = Math.max(0, Number(total) || 0);
+  if (!filterNeedsAllRows({ loaded, total: normalizedTotal, active }) && active === true) {
+    return Math.max(0, Number(filtered) || 0);
+  }
+  return normalizedTotal;
+}
+
+export async function appendRemainingPages({ rows, total, fetchPage, onPage = () => {}, maxPages = 10_000 }) {
+  let resolvedTotal = Math.max(rows.length, Number(total) || 0);
+  for (let pageIndex = 0; rows.length < resolvedTotal && pageIndex < maxPages; pageIndex += 1) {
+    const page = await fetchPage(rows.length);
+    if (!Array.isArray(page?.rows) || !page.rows.length) break;
+    rows.push(...page.rows);
+    resolvedTotal = Math.max(rows.length, Number(page.page?.total) || resolvedTotal);
+    onPage(page, resolvedTotal);
+    if (!page.page?.hasMore) break;
+  }
+  return resolvedTotal;
+}
+
 export function dateInputFromUnix(value) {
   const number = Number(value);
   if (!Number.isFinite(number) || number <= 0) return "";

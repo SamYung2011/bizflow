@@ -9,7 +9,10 @@ import {
 } from "../components/date-range-filter.js";
 import { renderMoneyText } from "../components/money-text.js";
 import {
+  appendRemainingPages,
   dateInputFromUnix,
+  filterNeedsAllRows,
+  filteredPaginationTotal,
   formatUnix,
   OCPP_PAGE_SIZE,
   paginate,
@@ -39,6 +42,8 @@ let context = null;
 let state = null;
 let tabs = [];
 let orderDate = null;
+let ordersFullLoad = null;
+let orderFilterSequence = 0;
 function h() {
   return context.helpers();
 }
@@ -154,7 +159,16 @@ function renderShare() {
 
 function renderOrders() {
   const filtered = filteredOrders();
-  const result = paginateWithTotal(filtered, state.orderPage, data.orderTotal);
+  const result = paginateWithTotal(
+    filtered,
+    state.orderPage,
+    filteredPaginationTotal({
+      loaded: data.orders.length,
+      total: data.orderTotal,
+      filtered: filtered.length,
+      active: orderFiltersActive(),
+    }),
+  );
   const controls = `${filterSelect({ helpers: h(), value: state.operator, attribute: "ocpp-operator", options: options(data.operators, "operatorId", "name") })}${filterSelect({ helpers: h(), value: state.status, attribute: "ocpp-status", options: options(data.stations, "stationId", "name") })}${filterInput({ helpers: h(), t, value: state.query, attribute: "ocpp-query", placeholderKey: "orderSearch" })}${orderDate.render(h())}`;
   const rows = result.rows
     .map((r) => {
@@ -185,6 +199,64 @@ function filteredOrders() {
       textMatch(r, state.query, ["orderId", "userId", "pileNo", "pileName"]) &&
       orderDate.matches(dateInputFromUnix(r.createdAt)),
   );
+}
+
+function orderFiltersActive() {
+  const range = orderDate?.captureState?.() ?? {};
+  return Boolean(
+    state.query.trim() ||
+    state.operator !== "all" ||
+    state.status !== "all" ||
+    range.from ||
+    range.to
+  );
+}
+
+function markOrdersBusy(busy) {
+  document.querySelector('[data-ocpp-route="charging"]')?.setAttribute("aria-busy", busy ? "true" : "false");
+}
+
+function loadAllOrders() {
+  const target = data;
+  if (!filterNeedsAllRows({ loaded: target.orders.length, total: target.orderTotal, active: true })) {
+    return Promise.resolve();
+  }
+  if (ordersFullLoad?.target === target) return ordersFullLoad.promise;
+  const entry = { target, promise: null };
+  entry.promise = (async () => {
+    target.orderTotal = await appendRemainingPages({
+      rows: target.orders,
+      total: target.orderTotal,
+      fetchPage: (offset) => getLiveOcppOrdersPage({ offset }),
+      onPage: (page) => { target.orderPage = page.page; },
+    });
+  })().finally(() => {
+    if (ordersFullLoad === entry) ordersFullLoad = null;
+  });
+  ordersFullLoad = entry;
+  return entry.promise;
+}
+
+async function refreshOrderFilters() {
+  const sequence = ++orderFilterSequence;
+  const target = data;
+  const needsLoad = filterNeedsAllRows({
+    loaded: target.orders.length,
+    total: target.orderTotal,
+    active: orderFiltersActive(),
+  });
+  if (needsLoad) markOrdersBusy(true);
+  try {
+    if (needsLoad) await loadAllOrders();
+  } catch (error) {
+    console.warn("OCPP order filter preload failed", error);
+  } finally {
+    if (sequence === orderFilterSequence && data === target && state) {
+      markOrdersBusy(false);
+      state.orderPage = 1;
+      rerender();
+    }
+  }
 }
 
 async function ensureOrdersForPage(targetPage) {
@@ -357,13 +429,16 @@ async function onChargingClick(event) {
   }
 }
 function onChargingInput(event) {
-  if (event.target.matches("[data-ocpp-query]"))
+  if (event.target.matches("[data-ocpp-query]")) {
     state.query = event.target.value;
+    if (state.tab === "orders") void refreshOrderFilters();
+  }
 }
 function onChargingChange(event) {
   if (event.target.matches("[data-ocpp-query]")) {
     state.page = state.sharePage = state.orderPage = 1;
-    rerender();
+    if (state.tab === "orders") void refreshOrderFilters();
+    else rerender();
   }
   if (event.target.matches("[data-ocpp-type]")) {
     state.type = event.target.value;
@@ -373,12 +448,14 @@ function onChargingChange(event) {
   if (event.target.matches("[data-ocpp-operator]")) {
     state.operator = event.target.value;
     state.page = state.orderPage = state.reportPage = 1;
-    rerender();
+    if (state.tab === "orders") void refreshOrderFilters();
+    else rerender();
   }
   if (event.target.matches("[data-ocpp-status]")) {
     state.status = event.target.value;
     state.page = state.sharePage = state.orderPage = state.reportPage = 1;
-    rerender();
+    if (state.tab === "orders") void refreshOrderFilters();
+    else rerender();
   }
   if (event.target.matches("[data-ocpp-period]")) {
     state.reportPeriod = event.target.value;
@@ -389,7 +466,8 @@ function onChargingChange(event) {
 function onChargingKeydown(event) {
   if (event.key === "Enter" && event.target.matches("[data-ocpp-query]")) {
     state.page = state.sharePage = state.orderPage = 1;
-    rerender();
+    if (state.tab === "orders") void refreshOrderFilters();
+    else rerender();
     return;
   }
   if (event.key === "Escape") {
@@ -449,7 +527,7 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
     initialDate: latestDateInput(data.orders.map((row) => dateInputFromUnix(row.createdAt))),
     onChange: () => {
       state.orderPage = 1;
-      rerender();
+      void refreshOrderFilters();
     },
   });
   orderDate.restoreState(historyState?.orderDate);
@@ -471,6 +549,8 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
     },
     captureState: () => ({ ...state, orderDate: orderDate.captureState() }),
     dispose() {
+      orderFilterSequence += 1;
+      ordersFullLoad = null;
       orderDate?.close();
       data = null;
       context = null;

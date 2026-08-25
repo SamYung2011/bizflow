@@ -4,7 +4,16 @@ import {
   getUnread,
 } from "../data/provider.js";
 import { renderMoneyText } from "../components/money-text.js";
-import { formatUnix, OCPP_PAGE_SIZE, paginate, paginateWithTotal, textMatch } from "./ocpp-model.js";
+import {
+  appendRemainingPages,
+  filterNeedsAllRows,
+  filteredPaginationTotal,
+  formatUnix,
+  OCPP_PAGE_SIZE,
+  paginate,
+  paginateWithTotal,
+  textMatch,
+} from "./ocpp-model.js";
 import { getLiveOcppUsersPage, OCPP_CACHE_SNAPSHOTS } from "../data/live-ocpp.js";
 import { LIVE_SNAPSHOT_UPDATED_EVENT } from "../data/live-snapshot-dependencies.js";
 import {
@@ -26,6 +35,8 @@ let data = null;
 let context = null;
 let state = null;
 let tabs = [];
+let usersFullLoad = null;
+let userFilterSequence = 0;
 function h() {
   return context.helpers();
 }
@@ -43,7 +54,16 @@ function toolbar(controls, count, total) {
 }
 function renderUsers() {
   const filtered = filteredUsers();
-  const result = paginateWithTotal(filtered, state.page, data.userTotal);
+  const result = paginateWithTotal(
+    filtered,
+    state.page,
+    filteredPaginationTotal({
+      loaded: data.users.length,
+      total: data.userTotal,
+      filtered: filtered.length,
+      active: userFiltersActive(),
+    }),
+  );
   const controls = `${filterSelect({
     helpers: h(),
     value: state.status,
@@ -97,6 +117,57 @@ function filteredUsers() {
         "mobile",
       ]),
   );
+}
+
+function userFiltersActive() {
+  return Boolean(state.query.trim() || state.status !== "all");
+}
+
+function markUsersBusy(busy) {
+  document.querySelector('[data-ocpp-route="users"]')?.setAttribute("aria-busy", busy ? "true" : "false");
+}
+
+function loadAllUsers() {
+  const target = data;
+  if (!filterNeedsAllRows({ loaded: target.users.length, total: target.userTotal, active: true })) {
+    return Promise.resolve();
+  }
+  if (usersFullLoad?.target === target) return usersFullLoad.promise;
+  const entry = { target, promise: null };
+  entry.promise = (async () => {
+    target.userTotal = await appendRemainingPages({
+      rows: target.users,
+      total: target.userTotal,
+      fetchPage: (offset) => getLiveOcppUsersPage({ offset, status: "all" }),
+      onPage: (page) => { target.userPage = page.page; },
+    });
+  })().finally(() => {
+    if (usersFullLoad === entry) usersFullLoad = null;
+  });
+  usersFullLoad = entry;
+  return entry.promise;
+}
+
+async function refreshUserFilters() {
+  const sequence = ++userFilterSequence;
+  const target = data;
+  const needsLoad = filterNeedsAllRows({
+    loaded: target.users.length,
+    total: target.userTotal,
+    active: userFiltersActive(),
+  });
+  if (needsLoad) markUsersBusy(true);
+  try {
+    if (needsLoad) await loadAllUsers();
+  } catch (error) {
+    console.warn("OCPP user filter preload failed", error);
+  } finally {
+    if (sequence === userFilterSequence && data === target && state && state.tab === "users") {
+      markUsersBusy(false);
+      state.page = 1;
+      rerender();
+    }
+  }
 }
 
 async function ensureUsersForPage(targetPage) {
@@ -196,18 +267,22 @@ async function onUsersClick(event) {
   }
 }
 function onUsersInput(event) {
-  if (event.target.matches("[data-ocpp-user-query]"))
+  if (event.target.matches("[data-ocpp-user-query]")) {
     state.query = event.target.value;
+    if (state.tab === "users") void refreshUserFilters();
+  }
 }
 function onUsersChange(event) {
   if (event.target.matches("[data-ocpp-user-query]")) {
     state.page = 1;
-    rerender();
+    if (state.tab === "users") void refreshUserFilters();
+    else rerender();
   }
   if (event.target.matches("[data-ocpp-user-status]")) {
     state.status = event.target.value;
     state.page = 1;
-    rerender();
+    if (state.tab === "users") void refreshUserFilters();
+    else rerender();
   }
   if (event.target.matches("[data-ocpp-bind]")) {
     state.bind = event.target.value;
@@ -218,7 +293,8 @@ function onUsersChange(event) {
 function onUsersKeydown(event) {
   if (event.key === "Enter" && event.target.matches("[data-ocpp-user-query]")) {
     state.page = 1;
-    rerender();
+    if (state.tab === "users") void refreshUserFilters();
+    else rerender();
   }
 }
 
@@ -264,6 +340,8 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
     },
     captureState: () => ({ ...state }),
     dispose() {
+      userFilterSequence += 1;
+      usersFullLoad = null;
       data = null;
       context = null;
       state = null;
