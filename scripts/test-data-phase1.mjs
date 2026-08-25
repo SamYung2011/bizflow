@@ -17,11 +17,12 @@ import { normalizeOrderQuery, ORDER_PAGE_SIZE } from "../root-site/data/live-ord
 import { completePasswordSignIn, readSignedInUser } from "../root-site/login/signed-in-user.js";
 
 const read = (relative) => readFile(new URL(`../${relative}`, import.meta.url), "utf8");
-const [migration, guardMigration, repairMigration, patchMigration, orders, revenue, orderQuery, orderWrites, liveHome, provider, home, customers, tasks, pending, customerDetail, itemMap] = await Promise.all([
+const [migration, guardMigration, repairMigration, patchMigration, homeRevenueGateMigration, orders, revenue, orderQuery, orderWrites, liveHome, provider, home, customers, tasks, pending, customerDetail, itemMap] = await Promise.all([
   read("migrations/102_bizflow_data_phase1.sql"),
   read("migrations/103_guard_non_array_invoice_items.sql"),
   read("migrations/104_bizflow_data_phase1_r5.sql"),
   read("migrations/105_bizflow_warranty_revenue_gate.sql"),
+  read("migrations/106_bizflow_home_revenue_gate.sql"),
   read("root-site/bizflow/orders.js"),
   read("root-site/bizflow/orders-revenue.js"),
   read("root-site/data/live-orders-query.js"),
@@ -70,6 +71,21 @@ assert.match(executablePatchMigration,
 assert.match(executablePatchMigration,
   /warranty_trim_chars AS MATERIALIZED[\s\S]*lower\(btrim\([\s\S]*product\.name[\s\S]*lower\(btrim\([\s\S]*line\.item->>'name'/,
   "both product and legacy item names must use the ECMAScript-trim character set before warranty matching");
+
+const executableHomeRevenueGateMigration = stripSqlComments(homeRevenueGateMigration);
+assert.doesNotMatch(executableHomeRevenueGateMigration, /SECURITY\s+DEFINER/i,
+  "the Home revenue gate must not bypass table RLS");
+assert.equal((executableHomeRevenueGateMigration.match(/CREATE OR REPLACE FUNCTION/g) || []).length, 1,
+  "migration 106 must only replace the reviewed Home function");
+assert.match(executableHomeRevenueGateMigration,
+  /CREATE OR REPLACE FUNCTION public\.bizflow_home_dashboard[\s\S]*revenue_access AS MATERIALIZED[\s\S]*employee\.user_id = auth\.uid\(\)[\s\S]*employee\.is_admin = true OR employee\.can_view_revenue = true/,
+  "Home must use the same signed-in employee revenue permission as migration 105");
+assert.match(executableHomeRevenueGateMigration,
+  /revenue AS \([\s\S]*FILTER \(WHERE access\.allowed AND status = 'Paid'[\s\S]*FILTER \(WHERE access\.allowed AND COALESCE\(status, ''\) <> 'Paid'[\s\S]*CROSS JOIN revenue_access AS access/,
+  "only Home's revenue aggregate must be zeroed when revenue access is denied");
+assert.match(executableHomeRevenueGateMigration,
+  /'revenue', \(SELECT jsonb_build_object\([\s\S]*'total_revenue'[\s\S]*'paid_count'[\s\S]*'average'[\s\S]*'unpaid_count'[\s\S]*'unpaid_amount'/,
+  "the Home revenue wire object must keep its five-key structure");
 
 assert.doesNotMatch(migration.replace(/^--.*$/gm, ""), /SECURITY\s+DEFINER/i, "phase 1 must not bypass RLS");
 assert.match(migration, /bizflow_order_list[\s\S]*security_invoker = true/);
