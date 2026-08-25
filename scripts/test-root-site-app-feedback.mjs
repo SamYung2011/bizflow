@@ -1223,6 +1223,79 @@ for (let cycle = 0; cycle < 30; cycle += 1) {
   );
 }
 
+// The adapter list is live data (online / charging), so the devices tab has to
+// keep polling; only the single-device unbind tab stops. One poller serves both
+// lists and dispatches on the active tab.
+const tabDocument = createFakeDocument();
+const tabScope = createFakeScope();
+const tabState = { activeTab: "feedback" };
+const polledLists = [];
+const tabPoller = createFeedbackPoller({
+  scope: tabScope,
+  documentRef: tabDocument,
+  poll: async () => {
+    polledLists.push(tabState.activeTab === "devices" ? "adapters" : "feedback");
+    return true;
+  },
+  clearTimeoutFn: (id) => tabScope.timers.delete(id),
+});
+function switchPolledTab(nextTab) {
+  tabState.activeTab = nextTab;
+  if (nextTab === "device") tabPoller.pause();
+  else tabPoller.resume();
+}
+
+if (tabState.activeTab !== "device") tabPoller.start();
+await tabScope.runNextTimer();
+assert.deepEqual(polledLists, ["feedback"]);
+
+switchPolledTab("devices");
+assert.equal(tabScope.timers.size, 1, "devices tab must stay on the poller");
+await tabScope.runNextTimer();
+assert.deepEqual(
+  polledLists,
+  ["feedback", "adapters"],
+  "devices tab must poll the adapter list, not the feedback list",
+);
+
+switchPolledTab("device");
+assert.equal(tabScope.timers.size, 0, "device unbind tab must stop polling");
+await tabDocument.setVisibility("hidden");
+await tabDocument.setVisibility("visible");
+assert.deepEqual(
+  polledLists,
+  ["feedback", "adapters"],
+  "device unbind tab must stay silent across visibility changes",
+);
+
+switchPolledTab("feedback");
+assert.equal(tabScope.timers.size, 1, "feedback tab must re-arm the poller");
+await tabScope.runNextTimer();
+assert.deepEqual(polledLists, ["feedback", "adapters", "feedback"]);
+
+switchPolledTab("devices");
+await tabDocument.setVisibility("hidden");
+assert.equal(tabScope.timers.size, 0);
+await tabDocument.setVisibility("visible");
+assert.deepEqual(
+  polledLists,
+  ["feedback", "adapters", "feedback", "adapters"],
+  "returning to a visible devices tab must refresh the adapter list at once",
+);
+tabScope.dispose();
+
+// Source contracts for the tab-dispatched, silent adapter refresh.
+assert.match(pageSource, /poll:\s*pollActiveTab/);
+assert.match(pageSource, /if \(state\.activeTab !== "device"\) poller\.start\(\)/);
+assert.match(pageSource, /return pollAdapterList\(\{ signal \}\)/);
+assert.match(pageSource, /loadAdapters\(\{ silent: true, signal \}\)/);
+// A poll must not flash the spinner, blank the table on a failed request, or
+// repaint over an open dialog / a field the operator is typing in.
+assert.match(pageSource, /if \(!silent\) \{\s*state\.adapters\.loading = true;/);
+assert.match(pageSource, /if \(silent\) return false;/);
+assert.match(pageSource, /adapterRefreshWouldInterrupt\(\)/);
+assert.match(pageSource, /state\.adapters\.loading\s*\)\s*\{\s*return true;/);
+
 console.log(
-  "Honnmono APP root-site contracts: PASS (feedback + device unbind + OTA package card, allowlists, confirmations, escaped fields, scoped polling, i18n)",
+  "Honnmono APP root-site contracts: PASS (feedback + device unbind + OTA package card, allowlists, confirmations, escaped fields, tab-dispatched polling, i18n)",
 );

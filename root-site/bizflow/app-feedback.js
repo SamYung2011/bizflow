@@ -922,40 +922,137 @@ function adapterListSubPath() {
   return `/devices/${state.adapters.kind}?${params}`;
 }
 
-async function loadAdapters() {
+function adapterListSignature(rows, total) {
+  return JSON.stringify([
+    Number(total) || 0,
+    (Array.isArray(rows) ? rows : []).map((row) => [
+      row?.certid ?? null,
+      row?.devid ?? null,
+      row?.imei ?? null,
+      row?.online ?? null,
+      row?.charging ?? null,
+      row?.locked ?? null,
+      row?.chargeCount ?? null,
+      row?.lastHeartbeatAt ?? null,
+      row?.binding?.userId ?? null,
+      row?.charger?.status ?? null,
+      row?.charger?.watts ?? null,
+      row?.charger?.durationSeconds ?? null,
+      row?.charger?.remainingSeconds ?? null,
+      row?.charger?.progressPercent ?? null,
+      row?.charger?.kwh ?? null,
+      row?.firmware?.software ?? null,
+    ]),
+  ]);
+}
+
+// A background refresh must never repaint over something the operator is in
+// the middle of: rerender() swaps the whole page via outerHTML, which would
+// drop focus/caret out of the search box or the action dialog.
+function adapterRefreshWouldInterrupt() {
+  if (state.adapters.actionConfirm || state.adapters.actionLoading) return true;
+  if (state.adapters.actionLookupId != null) return true;
+  // rerender() closes the date popover, so do not repaint while it is open.
+  if (adapterSessionDatePanel.isOpen()) return true;
+  const focused = document.activeElement;
+  return Boolean(
+    focused?.closest?.("[data-app-feedback-page]") &&
+      focused.matches?.("input, textarea, select"),
+  );
+}
+
+async function loadAdapters({ silent = false, signal } = {}) {
   const instance = activeInstance;
   const scope = activeScope;
   if (!state || state.activeTab !== "devices" || !isActive(instance, scope)) {
-    return;
+    return true;
   }
-  const request = ++state.adapters.request;
-  state.adapters.loading = true;
-  state.adapters.error = null;
-  rerender();
+  // A silent (poll-driven) refresh must not claim the request slot: a manual
+  // load started afterwards has to win, and this one has to notice it lost.
+  const request = silent ? state.adapters.request : ++state.adapters.request;
+  if (!silent) {
+    state.adapters.loading = true;
+    state.adapters.error = null;
+    rerender();
+  }
   try {
     const payload = await callHonnmonoAdmin(adapterListSubPath(), {
-      signal: scope.signal,
+      signal: signal || scope.signal,
     });
-    if (!isActive(instance, scope) || request !== state.adapters.request) return;
-    state.adapters.rows = Array.isArray(payload?.items) ? payload.items : [];
-    state.adapters.total = Number(payload?.total) || 0;
+    if (!isActive(instance, scope) || request !== state.adapters.request) {
+      return true;
+    }
+    const rows = Array.isArray(payload?.items) ? payload.items : [];
+    const total = Number(payload?.total) || 0;
+    if (silent) {
+      if (state.activeTab !== "devices") return true;
+      const unchanged =
+        adapterListSignature(rows, total) ===
+        adapterListSignature(state.adapters.rows, state.adapters.total);
+      if (unchanged || adapterRefreshWouldInterrupt()) return true;
+      const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
+      if (state.adapters.page > lastPage) {
+        // Rows vanished under this page: land on the new last page instead of
+        // painting an empty table. Bounded — the page only ever shrinks.
+        state.adapters.page = lastPage;
+        return loadAdapters({ silent: true, signal });
+      }
+      state.adapters.rows = rows;
+      state.adapters.total = total;
+      state.adapters.error = null;
+      rerender({ preserveScroll: true });
+      return true;
+    }
+    state.adapters.rows = rows;
+    state.adapters.total = total;
     if (state.adapters.page > adapterPageCount()) {
       state.adapters.page = adapterPageCount();
       void loadAdapters();
-      return;
+      return true;
     }
   } catch (error) {
+    // A failed poll leaves the last good list on screen; only an explicit
+    // load is allowed to blank the table and surface the error.
+    if (silent) return false;
     if (isActive(instance, scope) && request === state.adapters.request) {
       state.adapters.rows = [];
       state.adapters.total = 0;
       state.adapters.error = error;
     }
   } finally {
-    if (isActive(instance, scope) && request === state.adapters.request) {
+    if (
+      !silent &&
+      isActive(instance, scope) &&
+      request === state.adapters.request
+    ) {
       state.adapters.loading = false;
       rerender();
     }
   }
+  return true;
+}
+
+async function pollAdapterList({ signal } = {}) {
+  const instance = activeInstance;
+  const scope = activeScope;
+  if (
+    !state ||
+    !isActive(instance, scope) ||
+    state.activeTab !== "devices" ||
+    document.visibilityState !== "visible" ||
+    state.adapters.loading
+  ) {
+    return true;
+  }
+  return loadAdapters({ silent: true, signal });
+}
+
+// One poller, dispatched by tab: the feedback list and the adapter list both
+// need a 30s refresh, and only one of them is on screen at a time.
+async function pollActiveTab({ signal } = {}) {
+  if (!state) return true;
+  if (state.activeTab === "devices") return pollAdapterList({ signal });
+  return pollFeedbackList({ signal });
 }
 
 async function loadAdapterSessions() {
@@ -1321,6 +1418,7 @@ function switchAppTab(nextTab) {
   state.detailError = null;
   state.downloadError = null;
   if (nextTab === "device") {
+    // Single-device unbind is a one-shot lookup form, nothing to poll.
     activePoller?.pause();
     rerender();
     if (!state.ota.loaded) void activeOtaController?.load();
@@ -1330,7 +1428,8 @@ function switchAppTab(nextTab) {
     return;
   }
   if (nextTab === "devices") {
-    activePoller?.pause();
+    // The adapter list is live data (online/charging), so it keeps polling.
+    activePoller?.resume();
     rerender();
     if (!state.ota.loaded) void activeOtaController?.load();
     void loadAdapters();
@@ -1736,10 +1835,10 @@ export async function mountPage({
       poller = createFeedbackPoller({
         scope,
         documentRef: document,
-        poll: pollFeedbackList,
+        poll: pollActiveTab,
       });
       activePoller = poller;
-      if (state.activeTab === "feedback") poller.start();
+      if (state.activeTab !== "device") poller.start();
       if (["device", "devices"].includes(state.activeTab)) void otaController.load();
       if (state.activeTab === "devices") void loadAdapters();
     },
