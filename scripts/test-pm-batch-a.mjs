@@ -29,7 +29,7 @@ assert.match(homeJs, /data-home-members/,
 assert.match(homeJs, /<section class="home-logistics"[\s\S]*?logisticsCard\(\{ filter: "pending"[\s\S]*?logisticsCard\(\{ filter: "in_transit"[\s\S]*?logisticsCard\(\{ filter: "exception"/,
   "the three logistics summary cards must remain unchanged");
 
-assert.match(inventoryDetail, /liveReadOnly\s*=\s*authenticated\s*&&\s*\([\s\S]*?currentUser\?\.isBfAdmin !== true \|\| !shopifyWriteReady\(shopifyHealth\)[\s\S]*?\);/,
+assert.match(inventoryDetail, /function syncShopifyWriteAccess\(\)[\s\S]*?inventoryWriteAccess\(\{[\s\S]*?checking: shopifyHealthChecking,[\s\S]*?health: shopifyHealth/,
   "an absent Shopify binding must not make an otherwise write-ready administrator read-only");
 assert.doesNotMatch(inventoryDetail, /liveReadOnly\s*=\s*authenticated\s*&&\s*\([^)]*bindingReady/,
   "the product binding must stay outside the page-wide write gate");

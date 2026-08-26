@@ -10,12 +10,11 @@ import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import {
   cleanupLiveInventoryImage,
   deleteLiveInventoryProduct,
-  getShopifyCredentialHealth,
   SHOPIFY_PRODUCT_IMAGE_ACCEPT,
-  shopifyWriteReady,
   updateLiveInventoryProduct,
   uploadLiveInventoryImage
 } from "../data/live-inventory-writes.js";
+import { inventoryWriteAccess, runInventoryHealthCheck } from "./inventory-health.js";
 
 const dict = {
   zh: {
@@ -81,6 +80,7 @@ const dict = {
     "inventory.leaveUnsaved": "商品修改尚未保存，確定離開？",
     "inventory.shopifyWriteNotReady": "Shopify 寫入憑證未就緒",
     "inventory.shopifyWriteHint": "目前只讀連接正常；補齊 write_products、write_inventory 後即可保存。",
+    "inventory.shopifyWriteChecking": "正在檢查 Shopify 寫入連接…",
     "inventory.writeReady": "Shopify 寫入連接已就緒",
     "inventory.bindingRequired": "此老商品尚未綁定 Shopify 商品，請先到 Shopify API 頁確認綁定。",
     "inventory.bizflowOnlyProduct": "僅 BizFlow：此商品尚未綁定 Shopify，保存只更新 BizFlow。",
@@ -164,6 +164,7 @@ const dict = {
     "inventory.leaveUnsaved": "Product changes have not been saved. Leave this page?",
     "inventory.shopifyWriteNotReady": "Shopify write credential is not ready",
     "inventory.shopifyWriteHint": "The read connection works. Add write_products and write_inventory to enable saving.",
+    "inventory.shopifyWriteChecking": "Checking Shopify write connection…",
     "inventory.writeReady": "Shopify write connection is ready",
     "inventory.bindingRequired": "This existing product is not bound. Confirm its Shopify product in the Shopify API tab first.",
     "inventory.bizflowOnlyProduct": "BizFlow only: this product is not bound to Shopify, so saving updates BizFlow only.",
@@ -247,6 +248,7 @@ const dict = {
     "inventory.leaveUnsaved": "Les modifications du produit ne sont pas enregistrées. Quitter cette page ?",
     "inventory.shopifyWriteNotReady": "Les identifiants d'écriture Shopify ne sont pas prêts",
     "inventory.shopifyWriteHint": "La lecture fonctionne. Ajoutez write_products et write_inventory pour enregistrer.",
+    "inventory.shopifyWriteChecking": "Vérification de la connexion d’écriture Shopify…",
     "inventory.writeReady": "La connexion d'écriture Shopify est prête",
     "inventory.bindingRequired": "Ce produit existant n'est pas associé. Confirmez d'abord le produit Shopify dans l'onglet API Shopify.",
     "inventory.bizflowOnlyProduct": "BizFlow uniquement : ce produit n'est pas associé à Shopify ; l'enregistrement ne met à jour que BizFlow.",
@@ -273,6 +275,7 @@ let detail = null;
 let currentUser = null;
 let unread = null;
 let shopifyHealth = null;
+let shopifyHealthChecking = false;
 let authenticated = false;
 let liveReadOnly = false;
 let writeAttributes = "";
@@ -309,6 +312,29 @@ function pageT(lang, key) {
 
 function shopifyBindingReady() {
   return detail?.product.shopifyBinding?.status === "active";
+}
+
+function syncShopifyWriteAccess() {
+  const access = inventoryWriteAccess({
+    authenticated,
+    isAdmin: currentUser?.isBfAdmin === true,
+    checking: shopifyHealthChecking,
+    health: shopifyHealth,
+  });
+  liveReadOnly = access.liveReadOnly;
+  writeAttributes = access.writeAttributes;
+}
+
+function refreshShopifyHealth(scope) {
+  return runInventoryHealthCheck({
+    isCurrent: () => scope.isCurrent(),
+    onSettled(nextHealth) {
+      shopifyHealth = nextHealth;
+      shopifyHealthChecking = false;
+      syncShopifyWriteAccess();
+      rerenderDetailPage();
+    },
+  });
 }
 
 function imageErrorText(lang, error) {
@@ -585,13 +611,16 @@ function renderWriteStatus(helpers) {
   if (!authenticated) return "";
   const { escapeHtml, lang } = helpers;
   const isAdmin = currentUser?.isBfAdmin === true;
-  const writeReady = isAdmin && shopifyWriteReady(shopifyHealth);
+  const { checking, ready: writeReady } = inventoryWriteAccess({
+    authenticated, isAdmin, checking: shopifyHealthChecking, health: shopifyHealth,
+  });
   const bound = shopifyBindingReady();
   const title = !isAdmin ? pageT(lang, "inventory.adminOnly")
-    : !writeReady ? pageT(lang, "inventory.shopifyWriteNotReady")
+    : checking ? pageT(lang, "inventory.shopifyWriteChecking")
+      : !writeReady ? pageT(lang, "inventory.shopifyWriteNotReady")
       : !bound ? pageT(lang, "inventory.bizflowOnlyProduct") : pageT(lang, "inventory.writeReady");
-  const hint = isAdmin && !writeReady ? pageT(lang, "inventory.shopifyWriteHint") : "";
-  return `<section class="inventory-write-status${liveReadOnly ? " is-blocked" : " is-ready"}" data-shopify-binding-ready="${bound}" data-inventory-write-mode="${bound ? "shopify" : "bizflow-only"}">
+  const hint = isAdmin && !checking && !writeReady ? pageT(lang, "inventory.shopifyWriteHint") : "";
+  return `<section class="inventory-write-status${liveReadOnly ? " is-blocked" : " is-ready"}" data-shopify-binding-ready="${bound}" data-inventory-write-mode="${bound ? "shopify" : "bizflow-only"}" data-shopify-health-checking="${checking}" aria-busy="${checking}">
     <strong>${escapeHtml(title)}</strong>${hint ? `<span>${escapeHtml(hint)}</span>` : ""}
     ${state.error ? `<span class="inventory-domain-error">${escapeHtml(state.error)}</span>` : ""}
     ${state.feedback ? `<span class="inventory-domain-hint">${escapeHtml(state.feedback)}</span>` : ""}
@@ -1081,14 +1110,9 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
   currentUser = nextCurrentUser;
   ({ unread } = cachedPageUnread(currentUser));
   authenticated = typeof currentUser?.hasPermission === "function";
-  shopifyHealth = currentUser?.isBfAdmin === true
-    ? await getShopifyCredentialHealth({ refresh: true })
-    : null;
-  throwIfPageAborted(signal, scope);
-  liveReadOnly = authenticated && (
-    currentUser?.isBfAdmin !== true || !shopifyWriteReady(shopifyHealth)
-  );
-  writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
+  shopifyHealth = null;
+  shopifyHealthChecking = authenticated && currentUser?.isBfAdmin === true;
+  syncShopifyWriteAccess();
   if (detail.product.status === "enabled") detail.product.status = "active";
   statusOptions = ["draft", "active", "discontinued"];
   warehouseOptions = (detail.availableWarehouses || detail.warehouses || []).map((row) => ({ ...row }));
@@ -1121,6 +1145,7 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
     },
     activate() {
       void loadPageUnread({ scope, currentUser, onUpdate: (next) => { unread = next.unread; } });
+      if (shopifyHealthChecking) void refreshShopifyHealth(scope);
       scope.listen(document, "click", onInventoryDetailClick);
       scope.listen(document, "input", onInventoryDetailInput);
       scope.listen(document, "change", onInventoryDetailInput);
@@ -1140,6 +1165,7 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
       detail = null;
       currentUser = null;
       shopifyHealth = null;
+      shopifyHealthChecking = false;
       authenticated = false;
       unread = null;
       currentHelpers = null;
