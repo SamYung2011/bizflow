@@ -14,11 +14,10 @@ import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import {
   cleanupLiveInventoryImage,
   createLiveInventoryProduct,
-  getShopifyCredentialHealth,
   SHOPIFY_PRODUCT_IMAGE_ACCEPT,
-  shopifyWriteReady,
   uploadLiveInventoryImage
 } from "../data/live-inventory-writes.js";
+import { inventoryWriteAccess, runInventoryHealthCheck } from "./inventory-health.js";
 import {
   attachItemMapBehaviors, captureItemMapState, disposeItemMapState, ensureItemMapData,
   hasItemMapUnsavedChanges, renderItemMap, restoreItemMapState
@@ -94,6 +93,7 @@ const dict = {
     "inventory.leaveUnsaved": "尚有未保存的庫存資料，確定離開？",
     "inventory.shopifyWriteNotReady": "Shopify 寫入憑證未就緒",
     "inventory.shopifyWriteHint": "目前只讀連接正常；補齊 write_products、write_inventory 後即可保存。",
+    "inventory.shopifyWriteChecking": "正在檢查 Shopify 寫入連接…",
     "inventory.adminOnly": "商品目錄與庫存只限管理員修改",
     "inventory.writeReady": "Shopify 寫入連接已就緒",
     "inventory.saving": "正在同步 Shopify 與 BizFlow…",
@@ -153,6 +153,7 @@ const dict = {
     "inventory.leaveUnsaved": "There are unsaved inventory changes. Leave this page?",
     "inventory.shopifyWriteNotReady": "Shopify write credential is not ready",
     "inventory.shopifyWriteHint": "The read connection works. Add write_products and write_inventory to enable saving.",
+    "inventory.shopifyWriteChecking": "Checking Shopify write connection…",
     "inventory.adminOnly": "Only administrators can modify the catalogue and inventory",
     "inventory.writeReady": "Shopify write connection is ready",
     "inventory.saving": "Syncing Shopify and BizFlow…",
@@ -212,6 +213,7 @@ const dict = {
     "inventory.leaveUnsaved": "Des modifications de stock ne sont pas enregistrées. Quitter cette page ?",
     "inventory.shopifyWriteNotReady": "Les identifiants d'écriture Shopify ne sont pas prêts",
     "inventory.shopifyWriteHint": "La connexion en lecture fonctionne. Ajoutez write_products et write_inventory pour enregistrer.",
+    "inventory.shopifyWriteChecking": "Vérification de la connexion d’écriture Shopify…",
     "inventory.adminOnly": "Seuls les administrateurs peuvent modifier le catalogue et le stock",
     "inventory.writeReady": "La connexion d'écriture Shopify est prête",
     "inventory.saving": "Synchronisation de Shopify et BizFlow…",
@@ -225,6 +227,7 @@ let unreadWatermarks = null;
 let unread = null;
 let currentUser = null;
 let shopifyHealth = null;
+let shopifyHealthChecking = false;
 let authenticated = false;
 let liveReadOnly = false;
 let writeAttributes = "";
@@ -277,6 +280,29 @@ function imageErrorText(lang, error) {
   if (code === "SHOPIFY_IMAGE_DIMENSIONS_INVALID") return pageT(lang, "inventory.image.error.dimensions");
   if (code.includes("CONTENT") || code.includes("DIGEST")) return pageT(lang, "inventory.image.error.content");
   return pageT(lang, "inventory.image.error.upload");
+}
+
+function syncShopifyWriteAccess() {
+  const access = inventoryWriteAccess({
+    authenticated,
+    isAdmin: currentUser?.isBfAdmin === true,
+    checking: shopifyHealthChecking,
+    health: shopifyHealth,
+  });
+  liveReadOnly = access.liveReadOnly;
+  writeAttributes = access.writeAttributes;
+}
+
+function refreshShopifyHealth(scope) {
+  return runInventoryHealthCheck({
+    isCurrent: () => isCurrentInventoryScope(scope),
+    onSettled(nextHealth) {
+      shopifyHealth = nextHealth;
+      shopifyHealthChecking = false;
+      syncShopifyWriteAccess();
+      rerenderInventoryPage({ focusSearch: document.activeElement?.matches("[data-inventory-search]") === true });
+    },
+  });
 }
 
 function formatHkd(value) {
@@ -486,12 +512,15 @@ function renderWriteStatus(helpers) {
   if (!authenticated) return "";
   const { escapeHtml, lang } = helpers;
   const admin = currentUser?.isBfAdmin === true;
-  const ready = admin && shopifyWriteReady(shopifyHealth);
+  const { checking, ready } = inventoryWriteAccess({
+    authenticated, isAdmin: admin, checking: shopifyHealthChecking, health: shopifyHealth,
+  });
   const title = !admin ? pageT(lang, "inventory.adminOnly")
-    : ready ? pageT(lang, "inventory.writeReady") : pageT(lang, "inventory.shopifyWriteNotReady");
-  const hint = admin && !ready ? pageT(lang, "inventory.shopifyWriteHint") : "";
+    : checking ? pageT(lang, "inventory.shopifyWriteChecking")
+      : ready ? pageT(lang, "inventory.writeReady") : pageT(lang, "inventory.shopifyWriteNotReady");
+  const hint = admin && !checking && !ready ? pageT(lang, "inventory.shopifyWriteHint") : "";
   const message = state.error || state.feedback;
-  return `<section class="inventory-write-status${ready ? " is-ready" : " is-blocked"}" data-shopify-write-ready="${ready}">
+  return `<section class="inventory-write-status${ready ? " is-ready" : " is-blocked"}" data-shopify-write-ready="${ready}" data-shopify-health-checking="${checking}" aria-busy="${checking}">
     <strong>${escapeHtml(title)}</strong>${hint ? `<span>${escapeHtml(hint)}</span>` : ""}
     ${message ? `<span class="${state.error ? "inventory-domain-error" : "inventory-domain-hint"}">${escapeHtml(message)}</span>` : ""}
   </section>`;
@@ -911,12 +940,9 @@ export async function mountPage({ scope, signal, historyState = null, navigation
   currentUser = nextCurrentUser;
   ({ unread, watermarks: unreadWatermarks } = cachedPageUnread(currentUser));
   authenticated = typeof currentUser?.hasPermission === "function";
-  shopifyHealth = currentUser?.isBfAdmin === true
-    ? await getShopifyCredentialHealth({ refresh: true })
-    : null;
-  throwIfPageAborted(signal, scope);
-  liveReadOnly = authenticated && (currentUser?.isBfAdmin !== true || !shopifyWriteReady(shopifyHealth));
-  writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
+  shopifyHealth = null;
+  shopifyHealthChecking = authenticated && currentUser?.isBfAdmin === true;
+  syncShopifyWriteAccess();
   state = restoredState(historyState, presetSearch);
   restoreItemMapState(historyState?.itemMap);
   restoreSupplierState(historyState?.suppliers);
@@ -933,6 +959,7 @@ export async function mountPage({ scope, signal, historyState = null, navigation
     },
     activate() {
       markRead("inventory", unreadWatermarks?.inventory);
+      if (shopifyHealthChecking) void refreshShopifyHealth(scope);
       void loadPageUnread({
         scope,
         currentUser,
@@ -987,6 +1014,7 @@ export async function mountPage({ scope, signal, historyState = null, navigation
       unread = null;
       currentUser = null;
       shopifyHealth = null;
+      shopifyHealthChecking = false;
       authenticated = false;
       currentHelpers = null;
       inventoryRenderGeneration += 1;
