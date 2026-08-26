@@ -228,7 +228,8 @@
 }
 
 img.inventory-thumb,
-img.inventory-detail-image {
+img.inventory-detail-image,
+img.inventory-subitem-image {
   background: var(--white);
 }
 
@@ -590,6 +591,7 @@ img.inventory-detail-image {
   width: 40px;
   height: 40px;
   border-color: var(--inventory-panel-line);
+  object-fit: contain;
 }
 
 .inventory-subitem-name {
