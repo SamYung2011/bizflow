@@ -1,17 +1,29 @@
 import { getSession, getSupabaseClient } from "./auth.js";
+import {
+  liveSnapshotCacheVersion,
+  readLiveSnapshotCache,
+  writeLiveSnapshotCache,
+} from "./live-table-cache.js";
+import { LIVE_SNAPSHOT_UPDATED_EVENT } from "./live-snapshot-dependencies.js";
 
-// Mirrors bizflow_samyung/src/lib/ocppAdmin.js: GET-only Edge transport,
-// token-scoped 45s response cache, and in-flight request de-duplication.
+// GET-only Edge transport. The short memory cache de-duplicates bursts while the
+// IndexedDB snapshot cache makes subsequent route entries stale-while-revalidate.
 
 export const LIVE_OCPP_MISS = Symbol("live-ocpp-miss");
 
+export const OCPP_CACHE_SNAPSHOTS = Object.freeze({
+  monitor: "ocpp-monitor-v2",
+  logs: "ocpp-logs-v2",
+  charging: "ocpp-charging-v2",
+  users: "ocpp-users-v2",
+  finance: "ocpp-finance-v2",
+});
+
 const CACHE_TTL_MS = 45_000;
 const PAGE_LIMIT = 200;
-const LOG_WINDOW_SECONDS = 86_400;
-const LOG_DAYS = 7;
-const LOG_CONCURRENCY = 6;
 const responseCache = new Map();
 const inflightRequests = new Map();
+const persistentRefreshes = new Map();
 let cacheUserId = "";
 
 const READ_ONLY_PATHS = [
@@ -30,8 +42,19 @@ const READ_ONLY_PATHS = [
   /^\/share\/income(?:\?|$)/,
   /^\/share\/bookings(?:\?|$)/,
   /^\/finance\/(?:recharges|refunds|user-money-logs|operator-money-logs|platform-money-logs|withdrawals)(?:\?|$)/,
-  /^\/ocpp\/logs(?:\?|$)/
+  /^\/ocpp\/logs(?:\?|$)/,
+  /^\/ocpp\/logs\/recent(?:\?|$)/,
+  /^\/summary\/(?:monitor|charging|finance)(?:\?|$)/,
 ];
+
+const FINANCE_PATHS = Object.freeze({
+  recharges: "/finance/recharges",
+  refunds: "/finance/refunds",
+  userMoneyLogs: "/finance/user-money-logs",
+  operatorMoneyLogs: "/finance/operator-money-logs",
+  platformMoneyLogs: "/finance/platform-money-logs",
+  withdrawals: "/finance/withdrawals",
+});
 
 function assertReadOnlyPath(subPath) {
   if (!READ_ONLY_PATHS.some((pattern) => pattern.test(subPath))) {
@@ -44,6 +67,7 @@ function resetCacheForUser(userId) {
   cacheUserId = userId;
   responseCache.clear();
   inflightRequests.clear();
+  persistentRefreshes.clear();
 }
 
 async function edgeContext() {
@@ -55,9 +79,10 @@ async function edgeContext() {
   }
   resetCacheForUser(session.user.id);
   return {
+    userId: session.user.id,
     accessToken: session.access_token,
     anonKey: client.supabaseKey,
-    baseUrl: String(client.supabaseUrl).replace(/\/$/, "")
+    baseUrl: String(client.supabaseUrl).replace(/\/$/, ""),
   };
 }
 
@@ -78,8 +103,8 @@ async function callOcppAdmin(subPath, context, { ttlMs = CACHE_TTL_MS } = {}) {
       cache: "no-store",
       headers: {
         apikey: context.anonKey,
-        Authorization: `Bearer ${context.accessToken}`
-      }
+        Authorization: `Bearer ${context.accessToken}`,
+      },
     });
     const text = await response.text();
     let parsed = null;
@@ -100,55 +125,65 @@ async function callOcppAdmin(subPath, context, { ttlMs = CACHE_TTL_MS } = {}) {
   return request;
 }
 
-function withQuery(path, params) {
-  const query = new URLSearchParams(params);
-  return `${path}?${query}`;
+function withQuery(path, params = {}) {
+  const query = new URLSearchParams(
+    Object.entries(params).filter(([, value]) => value != null && value !== ""),
+  );
+  const suffix = query.toString();
+  return suffix ? `${path}?${suffix}` : path;
 }
 
-async function fetchAllRows(path, context, params = {}) {
-  const rows = [];
-  let offset = 0;
-  for (let pageIndex = 0; pageIndex < 10_000; pageIndex += 1) {
-    const response = await callOcppAdmin(withQuery(path, { ...params, limit: PAGE_LIMIT, offset }), context);
-    if (!Array.isArray(response?.data)) throw new Error(`${path} returned an invalid row contract`);
-    rows.push(...response.data);
-    if (!response.page?.hasMore) return rows;
-    offset += Number(response.page.limit) || PAGE_LIMIT;
+function pageContract(response, path) {
+  if (!Array.isArray(response?.data) || !response?.page || typeof response.page !== "object") {
+    throw new Error(`${path} returned an invalid page contract`);
   }
-  throw new Error(`${path} exceeded the pagination guard`);
+  return { rows: response.data, page: response.page };
 }
 
-async function mapLimit(items, limit, mapper) {
-  const results = new Array(items.length);
-  let cursor = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (cursor < items.length) {
-      const index = cursor;
-      cursor += 1;
-      results[index] = await mapper(items[index], index);
-    }
-  });
-  await Promise.all(workers);
-  return results;
-}
-
-async function safeSection(label, fallback, loader) {
-  try {
-    return await loader();
-  } catch (error) {
-    console.warn(`[live-ocpp] ${label} unavailable -> fallback empty`, error);
-    return fallback;
+function summaryContract(response, path) {
+  if (!response?.data || typeof response.data !== "object" || Array.isArray(response.data)) {
+    throw new Error(`${path} returned an invalid summary contract`);
   }
+  return response.data;
 }
 
-async function keyedDetails(rows, idKey, pathForId, context) {
-  const entries = await mapLimit(rows, 6, async (row) => {
-    const id = row?.[idKey];
-    if (!id) return null;
-    const response = await callOcppAdmin(pathForId(id), context);
-    return [String(id), response?.data ?? null];
+function dispatchSnapshot(snapshot, value) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(LIVE_SNAPSHOT_UPDATED_EVENT, {
+    detail: { snapshot, value },
+  }));
+}
+
+async function buildAndStore(snapshot, context, loader, { notify = false } = {}) {
+  const version = liveSnapshotCacheVersion(snapshot);
+  const value = await loader();
+  const stored = await writeLiveSnapshotCache({
+    userId: context.userId,
+    snapshot,
+    value,
+    version,
   });
-  return Object.fromEntries(entries.filter((entry) => entry?.[1] && typeof entry[1] === "object"));
+  if (notify && stored && context.userId === cacheUserId) dispatchSnapshot(snapshot, value);
+  return value;
+}
+
+function refreshPersistentSnapshot(snapshot, context, loader) {
+  const refreshKey = `${context.userId}:${snapshot}`;
+  if (persistentRefreshes.has(refreshKey)) return persistentRefreshes.get(refreshKey);
+  const refresh = buildAndStore(snapshot, context, loader, { notify: true })
+    .catch((error) => console.warn(`[live-ocpp] ${snapshot} SWR refresh failed`, error))
+    .finally(() => persistentRefreshes.delete(refreshKey));
+  persistentRefreshes.set(refreshKey, refresh);
+  return refresh;
+}
+
+async function cachedSnapshot(snapshot, context, loader) {
+  const cached = await readLiveSnapshotCache({ userId: context.userId, snapshot });
+  if (cached) {
+    void refreshPersistentSnapshot(snapshot, context, loader);
+    return cached.value;
+  }
+  return await buildAndStore(snapshot, context, loader);
 }
 
 async function liveContextOrMiss() {
@@ -156,120 +191,169 @@ async function liveContextOrMiss() {
   return context ?? LIVE_OCPP_MISS;
 }
 
-export async function getLiveOcppMonitorData() {
-  const context = await liveContextOrMiss();
-  if (context === LIVE_OCPP_MISS) return LIVE_OCPP_MISS;
-  const [piles, commandLogs, alarms] = await Promise.all([
-    safeSection("piles", [], () => fetchAllRows("/piles", context)),
-    safeSection("command-logs", [], () => fetchAllRows("/command-logs", context)),
-    safeSection("alarms", [], () => fetchAllRows("/alarms", context, { since: "all" }))
-  ]);
+async function fetchPage(path, context, params = {}) {
+  const response = await callOcppAdmin(withQuery(path, params), context);
+  return pageContract(response, path);
+}
+
+function generatedAt() {
+  return new Date().toISOString();
+}
+
+async function loadMonitor(context) {
+  const summary = summaryContract(
+    await callOcppAdmin("/summary/monitor", context, { ttlMs: 0 }),
+    "/summary/monitor",
+  );
   return {
     isLive: true,
-    generatedAt: new Date().toISOString(),
-    logsScope: "each pile recent 7d (live readapi, loaded on demand)",
+    generatedAt: generatedAt(),
+    logsScope: "latest mixed-pile messages (live readapi, loaded on demand)",
     logsDeferred: true,
-    piles,
+    piles: Array.isArray(summary.piles) ? summary.piles : [],
     logs: [],
-    commandLogs,
-    alarms
+    commandLogs: Array.isArray(summary.commandLogs) ? summary.commandLogs : [],
+    alarms: Array.isArray(summary.alarms) ? summary.alarms : [],
   };
 }
 
-async function fetchLogWindow(pileNo, from, to, context) {
-  const rows = [];
-  let beforeId = "";
-  for (let pageIndex = 0; pageIndex < 10_000; pageIndex += 1) {
-    const response = await callOcppAdmin(withQuery("/ocpp/logs", {
-      pile_no: pileNo,
-      from,
-      to,
-      limit: PAGE_LIMIT,
-      ...(beforeId ? { before_id: beforeId } : {})
-    }), context);
-    if (!Array.isArray(response?.data)) throw new Error("/ocpp/logs returned an invalid row contract");
-    rows.push(...response.data);
-    if (!response.page?.hasMore) return rows;
-    const nextId = response.data.at(-1)?.id;
-    if (!nextId || String(nextId) === beforeId) throw new Error("/ocpp/logs cursor did not advance");
-    beforeId = String(nextId);
-  }
-  throw new Error("/ocpp/logs exceeded the pagination guard");
+export async function getLiveOcppMonitorData() {
+  const context = await liveContextOrMiss();
+  if (context === LIVE_OCPP_MISS) return LIVE_OCPP_MISS;
+  return await cachedSnapshot(OCPP_CACHE_SNAPSHOTS.monitor, context, () => loadMonitor(context));
+}
+
+async function loadRecentLogs(context) {
+  const response = await callOcppAdmin(`/ocpp/logs/recent?limit=${PAGE_LIMIT}`, context, { ttlMs: 0 });
+  const page = pageContract(response, "/ocpp/logs/recent");
+  return {
+    isLive: true,
+    generatedAt: generatedAt(),
+    logsScope: "latest mixed-pile messages (live readapi)",
+    logs: page.rows,
+    logsPage: page.page,
+  };
 }
 
 export async function getLiveOcppMonitorLogsData() {
   const context = await liveContextOrMiss();
   if (context === LIVE_OCPP_MISS) return LIVE_OCPP_MISS;
-  const piles = await safeSection("piles for logs", [], () => fetchAllRows("/piles", context));
-  const now = Math.floor(Date.now() / 1000);
-  const jobs = piles.flatMap((pile) => {
-    if (!pile?.pileNo) return [];
-    return Array.from({ length: LOG_DAYS }, (_, day) => {
-      const to = now - day * LOG_WINDOW_SECONDS;
-      return { pileNo: pile.pileNo, from: to - LOG_WINDOW_SECONDS, to };
-    });
+  return await cachedSnapshot(OCPP_CACHE_SNAPSHOTS.logs, context, () => loadRecentLogs(context));
+}
+
+export async function getLiveOcppRecentLogsPage({ beforeId = "", limit = PAGE_LIMIT } = {}) {
+  const context = await liveContextOrMiss();
+  if (context === LIVE_OCPP_MISS) return LIVE_OCPP_MISS;
+  return await fetchPage("/ocpp/logs/recent", context, { before_id: beforeId, limit });
+}
+
+export async function getLiveOcppPileLogsPage({ pileNo, beforeId = "", from = "", to = "", limit = PAGE_LIMIT } = {}) {
+  const context = await liveContextOrMiss();
+  if (context === LIVE_OCPP_MISS) return LIVE_OCPP_MISS;
+  return await fetchPage("/ocpp/logs", context, {
+    pile_no: pileNo,
+    before_id: beforeId,
+    from,
+    to,
+    limit,
   });
-  const chunks = await safeSection("ocpp/logs", [], () =>
-    mapLimit(jobs, LOG_CONCURRENCY, (job) => fetchLogWindow(job.pileNo, job.from, job.to, context)));
-  const logsById = new Map();
-  chunks.flat().forEach((row) => {
-    if (row?.id != null && !logsById.has(String(row.id))) logsById.set(String(row.id), row);
-  });
-  const logs = [...logsById.values()].sort((left, right) => Number(right.id) - Number(left.id));
+}
+
+async function loadCharging(context) {
+  const summary = summaryContract(
+    await callOcppAdmin("/summary/charging", context, { ttlMs: 0 }),
+    "/summary/charging",
+  );
+  const stations = Array.isArray(summary.stations) ? summary.stations : [];
+  const shareCharges = Array.isArray(summary.shareCharges) ? summary.shareCharges : [];
+  const orders = pageContract(summary.orders, "/summary/charging orders");
   return {
-    isLive: true,
-    generatedAt: new Date().toISOString(),
-    logsScope: "each pile recent 7d (live readapi, 24h windows)",
-    logs
+    stations,
+    piles: Array.isArray(summary.piles) ? summary.piles : [],
+    operators: Array.isArray(summary.operators) ? summary.operators : [],
+    orders: orders.rows,
+    orderPage: orders.page,
+    orderTotal: Number(orders.page.total) || 0,
+    shareCharges,
+    shareIncome: Array.isArray(summary.shareIncome) ? summary.shareIncome : [],
+    shareBookings: Array.isArray(summary.shareBookings) ? summary.shareBookings : [],
+    stationDetails: Object.fromEntries(stations
+      .filter((station) => station?.stationId && station?.detail)
+      .map((station) => [String(station.stationId), station.detail])),
+    sharePrices: Object.fromEntries(shareCharges
+      .filter((share) => share?.shareId && Array.isArray(share.prices))
+      .map((share) => [String(share.shareId), share.prices])),
+    reports: summary.reports && typeof summary.reports === "object"
+      ? summary.reports
+      : { day: [], month: [], year: [] },
   };
 }
 
 export async function getLiveOcppChargingData() {
   const context = await liveContextOrMiss();
   if (context === LIVE_OCPP_MISS) return LIVE_OCPP_MISS;
-  const [stations, piles, operators, orders, shareCharges, shareIncome, shareBookings, reports] = await Promise.all([
-    safeSection("stations", [], () => fetchAllRows("/stations", context, { status: "all" })),
-    safeSection("piles", [], () => fetchAllRows("/piles", context)),
-    safeSection("operators", [], () => fetchAllRows("/operators", context, { status: "all" })),
-    safeSection("orders", [], () => fetchAllRows("/orders", context)),
-    safeSection("share/charges", [], () => fetchAllRows("/share/charges", context, { share: "all" })),
-    safeSection("share/income", [], () => fetchAllRows("/share/income", context)),
-    safeSection("share/bookings", [], () => fetchAllRows("/share/bookings", context)),
-    safeSection("reports", { day: [], month: [], year: [] }, async () => {
-      const [day, month, year] = await Promise.all(["day", "month", "year"].map((period) =>
-        fetchAllRows("/reports/charging", context, { period })));
-      return { day, month, year };
-    })
+  return await cachedSnapshot(OCPP_CACHE_SNAPSHOTS.charging, context, () => loadCharging(context));
+}
+
+export async function getLiveOcppOrdersPage(params = {}) {
+  const context = await liveContextOrMiss();
+  if (context === LIVE_OCPP_MISS) return LIVE_OCPP_MISS;
+  return await fetchPage("/orders", context, { limit: PAGE_LIMIT, ...params });
+}
+
+async function loadUsers(context) {
+  const [users, tags] = await Promise.all([
+    fetchPage("/charge-users", context, { limit: PAGE_LIMIT, status: "all" }),
+    fetchPage("/charge-user-tags", context, { limit: PAGE_LIMIT, status: "all" }),
   ]);
-  const [stationDetails, sharePrices] = await Promise.all([
-    safeSection("station details", {}, () => keyedDetails(stations, "stationId", (id) => `/stations/${id}`, context)),
-    safeSection("share prices", {}, () => keyedDetails(shareCharges, "shareId", (id) => `/share/prices/${id}?limit=${PAGE_LIMIT}`, context))
-  ]);
-  return { stations, piles, operators, orders, shareCharges, shareIncome, shareBookings, stationDetails, sharePrices, reports };
+  return {
+    users: users.rows,
+    tags: tags.rows,
+    userPage: users.page,
+    userTotal: Number(users.page.total) || 0,
+    tagPage: tags.page,
+  };
 }
 
 export async function getLiveOcppUsersData() {
   const context = await liveContextOrMiss();
   if (context === LIVE_OCPP_MISS) return LIVE_OCPP_MISS;
-  const [users, tags] = await Promise.all([
-    safeSection("charge-users", [], () => fetchAllRows("/charge-users", context, { status: "all" })),
-    safeSection("charge-user-tags", [], () => fetchAllRows("/charge-user-tags", context, { status: "all" }))
-  ]);
-  return { users, tags };
+  return await cachedSnapshot(OCPP_CACHE_SNAPSHOTS.users, context, () => loadUsers(context));
+}
+
+export async function getLiveOcppUsersPage(params = {}) {
+  const context = await liveContextOrMiss();
+  if (context === LIVE_OCPP_MISS) return LIVE_OCPP_MISS;
+  return await fetchPage("/charge-users", context, { limit: PAGE_LIMIT, ...params });
+}
+
+async function loadFinance(context) {
+  const summary = summaryContract(
+    await callOcppAdmin("/summary/finance", context, { ttlMs: 0 }),
+    "/summary/finance",
+  );
+  const data = {};
+  const financePages = {};
+  const financeTotals = {};
+  for (const key of Object.keys(FINANCE_PATHS)) {
+    const page = pageContract(summary[key], `/summary/finance ${key}`);
+    data[key] = page.rows;
+    financePages[key] = page.page;
+    financeTotals[key] = Number(page.page.total) || 0;
+  }
+  return { ...data, financePages, financeTotals };
 }
 
 export async function getLiveOcppFinanceData() {
   const context = await liveContextOrMiss();
   if (context === LIVE_OCPP_MISS) return LIVE_OCPP_MISS;
-  const paths = {
-    recharges: "/finance/recharges",
-    refunds: "/finance/refunds",
-    userMoneyLogs: "/finance/user-money-logs",
-    operatorMoneyLogs: "/finance/operator-money-logs",
-    platformMoneyLogs: "/finance/platform-money-logs",
-    withdrawals: "/finance/withdrawals"
-  };
-  const entries = await Promise.all(Object.entries(paths).map(async ([key, path]) =>
-    [key, await safeSection(path.slice(1), [], () => fetchAllRows(path, context))]));
-  return Object.fromEntries(entries);
+  return await cachedSnapshot(OCPP_CACHE_SNAPSHOTS.finance, context, () => loadFinance(context));
+}
+
+export async function getLiveOcppFinancePage(key, params = {}) {
+  const path = FINANCE_PATHS[key];
+  if (!path) throw new Error(`Unknown OCPP finance section: ${key}`);
+  const context = await liveContextOrMiss();
+  if (context === LIVE_OCPP_MISS) return LIVE_OCPP_MISS;
+  return await fetchPage(path, context, { limit: PAGE_LIMIT, ...params });
 }

@@ -2311,6 +2311,8 @@ export async function getOcppChargingData() {
     piles: cloneOcppValue(snapshot.piles, [], "piles"),
     operators: cloneOcppValue(snapshot.operators, [], "operators"),
     orders: cloneOcppValue(snapshot.orders, [], "orders"),
+    orderPage: { limit: snapshot.orders?.length ?? 0, offset: 0, hasMore: false, total: snapshot.orders?.length ?? 0 },
+    orderTotal: snapshot.orders?.length ?? 0,
     shareCharges: cloneOcppValue(snapshot["share/charges"], [], "share/charges"),
     shareIncome: cloneOcppValue(snapshot["share/income"], [], "share/income"),
     shareBookings: cloneOcppValue(snapshot["share/bookings"], [], "share/bookings"),
@@ -2326,7 +2328,10 @@ export async function getOcppUsersData() {
   const snapshot = await loadOcppSnapshot();
   return {
     users: cloneOcppValue(snapshot["charge-users"], [], "charge-users"),
-    tags: cloneOcppValue(snapshot["charge-user-tags"], [], "charge-user-tags")
+    tags: cloneOcppValue(snapshot["charge-user-tags"], [], "charge-user-tags"),
+    userPage: { limit: snapshot["charge-users"]?.length ?? 0, offset: 0, hasMore: false, total: snapshot["charge-users"]?.length ?? 0 },
+    userTotal: snapshot["charge-users"]?.length ?? 0,
+    tagPage: { limit: snapshot["charge-user-tags"]?.length ?? 0, offset: 0, hasMore: false }
   };
 }
 
@@ -2334,13 +2339,18 @@ export async function getOcppFinanceData() {
   const live = await getLiveOcppFinanceData();
   if (live !== LIVE_OCPP_MISS) return live;
   const snapshot = await loadOcppSnapshot();
-  return {
+  const data = {
     recharges: cloneOcppValue(snapshot["finance/recharges"], [], "finance/recharges"),
     refunds: cloneOcppValue(snapshot["finance/refunds"], [], "finance/refunds"),
     userMoneyLogs: cloneOcppValue(snapshot["finance/user-money-logs"], [], "finance/user-money-logs"),
     operatorMoneyLogs: cloneOcppValue(snapshot["finance/operator-money-logs"], [], "finance/operator-money-logs"),
     platformMoneyLogs: cloneOcppValue(snapshot["finance/platform-money-logs"], [], "finance/platform-money-logs"),
     withdrawals: cloneOcppValue(snapshot["finance/withdrawals"], [], "finance/withdrawals")
+  };
+  return {
+    ...data,
+    financePages: Object.fromEntries(Object.entries(data).map(([key, rows]) => [key, { limit: rows.length, offset: 0, hasMore: false, total: rows.length }])),
+    financeTotals: Object.fromEntries(Object.entries(data).map(([key, rows]) => [key, rows.length]))
   };
 }
 
