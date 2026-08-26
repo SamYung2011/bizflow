@@ -9,6 +9,7 @@ import { renderSegment as renderSharedSegment } from "../components/segment.js";
 import { consumeNavigationPreset, navigationPresetKeys } from "../components/navigation-presets.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
+import { thumbImageAttrs } from "../components/storage-image.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import {
   cleanupLiveInventoryImage,
@@ -371,7 +372,7 @@ function renderProductCard(product, helpers) {
   const lowStock = product.status !== "discontinued" && Number(product.stock) < 50;
   const statusLabel = pageT(lang, `inventory.status.${product.status}`);
   const image = product.imageUrl
-    ? `<img class="inventory-thumb" src="${escapeHtml(product.imageUrl)}" alt="" loading="lazy">`
+    ? `<img class="inventory-thumb" ${thumbImageAttrs(product.imageUrl, 120, escapeHtml)} alt="" loading="lazy">`
     : `<span class="inventory-thumb" aria-hidden="true"></span>`;
   const tag = product.localOnly ? "article" : "button";
   const attributes = product.localOnly ? ' data-local-product aria-disabled="true"' : ` type="button" data-inventory-product data-product-id="${escapeHtml(product.id)}"`;

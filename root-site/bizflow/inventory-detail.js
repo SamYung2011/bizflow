@@ -5,6 +5,7 @@ import { getInventoryDetailData, getCurrentUser } from "../data/provider.js";
 import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
+import { thumbImageAttrs } from "../components/storage-image.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import {
   cleanupLiveInventoryImage,
@@ -379,7 +380,7 @@ function renderProductImageEditor(helpers) {
   const disabled = liveReadOnly || state.busy || state.imageBusy;
   const disabledAttributes = disabled ? ' disabled aria-disabled="true"' : "";
   const preview = imageUrl
-    ? `<img class="inventory-detail-image" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(detail.product.name || pageT(lang, "inventory.image.title"))}">`
+    ? `<img class="inventory-detail-image" ${thumbImageAttrs(imageUrl, 640, escapeHtml)} alt="${escapeHtml(detail.product.name || pageT(lang, "inventory.image.title"))}">`
     : `<span class="inventory-detail-image inventory-image-upload__empty" aria-hidden="true">${icon("icon-nav-inventory", "icon")}</span>`;
   return `<div class="inventory-detail-image-editor" data-inventory-detail-image-upload>
     ${preview}
@@ -451,8 +452,11 @@ function renderSubitemRow(item, helpers) {
   const name = item.name ?? pageT(lang, item.nameKey);
   const exclusionLabel = pageT(lang, "inventory.warehouse.bizflowOnly");
   const exclusionHint = pageT(lang, "inventory.modal.shopifyExcludedHint");
+  const image = item.imageUrl
+    ? `<img class="inventory-subitem-image" ${thumbImageAttrs(item.imageUrl, 120, escapeHtml)} alt="" loading="lazy">`
+    : `<span class="inventory-subitem-image" aria-hidden="true"></span>`;
   return `<div class="inventory-subitem-row" role="button" tabindex="${liveReadOnly ? "-1" : "0"}" data-subitem-row data-inventory-write data-subitem-id="${escapeHtml(item.id)}" aria-disabled="${liveReadOnly}" title="${escapeHtml(name)}">
-    <span class="inventory-subitem-image" aria-hidden="true"></span>
+    ${image}
     <span class="inventory-subitem-main">
       <span class="inventory-subitem-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
       ${item.shopifyExcluded === true ? `<span class="inventory-warehouse-scope-badge" title="${escapeHtml(exclusionHint)}">${escapeHtml(exclusionLabel)}</span>` : ""}
