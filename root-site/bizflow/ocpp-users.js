@@ -1,8 +1,8 @@
 import {
   getCurrentUser,
   getOcppUsersData,
-  getUnread,
 } from "../data/provider.js";
+import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import { renderMoneyText } from "../components/money-text.js";
 import { formatUnix, paginate, textMatch } from "./ocpp-model.js";
 import {
@@ -218,8 +218,9 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
   const currentUser = await getCurrentUser();
   throwIfPageAborted(signal, scope);
   requireOcppRouteAccess(currentUser, { url, navigation });
-  const [nextData, unread] = await Promise.all([getOcppUsersData(), getUnread()]);
+  const nextData = await getOcppUsersData();
   throwIfPageAborted(signal, scope);
+  const { unread } = cachedPageUnread(currentUser);
   data = nextData;
   context = makeOcppContext();
   state = createState(historyState);
@@ -230,6 +231,7 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
   return {
     page: createOcppPage({ activeKey: "ocpp-users", currentUser, unread, render, title: "OCPP 用戶" }),
     activate() {
+      void loadPageUnread({ scope, currentUser });
       scope.listen(document, "click", onUsersClick);
       scope.listen(document, "input", onUsersInput);
       scope.listen(document, "change", onUsersChange);

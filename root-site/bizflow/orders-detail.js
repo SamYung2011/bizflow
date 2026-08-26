@@ -1,6 +1,7 @@
 // bizflow 訂單詳情桌面屏(Figma 676:92291)。列表與深層明細均由 provider 的 R8a 快照契約提供。
 
-import { getOrderCreateData, getOrderDetailData, getUnread, getCurrentUser } from "../data/provider.js";
+import { getOrderCreateData, getOrderDetailData, getCurrentUser } from "../data/provider.js";
+import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { renderNewCustomerFields } from "../components/new-customer-fields.js";
@@ -1281,15 +1282,14 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
   const mountId = ++activeMountId;
   activeScope = scope;
   const orderId = url.searchParams.get("id");
-  const [nextDetailData, nextCurrentUser, nextUnread] = await Promise.all([
+  const [nextDetailData, nextCurrentUser] = await Promise.all([
     getOrderDetailData(orderId),
-    getCurrentUser(),
-    getUnread()
+    getCurrentUser()
   ]);
   throwIfPageAborted(signal, scope);
   detailData = nextDetailData;
   currentUser = nextCurrentUser;
-  unread = nextUnread;
+  ({ unread } = cachedPageUnread(currentUser));
   liveMode = typeof currentUser?.hasPermission === "function";
   liveWritable = liveMode && currentUser?.bizflowMainAccess === true;
   liveReadOnly = liveMode && !liveWritable;
@@ -1314,6 +1314,7 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
       title: detailData?.detail?.orderNo ? `Honnmono · ${detailData.detail.orderNo}` : "Honnmono · Order"
     },
     activate() {
+      void loadPageUnread({ scope, currentUser, onUpdate: (next) => { unread = next.unread; } });
       scope.listen(document, "click", onOrderDetailClick);
       scope.listen(document, "change", onOrderDetailChange);
       scope.listen(document, "input", onOrderDetailInput);

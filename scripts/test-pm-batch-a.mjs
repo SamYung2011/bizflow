@@ -20,7 +20,7 @@ assert.doesNotMatch(shellCss, /max-width:\s*1494px/,
 assert.match(shellCss, /\.shell-app--mobile \.shell-page-inner\s*\{[\s\S]*?width:\s*min\(100%,\s*362px\)/,
   "the approved mobile content width must remain unchanged");
 
-assert.match(homeJs, /const bannerStats\s*=\s*data\.stats\.filter\(\(stat\)\s*=>\s*stat\.key\s*!==\s*"members"\)/,
+assert.match(homeJs, /const bannerStats\s*=\s*data\.stats\.filter\(\(stat\)\s*=>[\s\S]*?stat\.key\s*!==\s*"members"[\s\S]*?\);/,
   "the Home banner must omit the team-member statistic");
 assert.match(homeJs, /\$\{bannerStats\.map\(\(s\)\s*=>\s*statCard/,
   "the Home banner must render only the filtered five-card statistic set");

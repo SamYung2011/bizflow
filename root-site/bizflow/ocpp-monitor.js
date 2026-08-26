@@ -2,8 +2,8 @@ import {
   getCurrentUser,
   getOcppMonitorData,
   getOcppMonitorLogsData,
-  getUnread,
 } from "../data/provider.js";
+import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import { ocppCommandClient } from "../data/live-ocpp-commands.js";
 import {
   createDateRangeFilter,
@@ -515,12 +515,12 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
   const currentUser = await getCurrentUser();
   throwIfPageAborted(signal, scope);
   requireOcppRouteAccess(currentUser, { url, navigation });
-  const [initialData, unread, commandOverview] = await Promise.all([
+  const [initialData, commandOverview] = await Promise.all([
     getOcppMonitorData(),
-    getUnread(),
     loadCommandOverview(false),
   ]);
   throwIfPageAborted(signal, scope);
+  const { unread } = cachedPageUnread(currentUser);
   const instance = ++instanceSequence;
   activeInstance = instance;
   activeScope = scope;
@@ -548,6 +548,7 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
   return {
     page: createOcppPage({ activeKey: "ocpp-monitor", currentUser, unread, render, title: "OCPP 監控" }),
     activate() {
+      void loadPageUnread({ scope, currentUser });
       scope.listen(document, "click", onMonitorClick);
       scope.listen(document, "input", onMonitorInput);
       scope.listen(document, "change", onMonitorChange);

@@ -8,7 +8,8 @@
 //     (Frame784 浮层 + 弹窗按钮选项行)实装为真联动,写法参考 team/tasks.js 的 data-filter 委托模式(未 import)。
 //   - 日期区间与订单管理共用蓝色 date-range-panel,按 joinedAt 真筛选。
 
-import { getCustomersPageData, getCurrentUser, getUnread } from "../data/provider.js";
+import { getCustomersPageData, getCurrentUser } from "../data/provider.js";
+import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import { createDateRangeFilter, latestDateInput } from "../components/date-range-filter.js";
 import { managementPageSize, renderManagementList, renderManagementPager } from "../components/management-list.js";
 import { renderSegment } from "../components/segment.js";
@@ -868,11 +869,11 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
   const presetTab = consumeNavigationPreset(navigationPresetKeys.customersTab);
   const presetAdd = consumeNavigationPreset(navigationPresetKeys.customersAdd) === "1";
   const presetWarrantySearch = consumeNavigationPreset(navigationPresetKeys.warrantySearch) ?? "";
-  const [nextData, nextCurrentUser, nextUnread] = await Promise.all([getCustomersPageData(), getCurrentUser(), getUnread()]);
+  const [nextData, nextCurrentUser] = await Promise.all([getCustomersPageData(), getCurrentUser()]);
   throwIfPageAborted(signal, scope);
   data = nextData;
   currentUser = nextCurrentUser;
-  unread = nextUnread;
+  ({ unread } = cachedPageUnread(currentUser));
   liveMode = typeof currentUser?.hasPermission === "function";
   liveWritable = liveMode && currentUser?.bizflowMainAccess === true;
   liveReadOnly = liveMode && !liveWritable;
@@ -904,6 +905,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       title: "Honnmono · Customers"
     },
     activate() {
+      void loadPageUnread({ scope, currentUser, onUpdate: (next) => { unread = next.unread; } });
       customersSearchRender = createDebouncedTask(rerenderCustomerSearchResults);
       scope.onCleanup(() => customersSearchRender?.cancel());
       scope.listen(document, "click", onCustomersClick);

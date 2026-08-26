@@ -1,7 +1,8 @@
 // bizflow 客戶詳情桌面屏(Figma 676:96729 / 676:96829 / 676:96938)。
 // 视觉块复用 orders-detail 的订单/顾客卡片类与 customers 的弹窗/菜单类;本文件只做页面装配与交互。
 
-import { getCurrentUser, getCustomerDetailData, getCustomerMergeCandidates, getOrdersPageData, getUnread } from "../data/provider.js";
+import { getCurrentUser, getCustomerDetailData, getCustomerMergeCandidates, getOrdersPageData } from "../data/provider.js";
+import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { renderEmailSuggestion, safeSetSelectionRange, suggestEmail } from "../components/email-suggest.js";
 import { renderManagementPager } from "../components/management-list.js";
@@ -963,15 +964,14 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
   activeScope = scope;
   activeNavigation = navigation;
   const customerId = url.searchParams.get("id");
-  const [nextDetailData, nextCurrentUser, nextUnread] = await Promise.all([
+  const [nextDetailData, nextCurrentUser] = await Promise.all([
     getCustomerDetailData(customerId),
-    getCurrentUser(),
-    getUnread()
+    getCurrentUser()
   ]);
   throwIfPageAborted(signal, scope);
   detailData = nextDetailData;
   currentUser = nextCurrentUser;
-  unread = nextUnread;
+  ({ unread } = cachedPageUnread(currentUser));
   liveMode = typeof currentUser?.hasPermission === "function";
   liveWritable = liveMode && currentUser?.bizflowMainAccess === true;
   liveReadOnly = liveMode && !liveWritable;
@@ -989,6 +989,7 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
       title: detailData?.customer?.name ? `Honnmono · ${detailData.customer.name}` : "Honnmono · Customer"
     },
     activate() {
+      void loadPageUnread({ scope, currentUser, onUpdate: (next) => { unread = next.unread; } });
       scope.listen(document, "click", onCustomerDetailClick);
       scope.listen(document, "input", onCustomerDetailInput);
       scope.listen(document, "keydown", onCustomerDetailKeydown);

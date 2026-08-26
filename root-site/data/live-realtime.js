@@ -32,6 +32,7 @@ const BIZFLOW_TABLES = Object.freeze([
   ...WHATSAPP_REALTIME_TABLES
 ]);
 const INVALIDATION_DELAY_MS = 250;
+export const REALTIME_CATCH_UP_MIN_INTERVAL_MS = 60_000;
 
 export function visibleRealtimeTables(currentUser) {
   if (!currentUser?.userId) return [];
@@ -48,7 +49,10 @@ export function createLiveRealtimeManager({
   loadCurrentUser,
   invalidateTables,
   refreshTables,
+  markTablesStale = invalidateTables,
   invalidationDelay = INVALIDATION_DELAY_MS,
+  catchUpMinInterval = REALTIME_CATCH_UP_MIN_INTERVAL_MS,
+  now = Date.now,
   scheduleTimeout = setTimeout,
   cancelTimeout = clearTimeout,
   warn = console.warn
@@ -65,7 +69,21 @@ export function createLiveRealtimeManager({
   let flushChain = Promise.resolve();
   let generation = 0;
   let pendingGeneration = 0;
+  let lastCatchUpAt = Number.NEGATIVE_INFINITY;
   const pendingTables = new Set();
+
+  function queueCatchUp(tables, channelGeneration = generation) {
+    if (channelGeneration !== generation) return;
+    const requestedAt = now();
+    if (requestedAt - lastCatchUpAt < catchUpMinInterval) return;
+    lastCatchUpAt = requestedAt;
+    flushChain = flushChain
+      .then(async () => {
+        if (channelGeneration !== generation) return;
+        await markTablesStale(tables);
+      })
+      .catch((error) => warn("[live-realtime] catch-up failed", error));
+  }
 
   function queueInvalidation(tables, channelGeneration = generation) {
     if (channelGeneration !== generation) return;
@@ -107,24 +125,21 @@ export function createLiveRealtimeManager({
     stopping = false;
     subscribedOnce = false;
     disconnectedAfterSubscribe = false;
+    lastCatchUpAt = Number.NEGATIVE_INFINITY;
   }
 
   function handleStatus(status, channelGeneration, tables) {
     if (channelGeneration !== generation) return;
     if (status === "SUBSCRIBED") {
-      // The first SUBSCRIBED needs the same catch-up pass as a reconnect: writes made
-      // by other people while nobody had this channel open never arrived as
-      // postgres_changes, and live-table-cache serves IndexedDB rows as fresh for
-      // LIVE_TABLE_CACHE_TTL_MS (10 min) -- so without this pass a returning user can
-      // stare at up to 10-minute-old data, hard reload included. Costs one extra SWR
-      // round per page open, which is the accepted trade.
       const firstSubscribe = !subscribedOnce;
       const reconnected = subscribedOnce && disconnectedAfterSubscribe;
       subscribedOnce = true;
       disconnectedAfterSubscribe = false;
       // A repeated SUBSCRIBED with no disconnect in between is neither -- stay quiet
       // so a chatty transport cannot turn into a refresh loop.
-      if (firstSubscribe || reconnected) queueInvalidation(tables, channelGeneration);
+      // Catch-up only marks persisted rows stale. The next page read serves those rows
+      // immediately and revalidates on demand instead of eagerly refetching every table.
+      if (firstSubscribe || reconnected) queueCatchUp(tables, channelGeneration);
       return;
     }
     if (!stopping && subscribedOnce && ["CHANNEL_ERROR", "TIMED_OUT", "CLOSED"].includes(status)) {
@@ -191,7 +206,8 @@ const liveRealtimeManager = createLiveRealtimeManager({
   loadSession: getSession,
   loadCurrentUser: getCurrentUser,
   invalidateTables: (tables) => invalidateLiveTableData(tables),
-  refreshTables: (tables) => refreshLiveTables(tables)
+  refreshTables: (tables) => refreshLiveTables(tables),
+  markTablesStale: (tables) => invalidateLiveTableData(tables)
 });
 
 export function ensureLiveRealtime() {

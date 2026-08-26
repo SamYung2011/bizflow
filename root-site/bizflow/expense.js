@@ -1,4 +1,5 @@
-import { getCurrentUser, getExpenseData, getUnread } from "../data/provider.js";
+import { getCurrentUser, getExpenseData } from "../data/provider.js";
+import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { renderSegment } from "../components/segment.js";
 import {
@@ -1001,11 +1002,11 @@ function hasExpenseUnsavedChanges() {
 export async function mountPage({ scope, signal, historyState = null } = {}) {
   const mountId = ++activeMountId;
   activeScope = scope;
-  const [nextSnapshot, nextCurrentUser, nextUnread] = await Promise.all([getExpenseData(), getCurrentUser(), getUnread()]);
+  const [nextSnapshot, nextCurrentUser] = await Promise.all([getExpenseData(), getCurrentUser()]);
   throwIfPageAborted(signal, scope);
   snapshot = nextSnapshot;
   currentUser = nextCurrentUser;
-  unread = nextUnread;
+  ({ unread } = cachedPageUnread(currentUser));
   authenticated = typeof currentUser?.hasPermission === "function";
   isAdmin = !authenticated || currentUser?.isBfAdmin === true;
   liveReadOnly = false;
@@ -1030,6 +1031,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       title: "Honnmono · Finance"
     },
     activate() {
+      void loadPageUnread({ scope, currentUser, onUpdate: (next) => { unread = next.unread; } });
       scope.listen(document, "click", onExpenseClick);
       scope.listen(document, "input", onExpenseInput);
       scope.listen(document, "change", onExpenseChange);

@@ -1,8 +1,8 @@
 import {
   getCurrentUser,
   getOcppFinanceData,
-  getUnread,
 } from "../data/provider.js";
+import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import { moneyTone, renderMoneyText } from "../components/money-text.js";
 import { flowTypeLabel, formatUnix, paginate, textMatch } from "./ocpp-model.js";
 import {
@@ -362,8 +362,9 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
   const currentUser = await getCurrentUser();
   throwIfPageAborted(signal, scope);
   requireOcppRouteAccess(currentUser, { url, navigation });
-  const [nextData, unread] = await Promise.all([getOcppFinanceData(), getUnread()]);
+  const nextData = await getOcppFinanceData();
   throwIfPageAborted(signal, scope);
+  const { unread } = cachedPageUnread(currentUser);
   data = nextData;
   context = makeOcppContext();
   state = createState(historyState);
@@ -378,6 +379,7 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
   return {
     page: createOcppPage({ activeKey: "ocpp-finance", currentUser, unread, render, title: "OCPP 財務" }),
     activate() {
+      void loadPageUnread({ scope, currentUser });
       scope.listen(document, "click", onFinanceClick);
       scope.listen(document, "input", onFinanceInput);
       scope.listen(document, "change", onFinanceChange);

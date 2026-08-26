@@ -115,6 +115,8 @@ const clock = scheduler();
 const client = fakeClient();
 const invalidations = [];
 const refreshes = [];
+const catchUps = [];
+let currentTime = 0;
 let currentUser = { ...teamUser, userId: "main-user", bizflowMainAccess: true };
 const manager = createLiveRealtimeManager({
   loadClient: async () => client,
@@ -122,7 +124,10 @@ const manager = createLiveRealtimeManager({
   loadCurrentUser: async () => currentUser,
   invalidateTables: async (tables) => invalidations.push([...tables]),
   refreshTables: async (tables) => refreshes.push([...tables]),
+  markTablesStale: async (tables) => catchUps.push([...tables]),
   invalidationDelay: 1,
+  catchUpMinInterval: 60_000,
+  now: () => currentTime,
   scheduleTimeout: (callback) => clock.schedule(callback),
   cancelTimeout: (id) => clock.cancel(id),
   warn: (message, error) => assert.fail(`${message}: ${error}`)
@@ -131,41 +136,44 @@ const manager = createLiveRealtimeManager({
 assert.equal(await manager.ensure(), true);
 assert.equal(client.channels.length, 1);
 assert.deepEqual(client.channels[0].handlers.map(({ filter }) => filter.table), visibleRealtimeTables(currentUser));
-// todo #270: nobody was holding this channel open while other people wrote, and
-// live-table-cache hands back IndexedDB rows as fresh for 10 minutes -- so the first
-// SUBSCRIBED must run the same catch-up pass a reconnect does, or a returning user
-// stares at stale rows for up to a TTL even after a hard reload.
 const mainUserTables = visibleRealtimeTables(currentUser);
 client.channels[0].status("SUBSCRIBED");
 clock.run();
 await settle();
-assert.deepEqual(invalidations, [mainUserTables], "first subscription must catch up on writes missed while away");
-assert.deepEqual(refreshes, [mainUserTables]);
+assert.deepEqual(catchUps, [mainUserTables], "first subscription must mark missed tables stale");
+assert.deepEqual(invalidations, [], "first subscription must not enqueue eager table invalidation");
+assert.deepEqual(refreshes, [], "first subscription must not refetch every previously queried table");
 
 // A second SUBSCRIBED with no disconnect in between is not a reconnect: staying quiet
 // keeps a chatty transport from turning the catch-up into a refresh loop.
 client.channels[0].status("SUBSCRIBED");
 clock.run();
 await settle();
-assert.equal(invalidations.length, 1, "repeated SUBSCRIBED without a disconnect must not re-trigger the catch-up");
-assert.equal(refreshes.length, 1);
+assert.equal(catchUps.length, 1, "repeated SUBSCRIBED without a disconnect must not re-trigger the catch-up");
+assert.equal(refreshes.length, 0);
 
 client.channels[0].emit("employee_tasks");
 client.channels[0].emit("employee_tasks");
 client.channels[0].emit("invoices");
 clock.run();
 await settle();
-assert.deepEqual(invalidations[1], ["employee_tasks", "invoices"], "burst events must merge by table");
-assert.deepEqual(refreshes[1], ["employee_tasks", "invoices"]);
-assert.equal(invalidations.length, 2, "the burst must stay one flush, not double with the catch-up");
+assert.deepEqual(invalidations[0], ["employee_tasks", "invoices"], "burst events must merge by table");
+assert.deepEqual(refreshes[0], ["employee_tasks", "invoices"]);
+assert.equal(invalidations.length, 1, "the burst must stay one flush");
 
 client.channels[0].status("CHANNEL_ERROR");
 client.channels[0].status("SUBSCRIBED");
 clock.run();
 await settle();
-assert.deepEqual(invalidations[2], mainUserTables, "reconnect must evict every subscribed table once");
-assert.deepEqual(refreshes[2], mainUserTables);
-assert.equal(invalidations.length, 3, "reconnect must flush exactly once");
+assert.equal(catchUps.length, 1, "a reconnect inside 60 seconds must be throttled");
+assert.equal(refreshes.length, 1, "a throttled reconnect must not start a refresh storm");
+
+currentTime += 60_000;
+client.channels[0].status("CHANNEL_ERROR");
+client.channels[0].status("SUBSCRIBED");
+await settle();
+assert.deepEqual(catchUps[1], mainUserTables, "a reconnect after the throttle window must mark tables stale once");
+assert.equal(refreshes.length, 1, "catch-up after the throttle window must remain stale-only");
 
 currentUser = { ...teamUser, userId: "next-user" };
 assert.equal(await manager.ensure(), true);
@@ -174,17 +182,17 @@ assert.deepEqual(client.channels[1].handlers.map(({ filter }) => filter.table), 
 client.channels[0].emit("invoices");
 clock.run();
 await settle();
-assert.equal(invalidations.length, 3, "late callbacks from an old user channel must be ignored");
+assert.equal(invalidations.length, 1, "late callbacks from an old user channel must be ignored");
 
 // A re-established channel is a fresh first subscribe, and it must catch up on the new
 // user's own scope only.
 client.channels[1].status("SUBSCRIBED");
 clock.run();
 await settle();
-assert.deepEqual(invalidations[3], visibleRealtimeTables(currentUser), "a re-established channel must catch up on its own scope");
-assert.deepEqual(refreshes[3], visibleRealtimeTables(currentUser));
-assert.equal(invalidations.length, 4, "the re-established catch-up must flush exactly once");
+assert.deepEqual(catchUps[2], visibleRealtimeTables(currentUser), "a re-established channel must mark its own scope stale");
+assert.equal(refreshes.length, 1, "the re-established catch-up must not eagerly refresh tables");
+assert.equal(catchUps.length, 3, "the re-established catch-up must run exactly once");
 
 await manager.dispose();
 assert.equal(client.removed.length, 2);
-console.log("Live Realtime contracts: PASS (scope, throttle, first-subscribe catch-up, reconnect, user isolation)");
+console.log("Live Realtime contracts: PASS (scope, event batching, stale-only catch-up, 60s reconnect throttle, user isolation)");

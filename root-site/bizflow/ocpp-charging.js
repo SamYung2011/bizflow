@@ -1,8 +1,8 @@
 import {
   getCurrentUser,
   getOcppChargingData,
-  getUnread,
 } from "../data/provider.js";
+import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import {
   createDateRangeFilter,
   latestDateInput,
@@ -410,8 +410,9 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
   const currentUser = await getCurrentUser();
   throwIfPageAborted(signal, scope);
   requireOcppRouteAccess(currentUser, { url, navigation });
-  const [nextData, unread] = await Promise.all([getOcppChargingData(), getUnread()]);
+  const nextData = await getOcppChargingData();
   throwIfPageAborted(signal, scope);
+  const { unread } = cachedPageUnread(currentUser);
   data = nextData;
   context = makeOcppContext();
   state = createState(historyState);
@@ -436,6 +437,7 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
   return {
     page: createOcppPage({ activeKey: "ocpp-charging", currentUser, unread, render, title: "OCPP 充電站" }),
     activate() {
+      void loadPageUnread({ scope, currentUser });
       scope.listen(document, "click", onChargingClick);
       scope.listen(document, "input", onChargingInput);
       scope.listen(document, "change", onChargingChange);

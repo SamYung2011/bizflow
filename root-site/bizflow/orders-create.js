@@ -1,6 +1,7 @@
 // bizflow 建立訂單桌面屏(Figma 676:93247 / 676:93440 / 676:93614)。未登录演示态保持本地草稿；登录态接生产写入。
 
-import { getOrderCreateData, getUnread, getCurrentUser } from "../data/provider.js";
+import { getOrderCreateData, getCurrentUser } from "../data/provider.js";
+import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { renderNewCustomerFields } from "../components/new-customer-fields.js";
@@ -1089,11 +1090,11 @@ export async function mountPage({ scope, signal, navigation = null } = {}) {
   submissionComplete = false;
   state = initialState();
   draftCreatedAt = new Date();
-  const [nextData, nextCurrentUser, nextUnread] = await Promise.all([getOrderCreateData(), getCurrentUser(), getUnread()]);
+  const [nextData, nextCurrentUser] = await Promise.all([getOrderCreateData(), getCurrentUser()]);
   throwIfPageAborted(signal, scope);
   data = nextData;
   currentUser = nextCurrentUser;
-  unread = nextUnread;
+  ({ unread } = cachedPageUnread(currentUser));
   liveMode = typeof currentUser?.hasPermission === "function";
   liveWritable = liveMode && currentUser?.bizflowMainAccess === true;
   liveReadOnly = liveMode && !liveWritable;
@@ -1112,6 +1113,7 @@ export async function mountPage({ scope, signal, navigation = null } = {}) {
       title: "Honnmono · Create order"
     },
     activate() {
+      void loadPageUnread({ scope, currentUser, onUpdate: (next) => { unread = next.unread; } });
       scope.listen(document, "click", onOrderCreateClick);
       scope.listen(document, "change", onOrderCreateChange);
       scope.listen(document, "input", onOrderCreateInput);

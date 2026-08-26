@@ -1,6 +1,7 @@
 // team 站团队成员桌面屏(Figma 443:5035)。成员与统计只读 provider 契约,不直写样板数据。
 
-import { getTeamMembersData, getCurrentUser, getUnread, getUnreadWatermarks } from "../data/provider.js";
+import { getTeamMembersData, getCurrentUser } from "../data/provider.js";
+import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import { getSession } from "../data/auth.js";
 import { markRead } from "../data/read-state.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
@@ -93,6 +94,14 @@ async function runMemberWrite(operation) {
 function markUpdatesTabRead() {
   markRead("updates", unreadWatermarks?.updates ?? "");
   unread = { ...unread, updates: 0 };
+}
+
+function syncUpdatesTabUnread() {
+  const tab = document.querySelector('[data-members-tab="updates"]');
+  if (!tab || !currentHelpers) return;
+  const dot = tab.querySelector(":scope > .tp-dot");
+  if ((unread?.updates ?? 0) > 0 && !dot) tab.insertAdjacentHTML("beforeend", currentHelpers.redDot());
+  if ((unread?.updates ?? 0) <= 0) dot?.remove();
 }
 
 function createMemberState(initialTab) {
@@ -879,14 +888,11 @@ function buildMemberAccess() {
 export async function mountPage({ scope, signal, historyState = null } = {}) {
   const mountId = ++activeMountId;
   activeScope = scope;
-  const [nextCurrentUser, nextSession, nextUnread, nextUnreadWatermarks] = await Promise.all([
-    getCurrentUser(), getSession(), getUnread(), getUnreadWatermarks()
-  ]);
+  const [nextCurrentUser, nextSession] = await Promise.all([getCurrentUser(), getSession()]);
   throwIfPageAborted(signal, scope);
   currentUser = nextCurrentUser;
   session = nextSession;
-  unread = nextUnread;
-  unreadWatermarks = nextUnreadWatermarks;
+  ({ unread, watermarks: unreadWatermarks } = cachedPageUnread(currentUser));
   authenticated = typeof currentUser?.hasPermission === "function";
   buildMemberAccess();
   const restoredTab = visibleTabKeys.has(historyState?.activeTab) ? historyState.activeTab : null;
@@ -926,6 +932,16 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       // 跑到——落地即"看过",要在 activate 里也补一次,与 tasks.js activate() 里无条件
       // markRead("tasks", ...) 同一节奏,只是这里要看 activeTab 是不是 updates 才落。
       if (state.activeTab === "updates") markUpdatesTabRead();
+      void loadPageUnread({
+        scope,
+        currentUser,
+        onUpdate(next) {
+          unread = next.unread;
+          unreadWatermarks = next.watermarks;
+          if (state.activeTab === "updates") markUpdatesTabRead();
+          syncUpdatesTabUnread();
+        }
+      });
       scope.listen(document, "click", onMembersClick);
       scope.listen(document, "submit", onMembersSubmit);
       scope.listen(document, "input", onMembersInput);

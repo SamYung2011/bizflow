@@ -28,7 +28,7 @@ assert.equal(before.counts.all, before.orders.length);
 assert.equal(after.counts.all, after.orders.length);
 assert.equal(after.counts.all, before.counts.all + 1,
   "one inserted order must increment the all-status pill and visible all-list in the same derivation");
-assert.match(ordersSource, /const counts = data\?\.shippingCounts[\s\S]*const rows = currentPageOrders\(\)[\s\S]*renderShippingFilters\(helpers, counts\)/,
+assert.match(ordersSource, /const counts = data\?\.shippingCounts[\s\S]*const rows = [^;]*currentPageOrders\(\)[\s\S]*renderShippingFilters\(helpers, counts\)/,
   "the server response must feed status pills and the current page atomically");
 assert.doesNotMatch(ordersSource, /function shippingListView|function ordersBeforeShipping/,
   "orders.js must not filter a downloaded whole table after server pagination");

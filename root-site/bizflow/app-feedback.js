@@ -2,7 +2,8 @@ import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { createDateRangePanel } from "../components/date-range-panel.js";
 import { displayDateInput } from "../components/date-value.js";
 import { getSession } from "../data/auth.js";
-import { getCurrentUser, getUnread } from "../data/provider.js";
+import { getCurrentUser } from "../data/provider.js";
+import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import {
   HonnmonoAdminError,
@@ -1786,11 +1787,9 @@ export async function mountPage({
           (error) => ({ payload: null, error }),
         )
       : Promise.resolve({ payload: null, error: null });
-  const [initialResult, unread] = await Promise.all([
-    initialList,
-    getUnread(),
-  ]);
+  const initialResult = await initialList;
   throwIfPageAborted(signal, scope);
+  const { unread } = cachedPageUnread(currentUser);
   if (initialResult.payload) {
     applyFeedbackListPayload(nextState, initialResult.payload);
     nextState.hasLoadedList = true;
@@ -1827,6 +1826,7 @@ export async function mountPage({
   return {
     page: createFeedbackPage({ currentUser, unread }),
     activate() {
+      void loadPageUnread({ scope, currentUser });
       scope.listen(document, "click", onFeedbackClick);
       scope.listen(document, "input", onFeedbackInput);
       scope.listen(document, "change", onFeedbackChange);

@@ -121,7 +121,8 @@ const dict = {
   }
 };
 
-import { getHomeDashboardData, getUnread, getUnreadWatermarks } from "../data/provider.js";
+import { getHomeDashboardData } from "../data/provider.js";
+import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import { markRead } from "../data/read-state.js";
 import { renderBarChart } from "../components/bar-chart.js";
 import { navigationPresetKeys, setNavigationPreset } from "../components/navigation-presets.js";
@@ -161,17 +162,16 @@ const HOME_LIVE_TABLES = [
 const STAT_TONE_CLASS = { "": "", blue: "board-card--blue", green: "board-card--green", yellow: "board-card--yellow" };
 
 async function loadHomeViewState({ refresh = false } = {}) {
-  const [dashboard, unread, unreadWatermarks] = await Promise.all([
-    getHomeDashboardData({ refresh }),
-    getUnread(),
-    getUnreadWatermarks()
-  ]);
+  const dashboard = await getHomeDashboardData({ refresh });
+  const cached = data
+    ? { unread: data.unread ?? {}, watermarks: homeUnreadWatermarks ?? {} }
+    : cachedPageUnread(dashboard.currentUser);
   const homeData = dashboard.data;
   return {
     ...dashboard,
-    data: { ...homeData, unread: { ...(homeData.unread ?? {}), ...unread } },
-    unread,
-    unreadWatermarks
+    data: { ...homeData, unread: { ...(homeData.unread ?? {}), ...cached.unread } },
+    unread: cached.unread,
+    unreadWatermarks: cached.watermarks
   };
 }
 
@@ -202,6 +202,16 @@ function isHomeRefreshBlocked() {
 
 function flushHomeLiveRefresh() {
   if (!isHomeRefreshBlocked()) void homeLiveRefresh?.flush();
+}
+
+function syncHomeUnreadBadge() {
+  const head = document.querySelector("[data-home-team-activity] .home-card__head");
+  if (!head) return;
+  const count = Number(data?.unread?.messages) || 0;
+  const badge = head.querySelector(".home-badge");
+  if (count > 0 && badge) badge.textContent = String(count);
+  if (count > 0 && !badge) head.insertAdjacentHTML("beforeend", `<span class="home-badge">${count}</span>`);
+  if (count <= 0) badge?.remove();
 }
 
 export function renderHome({ icon, escapeHtml, lang }) {
@@ -548,6 +558,16 @@ export async function mountPage({ scope, signal, historyState = null }) {
       };
       rebindHomeTeamActivity = () => bindTeamActivity();
       bindTeamActivity({ honorHash: true });
+      void loadPageUnread({
+        scope,
+        currentUser: homeCurrentUser,
+        onUpdate(nextUnread) {
+          data.unread = { ...(data.unread ?? {}), ...nextUnread.unread };
+          homeUnreadWatermarks = nextUnread.watermarks;
+          syncHomeUnreadBadge();
+          rebindHomeTeamActivity?.();
+        }
+      });
       scope.listen(document, "visibilitychange", syncMessageRead);
       homeLiveRefresh = attachLiveSnapshotRefresh({
         scope,

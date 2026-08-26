@@ -1,7 +1,8 @@
 // bizflow 商品庫存详情桌面屏(Figma 676:99575 / 676:99691)。
 // 详情页读取 URL id,演示表单和子类弹窗走 provider 样稿轮;保存/确认修改回列表。
 
-import { getInventoryDetailData, getUnread, getCurrentUser } from "../data/provider.js";
+import { getInventoryDetailData, getCurrentUser } from "../data/provider.js";
+import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
@@ -1068,13 +1069,13 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
   activeNavigation = navigation;
   detailCommitted = false;
   const productId = url.searchParams.get("id");
-  const [nextDetail, nextCurrentUser, nextUnread] = await Promise.all([
-    getInventoryDetailData(productId), getCurrentUser(), getUnread()
+  const [nextDetail, nextCurrentUser] = await Promise.all([
+    getInventoryDetailData(productId), getCurrentUser()
   ]);
   throwIfPageAborted(signal, scope);
   detail = nextDetail;
   currentUser = nextCurrentUser;
-  unread = nextUnread;
+  ({ unread } = cachedPageUnread(currentUser));
   authenticated = typeof currentUser?.hasPermission === "function";
   shopifyHealth = currentUser?.isBfAdmin === true
     ? await getShopifyCredentialHealth({ refresh: true })
@@ -1115,6 +1116,7 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
       title: `Honnmono · ${detail.product.name}`
     },
     activate() {
+      void loadPageUnread({ scope, currentUser, onUpdate: (next) => { unread = next.unread; } });
       scope.listen(document, "click", onInventoryDetailClick);
       scope.listen(document, "input", onInventoryDetailInput);
       scope.listen(document, "change", onInventoryDetailInput);
