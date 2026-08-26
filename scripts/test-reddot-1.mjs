@@ -159,10 +159,11 @@ try {
 // (matching this repo's established pattern, e.g. test-nr-task-1.mjs G-task-14) these are
 // locked down as source contracts instead.
 
-const [providerSource, membersSource, readStateSource] = await Promise.all([
+const [providerSource, membersSource, readStateSource, pageUnreadSource] = await Promise.all([
   readFile(new URL("../root-site/data/provider.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/team/members.js", import.meta.url), "utf8"),
-  readFile(new URL("../root-site/data/read-state.js", import.meta.url), "utf8")
+  readFile(new URL("../root-site/data/read-state.js", import.meta.url), "utf8"),
+  readFile(new URL("../root-site/data/page-unread.js", import.meta.url), "utf8")
 ]);
 
 assert.match(readStateSource, /new Set\(\["tasks", "orders", "messages", "inventory", "updates"\]\)/,
@@ -193,8 +194,12 @@ assert.match(renderTabBlock, /unread\?\.updates \?\? 0\) > 0/,
   "the updates tab badge must be driven by the real unread.updates signal (computeUnreadState), not the hardcoded provider.js tab.update:false");
 assert.match(membersSource, /import \{ markRead \} from "\.\.\/data\/read-state\.js";/,
   "members.js must import markRead to close the loop (light up -> visit -> mark read)");
-assert.match(membersSource, /getTeamMembersData, getCurrentUser, getUnread, getUnreadWatermarks/,
-  "members.js must fetch the real watermark alongside the unread counts, mirroring tasks.js's own markRead(\"tasks\", unreadWatermarks.tasks) pattern");
+assert.match(membersSource, /import \{ cachedPageUnread, loadPageUnread \} from "\.\.\/data\/page-unread\.js"/,
+  "members.js must render cached unread state and refresh it after first paint");
+assert.match(pageUnreadSource, /import \{ getUnread, getUnreadWatermarks \} from "\.\/provider\.js"/,
+  "the shared page-unread refresh must fetch the real watermark alongside unread counts");
+assert.match(membersSource, /unreadWatermarks = next\.watermarks/,
+  "members.js must apply the asynchronously refreshed watermark before marking updates read");
 assert.match(membersSource, /function markUpdatesTabRead\(\)/);
 assert.match(membersSource, /if \(nextTab === "updates"\) markUpdatesTabRead\(\);/,
   "switching into the updates tab by clicking it must mark it read");

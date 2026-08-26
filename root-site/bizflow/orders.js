@@ -2,8 +2,9 @@
 // 各子页按需载入自己的快照，避免列表页和 Home 承担无关数据请求。
 
 import {
-  getOrderDetailData, getOrdersPageData, getUnread, getUnreadWatermarks, getCurrentUser
+  getOrderDetailData, getOrdersPageData, getCurrentUser
 } from "../data/provider.js";
+import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import { markRead } from "../data/read-state.js";
 import { createDateRangeFilter } from "../components/date-range-filter.js";
 import { renderManagementList, renderManagementPager } from "../components/management-list.js";
@@ -55,6 +56,7 @@ const dict = {
     "orders.unavailable": "暫時取不到數據，請稍後再試",
     "orders.search": "搜索單號、客戶或產品",
     "orders.loading": "正在載入訂單…",
+    "orders.updating": "更新中",
     "orders.sort": "排序",
     "orders.sort.newest": "最新在前",
     "orders.sort.oldest": "最早在前",
@@ -90,6 +92,7 @@ const dict = {
     "orders.unavailable": "Order data is temporarily unavailable. Please try again later.",
     "orders.search": "Search order, customer or product",
     "orders.loading": "Loading orders…",
+    "orders.updating": "Updating",
     "orders.sort": "Sort",
     "orders.sort.newest": "Newest first",
     "orders.sort.oldest": "Oldest first",
@@ -125,6 +128,7 @@ const dict = {
     "orders.unavailable": "Les données des commandes sont temporairement indisponibles. Réessayez plus tard.",
     "orders.search": "Rechercher commande, client ou produit",
     "orders.loading": "Chargement des commandes…",
+    "orders.updating": "Mise à jour",
     "orders.sort": "Trier",
     "orders.sort.newest": "Plus récentes",
     "orders.sort.oldest": "Plus anciennes",
@@ -175,6 +179,7 @@ let ordersLiveRefresh = null;
 let northboundLiveRefresh = null;
 let ordersSearchRender = null;
 let ordersLoading = false;
+let ordersKeepRowsWhileLoading = false;
 let orderRequestSequence = 0;
 
 function isCurrentOrdersScope(scope = activeScope) {
@@ -232,6 +237,10 @@ function totalPages() {
 
 function currentPageOrders() {
   return Array.isArray(data?.orders) ? data.orders : [];
+}
+
+function currentDataMatchesOrderQuery() {
+  return Boolean(data?.query) && liveQueryKey(data.query) === liveQueryKey(currentOrderQuery());
 }
 
 export function renderOrderCard(order, helpers) {
@@ -347,7 +356,8 @@ function renderOrderResults(helpers) {
   const shouldPaginate = pages > 1;
   if (state.page > pages) state.page = pages;
   if (state.page < 1) state.page = 1;
-  const rows = currentPageOrders();
+  const rows = ordersLoading && !ordersKeepRowsWhileLoading ? [] : currentPageOrders();
+  const updating = ordersLoading && ordersKeepRowsWhileLoading && rows.length > 0;
   const emptyKey = data?.unavailable ? "orders.unavailable" : "orders.empty";
   const listHtml = rows.length
     ? rows.map((order) => renderOrderCard(order, helpers)).join("")
@@ -363,8 +373,11 @@ function renderOrderResults(helpers) {
   });
   return `<div data-orders-search-results aria-busy="${ordersLoading}">
     ${renderShippingFilters(helpers, counts)}
-    ${ordersLoading ? `<p class="tp-muted orders-loading" role="status">${e(tt("orders.loading"))}</p>` : ""}
-    ${renderManagementList({ content: listHtml, pager: pagerHtml, paged: shouldPaginate })}
+    ${ordersLoading && !updating ? `<p class="tp-muted orders-loading" role="status">${e(tt("orders.loading"))}</p>` : ""}
+    <div class="orders-table-region">
+      ${updating ? `<span class="orders-updating" role="status">${e(tt("orders.updating"))}</span>` : ""}
+      ${renderManagementList({ content: listHtml, pager: pagerHtml, paged: shouldPaginate })}
+    </div>
   </div>`;
 }
 
@@ -457,6 +470,7 @@ function createOrdersDateFilter(initialDate = "") {
 
 async function loadCurrentOrderPage({ refresh = false } = {}) {
   const sequence = ++orderRequestSequence;
+  ordersKeepRowsWhileLoading = currentDataMatchesOrderQuery() && currentPageOrders().length > 0;
   ordersLoading = true;
   rerenderOrderSearchResults();
   try {
@@ -471,6 +485,7 @@ async function loadCurrentOrderPage({ refresh = false } = {}) {
   } finally {
     if (sequence === orderRequestSequence && isCurrentOrdersScope()) {
       ordersLoading = false;
+      ordersKeepRowsWhileLoading = false;
       rerenderOrderSearchResults();
     }
   }
@@ -672,13 +687,10 @@ export async function mountPage({ scope, signal, historyState = null, navigation
     shipping: consumeNavigationPreset(navigationPresetKeys.ordersShipping),
     search: consumeNavigationPreset(navigationPresetKeys.ordersSearch) ?? ""
   };
-  const [nextUnreadWatermarks, nextCurrentUser, nextUnread] = await Promise.all([
-    getUnreadWatermarks(), getCurrentUser(), getUnread()
-  ]);
+  const nextCurrentUser = await getCurrentUser();
   throwIfPageAborted(signal, scope);
-  unreadWatermarks = nextUnreadWatermarks;
   currentUser = nextCurrentUser;
-  unread = nextUnread;
+  ({ unread, watermarks: unreadWatermarks } = cachedPageUnread(currentUser));
   canViewRevenue = currentUser?.canViewRevenue !== false;
   liveMode = typeof currentUser?.hasPermission === "function";
   liveReadOnly = liveMode && currentUser?.bizflowMainAccess !== true;
@@ -705,7 +717,16 @@ export async function mountPage({ scope, signal, historyState = null, navigation
       title: "Honnmono · Orders"
     },
     activate() {
-      if (state.tab === "list") markRead("orders", unreadWatermarks.orders);
+      if (state.tab === "list") markRead("orders", unreadWatermarks?.orders);
+      void loadPageUnread({
+        scope,
+        currentUser,
+        onUpdate(next) {
+          unread = next.unread;
+          unreadWatermarks = next.watermarks;
+          if (state.tab === "list") markRead("orders", unreadWatermarks.orders);
+        }
+      });
       ordersSearchRender = createDebouncedTask(() => void loadCurrentOrderPage());
       scope.onCleanup(() => ordersSearchRender?.cancel());
       scope.listen(document, "click", onOrdersClick);
@@ -770,6 +791,7 @@ export async function mountPage({ scope, signal, historyState = null, navigation
       ordersSearchRender?.cancel();
       ordersSearchRender = null;
       ordersLoading = false;
+      ordersKeepRowsWhileLoading = false;
       data = null;
       unreadWatermarks = null;
       unread = null;

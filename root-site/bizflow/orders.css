@@ -86,7 +86,7 @@
 .orders-toolbar {
   display: flex;
   min-width: 0;
-  align-items: center;
+  align-items: flex-end;
   gap: var(--space-20);
 }
 
@@ -121,6 +121,25 @@
 
 [data-orders-search-results] {
   display: contents;
+}
+
+.orders-table-region {
+  position: relative;
+  min-width: 0;
+}
+
+.orders-updating {
+  position: absolute;
+  top: var(--space-10);
+  right: var(--space-10);
+  z-index: 1;
+  padding: var(--space-4) var(--space-10);
+  border-radius: var(--radius-10);
+  background: var(--white);
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+  line-height: var(--lh-tight);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .08);
 }
 
 .orders-shipping-filters {

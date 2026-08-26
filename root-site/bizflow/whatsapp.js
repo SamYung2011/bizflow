@@ -1,4 +1,5 @@
-import { getCurrentUser, getUnread, getWhatsappData } from "../data/provider.js";
+import { getCurrentUser, getWhatsappData } from "../data/provider.js";
+import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { createDateRangeFilter, latestDateInput } from "../components/date-range-filter.js";
 import { renderSegment } from "../components/segment.js";
@@ -509,11 +510,11 @@ function flushWhatsappRefreshAfterFocus() {
 }
 
 export async function mountPage({ scope, signal, historyState = null } = {}) {
-  const [nextSnapshot, nextCurrentUser, nextUnread] = await Promise.all([getWhatsappData(), getCurrentUser(), getUnread()]);
+  const [nextSnapshot, nextCurrentUser] = await Promise.all([getWhatsappData(), getCurrentUser()]);
   throwIfPageAborted(signal, scope);
   snapshot = nextSnapshot;
   currentUser = nextCurrentUser;
-  unread = nextUnread;
+  ({ unread } = cachedPageUnread(currentUser));
   liveMode = nextSnapshot?.__live === true || typeof currentUser?.hasPermission === "function";
   settingsReadOnly = liveMode && currentUser?.isWaAdmin !== true;
   initializeWhatsappState(historyState);
@@ -526,6 +527,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       title: "Honnmono · WhatsApp"
     },
     activate() {
+      void loadPageUnread({ scope, currentUser, onUpdate: (next) => { unread = next.unread; } });
       scope.listen(document, "click", onWhatsappClick);
       scope.listen(document, "input", onWhatsappInput);
       scope.listen(document, "change", onWhatsappChange);

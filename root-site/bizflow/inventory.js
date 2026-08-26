@@ -1,7 +1,8 @@
 // bizflow 站商品庫存桌面屏(Figma 676:99455 / 676:99512)。
 // 列表数据走 provider;R9 真图有 URL 才显示,空 URL 保留灰底占位。
 
-import { getInventoryPageData, getUnread, getUnreadWatermarks, getCurrentUser } from "../data/provider.js";
+import { getInventoryPageData, getCurrentUser } from "../data/provider.js";
+import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import { markRead } from "../data/read-state.js";
 import { managementPageSize, renderManagementList, renderManagementPager } from "../components/management-list.js";
 import { renderSegment as renderSharedSegment } from "../components/segment.js";
@@ -903,14 +904,11 @@ export async function mountPage({ scope, signal, historyState = null, navigation
   activeScope = scope;
   activeNavigation = navigation;
   const presetSearch = consumeNavigationPreset(navigationPresetKeys.inventorySearch) ?? "";
-  const [nextData, nextUnreadWatermarks, nextCurrentUser, nextUnread] = await Promise.all([
-    getInventoryPageData(), getUnreadWatermarks(), getCurrentUser(), getUnread()
-  ]);
+  const [nextData, nextCurrentUser] = await Promise.all([getInventoryPageData(), getCurrentUser()]);
   throwIfPageAborted(signal, scope);
   data = nextData;
-  unreadWatermarks = nextUnreadWatermarks;
   currentUser = nextCurrentUser;
-  unread = nextUnread;
+  ({ unread, watermarks: unreadWatermarks } = cachedPageUnread(currentUser));
   authenticated = typeof currentUser?.hasPermission === "function";
   shopifyHealth = currentUser?.isBfAdmin === true
     ? await getShopifyCredentialHealth({ refresh: true })
@@ -933,7 +931,16 @@ export async function mountPage({ scope, signal, historyState = null, navigation
       title: "Honnmono · Inventory"
     },
     activate() {
-      markRead("inventory", unreadWatermarks.inventory);
+      markRead("inventory", unreadWatermarks?.inventory);
+      void loadPageUnread({
+        scope,
+        currentUser,
+        onUpdate(next) {
+          unread = next.unread;
+          unreadWatermarks = next.watermarks;
+          markRead("inventory", unreadWatermarks.inventory);
+        }
+      });
       scope.listen(document, "click", onInventoryClick);
       scope.listen(document, "input", onInventoryInput);
       scope.listen(document, "change", onInventoryInput);

@@ -348,8 +348,12 @@ assert.match(homeSource, /id="team-activity" data-home-team-activity/);
 assert.match(homeSource, /entry\.intersectionRatio >= 0\.5/);
 assert.match(homeSource, /document\.visibilityState === "hidden"/);
 assert.match(homeSource, /markRead\("messages", unreadWatermarks\.messages\)/);
-assert.match(homeSource, /unread: \{ \.\.\.\(homeData\.unread \?\? \{\}\), \.\.\.unread \}/,
-  "the home card must render the same computed message unread value as the shell");
+assert.match(homeSource, /cachedPageUnread\(dashboard\.currentUser\)/,
+  "the home card must use the same cached unread state as the shell without blocking first paint");
+assert.match(homeSource, /unread: \{ \.\.\.\(homeData\.unread \?\? \{\}\), \.\.\.cached\.unread \}/,
+  "the home card must merge the shared cached message unread value into its dashboard data");
+assert.match(homeSource, /data\.unread = \{ \.\.\.\(data\.unread \?\? \{\}\), \.\.\.nextUnread\.unread \}/,
+  "the home card must apply the asynchronously refreshed unread value after first paint");
 
 assert.match(tasksSource, /createTaskBoardReadTracker/);
 assert.match(tasksSource, /createTaskBoardColumnReadObserver\(\{ tracker: readTracker \}\)/);

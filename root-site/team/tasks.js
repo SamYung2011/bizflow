@@ -1,4 +1,5 @@
-import { getTeamTaskData, getCurrentUser, getUnread, getUnreadWatermarks } from "../data/provider.js";
+import { getTeamTaskData, getCurrentUser } from "../data/provider.js";
+import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import { getReadStateAccount, markRead } from "../data/read-state.js";
 import { taskT as pageT } from "./tasks-i18n.js";
 import { renderTaskDetail } from "./tasks-detail.js";
@@ -2476,14 +2477,11 @@ async function refreshLiveTaskSnapshot({ defer, isCurrent }) {
 export async function mountPage({ scope, signal, historyState = null } = {}) {
   const mountId = ++activeMountId;
   activeScope = scope;
-  const [nextData, nextCurrentUser, nextUnreadWatermarks, nextUnread] = await Promise.all([
-    getTeamTaskData(), getCurrentUser(), getUnreadWatermarks(), getUnread()
-  ]);
+  const [nextData, nextCurrentUser] = await Promise.all([getTeamTaskData(), getCurrentUser()]);
   throwIfPageAborted(signal, scope);
   data = nextData;
   currentUser = nextCurrentUser;
-  unreadWatermarks = nextUnreadWatermarks;
-  unread = nextUnread;
+  ({ unread, watermarks: unreadWatermarks } = cachedPageUnread(currentUser));
   authenticated = typeof currentUser?.hasPermission === "function";
   permissions = {
     canCreate: !authenticated || currentUser.hasPermission("can_create_task"),
@@ -2508,7 +2506,16 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       title: "Honnmono · Tasks"
     },
     activate() {
-      markRead("tasks", unreadWatermarks.tasks);
+      markRead("tasks", unreadWatermarks?.tasks);
+      void loadPageUnread({
+        scope,
+        currentUser,
+        onUpdate(next) {
+          unread = next.unread;
+          unreadWatermarks = next.watermarks;
+          markRead("tasks", unreadWatermarks.tasks);
+        }
+      });
       taskSearchRender = createDebouncedTask(rerenderTaskSearchResults);
       scope.onCleanup(() => taskSearchRender?.cancel());
       scope.listen(document, "mousedown", onTaskMousedown);
@@ -2553,8 +2560,8 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       });
       const readScopeKey = `${currentUser.activeCompanyId || "demo"}:${state.currentUser.id || "anonymous"}`;
       // 件1 (2026-08-04 批4): accountId 直接问 read-state.js 要——跟 markRead("tasks", …) 那套 flat
-      // 水位系统用同一个身份源(都是 provider.js 的 buildUnreadState() 在这次页面数据 Promise.all
-      // 里已经 await 解析好的那个账号),不是 state.currentUser.id(那个演示态下可能只是个 mock 成员
+      // 水位系统用同一个身份源(cachedPageUnread 已按当前鉴权用户同步账号),
+      // 不是 state.currentUser.id(那个演示态下可能只是个 mock 成员
       // id,不是真账号)。两套存储的账号隔离口径必须对齐,不能各查各的。
       const readTracker = createTaskBoardReadTracker({
         scopeKey: readScopeKey,
