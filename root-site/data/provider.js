@@ -13,6 +13,13 @@ import {
   ORDER_PAGE_SIZE
 } from "./live-orders-query.js";
 import {
+  getLiveCustomersPage,
+  getLiveWarrantyPage,
+  LIVE_CUSTOMER_QUERY_MISS,
+  normalizeCustomerQuery,
+  normalizeWarrantyQuery
+} from "./live-customers-query.js";
+import {
   getLiveHomeDashboard,
   getLiveUnreadState,
   LIVE_HOME_QUERY_MISS
@@ -1239,7 +1246,7 @@ function loadGroupedCustomers() {
   return groupedCustomersPromise;
 }
 
-export async function getCustomersPageData() {
+async function getLegacyCustomersPageData() {
   const grouped = await loadGroupedCustomers();
   // Every persisted customer group is a customer. The live create form only requires
   // a name, so the legacy React contact-field gate made valid new rows invisible here
@@ -1248,6 +1255,128 @@ export async function getCustomersPageData() {
     Date.parse(String(left.joinedAt || "").replaceAll("/", "-")));
   const dashboardCustomerCount = grouped.length;
   return { customers, dashboardCustomerCount };
+}
+
+function providerSearchText(value) {
+  return String(value ?? "").trim().toLocaleLowerCase();
+}
+
+function providerSearchMatches(values, query) {
+  const term = providerSearchText(query);
+  if (!term) return true;
+  const compact = term.replace(/[\s-]+/g, "");
+  return values.flat().some((value) => {
+    if (value == null) return false;
+    const text = providerSearchText(value);
+    return text.includes(term) || (compact && text.replace(/[\s-]+/g, "").includes(compact));
+  });
+}
+
+function providerDateInput(value) {
+  const match = String(value || "").match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  return match ? `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}` : "";
+}
+
+function customerLastPurchase(customer) {
+  return (customer.detail?.orders ?? []).reduce((latest, order) => {
+    const time = Date.parse(String(order?.date || "").replaceAll("/", "-"));
+    return Number.isFinite(time) ? Math.max(latest, time) : latest;
+  }, Number.NEGATIVE_INFINITY);
+}
+
+function offlineCustomerPage(source, query) {
+  const normalized = normalizeCustomerQuery(query);
+  const eligible = source.customers.filter((customer) => customer.hasEmail || customer.hasPhone || customer.hasImei);
+  const filtered = eligible.filter((customer) => {
+    if (normalized.source !== "all" && customer.source !== normalized.source) return false;
+    const hasImei = Boolean(String(customer.imei || "").trim());
+    if (normalized.imei === "has" && !hasImei) return false;
+    if (normalized.imei === "none" && hasImei) return false;
+    const joined = providerDateInput(customer.joinedAt);
+    if (normalized.from && joined < normalized.from) return false;
+    if (normalized.to && joined > normalized.to) return false;
+    return providerSearchMatches([
+      customer.allNames, customer.allEmails, customer.allPhones, customer.allPhoneMainlands,
+      customer.imeiCodes, customer.allCarMakes, customer.allCarModels,
+      customer.name, customer.phone, customer.imei,
+      customer.detail?.email, customer.detail?.carMake, customer.detail?.carModelValue, customer.detail?.carModel
+    ], normalized.search);
+  }).sort((left, right) => {
+    const useLastPurchase = normalized.sort.startsWith("lastPurchase");
+    const leftTime = useLastPurchase
+      ? customerLastPurchase(left)
+      : Date.parse(String(left.joinedAt || "").replaceAll("/", "-"));
+    const rightTime = useLastPurchase
+      ? customerLastPurchase(right)
+      : Date.parse(String(right.joinedAt || "").replaceAll("/", "-"));
+    if (!Number.isFinite(leftTime) && !Number.isFinite(rightTime)) return 0;
+    if (!Number.isFinite(leftTime)) return 1;
+    if (!Number.isFinite(rightTime)) return -1;
+    return normalized.sort.endsWith("Desc") ? rightTime - leftTime : leftTime - rightTime;
+  });
+  const start = (normalized.page - 1) * normalized.pageSize;
+  const dates = eligible.map((customer) => providerDateInput(customer.joinedAt)).filter(Boolean).sort();
+  const sourceCount = (sourceKey) => eligible.filter((customer) => customer.source === sourceKey).length;
+  const imeiCount = eligible.filter((customer) => Boolean(String(customer.imei || "").trim())).length;
+  return {
+    ...source,
+    customers: filtered.slice(start, start + normalized.pageSize),
+    totalCount: filtered.length,
+    page: normalized.page,
+    pageSize: normalized.pageSize,
+    pages: Math.max(1, Math.ceil(filtered.length / normalized.pageSize)),
+    dateRange: { from: dates[0] ?? "", to: dates.at(-1) ?? "" },
+    sourceCounts: {
+      all: eligible.length,
+      shopify: sourceCount("shopify"),
+      framer: sourceCount("framer"),
+      other: sourceCount("other")
+    },
+    imeiCounts: { all: eligible.length, has: imeiCount, none: eligible.length - imeiCount },
+    query: normalized
+  };
+}
+
+function redactOfflineCustomerMoney(page) {
+  return {
+    ...page,
+    customers: page.customers.map((customer) => ({
+      ...customer,
+      detail: {
+        ...customer.detail,
+        totalAmount: 0,
+        order: customer.detail?.order ? { ...customer.detail.order, price: 0 } : null,
+        orders: (customer.detail?.orders ?? []).map((order) => ({ ...order, price: 0 }))
+      }
+    }))
+  };
+}
+
+async function offlineCustomerRevenueAllowed() {
+  try {
+    if (!await getSession()) return true;
+    return (await getAuthCurrentUser())?.canViewRevenue === true;
+  } catch {
+    // A live fallback must fail closed for money; ordinary customer fields stay usable.
+    return false;
+  }
+}
+
+export async function getCustomersPageData(query, options = {}) {
+  if (query === undefined) return getLegacyCustomersPageData();
+  const normalized = normalizeCustomerQuery(query);
+  try {
+    const live = await getLiveCustomersPage(normalized, options);
+    if (live !== LIVE_CUSTOMER_QUERY_MISS) return live;
+  } catch (error) {
+    console.warn("[provider] Customer page RPC failed; falling back to the legacy snapshot path", error);
+  }
+  const [legacy, revenueAllowed] = await Promise.all([
+    getLegacyCustomersPageData(),
+    offlineCustomerRevenueAllowed()
+  ]);
+  const page = offlineCustomerPage(legacy, normalized);
+  return revenueAllowed ? page : redactOfflineCustomerMoney(page);
 }
 
 export async function getCustomerMergeCandidates() {
@@ -1292,7 +1421,7 @@ function warrantySearchPhones(item, customer) {
     .filter(Boolean))];
 }
 
-export async function getWarrantyData() {
+async function getLegacyWarrantyData() {
   const snapshot = await loadWarrantySnapshot();
   const itemsValid = Array.isArray(snapshot?.items) && snapshot.items.every(isValidWarrantyItem);
   if (snapshot && !itemsValid) warnProviderFallback("warranty.json:items", "empty warranty list");
@@ -1316,6 +1445,60 @@ export async function getWarrantyData() {
       : [];
   });
   return { items };
+}
+
+function warrantyOfflineBucket(expiry) {
+  const today = Date.parse(`${hongKongDateInput()}T00:00:00Z`);
+  const target = Date.parse(`${String(expiry || "").replaceAll("/", "-")}T00:00:00Z`);
+  const days = Math.ceil((target - today) / 86400000);
+  if (!Number.isFinite(days) || days < -30 || days > 365) return null;
+  if (days < 0) return { bucket: "expired", daysLeft: days };
+  if (days <= 7) return { bucket: "week", daysLeft: days };
+  if (days <= 30) return { bucket: "month", daysLeft: days };
+  if (days <= 90) return { bucket: "quarter", daysLeft: days };
+  return { bucket: "year", daysLeft: days };
+}
+
+function offlineWarrantyPage(source, query) {
+  const normalized = normalizeWarrantyQuery(query);
+  const all = source.items.flatMap((item) => {
+    const timing = warrantyOfflineBucket(item.expiry);
+    return timing ? [{ ...item, ...timing }] : [];
+  });
+  const bucketCounts = Object.fromEntries(["all", "expired", "week", "month", "quarter", "year"].map((key) => [key, 0]));
+  all.forEach((item) => {
+    bucketCounts.all += 1;
+    bucketCounts[item.bucket] += 1;
+  });
+  const filtered = all.filter((item) => {
+    if (normalized.bucket !== "all" && item.bucket !== normalized.bucket) return false;
+    const purchase = providerDateInput(item.purchaseDate);
+    if (normalized.from && purchase < normalized.from) return false;
+    if (normalized.to && purchase > normalized.to) return false;
+    return providerSearchMatches([item.customer, item.phone, item.phones, item.product, item.no], normalized.search);
+  });
+  const start = (normalized.page - 1) * normalized.pageSize;
+  return {
+    items: filtered.slice(start, start + normalized.pageSize),
+    totalCount: filtered.length,
+    page: normalized.page,
+    pageSize: normalized.pageSize,
+    pages: Math.max(1, Math.ceil(filtered.length / normalized.pageSize)),
+    bucketCounts,
+    query: normalized
+  };
+}
+
+export async function getWarrantyData(query, options = {}) {
+  if (query === undefined) return getLegacyWarrantyData();
+  const normalized = normalizeWarrantyQuery(query);
+  try {
+    const live = await getLiveWarrantyPage(normalized, options);
+    if (live !== LIVE_CUSTOMER_QUERY_MISS) return live;
+  } catch (error) {
+    console.warn("[provider] Warranty page RPC failed; falling back to the legacy snapshot path", error);
+  }
+  return offlineWarrantyPage(await getLegacyWarrantyData(), normalized);
 }
 
 // bizflow 客户详情屏(Figma 676:96729)数据契约。

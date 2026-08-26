@@ -66,9 +66,9 @@ const customersAttachment = customers.slice(
   customers.indexOf("if (typeof MutationObserver", customers.indexOf("customersLiveRefresh = attachLiveSnapshotRefresh"))
 );
 assert.match(customersAttachment, /scope,[\s\S]*snapshots: CUSTOMERS_LIVE_SNAPSHOTS,[\s\S]*tables: CUSTOMERS_LIVE_TABLES,[\s\S]*isBlocked: isCustomersRefreshBlocked/);
-assert.match(customersAttachment, /const nextData = await getCustomersPageData\(\)[\s\S]*if \(!isCurrent\(\)\) return;[\s\S]*if \(isCustomersRefreshBlocked\(\)\) \{[\s\S]*defer\(\);[\s\S]*return;[\s\S]*data = nextData;[\s\S]*rerenderCustomersPage\(\{ preserveTextFocus: true \}\)/,
-  "customer snapshot updates must refetch and rerender without replacing UI state");
-assert.doesNotMatch(customersAttachment, /state\.(?:tab|sort|source|imei|search|page)\s*=|dateFilter\s*=/,
+assert.match(customersAttachment, /state\.tab === "warranty"[\s\S]*refreshCurrentWarrantyQuery[\s\S]*refreshCurrentCustomerQuery[\s\S]*if \(!isCurrent\(\)\) return;[\s\S]*if \(isCustomersRefreshBlocked\(\)\) \{[\s\S]*defer\(\);[\s\S]*return;[\s\S]*isCurrentWarrantyQueryKey[\s\S]*applyWarrantyPageData\(nextData\)[\s\S]*liveQueryKey\(nextData\.query\) !== liveQueryKey\(currentCustomerQuery\(\)\)[\s\S]*data = nextData;[\s\S]*rerenderCustomersPage\(\{ preserveTextFocus: true \}\)/,
+  "customer realtime updates must refresh only the active bounded query and reject stale query results");
+assert.doesNotMatch(customersAttachment, /state\.(?:tab|sort|source|imei|search|page)\s*=(?!=)|dateFilter\s*=(?!=)/,
   "live customer refresh must preserve search, filters, page, tab, and date-filter state");
 assert.match(customers, /function isCustomersRefreshBlocked\(\)[\s\S]*state\.writeBusy[\s\S]*state\.modalOpen[\s\S]*data-date-range-panel[\s\S]*data-customers-filter-popover/,
   "open writes, filters, and calendar panels must defer customer rerenders");

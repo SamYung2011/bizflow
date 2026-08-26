@@ -13,8 +13,8 @@ assert.match(customers, /import \{ createLiveOrderCustomer \} from "\.\.\/data\/
   "customer list must reuse the approved live customer create helper");
 assert.match(customers, /const result = await createLiveOrderCustomer\(values\);/,
   "customer list submit must perform the live insert");
-assert.match(customers, /data = await getCustomersPageData\(\);/,
-  "a successful insert must refresh the customer list snapshot");
+assert.match(customers, /data = await getCustomersPageData\(currentCustomerQuery\(\), \{ refresh: true \}\);/,
+  "a successful insert must refresh the active bounded customer query");
 assert.match(customers, /console\.error\("\[customers\] customer write failed", error\);/,
   "customer create failures must remain visible and diagnosable");
 assert.match(customers, /if \(!liveMode\) \{[\s\S]*?state\.modalOpen = false;[\s\S]*?\} else if \(liveWritable/,

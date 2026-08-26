@@ -15,6 +15,7 @@ const repairMigrationPath = join(repoRoot, "migrations/104_bizflow_data_phase1_r
 const patchMigrationPath = join(repoRoot, "migrations/105_bizflow_warranty_revenue_gate.sql");
 const homeRevenueGateMigrationPath = join(repoRoot, "migrations/106_bizflow_home_revenue_gate.sql");
 const homeSalesGateMigrationPath = join(repoRoot, "migrations/107_bizflow_home_sales_gate.sql");
+const customerPageMigrationPath = join(repoRoot, "migrations/108_bizflow_customer_page.sql");
 
 function executable(name) {
   for (const candidate of [`/opt/homebrew/bin/${name}`, `/usr/local/bin/${name}`, name]) {
@@ -196,6 +197,10 @@ function semanticFixture() {
   [rows[9], rows[10]].forEach((row, index) => Object.assign(row, {
     phone_mainland: "86-shared", email: ["main-a@test", "main-b@test"][index], address: ["Main A", "Main B"][index]
   }));
+  Object.assign(rows[0], { car_make: "Tesla\nBYD", car_model: "Model 3\nAtto 3", type: "VIP" });
+  Object.assign(rows[1], { car_make: "Tesla", car_model: "Model Y" });
+  Object.assign(rows[20], { car_make: "Polestar", car_model: "2" });
+  rows[500].name = "";
 
   ECMASCRIPT_TRIM_CHARS.forEach((whitespace, offset) => {
     const cleanName = `Whitespace ${offset}`;
@@ -244,7 +249,7 @@ function quote(value) {
 function customerValues(rows) {
   return rows.map((row) => `(${[
     quote(row.id), quote(row.name), quote(row.phone), quote(row.phone_mainland), quote(row.email), quote(row.address),
-    quote(row.parent_id), `${quote(JSON.stringify(row.merge_exclude))}::jsonb`
+    quote(row.car_make), quote(row.car_model), quote(row.type), quote(row.parent_id), `${quote(JSON.stringify(row.merge_exclude))}::jsonb`
   ].join(",")})`).join(",\n");
 }
 
@@ -361,7 +366,12 @@ try {
     );
     CREATE TABLE public.customers (
       id uuid PRIMARY KEY, name text, phone text, phone_mainland text, email text, address text,
-      car_make text, car_model text, parent_id uuid, merge_exclude jsonb DEFAULT '[]'::jsonb
+      car_make text, car_model text, type text DEFAULT 'Regular', parent_id uuid,
+      merge_exclude jsonb DEFAULT '[]'::jsonb, created_at timestamptz DEFAULT now()
+    );
+    CREATE TABLE public.customer_devices (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(), customer_id uuid, imei text UNIQUE,
+      device_type text DEFAULT 'adapter_pro', created_at timestamptz DEFAULT now()
     );
     CREATE TABLE public.products (
       id uuid PRIMARY KEY, name text, warranty_months integer DEFAULT 0, is_virtual boolean DEFAULT false,
@@ -391,7 +401,7 @@ try {
     DO $$
     DECLARE table_name text;
     BEGIN
-      FOREACH table_name IN ARRAY ARRAY['customers','invoices','products','inventory_stock','line_item_aliases','warranty_renewals'] LOOP
+      FOREACH table_name IN ARRAY ARRAY['customers','customer_devices','invoices','products','inventory_stock','line_item_aliases','warranty_renewals'] LOOP
         EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', table_name);
         EXECUTE format(
           'CREATE POLICY access ON public.%I FOR ALL TO authenticated USING (public.has_bizflow_main_access()) WITH CHECK (public.has_bizflow_main_access())',
@@ -412,6 +422,9 @@ try {
            'customer-'||i||'@example.test',
            CASE WHEN i<=450 THEN 'Shared HK store address' ELSE 'Address '||i END
     FROM generate_series(1,4500) AS i;
+    INSERT INTO public.customer_devices(customer_id,imei,created_at)
+    SELECT md5('customer-'||i)::uuid, lpad(i::text,15,'0'), now()-(i||' minutes')::interval
+    FROM generate_series(1,20) AS i;
     INSERT INTO public.products(id,name,warranty_months,status,internal_code)
       SELECT md5('product-'||i)::uuid,'Product '||i,12,'active','P-'||i FROM generate_series(1,100) AS i;
     INSERT INTO public.inventory_stock(product_id,qty) SELECT id,100 FROM public.products;
@@ -452,6 +465,7 @@ try {
     CREATE INDEX invoices_order_page_customer_idx ON public.invoices(customer_id);
     CREATE INDEX invoices_order_page_salesperson_idx ON public.invoices(salesperson_id);
     CREATE INDEX invoices_order_page_shipping_idx ON public.invoices(shipping_status);
+    CREATE INDEX customer_devices_customer_page_customer_idx ON public.customer_devices(customer_id,created_at DESC);
   `);
 
   run(psql, psqlArgs(["-f", migrationPath]), { quiet: true });
@@ -736,7 +750,74 @@ try {
 
   run(psql, psqlArgs(["-f", homeSalesGateMigrationPath]), { quiet: true });
   run(psql, psqlArgs(["-f", homeSalesGateMigrationPath]), { quiet: true });
+  run(psql, psqlArgs(["-f", customerPageMigrationPath]), { quiet: true });
+  run(psql, psqlArgs(["-f", customerPageMigrationPath]), { quiet: true });
   sql("ANALYZE;");
+
+  assert.equal(sql("SELECT prosecdef FROM pg_proc WHERE oid='public.bizflow_customer_page(text,text,text,date,date,text,integer,integer)'::regprocedure;"), "f",
+    "the customer page RPC must remain SECURITY INVOKER");
+  assert.equal(sql("SELECT prosecdef FROM pg_proc WHERE oid='public.bizflow_warranty_page(text,text,date,date,integer,integer)'::regprocedure;"), "f",
+    "the warranty page RPC must remain SECURITY INVOKER");
+  assert.equal(sql("SELECT has_function_privilege('anon','public.bizflow_customer_page(text,text,text,date,date,text,integer,integer)','EXECUTE');"), "f");
+  assert.equal(sql("SELECT has_function_privilege('authenticated','public.bizflow_customer_page(text,text,text,date,date,text,integer,integer)','EXECUTE');"), "t");
+  assert.equal(sql("SELECT has_function_privilege('anon','public.bizflow_warranty_page(text,text,date,date,integer,integer)','EXECUTE');"), "f");
+  assert.equal(sql("SELECT has_function_privilege('authenticated','public.bizflow_warranty_page(text,text,date,date,integer,integer)','EXECUTE');"), "t");
+
+  const customerPageMeasurement = timedAuthenticated(
+    "SELECT public.bizflow_customer_page(NULL,NULL,NULL,NULL,NULL,'createdDesc',0,18)::text;"
+  );
+  const authorizedCustomerPage = JSON.parse(customerPageMeasurement.value);
+  const deniedCustomerPage = JSON.parse(asAuthenticatedUser(
+    '20000000-0000-0000-0000-000000000002',
+    "SELECT public.bizflow_customer_page(NULL,NULL,NULL,NULL,NULL,'createdDesc',0,18)::text;"
+  ));
+  assert.equal(authorizedCustomerPage.customer_count, 4496);
+  assert.equal(authorizedCustomerPage.total_count, 4496);
+  assert.equal(authorizedCustomerPage.rows.length, 18, "the customer RPC must return one bounded page");
+  assert.equal(authorizedCustomerPage.source_counts.all, authorizedCustomerPage.total_count);
+  assert.equal(authorizedCustomerPage.imei_counts.has, 16,
+    "the twenty fixture devices must collapse with the five-person customer group");
+  assert.ok(authorizedCustomerPage.rows.some((row) => Number(row.detail.totalAmount) > 0),
+    "the positive revenue fixture must expose real customer totals to an authorized employee");
+  assert.equal(deniedCustomerPage.total_count, authorizedCustomerPage.total_count,
+    "the revenue gate must not hide ordinary customer rows");
+  assert.deepEqual(
+    deniedCustomerPage.rows,
+    authorizedCustomerPage.rows.map((row) => ({
+      ...row,
+      detail: {
+        ...row.detail,
+        totalAmount: 0,
+        order: row.detail.order ? { ...row.detail.order, price: 0 } : null,
+        orders: row.detail.orders.map((order) => ({ ...order, price: 0 }))
+      }
+    })),
+    "a denied employee must receive byte-equivalent customer rows except for all-zero monetary fields"
+  );
+  assert.ok(customerPageMeasurement.elapsedMs < 1500,
+    `the production-shape customer page must stay below 1.5s, got ${customerPageMeasurement.elapsedMs.toFixed(1)}ms`);
+  const secondCustomerPage = JSON.parse(asAuthenticated(
+    "SELECT public.bizflow_customer_page(NULL,NULL,NULL,NULL,NULL,'createdDesc',18,18)::text;"
+  ));
+  assert.equal(secondCustomerPage.rows.length, 18);
+  assert.equal(new Set([...authorizedCustomerPage.rows, ...secondCustomerPage.rows].map((row) => row.id)).size, 36,
+    "customer pages must not overlap");
+  const customerSearchPage = JSON.parse(asAuthenticated(
+    "SELECT public.bizflow_customer_page('85200000006',NULL,NULL,NULL,NULL,'createdDesc',0,18)::text;"
+  ));
+  assert.ok(customerSearchPage.total_count > 0,
+    "customer search must keep the shared compact phone-number contract");
+
+  const warrantyPage = JSON.parse(asAuthenticated(
+    "SELECT public.bizflow_warranty_page(NULL,NULL,NULL,NULL,0,18)::text;"
+  ));
+  assert.equal(warrantyPage.rows.length, Math.min(18, warrantyPage.total_count));
+  assert.equal(warrantyPage.bucket_counts.all, warrantyPage.total_count,
+    "the unfiltered warranty total and top chips must share one reviewed population");
+  assert.deepEqual(JSON.parse(asAuthenticatedUser(
+    '20000000-0000-0000-0000-000000000002',
+    "SELECT public.bizflow_warranty_page(NULL,NULL,NULL,NULL,0,18)::text;"
+  )), warrantyPage, "revenue permission must not disturb non-monetary warranty rows");
 
   const authorizedHomeAfterSalesGate = JSON.parse(asAuthenticated(
     "SELECT public.bizflow_home_dashboard('30000000-0000-0000-0000-000000000001')::text;"
@@ -762,6 +843,8 @@ try {
     "migration 107 must retain migration 106's denied all-zero revenue object");
   assert.equal(deniedHomeNonSalesAfterGate, deniedHomeNonSalesBeforeGate,
     "migration 107 must preserve every denied Home field outside chart and counts.orders byte-for-byte");
+  assert.equal(warrantyPage.bucket_counts.all, authorizedHomeAfterSalesGate.counts.warranty,
+    "the paged warranty contract must match the Home KPI population exactly");
 
   const secondUserWarranty = Number(asAuthenticatedUser(
     '20000000-0000-0000-0000-000000000002',
@@ -806,6 +889,12 @@ try {
     orders: authorizedHomeAfterSalesGate.counts.orders,
     chart: authorizedHomeAfterSalesGate.chart
   }, "is_admin alone must retain the unchanged Home sales signals");
+  const adminCustomerPage = JSON.parse(asAuthenticatedUser(
+    '20000000-0000-0000-0000-000000000002',
+    "SELECT public.bizflow_customer_page(NULL,NULL,NULL,NULL,NULL,'createdDesc',0,18)::text;"
+  ));
+  assert.deepEqual(adminCustomerPage, authorizedCustomerPage,
+    "is_admin alone must receive the byte-identical authorized customer page");
   sql("UPDATE public.employees SET is_admin=false, can_view_revenue=true WHERE user_id='20000000-0000-0000-0000-000000000002';");
   const newlyAuthorizedRevenue = JSON.parse(asAuthenticatedUser(
     '20000000-0000-0000-0000-000000000002',
@@ -925,7 +1014,7 @@ try {
   assert.equal(oldGroups.length, 561,
     "the independent front-end oracle must retain the reviewed base groups plus every ECMAScript whitespace pair");
   reseedCustomers(`
-    INSERT INTO public.customers(id,name,phone,phone_mainland,email,address,parent_id,merge_exclude) VALUES
+    INSERT INTO public.customers(id,name,phone,phone_mainland,email,address,car_make,car_model,type,parent_id,merge_exclude) VALUES
     ${customerValues(fixture)}
   `);
   const sqlGroups = Number(asAuthenticated("SELECT public.bizflow_customer_group_count();"));
@@ -947,6 +1036,69 @@ try {
     .sort((left, right) => left[0].localeCompare(right[0]));
   assert.deepEqual(sqlGroupMap, legacyGroupMap,
     "the Home warranty membership/primary map must match the legacy JS grouper exactly");
+
+  const sqlCustomerRows = [];
+  for (let offset = 0; offset < legacyGrouping.groups.length; offset += 50) {
+    const page = JSON.parse(asAuthenticated(
+      `SELECT public.bizflow_customer_page(NULL,NULL,NULL,NULL,NULL,'createdAsc',${offset},50)::text;`
+    ));
+    sqlCustomerRows.push(...page.rows);
+  }
+  const sqlCustomerGroupsById = new Map(sqlCustomerRows.map((row) => [row.id, row]));
+  assert.equal(sqlCustomerRows.length, legacyGrouping.groups.length,
+    "the server-paged customer population must equal the legacy JS group population");
+  for (const group of legacyGrouping.groups) {
+    const actual = sqlCustomerGroupsById.get(String(group.id));
+    assert.ok(actual, `missing SQL customer group ${group.id}`);
+    assert.deepEqual({
+      name: actual.name,
+      phone: actual.phone,
+      groupCids: actual.groupCids,
+      allNames: actual.allNames,
+      allPhones: actual.allPhones,
+      allEmails: actual.allEmails,
+      allPhoneMainlands: actual.allPhoneMainlands,
+      allCarMakes: actual.allCarMakes,
+      allCarModels: actual.allCarModels,
+      type: actual.type,
+      email: actual.detail.email,
+      carMake: actual.detail.carMake,
+      carModelValue: actual.detail.carModelValue,
+      shippingAddress: actual.detail.shippingAddress
+    }, {
+      name: String(group.primary.name ?? "") || group.allNames[0] || "",
+      phone: String(group.primary.phone ?? "") || group.allPhones[0] || "",
+      groupCids: group.allCids.map(String),
+      allNames: group.allNames,
+      allPhones: group.allPhones,
+      allEmails: group.allEmails,
+      allPhoneMainlands: group.allPhoneMainlands,
+      allCarMakes: group.allCarMakes,
+      allCarModels: group.allCarModels,
+      type: String(group.primary.type ?? "Regular") || "Regular",
+      email: String(group.primary.email ?? "") || group.allEmails[0] || "",
+      carMake: group.allCarMakes.join("\n") || String(group.primary.car_make ?? ""),
+      carModelValue: group.allCarModels.join("\n") || String(group.primary.car_model ?? ""),
+      shippingAddress: String(group.primary.address ?? "") || group.allAddresses[0] || ""
+    }, `server customer aggregation diverged from customer-groups.js for ${group.id}`);
+  }
+  const unicodeCompactSearch = JSON.parse(asAuthenticated(
+    "SELECT public.bizflow_customer_page('852ws24',NULL,NULL,NULL,NULL,'createdAsc',0,18)::text;"
+  ));
+  assert.equal(unicodeCompactSearch.total_count, 1,
+    "server search must remove the same ECMAScript whitespace and hyphens as compactSearchText");
+  const combinedVehicleSearch = JSON.parse(asAuthenticated(
+    "SELECT public.bizflow_customer_page('Polestar 2',NULL,NULL,NULL,NULL,'createdAsc',0,18)::text;"
+  ));
+  assert.equal(combinedVehicleSearch.total_count, 1,
+    "server search must retain the visible combined make/model field");
+  for (const query of ["Unique 300 852-300", "Address 300"]) {
+    const search = JSON.parse(asAuthenticated(
+      `SELECT public.bizflow_customer_page(${quote(query)},NULL,NULL,NULL,NULL,'createdAsc',0,18)::text;`
+    ));
+    assert.equal(search.total_count, 0,
+      `server search must not join separate fields or expand into the hidden address field: ${query}`);
+  }
 
   seedDirtyBook();
   const dirty = timedAuthenticated("SELECT public.bizflow_customer_group_count();");
@@ -1149,8 +1301,21 @@ ANALYZE public.customers, public.invoices, public.products, public.warranty_rene
   assert.deepEqual(whitespaceWarranty, ["adv-29", "  WIDGET  ", "Charlie", "852-b2"],
     "a whitespace-padded legacy item without product_id must resolve by trimmed product name");
 
+  const pagedWarrantyOracle = JSON.parse(asAuthenticated(
+    "SELECT public.bizflow_warranty_page(NULL,NULL,NULL,NULL,0,50)::text;"
+  ));
+  assert.equal(pagedWarrantyOracle.bucket_counts.all, warrantyParityRows.length,
+    "the warranty page chips must use the exact migration-105/Home population");
+  assert.deepEqual(
+    pagedWarrantyOracle.rows
+      .map((row) => [row.invoiceId, row.product, row.customer, row.phone])
+      .sort((left, right) => left[0].localeCompare(right[0])),
+    warrantyParityRows.slice().sort((left, right) => left[0].localeCompare(right[0])),
+    "the paged warranty rows must match the reviewed 34-case oracle row-for-row"
+  );
 
-  console.log(`DATA-phase1 PG: PASS (dirty JSON string/object/null=empty; post-ANALYZE authenticated order first/later ${orderPage.elapsedMs.toFixed(1)}/${laterPage.elapsedMs.toFixed(1)}ms, search ${orderSearch.elapsedMs.toFixed(1)}ms, unread ${unread.elapsedMs.toFixed(1)}ms, Home ${home.elapsedMs.toFixed(1)}ms, ${orderPayloadBytes}B from ${(rawInvoiceItemBytes / 1048576).toFixed(1)}MiB raw; EXPLAIN JSON loops first/search ${firstPageExpansionLoops}/${searchExpansionLoops}<=50; mutations M-A/M-A2 red at loops ${preLimitMutationLoops}/${revertedR5Loops}; flat ${group.elapsedMs.toFixed(1)}ms, dirty ${dirty.elapsedMs.toFixed(1)}ms, clusters ${largeClusters.elapsedMs.toFixed(1)}ms, revenue ${revenue.elapsedMs.toFixed(1)}ms + allow/deny gate, warranty scope ${cleanHome.counts.warranty}=${orphanHome.counts.warranty}=${secondUserWarranty}, warranty differential 34/34, parity ${oldGroups.length}=${sqlGroups} exact, scale ${scale.map(({ size, elapsedMs }) => `${size}:${elapsedMs.toFixed(1)}ms`).join("/")})`);
+
+  console.log(`DATA-phase1 PG: PASS (dirty JSON string/object/null=empty; post-ANALYZE authenticated order first/later ${orderPage.elapsedMs.toFixed(1)}/${laterPage.elapsedMs.toFixed(1)}ms, search ${orderSearch.elapsedMs.toFixed(1)}ms, unread ${unread.elapsedMs.toFixed(1)}ms, Home ${home.elapsedMs.toFixed(1)}ms, customer page ${customerPageMeasurement.elapsedMs.toFixed(1)}ms, ${orderPayloadBytes}B from ${(rawInvoiceItemBytes / 1048576).toFixed(1)}MiB raw; EXPLAIN JSON loops first/search ${firstPageExpansionLoops}/${searchExpansionLoops}<=50; mutations M-A/M-A2 red at loops ${preLimitMutationLoops}/${revertedR5Loops}; flat ${group.elapsedMs.toFixed(1)}ms, dirty ${dirty.elapsedMs.toFixed(1)}ms, clusters ${largeClusters.elapsedMs.toFixed(1)}ms, revenue ${revenue.elapsedMs.toFixed(1)}ms + allow/deny gate, warranty scope ${cleanHome.counts.warranty}=${orphanHome.counts.warranty}=${secondUserWarranty}, warranty differential/page 34/34, customer oracle ${oldGroups.length}=${sqlGroups} exact, scale ${scale.map(({ size, elapsedMs }) => `${size}:${elapsedMs.toFixed(1)}ms`).join("/")})`);
 } finally {
   if (started) spawnSync(pgCtl, ["-D", dataDir, "-m", "immediate", "stop"], { encoding: "utf8" });
   rmSync(probeRoot, { recursive: true, force: true });

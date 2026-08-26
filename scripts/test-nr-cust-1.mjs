@@ -187,15 +187,17 @@ for (const lang of ["zh", "en", "fr"]) {
 }
 
 const read = (relative) => readFile(new URL(`../${relative}`, import.meta.url), "utf8");
-const [customersUi, customerDetailUi, warrantyUi, snapshots, cache, provider] = await Promise.all([
+const [customersUi, customerDetailUi, warrantyUi, snapshots, cache, provider, customerPageMigration] = await Promise.all([
   read("root-site/bizflow/customers.js"),
   read("root-site/bizflow/customer-detail.js"),
   read("root-site/bizflow/customers-warranty.js"),
   read("root-site/data/live-snapshots.js"),
   read("root-site/data/live-table-cache.js"),
-  read("root-site/data/provider.js")
+  read("root-site/data/provider.js"),
+  read("migrations/108_bizflow_customer_page.sql")
 ]);
-assert.match(customersUi, /!c\.hasEmail && !c\.hasPhone && !c\.hasImei/);
+assert.match(customerPageMigration, /jsonb_array_length\(row\.all_emails\) > 0[\s\S]*jsonb_array_length\(row\.all_phones\) > 0[\s\S]*jsonb_array_length\(row\.imei_codes\) > 0/,
+  "the old contact-or-IMEI eligibility gate must move with the list population into the server RPC");
 assert.match(customersUi, /data-customers-visible-count/);
 assert.match(customerDetailUi, /data-email-suggestion-target="edit-customer"/);
 assert.match(warrantyUi, /data-warranty-bucket=/);

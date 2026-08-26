@@ -44,12 +44,13 @@ const escapedVehicle = renderCustomerRow({
 assert.match(escapedVehicle, /title="Smart &lt;#5&gt; &amp; Premium">Smart &lt;#5&gt; &amp; Premium<\/span>/,
   "vehicle text and its title must remain escaped");
 
-const [customersSource, customerCss, liveSnapshotsSource, fetchAllSource, warrantySource] = await Promise.all([
+const [customersSource, customerCss, liveSnapshotsSource, fetchAllSource, warrantySource, liveCustomerQuerySource] = await Promise.all([
   readFile(new URL("../root-site/bizflow/customers.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/bizflow/customers.css", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/live-snapshots.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/fetch-all-pages.js", import.meta.url), "utf8"),
-  readFile(new URL("../root-site/bizflow/customers-warranty.js", import.meta.url), "utf8")
+  readFile(new URL("../root-site/bizflow/customers-warranty.js", import.meta.url), "utf8"),
+  readFile(new URL("../root-site/data/live-customers-query.js", import.meta.url), "utf8")
 ]);
 
 assert.match(liveSnapshotsSource, /allRows\("customers", "name"\)/,
@@ -59,8 +60,10 @@ assert.match(fetchAllSource, /columns = "\*"/,
 assert.match(liveSnapshotsSource, /carModel: `\$\{asText\(customer\.car_make\)\} \$\{asText\(customer\.car_model\)\}`\.trim\(\) \|\| null/,
   "snapshot vehicle value must join only the non-empty make/model content");
 
-const filterFlow = customersSource.slice(customersSource.indexOf("function filteredCustomers"), customersSource.indexOf("function initials"));
-assert.match(filterFlow, /customerMatchesSearch\(c, state\.search\)/);
+const filterFlow = customersSource.slice(customersSource.indexOf("function currentCustomerQuery"), customersSource.indexOf("function initials"));
+assert.match(filterFlow, /search: state\.search/);
+assert.match(liveCustomerQuerySource, /rpc: "bizflow_customer_page"[\s\S]*p_search: query\.search \|\| null/,
+  "customer search, including the visible vehicle value, must be applied by the server page RPC");
 assert.equal(customerMatchesSearch(customer, "曾嘉欣"), true);
 assert.equal(customerMatchesSearch(customer, "90123987"), true);
 assert.equal(customerMatchesSearch(customer, "Toyota BZ3X"), true,

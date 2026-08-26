@@ -10,6 +10,7 @@ import { readFile } from "node:fs/promises";
 import { compactSearchText, matchesSearchValues, normalizeSearchText } from "../root-site/components/search-match.js";
 import { customerMatchesSearch } from "../root-site/bizflow/customers.js";
 import {
+  applyWarrantyPageData,
   ensureWarrantyData,
   renderWarranty,
   setWarrantySearch,
@@ -19,11 +20,12 @@ import { getCustomersPageData, getWarrantyData } from "../root-site/data/provide
 import { updateProviderSnapshotMemo } from "../root-site/data/provider-snapshot-cache.js";
 
 const read = (relative) => readFile(new URL(`../${relative}`, import.meta.url), "utf8");
-const [sharedMatcher, customersSource, warrantySource, providerSource] = await Promise.all([
+const [sharedMatcher, customersSource, warrantySource, providerSource, liveCustomerQuerySource] = await Promise.all([
   read("root-site/components/search-match.js"),
   read("root-site/bizflow/customers.js"),
   read("root-site/bizflow/customers-warranty.js"),
-  read("root-site/data/provider.js")
+  read("root-site/data/provider.js"),
+  read("root-site/data/live-customers-query.js")
 ]);
 
 // ---------- 一份匹配口径:两页共用 components/search-match.js ----------
@@ -42,8 +44,8 @@ assert.doesNotMatch(customersSource, /const compactTerm = term\.replace/,
   "客户列表不得把压缩逻辑再抄回本地");
 assert.match(warrantySource, /export function warrantyMatchesSearch\(item, query\) \{[\s\S]*matchesSearchValues\(\[item\.customer, item\.phone, item\.phones, item\.product, item\.no\], query\)/,
   "保修搜索面必须含整组电话 item.phones");
-assert.match(warrantySource, /if \(!term\) return true;\s*return warrantyMatchesSearch\(item, term\);/,
-  "保修列表筛选必须走同一个 warrantyMatchesSearch");
+assert.match(liveCustomerQuerySource, /rpc: "bizflow_warranty_page"[\s\S]*p_search: query\.search \|\| null/,
+  "保修筛选必须把搜索词交给服务器分页函数");
 assert.match(customersSource, /export function customerMatchesSearch\(customer, query\) \{\s*return matchesSearchValues\(\[/,
   "客户列表匹配必须只剩字段声明");
 
@@ -190,7 +192,7 @@ assert.equal(warrantyMatchesSearch(warrantyRow, ""), true, "空搜索词必须�
 assert.equal(warrantyMatchesSearch({ no: "#1", product: "x", customer: "y" }, "undefined"), false,
   "缺字段的保修行不能被 \"undefined\" 搜到");
 
-// 整页跑一遍:保修列表真的按搜索词筛出对应的行,不只是判断函数自己对。
+// 整页跑一遍:服务器已筛好的分页结果必须原样渲染,不再对当前页做二次假全量筛选。
 // renderWarranty 里的 managementPageSize() 要读 window.matchMedia,这里按 REDDOT-1 的
 // globalThis.window 存档-还原写法临时补一个双列桌面视口。
 const originalWindow = globalThis.window;
@@ -203,22 +205,23 @@ try {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
-  const renderWithSearch = (query) => {
-    setWarrantySearch(query);
+  const renderWithItems = (items, search = "") => {
+    setWarrantySearch(search);
+    applyWarrantyPageData({ items, totalCount: items.length, pages: 1, pageSize: 18 });
     return renderWarranty({ escapeHtml, icon: () => "", lang: "zh" });
   };
-  const allRows = renderWithSearch("");
+  const allRows = renderWithItems([warrantyRow, warranty.items.find((item) => item.customerId === "cust-2")]);
   assert.match(allRows, /data-warranty-filtered="2"/, "空搜索词必须列出全部保修行");
   for (const query of ["91234567", "9123 4567", "9123-4567", "13800138000"]) {
-    const html = renderWithSearch(query);
+    const html = renderWithItems([warrantyRow], query);
     assert.match(html, /data-warranty-filtered="1"/, `保修列表搜 ${query} 必须只剩命中的那一行`);
     assert.ok(html.includes("陳大文"), `保修列表搜 ${query} 必须留下陳大文那行`);
     assert.ok(!html.includes("Vicky Chan"), `保修列表搜 ${query} 不该带出别的客户`);
   }
-  const otherHit = renderWithSearch("56008904");
+  const otherHit = renderWithItems([warranty.items.find((item) => item.customerId === "cust-2")], "56008904");
   assert.match(otherHit, /data-warranty-filtered="1"/);
   assert.ok(otherHit.includes("Vicky Chan"), "另一位客户的连号同样要能搜到");
-  assert.match(renderWithSearch("00000000"), /data-warranty-filtered="0"/, "无关号码必须一行都不剩");
+  assert.match(renderWithItems([], "00000000"), /data-warranty-filtered="0"/, "服务器空结果必须一行都不剩");
   setWarrantySearch("");
 } finally {
   if (originalWindow === undefined) delete globalThis.window;
