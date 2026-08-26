@@ -4,6 +4,8 @@ import { createDateRangePanel } from "../components/date-range-panel.js";
 import { clearPhoneCopyNotice, phoneCopyLabel } from "../components/phone-copy.js";
 import { matchesSearchValues } from "../components/search-match.js";
 import { renewLiveWarranty } from "../data/live-warranty-writes.js";
+import { normalizeWarrantyQuery } from "../data/live-customers-query.js";
+import { liveQueryKey } from "../data/live-query-cache.js";
 
 const copy = {
   zh: {
@@ -155,6 +157,11 @@ const WARRANTY_BUCKETS = ["all", "expired", "week", "month", "quarter", "year"];
 
 const state = {
   items: null,
+  totalCount: 0,
+  bucketCounts: null,
+  pages: 1,
+  pageSize: 18,
+  query: null,
   bucket: "all",
   search: "",
   dateFrom: "",
@@ -169,6 +176,7 @@ let validCustomerIds = new Set();
 const dateRangePanel = createDateRangePanel();
 const renewalDatePanel = createDateRangePanel();
 let dataLoadVersion = 0;
+let requestSequence = 0;
 
 function t(lang, key, values = {}) {
   const template = copy[lang]?.[key] ?? copy.zh[key] ?? key;
@@ -242,19 +250,57 @@ export function warrantyBucket(expiry, today = new Date()) {
   return null;
 }
 
-export async function ensureWarrantyData({ scope = null, signal = scope?.signal } = {}) {
-  if (state.items !== null) return;
-  const version = dataLoadVersion;
-  const data = await getWarrantyData();
-  if (version !== dataLoadVersion || signal?.aborted || (scope && !scope.isCurrent())) return;
+function currentWarrantyQuery() {
+  return normalizeWarrantyQuery({
+    page: state.page,
+    pageSize: managementPageSize(),
+    search: state.search,
+    bucket: state.bucket,
+    from: state.dateFrom,
+    to: state.dateTo
+  });
+}
+
+export function isCurrentWarrantyQueryKey(queryKey) {
+  return queryKey === liveQueryKey(currentWarrantyQuery());
+}
+
+export function applyWarrantyPageData(data) {
+  if (!data || !Array.isArray(data.items)) return false;
   validCustomerIds = new Set(data.items.map((item) => String(item.customerId)));
   state.items = data.items
     .map((item) => ({
       ...item,
-      bucket: warrantyBucket(item.expiry),
-      daysLeft: warrantyDaysLeft(item.expiry)
+      bucket: item.bucket || warrantyBucket(item.expiry),
+      daysLeft: Number.isFinite(Number(item.daysLeft)) ? Number(item.daysLeft) : warrantyDaysLeft(item.expiry)
     }))
     .filter((item) => item.bucket !== null && item.daysLeft >= -30 && validCustomerIds.has(String(item.customerId)));
+  state.totalCount = Number(data.totalCount ?? state.items.length) || 0;
+  state.bucketCounts = data.bucketCounts && typeof data.bucketCounts === "object"
+    ? { ...data.bucketCounts }
+    : warrantyBucketCounts(state.items);
+  state.pages = Math.max(1, Number(data.pages) || 1);
+  state.pageSize = Math.max(1, Number(data.pageSize) || managementPageSize());
+  state.query = data.query ? { ...data.query } : currentWarrantyQuery();
+  return true;
+}
+
+export async function loadWarrantyPage({ scope = null, signal = scope?.signal, refresh = false } = {}) {
+  const version = dataLoadVersion;
+  const sequence = ++requestSequence;
+  let data = await getWarrantyData(currentWarrantyQuery(), { refresh });
+  if (version !== dataLoadVersion || sequence !== requestSequence || signal?.aborted || (scope && !scope.isCurrent())) return false;
+  if (state.page > data.pages) {
+    state.page = Math.max(1, data.pages);
+    data = await getWarrantyData(currentWarrantyQuery(), { refresh: true });
+    if (version !== dataLoadVersion || sequence !== requestSequence || signal?.aborted || (scope && !scope.isCurrent())) return false;
+  }
+  return applyWarrantyPageData(data);
+}
+
+export async function ensureWarrantyData({ scope = null, signal = scope?.signal } = {}) {
+  if (state.items !== null) return;
+  await loadWarrantyPage({ scope, signal });
 }
 
 export function warrantyBucketCounts(items) {
@@ -271,20 +317,6 @@ export function warrantyBucketCounts(items) {
 // 行上展示的仍旧只有主号 item.phone。
 export function warrantyMatchesSearch(item, query) {
   return matchesSearchValues([item.customer, item.phone, item.phones, item.product, item.no], query);
-}
-
-function filteredItems() {
-  const term = state.search.trim();
-  const rangeFrom = dateValue(state.dateFrom);
-  const rangeTo = dateValue(state.dateTo);
-  return (state.items ?? []).filter((item) => {
-    if (state.bucket !== "all" && item.bucket !== state.bucket) return false;
-    const purchaseDate = dateValue(item.purchaseDate);
-    if (Number.isFinite(rangeFrom) && (!Number.isFinite(purchaseDate) || purchaseDate < rangeFrom)) return false;
-    if (Number.isFinite(rangeTo) && (!Number.isFinite(purchaseDate) || purchaseDate > rangeTo)) return false;
-    if (!term) return true;
-    return warrantyMatchesSearch(item, term);
-  });
 }
 
 function dateRangeLabel(lang) {
@@ -382,27 +414,26 @@ export function renderWarranty(helpers) {
     return `<div class="management-list__empty warranty-empty" data-warranty-loading>${escapeHtml(t(lang, "loading"))}</div>`;
   }
 
-  const filtered = filteredItems();
-  const counts = warrantyBucketCounts(state.items);
-  const pageSize = managementPageSize();
-  const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const filtered = state.items;
+  const counts = state.bucketCounts ?? warrantyBucketCounts(state.items);
+  const pages = Math.max(1, state.pages);
   state.page = Math.min(Math.max(state.page, 1), pages);
-  const pageItems = filtered.slice((state.page - 1) * pageSize, state.page * pageSize);
+  const pageItems = filtered;
   const content = pageItems.length
     ? pageItems.map((item) => renderWarrantyRow(item, helpers)).join("")
     : `<div class="management-list__empty warranty-empty">${escapeHtml(t(lang, "empty"))}</div>`;
   const pager = renderManagementPager({
     page: state.page,
     pages,
-    visible: filtered.length > pageSize,
+    visible: pages > 1,
     icon,
     escapeHtml,
     previousLabel: t(lang, "previous"),
     nextLabel: t(lang, "next")
   });
-  return `<section class="warranty-panel" data-warranty-panel data-warranty-total="${state.items.length}" data-warranty-filtered="${filtered.length}">
+  return `<section class="warranty-panel" data-warranty-panel data-warranty-total="${counts.all}" data-warranty-filtered="${state.totalCount}">
     ${state.renewalNotice ? `<p class="customer-write-notice customer-write-notice--success" role="status">${escapeHtml(t(lang, state.renewalNotice.key, state.renewalNotice.values))}</p>` : ""}
-    <p class="warranty-summary">${escapeHtml(t(lang, "count", { count: state.items.length }))}</p>
+    <p class="warranty-summary">${escapeHtml(t(lang, "count", { count: counts.all }))}</p>
     <div class="warranty-toprow">
       <div class="warranty-buckets" role="group" aria-label="${escapeHtml(t(lang, "title"))}">
         ${WARRANTY_BUCKETS.map((bucket) => `<button type="button" class="warranty-bucket${state.bucket === bucket ? " is-active" : ""}" data-warranty-bucket="${bucket}" aria-pressed="${state.bucket === bucket}"><span>${escapeHtml(t(lang, bucket))}</span><strong>${escapeHtml(String(counts[bucket]))}</strong></button>`).join("")}
@@ -417,7 +448,7 @@ export function renderWarranty(helpers) {
         </div>
       </div>
     </div>
-    ${renderManagementList({ content, pager, paged: filtered.length > pageSize })}
+    ${renderManagementList({ content, pager, paged: pages > 1 })}
   </section>${renderRenewalModal(helpers)}`;
 }
 
@@ -602,14 +633,25 @@ export function restoreWarrantyState(value = null) {
   state.renewalBusy = false;
   state.renewalError = "";
   state.renewalNotice = null;
+  state.totalCount = 0;
+  state.bucketCounts = null;
+  state.pages = 1;
+  state.pageSize = managementPageSize();
+  state.query = null;
 }
 
 export function disposeWarrantyState() {
   dataLoadVersion += 1;
+  requestSequence += 1;
   dateRangePanel.close({ restoreFocus: false });
   renewalDatePanel.close({ restoreFocus: false });
   clearPhoneCopyNotice();
   state.items = null;
+  state.totalCount = 0;
+  state.bucketCounts = null;
+  state.pages = 1;
+  state.pageSize = 18;
+  state.query = null;
   state.bucket = "all";
   state.renewal = null;
   state.renewalBusy = false;

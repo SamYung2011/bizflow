@@ -22,8 +22,16 @@ import { matchesSearchValues } from "../components/search-match.js";
 import { createDebouncedTask } from "../components/debounced-task.js";
 import { createLiveOrderCustomer } from "../data/live-orders-writes.js";
 import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
+import {
+  CUSTOMER_QUERY_UPDATED_EVENT,
+  normalizeCustomerQuery,
+  refreshCurrentCustomerQuery,
+  refreshCurrentWarrantyQuery,
+  WARRANTY_QUERY_UPDATED_EVENT
+} from "../data/live-customers-query.js";
+import { liveQueryKey } from "../data/live-query-cache.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
-import { createCustomerSorter, customerSortKeys } from "./customers-sort.js";
+import { customerSortKeys } from "./customers-sort.js";
 import {
   captureWarrantyState,
   clearWarrantyDateRange,
@@ -32,7 +40,10 @@ import {
   closeWarrantyRenewalDate,
   disposeWarrantyState,
   ensureWarrantyData,
+  applyWarrantyPageData,
+  isCurrentWarrantyQueryKey,
   isWarrantyRenewalOpen,
+  loadWarrantyPage,
   moveWarrantyPage,
   openWarrantyDateRange,
   openWarrantyRenewal,
@@ -216,15 +227,17 @@ let state = {
 
 let currentHelpers = null;
 const customerTabs = ["list", "warranty"];
-let customerSorter = null;
 let dateFilter = null;
 let resizeTimer = 0;
 let activeScope = null;
 let customersLiveRefresh = null;
 let customersSearchRender = null;
+let warrantySearchRender = null;
+let customerRequestSequence = 0;
+let customersLoading = false;
 
-const CUSTOMERS_LIVE_SNAPSHOTS = ["customers.json"];
-const CUSTOMERS_LIVE_TABLES = ["customers", "invoices", "customer_devices"];
+const CUSTOMERS_LIVE_SNAPSHOTS = ["customers.json", "warranty.json"];
+const CUSTOMERS_LIVE_TABLES = ["customers", "invoices", "customer_devices", "products", "warranty_renewals"];
 
 function isCurrentCustomersScope(scope = activeScope) {
   return Boolean(scope && scope === activeScope && scope.isCurrent());
@@ -272,16 +285,58 @@ export function customerMatchesSearch(customer, query) {
   ], query);
 }
 
-function filteredCustomers() {
-  return data.customers.filter((c) => {
-    if (!c.hasEmail && !c.hasPhone && !c.hasImei) return false;
-    if (!customerMatchesSearch(c, state.search)) return false;
-    if (state.source !== "all" && c.source !== state.source) return false;
-    const hasImei = Boolean(String(c.imei ?? "").trim());
-    if (state.imei === "has" && !hasImei) return false;
-    if (state.imei === "none" && hasImei) return false;
-    return dateFilter.matches(c.joinedAt);
-  }).sort((left, right) => customerSorter.compare(left, right, state.sort));
+function currentCustomerQuery() {
+  const range = dateFilter?.captureState?.() ?? {};
+  return normalizeCustomerQuery({
+    page: state.page,
+    pageSize: managementPageSize(),
+    search: state.search,
+    source: state.source,
+    imei: state.imei,
+    from: range.from,
+    to: range.to,
+    sort: state.sort
+  });
+}
+
+function currentCustomerDataMatchesQuery() {
+  return Boolean(data?.query) && liveQueryKey(data.query) === liveQueryKey(currentCustomerQuery());
+}
+
+async function loadCurrentCustomerPage({ refresh = false } = {}) {
+  const sequence = ++customerRequestSequence;
+  customersLoading = true;
+  rerenderCustomerSearchResults();
+  try {
+    let nextData = await getCustomersPageData(currentCustomerQuery(), { refresh });
+    if (sequence !== customerRequestSequence || !isCurrentCustomersScope()) return;
+    if (state.page > nextData.pages) {
+      state.page = Math.max(1, nextData.pages);
+      nextData = await getCustomersPageData(currentCustomerQuery(), { refresh: true });
+      if (sequence !== customerRequestSequence || !isCurrentCustomersScope()) return;
+    }
+    data = nextData;
+  } finally {
+    if (sequence === customerRequestSequence && isCurrentCustomersScope()) {
+      customersLoading = false;
+      rerenderCustomerSearchResults();
+    }
+  }
+}
+
+function onCustomerQueryUpdated(event) {
+  if (state.tab !== "list" || !event.detail?.value) return;
+  if (event.detail.queryKey !== liveQueryKey(currentCustomerQuery())) return;
+  data = event.detail.value;
+  customersLoading = false;
+  rerenderCustomerSearchResults();
+}
+
+function onWarrantyQueryUpdated(event) {
+  if (state.tab !== "warranty" || !event.detail?.value) return;
+  if (!isCurrentWarrantyQueryKey(event.detail.queryKey)) return;
+  if (!applyWarrantyPageData(event.detail.value)) return;
+  rerenderCustomersPage({ preserveTextFocus: true });
 }
 
 function initials(name) {
@@ -401,18 +456,18 @@ function renderAddCustomerModal(helpers) {
 function renderCustomerSearchResults(helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const tt = (key) => pageT(lang, key);
-  const filtered = filteredCustomers();
-  const pageSize = managementPageSize();
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const filtered = Array.isArray(data?.customers) ? data.customers : [];
+  const totalCount = Number(data?.totalCount ?? filtered.length);
+  const totalPages = Math.max(1, Number(data?.pages) || 1);
   state.page = Math.min(state.page, totalPages);
-  const pageItems = filtered.slice((state.page - 1) * pageSize, state.page * pageSize);
+  const pageItems = customersLoading && !currentCustomerDataMatchesQuery() ? [] : filtered;
   const listHtml = pageItems.length
     ? pageItems.map((c) => renderCustomerRow(c, helpers)).join("")
-    : `<div class="management-list__empty customers-empty">${escapeHtml(tt("customers.empty"))}</div>`;
+    : customersLoading ? "" : `<div class="management-list__empty customers-empty">${escapeHtml(tt("customers.empty"))}</div>`;
   const pagerHtml = renderManagementPager({
     page: state.page,
     pages: totalPages,
-    visible: filtered.length > pageSize,
+    visible: totalPages > 1,
     icon,
     escapeHtml,
     previousLabel: tt("customers.pager.prev"),
@@ -420,8 +475,8 @@ function renderCustomerSearchResults(helpers) {
   });
 
   return {
-    summary: `<p class="customers-list-summary" data-customers-list-summary data-customers-visible-count="${filtered.length}">${escapeHtml(pageTf(lang, "customers.count", { count: filtered.length }))}</p>`,
-    list: `<div data-customers-search-results>${renderManagementList({ content: listHtml, pager: pagerHtml, paged: filtered.length > pageSize })}</div>`
+    summary: `<p class="customers-list-summary" data-customers-list-summary data-customers-visible-count="${totalCount}">${escapeHtml(pageTf(lang, "customers.count", { count: totalCount }))}</p>`,
+    list: `<div data-customers-search-results aria-busy="${customersLoading}">${renderManagementList({ content: listHtml, pager: pagerHtml, paged: totalPages > 1 })}</div>`
   };
 }
 
@@ -559,8 +614,9 @@ async function submitLiveCustomer() {
   try {
     const result = await createLiveOrderCustomer(values);
     if (!isCurrentCustomersScope(scope)) return;
+    state.page = 1;
     try {
-      data = await getCustomersPageData();
+      data = await getCustomersPageData(currentCustomerQuery(), { refresh: true });
     } catch (refreshError) {
       console.warn("[customers] customer list refresh failed", refreshError);
       data.customers.unshift(fallbackCreatedCustomer(result));
@@ -575,7 +631,6 @@ async function submitLiveCustomer() {
         : "customers.customer.created";
     setCustomerNotice(pageT(currentHelpers?.lang ?? "zh", noticeKey), noticeKey === "customers.customer.created" ? "success" : "error");
     state.customerDraft = {};
-    state.page = 1;
   } catch (error) {
     if (!isCurrentCustomersScope(scope)) return;
     console.error("[customers] customer write failed", error);
@@ -601,7 +656,11 @@ async function onCustomersClick(event) {
 
   const warrantyBucket = event.target.closest("[data-warranty-bucket]");
   if (warrantyBucket && state.tab === "warranty") {
-    if (setWarrantyBucket(warrantyBucket.getAttribute("data-warranty-bucket"))) rerenderCustomersPage();
+    if (setWarrantyBucket(warrantyBucket.getAttribute("data-warranty-bucket"))) {
+      rerenderCustomersPage();
+      await loadWarrantyPage({ scope: activeScope });
+      if (isCurrentCustomersScope()) rerenderCustomersPage();
+    }
     return;
   }
 
@@ -618,10 +677,12 @@ async function onCustomersClick(event) {
     if (isWarrantyRenewalOpen() && !closeWarrantyRenewal()) return;
     rerenderCustomersPage();
     if (tab === "warranty") {
-      await ensureWarrantyData({ scope });
-      if (!isCurrentCustomersScope(scope)) return;
-      rerenderCustomersPage();
+      await loadWarrantyPage({ scope });
+    } else {
+      await loadCurrentCustomerPage();
     }
+    if (!isCurrentCustomersScope(scope)) return;
+    rerenderCustomersPage();
     return;
   }
 
@@ -669,7 +730,12 @@ async function onCustomersClick(event) {
 
   if (event.target.closest("[data-warranty-renewal-submit]") && state.tab === "warranty") {
     const result = await submitWarrantyRenewal({ scope: activeScope, onChange: rerenderCustomersPage });
-    if (result.ok) activeScope?.animationFrame(() => document.querySelector(`[data-warranty-renew="${result.target}"]`)?.focus());
+    if (result.ok) {
+      await loadWarrantyPage({ scope: activeScope, refresh: true });
+      if (!isCurrentCustomersScope()) return;
+      rerenderCustomersPage();
+      activeScope?.animationFrame(() => document.querySelector(`[data-warranty-renew="${result.target}"]`)?.focus());
+    }
     return;
   }
 
@@ -686,12 +752,21 @@ async function onCustomersClick(event) {
   if (warrantyDateTrigger && state.tab === "warranty") {
     closeAllFilterMenus(null);
     dateFilter.close();
-    openWarrantyDateRange(warrantyDateTrigger, currentHelpers, rerenderCustomersPage);
+    openWarrantyDateRange(warrantyDateTrigger, currentHelpers, () => {
+      rerenderCustomersPage();
+      void loadWarrantyPage({ scope: activeScope }).then(() => {
+        if (isCurrentCustomersScope()) rerenderCustomersPage();
+      });
+    });
     return;
   }
 
   if (event.target.closest("[data-warranty-date-clear]") && state.tab === "warranty") {
-    if (clearWarrantyDateRange()) rerenderCustomersPage();
+    if (clearWarrantyDateRange()) {
+      rerenderCustomersPage();
+      await loadWarrantyPage({ scope: activeScope });
+      if (isCurrentCustomersScope()) rerenderCustomersPage();
+    }
     return;
   }
 
@@ -722,6 +797,7 @@ async function onCustomersClick(event) {
       state[group] = value;
       state.page = 1; // 换筛选条件回第一页
       rerenderCustomersPage();
+      await loadCurrentCustomerPage();
     }
     return;
   }
@@ -730,11 +806,15 @@ async function onCustomersClick(event) {
   if (pageBtn && !pageBtn.disabled) {
     if (state.tab === "warranty") {
       moveWarrantyPage(pageBtn.getAttribute("data-management-page"));
+      rerenderCustomersPage();
+      await loadWarrantyPage({ scope: activeScope });
+      if (isCurrentCustomersScope()) rerenderCustomersPage();
     } else {
       state.page += pageBtn.getAttribute("data-management-page") === "next" ? 1 : -1;
       dateFilter.close();
+      rerenderCustomersPage();
+      await loadCurrentCustomerPage();
     }
-    rerenderCustomersPage();
     return;
   }
 
@@ -809,12 +889,7 @@ function onCustomersInput(event) {
   }
   const search = event.target.closest("[data-warranty-search]");
   if (!search || state.tab !== "warranty" || !setWarrantySearch(search.value)) return;
-  rerenderCustomersPage();
-  const nextSearch = document.querySelector("[data-warranty-search]");
-  if (nextSearch) {
-    nextSearch.focus();
-    nextSearch.setSelectionRange(nextSearch.value.length, nextSearch.value.length);
-  }
+  warrantySearchRender?.schedule();
 }
 
 function onCustomersKeydown(event) {
@@ -835,12 +910,15 @@ function onCustomersKeydown(event) {
 
 function onCustomersResize() {
   window.clearTimeout(resizeTimer);
-  resizeTimer = window.setTimeout(() => {
+  resizeTimer = window.setTimeout(async () => {
     resizeTimer = 0;
     if (!isCurrentCustomersScope()) return;
     closeWarrantyDateRange();
     closeWarrantyRenewalDate();
     rerenderCustomersPage();
+    if (state.tab === "warranty") await loadWarrantyPage({ scope: activeScope });
+    else await loadCurrentCustomerPage();
+    if (isCurrentCustomersScope()) rerenderCustomersPage();
   }, 120);
 }
 
@@ -869,33 +947,44 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
   const presetTab = consumeNavigationPreset(navigationPresetKeys.customersTab);
   const presetAdd = consumeNavigationPreset(navigationPresetKeys.customersAdd) === "1";
   const presetWarrantySearch = consumeNavigationPreset(navigationPresetKeys.warrantySearch) ?? "";
-  const [nextData, nextCurrentUser] = await Promise.all([getCustomersPageData(), getCurrentUser()]);
+  state = restoredState(historyState, presetTab);
+  restoreWarrantyState(historyState?.warranty);
+  if (!historyState && presetWarrantySearch) setWarrantySearch(presetWarrantySearch);
+  dateFilter = createDateRangeFilter({
+    id: "customers",
+    initialDate: "",
+    onChange({ filterChanged }) {
+      if (filterChanged) state.page = 1;
+      rerenderCustomersPage();
+      if (filterChanged) void loadCurrentCustomerPage();
+    }
+  });
+  dateFilter.restoreState?.(historyState?.dateFilter);
+  const [nextCurrentUser, nextData] = await Promise.all([
+    getCurrentUser(),
+    getCustomersPageData(currentCustomerQuery()),
+    state.tab === "warranty" ? ensureWarrantyData({ scope, signal }) : Promise.resolve()
+  ]);
   throwIfPageAborted(signal, scope);
-  data = nextData;
   currentUser = nextCurrentUser;
+  data = nextData;
   ({ unread } = cachedPageUnread(currentUser));
   liveMode = typeof currentUser?.hasPermission === "function";
   liveWritable = liveMode && currentUser?.bizflowMainAccess === true;
   liveReadOnly = liveMode && !liveWritable;
   writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
-  state = restoredState(historyState, presetTab);
   if (!historyState && presetAdd && !liveReadOnly) state.modalOpen = true;
-  customerSorter = createCustomerSorter();
-  restoreWarrantyState(historyState?.warranty);
-  if (!historyState && presetWarrantySearch) setWarrantySearch(presetWarrantySearch);
+  const restoredDateState = dateFilter.captureState?.();
   dateFilter = createDateRangeFilter({
     id: "customers",
-    initialDate: latestDateInput(data.customers.map((customer) => customer.joinedAt)),
+    initialDate: latestDateInput([data.dateRange?.to]),
     onChange({ filterChanged }) {
       if (filterChanged) state.page = 1;
       rerenderCustomersPage();
+      if (filterChanged) void loadCurrentCustomerPage();
     }
   });
-  dateFilter.restoreState?.(historyState?.dateFilter);
-  if (state.tab === "warranty") {
-    await ensureWarrantyData({ scope, signal });
-    throwIfPageAborted(signal, scope);
-  }
+  dateFilter.restoreState?.(restoredDateState);
 
   return {
     page: {
@@ -906,26 +995,40 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
     },
     activate() {
       void loadPageUnread({ scope, currentUser, onUpdate: (next) => { unread = next.unread; } });
-      customersSearchRender = createDebouncedTask(rerenderCustomerSearchResults);
+      customersSearchRender = createDebouncedTask(() => void loadCurrentCustomerPage());
+      warrantySearchRender = createDebouncedTask(() => void loadWarrantyPage({ scope }).then(() => {
+        if (isCurrentCustomersScope(scope)) rerenderCustomersPage({ preserveTextFocus: true });
+      }));
       scope.onCleanup(() => customersSearchRender?.cancel());
+      scope.onCleanup(() => warrantySearchRender?.cancel());
       scope.listen(document, "click", onCustomersClick);
       scope.listen(document, "contextmenu", onCustomersContextMenu);
       scope.listen(document, "input", onCustomersInput);
       scope.listen(document, "keydown", onCustomersKeydown);
       scope.listen(window, "resize", onCustomersResize);
+      scope.listen(window, CUSTOMER_QUERY_UPDATED_EVENT, onCustomerQueryUpdated);
+      scope.listen(window, WARRANTY_QUERY_UPDATED_EVENT, onWarrantyQueryUpdated);
       customersLiveRefresh = attachLiveSnapshotRefresh({
         scope,
         snapshots: CUSTOMERS_LIVE_SNAPSHOTS,
         tables: CUSTOMERS_LIVE_TABLES,
         isBlocked: isCustomersRefreshBlocked,
         async refresh({ defer, isCurrent }) {
-          const nextData = await getCustomersPageData();
+          const nextData = state.tab === "warranty"
+            ? await refreshCurrentWarrantyQuery({ soft: true, source: "realtime", notify: false })
+            : await refreshCurrentCustomerQuery({ soft: true, source: "realtime", notify: false });
           if (!isCurrent()) return;
           if (isCustomersRefreshBlocked()) {
             defer();
             return;
           }
-          data = nextData;
+          if (state.tab === "warranty") {
+            if (!nextData?.query || !isCurrentWarrantyQueryKey(liveQueryKey(nextData.query))) return;
+            applyWarrantyPageData(nextData);
+          } else {
+            if (!nextData?.query || liveQueryKey(nextData.query) !== liveQueryKey(currentCustomerQuery())) return;
+            data = nextData;
+          }
           rerenderCustomersPage({ preserveTextFocus: true });
         }
       });
@@ -953,6 +1056,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       };
     },
     dispose() {
+      customerRequestSequence += 1;
       window.clearTimeout(resizeTimer);
       resizeTimer = 0;
       closeAllFilterMenus(null);
@@ -962,11 +1066,13 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       currentUser = null;
       unread = null;
       currentHelpers = null;
-      customerSorter = null;
       dateFilter = null;
       customersLiveRefresh = null;
       customersSearchRender?.cancel();
       customersSearchRender = null;
+      warrantySearchRender?.cancel();
+      warrantySearchRender = null;
+      customersLoading = false;
       if (activeScope === scope) activeScope = null;
     }
   };

@@ -78,7 +78,7 @@ assert.match(ordersCss, /\.orders-toolbar\s*\{[\s\S]*?align-items:\s*flex-end/,
 assert.match(ordersCss, /\.orders-table-region\s*\{[\s\S]*?position:\s*relative/);
 
 const customers = routeSources.find(([file]) => file === "customers.js")[1];
-assert.match(customers, /const nextData = await getCustomersPageData\(\);[\s\S]*?data = nextData;/,
-  "customer realtime refresh must keep current rows until replacement data resolves");
+assert.match(customers, /const nextData = state\.tab === "warranty"[\s\S]*?refreshCurrentWarrantyQuery[\s\S]*?refreshCurrentCustomerQuery[\s\S]*?data = nextData;/,
+  "customer realtime refresh must keep current rows and refresh only the active bounded query");
 
 console.log("SPA switch SWR contracts: PASS (orders retain rows, aligned filters, async unread, customer SWR)");
