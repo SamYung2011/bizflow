@@ -20,7 +20,8 @@ const SNAPSHOT_CONTRACT_GENERATIONS = new Map([
   ["warranty.json", 2],
   ["orders.json", 2],
   ["pending-deduction.json", 1],
-  ["expense.json", 1] // G-exp-6: rows now carry employee_name from an employees join.
+  ["expense.json", 1], // G-exp-6: rows now carry employee_name from an employees join.
+  ["whatsapp.json", 1] // G-wa-7: settings now carry the full boss_prompt plus its real character count.
 ]);
 
 export const LIVE_TABLE_CACHE_TTL_MS = 10 * 60_000;

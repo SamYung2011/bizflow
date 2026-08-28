@@ -18,9 +18,9 @@ AS $function$
   )
   OR EXISTS (
     SELECT 1
-    FROM public.employees AS employee
-    WHERE lower(employee.email) = lower(COALESCE(auth.jwt() ->> 'email', ''))
-      AND employee.is_admin = true
+    FROM public.employees AS e
+    WHERE e.user_id = auth.uid()
+      AND e.is_admin = true
   );
 $function$;
 

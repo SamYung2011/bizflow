@@ -63,7 +63,12 @@ assert.match(unlockedSettings, /data-wa-setting="openaiBaseUrl" data-wa-write/);
 assert.match(unlockedSettings, /data-wa-api-key data-wa-write/);
 assert.match(unlockedSettings, /data-wa-setting="model" data-wa-write/);
 assert.match(unlockedSettings, /data-wa-api-test data-wa-write/);
-assert.doesNotMatch(unlockedSettings, /fixture-api-key[^>]*localStorage/);
+const apiKeyTag = unlockedSettings.match(/<input\b[^>]*data-wa-api-key[^>]*>/)?.[0] ?? "";
+assert.ok(apiKeyTag, "C2 must render the API-key input");
+assert.doesNotMatch(apiKeyTag, /\svalue=/,
+  "the API-key input value must be assigned after render, never serialized into outerHTML");
+assert.doesNotMatch(unlockedSettings, /fixture-api-key/,
+  "the in-memory API key must not enter rendered page HTML");
 
 assert.deepEqual(whatsappSettingsPatch({
   openaiBaseUrl: "https://api.openai.com/v1",
@@ -204,11 +209,12 @@ await assert.rejects(() => unauthorized.skipReply("blocked"), /WhatsApp admin co
 await assert.rejects(() => unauthorized.resolveUnresolved("blocked"), /WhatsApp admin context required/);
 await assert.rejects(() => unauthorized.unlockSecrets("blocked"), /WhatsApp admin context required/);
 
-const [pageSource, configSource, writerSource, snapshotSource, providerSource, migrationSource] = await Promise.all([
+const [pageSource, configSource, writerSource, snapshotSource, cacheSource, providerSource, migrationSource] = await Promise.all([
   readFile(new URL("../root-site/bizflow/whatsapp.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/bizflow/whatsapp-config.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/live-whatsapp-writes.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/live-admin-snapshots.js", import.meta.url), "utf8"),
+  readFile(new URL("../root-site/data/live-table-cache.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/data/provider.js", import.meta.url), "utf8"),
   readFile(new URL("../migrations/109_wa_admin_rls_alignment.sql", import.meta.url), "utf8")
 ]);
@@ -217,26 +223,41 @@ assert.match(pageSource, /skipLiveWhatsappReply\(id\)/);
 assert.match(pageSource, /resolveLiveWhatsappUnresolved\(id\)/);
 assert.match(pageSource, /savedSettings\.bossPromptChars = promptChars/,
   "C4 autosave must keep the saved character count in sync so the page is not left permanently dirty");
+assert.match(pageSource, /function syncApiKeyInputValue\(\)[\s\S]*?input\.value = state\.secretUnlocked \? state\.unlockedApiKey : "";/,
+  "the API key must be restored to the input property only after the page HTML is rendered");
+assert.match(pageSource, /const testButton = document\.querySelector\("\[data-wa-api-test\]"\);[\s\S]*?testButton\.disabled = state\.writeBlocked[\s\S]*?!apiKey\.value\.trim\(\)/,
+  "typing an API key must immediately synchronize the test-connection button disabled property");
 assert.doesNotMatch(pageSource, /\.from\(["']wa_(?:replies|unresolved|settings)["']\)/,
   "the page must keep every database write in live-whatsapp-writes.js");
-assert.doesNotMatch(pageSource, /localStorage/,
-  "API and Meta plaintext state must not enter browser persistence");
 assert.match(configSource, /href="\/whatsapp-extension-cloud\.zip" download/);
+assert.match(configSource, /dataAttribute: "data-wa-api-key"[\s\S]*?deferValue: true/,
+  "the API-key renderer must omit the value attribute for outerHTML safety");
 assert.match(writerSource, /openaiBaseUrl:\s*"openai_base_url"/);
 assert.match(writerSource, /model:\s*"model"/);
 assert.match(writerSource, /bossPrompt:\s*"boss_prompt"/);
 assert.doesNotMatch(writerSource, /apiKey:\s*"openai_api_key"/);
+assert.doesNotMatch(snapshotSource, /openai_api_key/,
+  "the live WhatsApp snapshot must never select or persist the plaintext API key");
 assert.match(snapshotSource, /"boss_prompt"/);
 assert.match(snapshotSource, /bossPrompt:\s*asText\(settings\.boss_prompt\)/);
 assert.match(snapshotSource, /bossPromptChars:\s*asText\(settings\.boss_prompt\)\.length/);
+assert.match(cacheSource, /\["whatsapp\.json", 1\][^\n]*settings now carry the full boss_prompt plus its real character count/,
+  "the WhatsApp cache generation must invalidate stale snapshots that lack the full boss prompt contract");
 assert.match(providerSource, /"bossPrompt",\s*"bossPromptChars"/);
 for (const email of ["samyung2011@gmail.com", "a1017339632@gmail.com", "1017339632@qq.com"]) {
   assert.match(migrationSource, new RegExp(email.replace(".", "\\.")));
 }
-assert.match(migrationSource, /FROM public\.employees AS employee/);
-assert.match(migrationSource, /employee\.is_admin = true/);
+assert.match(migrationSource, /FROM public\.employees AS e/);
+assert.match(migrationSource, /e\.user_id = auth\.uid\(\)/);
+assert.match(migrationSource, /e\.is_admin = true/);
+assert.doesNotMatch(migrationSource, /(?:employee|e)\.email/,
+  "migration 109 must not use employees.email as an identity key");
 assert.match(migrationSource, /SECURITY DEFINER/);
 assert.match(migrationSource, /SET search_path = ''/);
+
+assert.match(whatsappCopy.zh.lockedPromptHint, /全文.*真實字數/);
+assert.match(whatsappCopy.en.lockedPromptHint, /full prompt.*real character count/i);
+assert.match(whatsappCopy.fr.lockedPromptHint, /texte complet.*nombre réel de caractères/i);
 
 const newCopyKeys = [
   "locked", "unlocked", "baseUrlHint", "apiKeyMemoryHint", "saveApiConfig", "testConnection",

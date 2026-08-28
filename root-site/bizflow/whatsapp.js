@@ -182,7 +182,15 @@ export function renderWhatsapp(helpers) {
 
 function rerender() {
   const page = document.querySelector("[data-wa-page]");
-  if (page && currentHelpers) page.outerHTML = renderWhatsapp(currentHelpers);
+  if (page && currentHelpers) {
+    page.outerHTML = renderWhatsapp(currentHelpers);
+    syncApiKeyInputValue();
+  }
+}
+
+function syncApiKeyInputValue() {
+  const input = document.querySelector("[data-wa-api-key]");
+  if (input) input.value = state.secretUnlocked ? state.unlockedApiKey : "";
 }
 
 function closeGuide() {
@@ -677,6 +685,11 @@ function onWhatsappInput(event) {
     state.unlockedApiKey = apiKey.value;
     state.savedSection = "";
     state.writeError = "";
+    const testButton = document.querySelector("[data-wa-api-test]");
+    if (testButton) {
+      testButton.disabled = state.writeBlocked || !state.secretUnlocked || !apiKey.value.trim()
+        || !String(state.settings.openaiBaseUrl || "").trim() || !String(state.settings.model || "").trim();
+    }
   }
   const setting = event.target.closest("[data-wa-setting]");
   if (setting && setting.type !== "checkbox") {
@@ -832,6 +845,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       title: "Honnmono · WhatsApp"
     },
     activate() {
+      syncApiKeyInputValue();
       void loadPageUnread({ scope, currentUser, onUpdate: (next) => { unread = next.unread; } });
       scope.listen(document, "click", onWhatsappClick);
       scope.listen(document, "input", onWhatsappInput);
