@@ -1,4 +1,5 @@
 import { getCurrentUser, getSession, getSupabaseClient } from "./auth.js";
+import { fetchAllTablePages } from "./fetch-all-pages.js";
 import { invalidateLiveTables } from "./live-snapshot-utils.js";
 
 let healthPromise = null;
@@ -474,10 +475,6 @@ export async function deleteLiveInventorySupplier(supplierId) {
   return { ok: true, supplierId };
 }
 
-const pendingDeductionTables = [
-  "invoices", "inventory_stock", "inventory_movements", "stock_deduction_audit", "line_item_aliases"
-];
-
 function invoiceItems(invoice) {
   let items = invoice?.items;
   if (typeof items === "string") {
@@ -492,15 +489,56 @@ function normalizedAliasName(value) {
 
 function buildLiveDeductionPlan({ invoice, products, warehouses, stocks, aliases }) {
   if (invoice.legacy_skip_deduct === true) {
-    return [{ name: "Historical invoice", source_item_name: "Historical invoice", qty: 0, skip: true }];
+    return [{
+      name: "歷史發票", source_item_name: "歷史發票", product_name: "", warehouse_name: "",
+      current: null, qty: 0, after: null, skip: true, reason: "已標記為歷史，不扣庫存"
+    }];
   }
   if (String(invoice.notes || "").includes("__BROADWAY__")) {
-    return [{ name: "Broadway channel", source_item_name: "Broadway channel", qty: 0, skip: true }];
+    return [{
+      name: "百老匯渠道", source_item_name: "百老匯渠道", product_name: "", warehouse_name: "",
+      current: null, qty: 0, after: null, skip: true, reason: "百老匯渠道：不扣本地庫存"
+    }];
   }
   const defaultWarehouseId = warehouses[0]?.id || null;
   const items = invoiceItems(invoice);
   const parentIds = new Set(products.filter((product) => product.parent_product_id).map((product) => product.parent_product_id));
   const aliasByName = new Map(aliases.map((alias) => [normalizedAliasName(alias.alias_name), alias]));
+  const warehouseById = new Map(warehouses.map((warehouse) => [warehouse.id, warehouse]));
+  const warehouseName = (warehouseId) => {
+    const warehouse = warehouseById.get(warehouseId);
+    return String(warehouse?.name || warehouse?.code || "");
+  };
+  const skippedRow = ({ name, sourceName, qty, reason, product = null, warehouseId = null }) => ({
+    product_id: product?.id || null,
+    warehouse_id: warehouseId,
+    product_name: String(product?.name || ""),
+    warehouse_name: warehouseName(warehouseId),
+    name,
+    source_item_name: sourceName,
+    current: null,
+    qty,
+    after: null,
+    skip: true,
+    reason
+  });
+  const deductionRow = ({ name, sourceName, qty, product, warehouseId }) => {
+    const current = Number(stocks.find((stock) =>
+      stock.product_id === product.id && stock.warehouse_id === warehouseId)?.qty) || 0;
+    return {
+      product_id: product.id,
+      warehouse_id: warehouseId,
+      product_name: String(product.name || ""),
+      warehouse_name: warehouseName(warehouseId),
+      name,
+      source_item_name: sourceName,
+      current,
+      qty,
+      after: current - qty,
+      skip: false,
+      reason: ""
+    };
+  };
   const plan = [];
   for (const item of items) {
     const itemName = String(item?.name || "");
@@ -508,42 +546,67 @@ function buildLiveDeductionPlan({ invoice, products, warehouses, stocks, aliases
     const alias = aliasByName.get(normalizedAliasName(itemName));
     if (!alias) {
       const product = products.find((candidate) => candidate.name === itemName);
-      if (!product || product.is_virtual === true || product.category === "_archived" || parentIds.has(product.id)) {
-        plan.push({ name: itemName, source_item_name: itemName, qty: itemQty, skip: true });
+      if (!product) {
+        plan.push(skippedRow({ name: itemName, sourceName: itemName, qty: itemQty, reason: "未配 line item 映射" }));
+        continue;
+      }
+      if (product.is_virtual === true) {
+        plan.push(skippedRow({ name: itemName, sourceName: itemName, qty: itemQty, reason: "虛擬產品", product }));
+        continue;
+      }
+      if (product.category === "_archived") {
+        plan.push(skippedRow({ name: itemName, sourceName: itemName, qty: itemQty, reason: "已歸檔老產品", product }));
+        continue;
+      }
+      if (parentIds.has(product.id)) {
+        plan.push(skippedRow({ name: itemName, sourceName: itemName, qty: itemQty, reason: "父 SKU 不扣", product }));
         continue;
       }
       const warehouseId = item?.warehouse_id || defaultWarehouseId;
       if (!warehouseId) {
-        plan.push({ name: itemName, source_item_name: itemName, qty: itemQty, skip: true });
+        plan.push(skippedRow({ name: itemName, sourceName: itemName, qty: itemQty, reason: "無倉庫", product }));
         continue;
       }
-      const current = Number(stocks.find((stock) => stock.product_id === product.id && stock.warehouse_id === warehouseId)?.qty) || 0;
-      plan.push({ product_id: product.id, warehouse_id: warehouseId, name: itemName, source_item_name: itemName, qty: itemQty, current, after: current - itemQty });
+      plan.push(deductionRow({ name: itemName, sourceName: itemName, qty: itemQty, product, warehouseId }));
       continue;
     }
     if (alias.skip === true) {
-      plan.push({ name: itemName, source_item_name: itemName, qty: itemQty, skip: true });
+      plan.push(skippedRow({
+        name: itemName, sourceName: itemName, qty: itemQty, reason: alias.note || "alias 標記為不扣"
+      }));
       continue;
     }
     const mappedProducts = Array.isArray(alias.products) ? alias.products : [];
     if (!mappedProducts.length) {
-      plan.push({ name: itemName, source_item_name: itemName, qty: itemQty, skip: true });
+      plan.push(skippedRow({ name: itemName, sourceName: itemName, qty: itemQty, reason: "alias 未配產品" }));
       continue;
     }
     for (const mapped of mappedProducts) {
       const product = products.find((candidate) => candidate.id === mapped.product_id);
-      if (!product || product.is_virtual === true || product.category === "_archived" || parentIds.has(product.id)) {
-        plan.push({ name: itemName, source_item_name: itemName, qty: 0, skip: true });
+      if (!product) {
+        plan.push(skippedRow({ name: `${itemName} → ?`, sourceName: itemName, qty: 0, reason: "alias 引用的產品已刪除" }));
+        continue;
+      }
+      const mappedName = `${itemName} → ${product.name}`;
+      if (product.is_virtual === true) {
+        plan.push(skippedRow({ name: mappedName, sourceName: itemName, qty: 0, reason: "虛擬產品", product }));
+        continue;
+      }
+      if (product.category === "_archived") {
+        plan.push(skippedRow({ name: mappedName, sourceName: itemName, qty: 0, reason: "已歸檔老產品", product }));
+        continue;
+      }
+      if (parentIds.has(product.id)) {
+        plan.push(skippedRow({ name: mappedName, sourceName: itemName, qty: 0, reason: "父 SKU 不扣", product }));
         continue;
       }
       const warehouseId = item?.warehouse_id || defaultWarehouseId;
       if (!warehouseId) {
-        plan.push({ name: itemName, source_item_name: itemName, qty: 0, skip: true });
+        plan.push(skippedRow({ name: mappedName, sourceName: itemName, qty: 0, reason: "無倉庫", product }));
         continue;
       }
       const totalDeduct = (Number(mapped.qty) || 1) * itemQty;
-      const current = Number(stocks.find((stock) => stock.product_id === product.id && stock.warehouse_id === warehouseId)?.qty) || 0;
-      plan.push({ product_id: product.id, warehouse_id: warehouseId, name: `${itemName} -> ${product.name}`, source_item_name: itemName, qty: totalDeduct, current, after: current - totalDeduct });
+      plan.push(deductionRow({ name: mappedName, sourceName: itemName, qty: totalDeduct, product, warehouseId }));
     }
   }
   return plan;
@@ -572,21 +635,30 @@ export async function dismissLivePendingDeduction(invoiceId) {
     audited_by: currentUser?.employeeId || null
   });
   if (audit.error) console.warn("[dismiss audit] insert failed", audit.error.message);
-  await invalidateLiveTables(...pendingDeductionTables);
+  await invalidateLiveTables(
+    "invoices", "inventory_stock", "inventory_movements", "stock_deduction_audit", "line_item_aliases"
+  );
   return { ok: true, invoiceId, auditRecorded: !audit.error };
 }
 
-export async function reviewLivePendingDeduction(invoiceId, { allowDuplicate = false } = {}) {
+export async function reviewLivePendingDeduction(invoiceId, { allowDuplicate = false, dryRun = false } = {}) {
   const { client, currentUser } = await adminContext();
-  const [invoiceResult, productsResult, warehousesResult, stocksResult, aliasesResult, movementsResult] = await Promise.all([
+  const [invoiceResult, products, warehousesResult, stocks, aliases, movementsResult] = await Promise.all([
     client.from("invoices").select("id,invoice_number,status,items,notes,legacy_skip_deduct").eq("id", invoiceId).maybeSingle(),
-    client.from("products").select("id,name,is_virtual,category,parent_product_id"),
+    fetchAllTablePages({
+      client, table: "products", columns: "id,name,is_virtual,category,parent_product_id", orderCol: "name"
+    }),
     client.from("warehouses").select("id,name,code,sort_order").order("sort_order"),
-    client.from("inventory_stock").select("product_id,warehouse_id,qty"),
-    client.from("line_item_aliases").select("id,alias_name,skip,products,note,verified"),
+    fetchAllTablePages({
+      client, table: "inventory_stock", columns: "product_id,warehouse_id,qty",
+      orderCol: "product_id", secondaryOrder: "warehouse_id"
+    }),
+    fetchAllTablePages({
+      client, table: "line_item_aliases", columns: "id,alias_name,skip,products,note,verified", orderCol: "alias_name"
+    }),
     client.from("inventory_movements").select("id,delta").eq("invoice_id", invoiceId).eq("type", "sale")
   ]);
-  const failedRead = [invoiceResult, productsResult, warehousesResult, stocksResult, aliasesResult, movementsResult]
+  const failedRead = [invoiceResult, warehousesResult, movementsResult]
     .find((result) => result.error);
   if (failedRead?.error) throw inventoryDomainWriteError(failedRead.error.message, "PENDING_DEDUCTION_READ_FAILED");
   if (!invoiceResult.data) throw inventoryDomainWriteError("Invoice not found", "PENDING_INVOICE_NOT_FOUND");
@@ -598,12 +670,23 @@ export async function reviewLivePendingDeduction(invoiceId, { allowDuplicate = f
   const invoice = invoiceResult.data;
   const plan = buildLiveDeductionPlan({
     invoice,
-    products: productsResult.data || [],
+    products,
     warehouses: warehousesResult.data || [],
-    stocks: stocksResult.data || [],
-    aliases: aliasesResult.data || []
+    stocks,
+    aliases
   });
   const deductions = plan.filter((row) => !row.skip && row.qty > 0 && row.product_id && row.warehouse_id);
+  if (dryRun) {
+    return {
+      ok: true,
+      dryRun: true,
+      invoiceId,
+      invoiceNumber: invoice.invoice_number || invoice.id,
+      plan,
+      deductions: deductions.length,
+      skipped: plan.filter((row) => row.skip).length
+    };
+  }
   for (const deduction of deductions) {
     const stock = await client.from("inventory_stock").upsert({
       product_id: deduction.product_id,
@@ -663,7 +746,9 @@ export async function reviewLivePendingDeduction(invoiceId, { allowDuplicate = f
     aliasError = aliases.error || null;
     if (aliasError) console.warn("[alias] upsert failed", aliasError.message);
   }
-  await invalidateLiveTables(...pendingDeductionTables);
+  await invalidateLiveTables(
+    "invoices", "inventory_stock", "inventory_movements", "stock_deduction_audit", "line_item_aliases"
+  );
   return {
     ok: true,
     invoiceId,

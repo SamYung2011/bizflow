@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS public.suppliers (
   contact_person text,
   category text,
   note text,
-  created_at timestamptz NOT NULL DEFAULT now()
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz
 );
 
 ALTER TABLE public.suppliers ENABLE ROW LEVEL SECURITY;

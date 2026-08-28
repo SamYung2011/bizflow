@@ -46,7 +46,8 @@ const copy = {
     required: "請輸入 alias_name",
     saveFailed: "映射儲存失敗，請重試",
     deleteFailed: "映射刪除失敗，請重試",
-    verifyFailed: "映射確認失敗，請重試"
+    verifyFailed: "映射確認失敗，請重試",
+    operationFailed: "操作失敗"
   },
   en: {
     title: "Item mapping",
@@ -87,7 +88,8 @@ const copy = {
     required: "Enter an alias_name",
     saveFailed: "Could not save the mapping. Try again",
     deleteFailed: "Could not delete the mapping. Try again",
-    verifyFailed: "Could not confirm the mapping. Try again"
+    verifyFailed: "Could not confirm the mapping. Try again",
+    operationFailed: "Operation failed"
   },
   fr: {
     title: "Mappage Item",
@@ -128,7 +130,8 @@ const copy = {
     required: "Saisissez un alias_name",
     saveFailed: "Impossible d’enregistrer le mappage. Réessayez",
     deleteFailed: "Impossible de supprimer le mappage. Réessayez",
-    verifyFailed: "Impossible de confirmer le mappage. Réessayez"
+    verifyFailed: "Impossible de confirmer le mappage. Réessayez",
+    operationFailed: "Échec de l'opération"
   }
 };
 
@@ -388,8 +391,8 @@ export function attachItemMapBehaviors({ rerender: nextRerender, scope }) {
         const saved = aliasFromLiveRow(await verifyLiveInventoryAlias(aliasId));
         if (!scope.isCurrent()) return;
         state.aliases = state.aliases.map((alias) => alias.id === aliasId ? saved : alias);
-      } catch {
-        state.error = t(currentHelpersLang(), "verifyFailed");
+      } catch (error) {
+        state.error = `${t(currentHelpersLang(), "operationFailed")}: ${error.message}`;
       } finally {
         state.busy = false;
         if (scope.isCurrent()) rerender();
@@ -417,8 +420,8 @@ export function attachItemMapBehaviors({ rerender: nextRerender, scope }) {
         await deleteLiveInventoryAlias(aliasId);
         if (!scope.isCurrent()) return;
         state.aliases = state.aliases.filter((item) => item.id !== aliasId);
-      } catch {
-        state.error = t(currentHelpersLang(), "deleteFailed");
+      } catch (error) {
+        state.error = `${t(currentHelpersLang(), "operationFailed")}: ${error.message}`;
       } finally {
         state.busy = false;
         if (scope.isCurrent()) rerender();
@@ -443,7 +446,7 @@ export function attachItemMapBehaviors({ rerender: nextRerender, scope }) {
     const field = event.target.closest("[data-item-map-field]");
     if (field) state.draft[field.getAttribute("data-item-map-field")] = field.value;
     const qty = event.target.closest("[data-item-map-qty]");
-    if (qty) state.draft.products[Number(qty.getAttribute("data-item-map-qty"))].qty = Math.max(1, Number(qty.value) || 1);
+    if (qty) state.draft.products[Number(qty.getAttribute("data-item-map-qty"))].qty = Number(qty.value) || 1;
   });
   scope.listen(document, "change", (event) => {
     if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
@@ -471,7 +474,7 @@ export function attachItemMapBehaviors({ rerender: nextRerender, scope }) {
       aliasName,
       products: state.draft.skip ? [] : state.draft.products
         .filter((row) => row.product_id)
-        .map((row) => ({ product_id: row.product_id, qty: Math.max(1, Number(row.qty) || 1) }))
+        .map((row) => ({ product_id: row.product_id, qty: Number(row.qty) || 1 }))
     };
     state.busy = true;
     state.error = "";
@@ -483,8 +486,8 @@ export function attachItemMapBehaviors({ rerender: nextRerender, scope }) {
       if (index >= 0) state.aliases[index] = saved;
       else state.aliases.unshift(saved);
       state.draft = null;
-    } catch {
-      state.error = t(currentHelpersLang(), "saveFailed");
+    } catch (error) {
+      state.error = `${t(currentHelpersLang(), "operationFailed")}: ${error.message}`;
     } finally {
       state.busy = false;
       if (scope.isCurrent()) rerender();

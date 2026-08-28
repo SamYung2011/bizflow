@@ -34,7 +34,8 @@ const copy = {
     close: "關閉",
     loading: "正在載入供應商",
     saveFailed: "供應商儲存失敗，請重試",
-    deleteFailed: "供應商刪除失敗，請重試"
+    deleteFailed: "供應商刪除失敗，請重試",
+    operationFailed: "操作失敗"
   },
   en: {
     title: "Suppliers",
@@ -63,7 +64,8 @@ const copy = {
     close: "Close",
     loading: "Loading suppliers",
     saveFailed: "Could not save the supplier. Try again",
-    deleteFailed: "Could not delete the supplier. Try again"
+    deleteFailed: "Could not delete the supplier. Try again",
+    operationFailed: "Operation failed"
   },
   fr: {
     title: "Fournisseurs",
@@ -92,7 +94,8 @@ const copy = {
     close: "Fermer",
     loading: "Chargement des fournisseurs",
     saveFailed: "Impossible d’enregistrer le fournisseur. Réessayez",
-    deleteFailed: "Impossible de supprimer le fournisseur. Réessayez"
+    deleteFailed: "Impossible de supprimer le fournisseur. Réessayez",
+    operationFailed: "Échec de l'opération"
   }
 };
 
@@ -253,8 +256,8 @@ export function attachSupplierBehaviors({ rerender: nextRerender, scope }) {
         if (!scope.isCurrent()) return;
         state.suppliers = state.suppliers.filter((item) => item.id !== supplierId);
         if (state.category !== "all" && !categories().includes(state.category)) state.category = "all";
-      } catch {
-        state.error = t(currentLang(), "deleteFailed");
+      } catch (error) {
+        state.error = `${t(currentLang(), "operationFailed")}: ${error.message}`;
       } finally {
         state.busy = false;
         if (scope.isCurrent()) rerender();
@@ -308,8 +311,8 @@ export function attachSupplierBehaviors({ rerender: nextRerender, scope }) {
       if (index >= 0) state.suppliers[index] = saved;
       else state.suppliers.unshift(saved);
       state.draft = null;
-    } catch {
-      state.error = t(currentLang(), "saveFailed");
+    } catch (error) {
+      state.error = `${t(currentLang(), "operationFailed")}: ${error.message}`;
     } finally {
       state.busy = false;
       if (scope.isCurrent()) rerender();

@@ -15,10 +15,19 @@ const [inventory, writes, itemMap, suppliers, pending, shopify, edgeIndex, catal
 ]);
 
 function functionBody(source, name) {
-  const start = source.indexOf(`export async function ${name}`);
+  const start = [
+    source.indexOf(`export async function ${name}`),
+    source.indexOf(`function ${name}`)
+  ].filter((index) => index >= 0).sort((left, right) => left - right)[0] ?? -1;
   assert.notEqual(start, -1, `${name} must exist`);
   const next = source.indexOf("\nexport ", start + 1);
   return source.slice(start, next === -1 ? source.length : next);
+}
+
+function invalidationArguments(body, name) {
+  const calls = [...body.matchAll(/invalidateLiveTables\(([\s\S]*?)\);/g)];
+  assert.equal(calls.length, 1, `${name} must have exactly one invalidation call`);
+  return calls[0][1];
 }
 
 // Permission: the three formerly fake domains use the exact same two-bit gate as adminContext.
@@ -74,6 +83,18 @@ assert.match(dismiss, /from\("invoices"\)\.update\(updates\)\.eq\("id", invoiceI
 assert.match(dismiss, /from\("stock_deduction_audit"\)\.insert\(\{[\s\S]*decision: "dismissed"/);
 
 const review = functionBody(writes, "reviewLivePendingDeduction");
+const buildPlan = functionBody(writes, "buildLiveDeductionPlan");
+assert.match(writes, /import \{ fetchAllTablePages \} from "\.\/fetch-all-pages\.js"/);
+for (const [table, order] of [
+  ["products", "name"],
+  ["inventory_stock", "product_id"],
+  ["line_item_aliases", "alias_name"]
+]) {
+  assert.match(review, new RegExp(`fetchAllTablePages\\(\\{[\\s\\S]*?table: "${table}"[\\s\\S]*?orderCol: "${order}"`),
+    `${table} must use the full-table paginator before stock math`);
+  assert.doesNotMatch(review, new RegExp(`client\\.from\\("${table}"\\)\\.select\\(`),
+    `${table} must not use a PostgREST-capped whole-table select`);
+}
 const stockWrite = review.indexOf('from("inventory_stock").upsert');
 const movementWrite = review.indexOf('from("inventory_movements").insert');
 const auditWrite = review.indexOf('from("stock_deduction_audit").insert');
@@ -83,26 +104,54 @@ assert.ok(stockWrite >= 0 && stockWrite < movementWrite && movementWrite < audit
 assert.match(review, /qty: deduction\.after/);
 assert.match(review, /delta: -deduction\.qty/);
 assert.match(review, /type: "sale"/);
+assert.match(review, /from\("inventory_movements"\)\.insert\(\{[\s\S]*?invoice_id: invoice\.id[\s\S]*?\}\)/,
+  "each stock movement must retain its invoice_id duplicate-defense link");
 assert.match(review, /decision: row\.skip \? "skip" : "confirm"/);
+assert.match(review, /const auditRows = plan\.map\([\s\S]*?audited_by: currentUser\?\.employeeId \|\| null/,
+  "each audit row must identify the confirming employee");
 assert.match(review, /onConflict: "alias_name"/);
-assert.doesNotMatch(review, /Math\.max\(0/,
+assert.doesNotMatch(`${buildPlan}\n${review}`, /Math\.max\s*\(\s*0|GREATEST\s*\(/i,
   "pending deductions must preserve negative stock");
-for (const table of ["invoices", "inventory_stock", "inventory_movements", "stock_deduction_audit", "line_item_aliases"]) {
-  assert.match(writes, new RegExp(`"${table}"`), `C3 invalidation set must include ${table}`);
+assert.match(buildPlan, /product_name:[\s\S]*warehouse_name:[\s\S]*current:[\s\S]*qty:[\s\S]*after:[\s\S]*skip:[\s\S]*reason:/,
+  "every preview row must expose product, warehouse, quantities, skip and reason fields");
+for (const [name, body] of [["dismissLivePendingDeduction", dismiss], ["reviewLivePendingDeduction", review]]) {
+  const invalidation = invalidationArguments(body, name);
+  for (const table of ["invoices", "inventory_stock", "inventory_movements", "stock_deduction_audit", "line_item_aliases"]) {
+    assert.match(invalidation, new RegExp(`"${table}"`), `${name} invalidation must include ${table}`);
+  }
 }
-assert.match(pending, /await reviewLivePendingDeduction\(invoiceId\)/);
+const dryRunIndex = review.indexOf("if (dryRun)");
+assert.ok(dryRunIndex >= 0 && dryRunIndex < stockWrite,
+  "dry-run must return the full plan before the first database write");
+assert.match(pending, /await reviewLivePendingDeduction\(invoiceId, \{ dryRun: true \}\)/);
+assert.match(pending, /data-pending-plan[\s\S]*data-pending-plan-confirm/,
+  "C3 must render the deduction plan before exposing the confirm action");
+assert.match(pending, /data-pending-plan-confirm[\s\S]*confirmInPage\(t\(currentLang\(\), "reviewConfirm"/,
+  "the reviewed plan must still require an explicit confirmation before writes");
 assert.match(pending, /await dismissLivePendingDeduction\(invoiceId\)/);
 assert.doesNotMatch(pending, /Local-only demonstration|future API|本地標記|本地忽略/);
+assert.match(writes, /name: "歷史發票"[\s\S]*source_item_name: "歷史發票"/);
+assert.match(writes, /name: "百老匯渠道"[\s\S]*source_item_name: "百老匯渠道"/);
+
+assert.doesNotMatch(itemMap, /Math\.max\(1/,
+  "fractional alias ratios must not be silently raised to one in the editor");
+assert.match(itemMap, /\.qty = Number\(qty\.value\) \|\| 1/);
+assert.match(itemMap, /qty: Number\(row\.qty\) \|\| 1/);
+for (const source of [itemMap, suppliers, pending]) {
+  assert.doesNotMatch(source, /catch\s*\{/,
+    "inventory write pages must surface the real database error message");
+  assert.match(source, /operationFailed[\s\S]*error\.message/);
+}
 
 // Destructive/irreversible actions all remain behind local i18n confirmation copy.
 assert.match(itemMap, /confirmInPage\(t\(currentHelpersLang\(\), "deleteConfirm"\)/);
 assert.match(suppliers, /confirmInPage\(t\(currentLang\(\), "deleteConfirm"\)/);
-assert.match(pending, /confirmInPage\(t\(currentLang\(\), "reviewConfirm"\)/);
+assert.match(pending, /confirmInPage\(t\(currentLang\(\), "reviewConfirm"/);
 assert.match(pending, /confirmInPage\(t\(currentLang\(\), "dismissConfirm"\)/);
 for (const [source, keys] of [
-  [itemMap, ["saveFailed", "deleteFailed", "verifyFailed"]],
-  [suppliers, ["saveFailed", "deleteFailed"]],
-  [pending, ["reviewConfirm", "dismissConfirm", "reviewFailed", "dismissFailed"]],
+  [itemMap, ["saveFailed", "deleteFailed", "verifyFailed", "operationFailed"]],
+  [suppliers, ["saveFailed", "deleteFailed", "operationFailed"]],
+  [pending, ["reviewConfirm", "dismissConfirm", "reviewFailed", "dismissFailed", "planTitle", "planProduct", "planWarehouse", "planCurrent", "planDeduct", "planAfter", "planReason", "planConfirmButton", "operationFailed"]],
   [shopify, ["reversePreview", "reverseConfirm", "reverseFailed"]]
 ]) {
   for (const key of keys) {
@@ -128,7 +177,7 @@ assert.match(catalog, /onConflict: "shopify_variant_id,bizflow_product_id"/);
 
 // M1 is additive migration history only; WhatsApp owns 109, so this branch owns 110.
 assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.suppliers/);
-for (const field of ["id", "name", "contact_url", "contact_person", "category", "note", "created_at"]) {
+for (const field of ["id", "name", "contact_url", "contact_person", "category", "note", "created_at", "updated_at"]) {
   assert.match(migration, new RegExp(`\\b${field}\\b`), `migration is missing ${field}`);
 }
 assert.doesNotMatch(migration, /\bDROP\b|\bTRUNCATE\b/);
