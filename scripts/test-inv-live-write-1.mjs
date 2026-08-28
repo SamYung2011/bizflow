@@ -104,7 +104,7 @@ assert.ok(stockWrite >= 0 && stockWrite < movementWrite && movementWrite < audit
 assert.match(review, /qty: deduction\.after/);
 assert.match(review, /delta: -deduction\.qty/);
 assert.match(review, /type: "sale"/);
-assert.match(review, /from\("inventory_movements"\)\.insert\(\{[\s\S]*?invoice_id: invoice\.id[\s\S]*?\}\)/,
+assert.match(review, /from\("inventory_movements"\)\.insert\(\{\s*product_id: deduction\.product_id,\s*warehouse_id: deduction\.warehouse_id,\s*delta: -deduction\.qty,\s*type: "sale",\s*reason: `[^`]+`,\s*invoice_id: invoice\.id\s*\}\)/,
   "each stock movement must retain its invoice_id duplicate-defense link");
 assert.match(review, /decision: row\.skip \? "skip" : "confirm"/);
 assert.match(review, /const auditRows = plan\.map\([\s\S]*?audited_by: currentUser\?\.employeeId \|\| null/,
