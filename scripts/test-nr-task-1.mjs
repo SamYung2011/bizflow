@@ -321,12 +321,21 @@ assert.match(tasksSource, /event\.key === "Enter" && \(event\.metaKey \|\| event
 // G-task-14 (todo #260, 2026-08-04, 煊煊 approved "可以"): creator wholeTask uncheck must reset
 // every assignee's local completedAt too (mirrors completeWholeTask's fan-out, but for undo), while
 // an assignee reopening the task via their own row toggle must leave everyone else's row alone.
-const toggleWrite = tasksSource.slice(tasksSource.indexOf("function reopenWholeTask"), tasksSource.indexOf("async function approveWaitingTask"));
-assert.match(toggleWrite, /function reopenWholeTask\(task, \{ resetAssignees = false \} = \{\}\)/);
-const resetAssigneesCalls = toggleWrite.match(/reopenWholeTask\(task, \{ resetAssignees: true \}\)/g) ?? [];
-assert.equal(resetAssigneesCalls.length, 2, "both creator wholeTask-uncheck call sites (live-write + local-only) must pass resetAssignees: true");
-const bareReopenCalls = toggleWrite.match(/else if \(!completed\) reopenWholeTask\(task\);/g) ?? [];
-assert.equal(bareReopenCalls.length, 2, "an assignee's own-row uncheck must keep calling reopenWholeTask without resetAssignees, unchanged");
+const completionEcho = tasksSource.slice(
+  tasksSource.indexOf("function applyPredictedTaskCompletion"),
+  tasksSource.indexOf("function completeWholeTask")
+);
+const reopenSource = tasksSource.slice(
+  tasksSource.indexOf("function reopenWholeTask"),
+  tasksSource.indexOf("async function toggleTaskCompletion")
+);
+assert.match(reopenSource, /function reopenWholeTask\(task, \{ resetAssignees = false \} = \{\}\)/);
+const resetAssigneesCalls = completionEcho.match(/reopenWholeTask\(task, \{ resetAssignees: true \}\)/g) ?? [];
+assert.equal(resetAssigneesCalls.length, 2,
+  "both optimistic prediction and server correction must keep creator wholeTask-uncheck's resetAssignees semantics");
+const bareReopenCalls = completionEcho.match(/reopenWholeTask\(task\);/g) ?? [];
+assert.equal(bareReopenCalls.length, 2,
+  "assignee prediction/correction must keep reopening without resetting anyone else's row");
 
 assert.match(writesSource, /start_date: startDate \|\| null/g);
 const completionWrite = writesSource.slice(writesSource.indexOf("export async function completeLiveTask"), writesSource.indexOf("export async function approveLiveTask"));
