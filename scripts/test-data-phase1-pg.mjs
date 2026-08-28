@@ -16,6 +16,7 @@ const patchMigrationPath = join(repoRoot, "migrations/105_bizflow_warranty_reven
 const homeRevenueGateMigrationPath = join(repoRoot, "migrations/106_bizflow_home_revenue_gate.sql");
 const homeSalesGateMigrationPath = join(repoRoot, "migrations/107_bizflow_home_sales_gate.sql");
 const customerPageMigrationPath = join(repoRoot, "migrations/108_bizflow_customer_page.sql");
+const waAdminMigrationPath = join(repoRoot, "migrations/109_wa_admin_rls_alignment.sql");
 
 function executable(name) {
   for (const candidate of [`/opt/homebrew/bin/${name}`, `/usr/local/bin/${name}`, name]) {
@@ -68,6 +69,14 @@ function asAuthenticatedUser(userId, statement) {
     SET ROLE authenticated;
     SET request.jwt.claim.sub = '${userId}';
     SET statement_timeout = '8s';
+    ${statement}
+  `).split("\n").filter(Boolean).at(-1);
+}
+
+function asAuthenticatedEmail(email, statement) {
+  return sql(`
+    SET ROLE authenticated;
+    SET request.jwt.claim.email = '${email}';
     ${statement}
   `).split("\n").filter(Boolean).at(-1);
 }
@@ -345,10 +354,13 @@ try {
     CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE
       AS $$ SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
     GRANT EXECUTE ON FUNCTION auth.uid() TO authenticated, anon;
+    CREATE FUNCTION auth.jwt() RETURNS jsonb LANGUAGE sql STABLE
+      AS $$ SELECT jsonb_build_object('email', NULLIF(current_setting('request.jwt.claim.email', true), '')) $$;
+    GRANT EXECUTE ON FUNCTION auth.jwt() TO authenticated, anon;
     CREATE TABLE public.employees (
       id uuid PRIMARY KEY, user_id uuid, name text, created_at timestamptz DEFAULT now(),
       active boolean DEFAULT true, bizflow_main_access boolean DEFAULT false, is_admin boolean DEFAULT false,
-      can_view_revenue boolean NOT NULL DEFAULT false
+      can_view_revenue boolean NOT NULL DEFAULT false, email text
     );
     CREATE FUNCTION public.has_bizflow_main_access() RETURNS boolean
       LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,auth
@@ -752,7 +764,26 @@ try {
   run(psql, psqlArgs(["-f", homeSalesGateMigrationPath]), { quiet: true });
   run(psql, psqlArgs(["-f", customerPageMigrationPath]), { quiet: true });
   run(psql, psqlArgs(["-f", customerPageMigrationPath]), { quiet: true });
+  run(psql, psqlArgs(["-f", waAdminMigrationPath]), { quiet: true });
+  run(psql, psqlArgs(["-f", waAdminMigrationPath]), { quiet: true });
   sql("ANALYZE;");
+
+  assert.equal(sql("SELECT prosecdef FROM pg_proc WHERE oid='public.is_wa_admin()'::regprocedure;"), "t",
+    "the RLS helper must stay SECURITY DEFINER while reading the employees table");
+  assert.match(sql("SELECT array_to_string(proconfig, ',') FROM pg_proc WHERE oid='public.is_wa_admin()'::regprocedure;"), /search_path=/,
+    "the RLS helper must pin its search_path");
+  assert.equal(asAuthenticatedEmail("SAMYUNG2011@GMAIL.COM", "SELECT public.is_wa_admin();"), "t");
+  assert.equal(asAuthenticatedEmail("a1017339632@gmail.com", "SELECT public.is_wa_admin();"), "t");
+  assert.equal(asAuthenticatedEmail("1017339632@qq.com", "SELECT public.is_wa_admin();"), "t");
+  sql(`
+    INSERT INTO public.employees(id,user_id,name,email,is_admin,bizflow_main_access) VALUES
+      ('90000000-0000-0000-0000-000000000001',NULL,'WA admin by row','row-admin@example.test',true,true),
+      ('90000000-0000-0000-0000-000000000002',NULL,'WA non-admin by row','row-member@example.test',false,true);
+  `);
+  assert.equal(asAuthenticatedEmail("ROW-ADMIN@EXAMPLE.TEST", "SELECT public.is_wa_admin();"), "t",
+    "an employees.is_admin row must grant the same WhatsApp write access as the frontend");
+  assert.equal(asAuthenticatedEmail("row-member@example.test", "SELECT public.is_wa_admin();"), "f");
+  assert.equal(asAuthenticatedEmail("unknown@example.test", "SELECT public.is_wa_admin();"), "f");
 
   assert.equal(sql("SELECT prosecdef FROM pg_proc WHERE oid='public.bizflow_customer_page(text,text,text,date,date,text,integer,integer)'::regprocedure;"), "f",
     "the customer page RPC must remain SECURITY INVOKER");
