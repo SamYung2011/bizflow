@@ -25,6 +25,8 @@ import { buildTaskSubtaskEcho, createTaskSubmitSubtaskDraft, createTaskSubmitSub
 import { callTeamTaskParser } from "../data/live-ai-parse.js";
 import { matchesSearchValues } from "../components/search-match.js";
 import { createDebouncedTask } from "../components/debounced-task.js";
+import { createOptimisticWriteCoordinator } from "./task-optimistic-write.js";
+import { captureTaskCompletionEffects, createTaskCompletionSnapshot, restoreTaskCompletionSnapshot } from "./task-completion-state.js";
 
 let data = null;
 let currentUser = null;
@@ -41,6 +43,7 @@ let taskLiveRefresh = null;
 let taskBoardReadTracker = null;
 let taskBoardColumnReadObserver = null;
 let taskSearchRender = null;
+const taskCompletionWrites = createOptimisticWriteCoordinator();
 const taskDueDatePanel = createDateRangePanel();
 const taskStartDatePanel = createDateRangePanel();
 
@@ -391,6 +394,12 @@ function rerenderTaskPage({ focusDetail = false, restoreDetailFocus = false, foc
   }
   activeScope?.animationFrame(observeTaskBoardUnreadColumns);
   if (taskLiveRefresh?.pending) queueMicrotask(() => void taskLiveRefresh.flush());
+}
+
+function rerenderTaskPageFromBackground(options = {}) {
+  if (state.actionTaskId) return false;
+  rerenderTaskPage(options);
+  return true;
 }
 
 function rerenderTaskSearchResults() {
@@ -912,6 +921,54 @@ function decrementOpenTaskCounts(task) {
   adjustOpenTaskCounts(task, -1);
 }
 
+function applyPredictedTaskCompletion(task, { wholeTask, targetAssignee, completed, completedAt }) {
+  if (wholeTask) {
+    if (completed) completeWholeTask(task, completedAt);
+    else reopenWholeTask(task, { resetAssignees: true });
+    return;
+  }
+
+  targetAssignee.completedAt = completed ? completedAt : null;
+  targetAssignee.abandonedAt = null;
+  const allDone = task.assignees.length > 0 && task.assignees.every((assignee) => assignee.completedAt != null);
+  const thresholdDone = !isStrictCompletionMode(task.completionMode) && completed && meetsTaskCompletionThreshold(
+    task.assignees.filter((assignee) => assignee.completedAt != null).length, task.assignees.length);
+  if ((allDone || thresholdDone) && !task.requiresReview) {
+    completeWholeTask(task, targetAssignee.completedAt, { stampAssignees: false });
+  } else if (!completed) {
+    reopenWholeTask(task);
+  }
+}
+
+function reconcileTaskCompletion(task, { wholeTask, targetAssignee, completed, result, snapshot = null }) {
+  if (wholeTask) {
+    if (result.taskDone) {
+      completeWholeTask(task, result.completedAt);
+      const previousAssignees = new Map((snapshot?.task.assignees ?? []).map((assignee) => [assignee.employeeId, assignee]));
+      task.assignees.forEach((assignee) => {
+        const previous = previousAssignees.get(assignee.employeeId);
+        if (previous?.completedAt == null && previous?.abandonedAt == null) assignee.completedAt = result.completedAt;
+      });
+    } else reopenWholeTask(task, { resetAssignees: true });
+    return;
+  }
+
+  targetAssignee.completedAt = result.completedAt;
+  targetAssignee.abandonedAt = null;
+  if (result.taskDone) {
+    completeWholeTask(task, result.completedAt, { stampAssignees: false });
+  } else if (completed && snapshot) {
+    // A below-threshold/needs-review completion does not update employee_tasks on the
+    // server. Restore its exact prior status (including overdue) while keeping the
+    // caller's freshly-confirmed assignee timestamp.
+    restoreTaskCompletionSnapshot(task, snapshot, state);
+    targetAssignee.completedAt = result.completedAt;
+    targetAssignee.abandonedAt = null;
+  } else {
+    reopenWholeTask(task);
+  }
+}
+
 // 批3件C (2026-08-05 80% 阈值): stampAssignees=false 用于 assignee 勾自己行触发的整单收口(全员 or
 // 阈值)——那条 DB 路径只写 employee_tasks 任务级字段,不动其他 assignee 行(082 不许普通 assignee
 // fan-out),回显必须同样不给别人的行伪造 ✓。全员完成时行本就全勾,不 stamp 也无差;阈值完成时没勾
@@ -968,7 +1025,7 @@ function reopenWholeTask(task, { resetAssignees = false } = {}) {
 async function toggleTaskCompletion(taskId, { forceComplete = false, forceUncomplete = false } = {}) {
   if (state.writeBusy || (state.liveReadOnly && !state.liveTaskWrites)) return;
   const task = state.tasks.find((item) => item.id === taskId);
-  if (!task) return;
+  if (!task || taskCompletionWrites.has(task.id)) return;
   const completion = taskCompletionForMember(task, state.currentUser);
   if (!completion.canToggle) return;
   const completed = forceComplete ? true : forceUncomplete ? false : !completion.checked;
@@ -982,53 +1039,52 @@ async function toggleTaskCompletion(taskId, { forceComplete = false, forceUncomp
   const mountId = activeMountId;
   const scope = activeScope;
   if (state.liveTaskWrites) {
-    state.writeBusy = true;
-    state.writeError = "";
-    rerenderTaskPage();
-    try {
-      const result = await completeLiveTask({
+    const snapshot = createTaskCompletionSnapshot(task, state);
+    const completedAt = completed ? localTimestamp() : null;
+    await taskCompletionWrites.run(task.id, {
+      apply() {
+        state.writeError = "";
+        applyPredictedTaskCompletion(task, { wholeTask: completion.wholeTask, targetAssignee, completed, completedAt });
+        captureTaskCompletionEffects(snapshot, state);
+        state.actionTaskId = null;
+        taskBoardReadTracker?.refresh(state.tasks);
+        rerenderTaskPage({ focusBoard: true });
+      },
+      write: () => completeLiveTask({
         taskId: task.id,
         targetEmployeeId: targetAssignee?.employeeId,
         wholeTask: completion.wholeTask,
         needsApproval: task.requiresReview,
         completionMode: task.completionMode,
         completed
-      });
-      if (!isCurrentTaskMount(mountId, scope)) return;
-      if (completion.wholeTask) {
-        if (completed) completeWholeTask(task, result.completedAt);
-        else reopenWholeTask(task, { resetAssignees: true });
-      } else {
-        targetAssignee.completedAt = result.completedAt;
-        targetAssignee.abandonedAt = null;
-        if (result.taskDone) completeWholeTask(task, result.completedAt, { stampAssignees: false });
-        else if (!completed) reopenWholeTask(task);
+      }),
+      isCurrent: () => isCurrentTaskMount(mountId, scope),
+      reconcile(result) {
+        reconcileTaskCompletion(task, { wholeTask: completion.wholeTask, targetAssignee, completed, result, snapshot });
+        taskBoardReadTracker?.refresh(state.tasks);
+        rerenderTaskPage({ focusBoard: true });
+      },
+      rollback() {
+        restoreTaskCompletionSnapshot(task, snapshot, state);
+      },
+      onFailure(error) {
+        console.warn("Task completion update failed", error);
+        state.writeError = "tasks.write.failed";
+        taskBoardReadTracker?.refresh(state.tasks);
+        rerenderTaskPage({ focusBoard: true });
       }
-    } catch (error) {
-      if (!isCurrentTaskMount(mountId, scope)) return;
-      console.warn("Task completion update failed", error);
-      state.writeError = "tasks.write.failed";
-    } finally {
-      if (isCurrentTaskMount(mountId, scope)) state.writeBusy = false;
-    }
-  } else if (completion.wholeTask) {
-    if (completed) completeWholeTask(task, localTimestamp());
-    else reopenWholeTask(task, { resetAssignees: true });
+    });
   } else {
-    targetAssignee.completedAt = completed ? localTimestamp() : null;
-    targetAssignee.abandonedAt = null;
-    const allDone = task.assignees.length > 0 && task.assignees.every((assignee) => assignee.completedAt != null);
-    // 批3件C: 演示态与 live 写路径同一条 80% 阈值(共用 task-completion-threshold.js),先到先触发。
-    // 批3件D: 嚴格驗收(strict)关阈值,同 live 路径的模式闸。
-    const thresholdDone = !isStrictCompletionMode(task.completionMode) && completed && meetsTaskCompletionThreshold(
-      task.assignees.filter((assignee) => assignee.completedAt != null).length, task.assignees.length);
-    if ((allDone || thresholdDone) && !task.requiresReview) completeWholeTask(task, targetAssignee.completedAt, { stampAssignees: false });
-    else if (!completed) reopenWholeTask(task);
+    applyPredictedTaskCompletion(task, {
+      wholeTask: completion.wholeTask,
+      targetAssignee,
+      completed,
+      completedAt: completed ? localTimestamp() : null
+    });
+    state.actionTaskId = null;
+    taskBoardReadTracker?.refresh(state.tasks);
+    rerenderTaskPage({ focusBoard: true });
   }
-  if (!isCurrentTaskMount(mountId, scope)) return;
-  state.actionTaskId = null;
-  taskBoardReadTracker?.refresh(state.tasks);
-  rerenderTaskPage({ focusBoard: true });
 }
 
 async function approveWaitingTask(task) {
@@ -1167,43 +1223,50 @@ async function toggleTaskParticipation(task) {
 }
 
 async function toggleSubtaskCompletion(subtask) {
-  if (!state.liveTaskWrites || state.writeBusy || !subtask?.parentId) return;
+  if (!state.liveTaskWrites || state.writeBusy || !subtask?.parentId || taskCompletionWrites.has(subtask.id)) return;
   const ownAssignee = taskAssignee(subtask, state.currentUser);
   if (!ownAssignee) return;
   const mountId = activeMountId;
   const scope = activeScope;
   const nextCompleted = ownAssignee.completedAt == null;
-  const wasDone = subtask.done === true || subtask.status === "completed";
-  state.writeBusy = true;
-  state.writeError = "";
-  rerenderTaskPage({ focusSubtaskId: subtask.id });
-  try {
-    const result = await setLiveSubtaskCompletion({ taskId: subtask.id, completed: nextCompleted });
-    if (!isCurrentTaskMount(mountId, scope)) return;
-    ownAssignee.completedAt = result.completedAt;
-    ownAssignee.abandonedAt = null;
-    subtask.done = result.taskDone;
-    subtask.status = result.taskDone ? "completed" : "inProgress";
-    subtask.completedAt = result.taskDone ? result.completedAt : "";
-    if (result.taskDone && !wasDone) {
-      state.summary.completed += 1;
-      state.summary.inProgress = Math.max(0, state.summary.inProgress - 1);
-      adjustOpenTaskCounts(subtask, -1);
-    } else if (!result.taskDone && wasDone) {
-      state.summary.completed = Math.max(0, state.summary.completed - 1);
-      state.summary.inProgress += 1;
-      adjustOpenTaskCounts(subtask, 1);
+  const snapshot = createTaskCompletionSnapshot(subtask, state);
+  const completedAt = nextCompleted ? localTimestamp() : null;
+  await taskCompletionWrites.run(subtask.id, {
+    apply() {
+      state.writeError = "";
+      applyPredictedTaskCompletion(subtask, {
+        wholeTask: false,
+        targetAssignee: ownAssignee,
+        completed: nextCompleted,
+        completedAt
+      });
+      captureTaskCompletionEffects(snapshot, state);
+      taskBoardReadTracker?.refresh(state.tasks);
+      rerenderTaskPage({ focusSubtaskId: subtask.id });
+    },
+    write: () => setLiveSubtaskCompletion({ taskId: subtask.id, completed: nextCompleted }),
+    isCurrent: () => isCurrentTaskMount(mountId, scope),
+    reconcile(result) {
+      reconcileTaskCompletion(subtask, {
+        wholeTask: false,
+        targetAssignee: ownAssignee,
+        completed: nextCompleted,
+        result,
+        snapshot
+      });
+      taskBoardReadTracker?.refresh(state.tasks);
+      rerenderTaskPage({ focusSubtaskId: subtask.id });
+    },
+    rollback() {
+      restoreTaskCompletionSnapshot(subtask, snapshot, state);
+    },
+    onFailure(error) {
+      console.warn("Subtask completion update failed", error);
+      state.writeError = "tasks.write.failed";
+      taskBoardReadTracker?.refresh(state.tasks);
+      rerenderTaskPage({ focusSubtaskId: subtask.id });
     }
-    taskBoardReadTracker?.refresh(state.tasks);
-  } catch (error) {
-    if (!isCurrentTaskMount(mountId, scope)) return;
-    console.warn("Subtask completion update failed", error);
-    state.writeError = "tasks.write.failed";
-  } finally {
-    if (isCurrentTaskMount(mountId, scope)) state.writeBusy = false;
-  }
-  if (!isCurrentTaskMount(mountId, scope)) return;
-  rerenderTaskPage({ focusSubtaskId: subtask.id });
+  });
 }
 
 async function createSubtaskWrite(parent, title, member) {
@@ -2397,7 +2460,7 @@ function hasTaskUnsavedChanges() {
 }
 
 function hasTaskRealtimeRefreshBlock() {
-  if (state.writeBusy || state.submitOpen || state.aiOpen || state.feedbackEditingId || hasTaskUnsavedChanges()) return true;
+  if (state.writeBusy || taskCompletionWrites.pending || state.actionTaskId || state.submitOpen || state.aiOpen || state.feedbackEditingId || hasTaskUnsavedChanges()) return true;
   const active = document.activeElement;
   return Boolean(active?.closest?.("[data-task-search], [data-task-feedback-form], [data-task-feedback-edit-form], [data-task-subtask-form], [data-task-subtask-edit-form], [data-task-submit-form], [data-task-ai-form]"));
 }
@@ -2460,7 +2523,7 @@ function applyRealtimeTaskData(nextData) {
   Object.assign(currentFilters, next.filterState);
   state = currentState;
   filterState = currentFilters;
-  rerenderTaskPage({ focusDetail: keepDetail });
+  rerenderTaskPageFromBackground({ focusDetail: keepDetail });
   taskBoardReadTracker?.refresh(state.tasks);
 }
 
@@ -2572,7 +2635,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
           const unchanged = previous.size === nextUnreadIds.size && [...previous].every((id) => nextUnreadIds.has(id));
           if (unchanged) return;
           state.boardUnreadTaskIds = nextUnreadIds;
-          if (!state.detailOpen && state.mode === "board" && filterState.view === "board") rerenderTaskPage();
+          if (!state.detailOpen && state.mode === "board" && filterState.view === "board") rerenderTaskPageFromBackground();
         }
       });
       taskBoardReadTracker = readTracker;
@@ -2621,6 +2684,7 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       taskMobileViewport = null;
       if (activeScope === scope) activeScope = null;
       taskLiveRefresh = null;
+      taskCompletionWrites.clear();
       taskSearchRender?.cancel();
       taskSearchRender = null;
       taskBoardReadTracker = null;

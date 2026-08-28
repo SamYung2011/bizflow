@@ -231,9 +231,9 @@ assert.match(subtaskWrite, /const taskDone = \(allDone \|\| thresholdDone\) && t
 assert.match(tasksSource, /function completeWholeTask\(task, completedAt, \{ stampAssignees = true \} = \{\}\)/);
 assert.equal((tasksSource.match(/completeWholeTask\(task, [^,)]+, \{ stampAssignees: false \}\)/g) ?? []).length, 2,
   "both assignee-path call sites (live echo + demo mode) must skip local row stamping");
-assert.match(tasksSource, /if \(completed\) completeWholeTask\(task, result\.completedAt\);/,
-  "the creator wholeTask echo keeps the default stamping — its DB write really does stamp pending rows");
+assert.match(tasksSource, /if \(result\.taskDone\) \{\s*\n\s*completeWholeTask\(task, result\.completedAt\);/,
+  "the server-authoritative creator wholeTask echo keeps the default stamping — its DB write really does stamp pending rows");
 // Demo mode mirrors the live gate.
-assert.match(tasksSource, /if \(\(allDone \|\| thresholdDone\) && !task\.requiresReview\) completeWholeTask\(task, targetAssignee\.completedAt, \{ stampAssignees: false \}\);/);
+assert.match(tasksSource, /if \(\(allDone \|\| thresholdDone\) && !task\.requiresReview\) \{\s*\n\s*completeWholeTask\(task, targetAssignee\.completedAt, \{ stampAssignees: false \}\);/);
 
 console.log("task-threshold-complete-1 contracts: PASS (rounded-count effect table 1-10, 4/5 + 2/3 + 3/4 trigger, 1/2 + 3/5 no-trigger, abandoned denominator-only, done-for-member extension + buckets + no phantom pending, approval routing, fresh-rows gate + single close + no fan-out, uncheck reopen unchanged, echo honesty, single shared definition)");

@@ -91,18 +91,26 @@
 .team-member-rail {
   display: flex;
   width: 360px;
+  max-height: calc(100vh - (var(--space-40) * 2));
   min-width: 360px;
+  min-height: 0;
   flex-direction: column;
   gap: var(--space-20);
   padding: var(--space-20);
   background: var(--gray-5);
+  overflow: hidden;
 }
 
 .team-member-list {
   display: flex;
   min-width: 0;
+  min-height: 0;
+  flex: 0 1 auto;
   flex-direction: column;
   gap: var(--space-20);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .team-member-task {
@@ -223,6 +231,7 @@
   display: flex;
   width: 100%;
   min-height: 40px;
+  flex: none;
   align-items: center;
   justify-content: center;
   border: 0;
