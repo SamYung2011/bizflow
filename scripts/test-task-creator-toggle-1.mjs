@@ -52,16 +52,41 @@ function task(id, overrides = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Old Tasks.jsx:388-399 precedence: when the current user is BOTH an assignee
-//    and the creator, the assignee row wins — ticking toggles their own row, not
-//    the whole task (`isEmpAssignee ? toggleDone : creatorToggleDone`).
+// 1. 2026-08-28 product rule: the publisher always owns the whole-task toggle,
+//    including when that same person is also an assignee. This must select the
+//    existing creator fan-out/reopen paths instead of the assignee self-row path.
 const bothRoles = task("both-roles", { creator: helen.name, creatorId: helen.id });
-assert.deepEqual(taskCompletionForMember(bothRoles, helen), { checked: false, canToggle: true, wholeTask: false },
-  "assignee-and-creator must resolve to the own-row toggle (wholeTask: false), mirroring old Tasks.jsx assignee-first precedence");
+assert.deepEqual(taskCompletionForMember(bothRoles, helen), { checked: false, canToggle: true, wholeTask: true },
+  "assignee-and-creator must select the whole-task completion path");
 
-// Creator who is NOT an assignee gets the whole-task toggle (old creatorToggleDone).
+const completedBothRoles = task("completed-both-roles", {
+  creator: helen.name,
+  creatorId: helen.id,
+  status: "completed",
+  done: true,
+  completedAt: "2026/08/28 12:00",
+  assignees: [
+    { employeeId: helen.id, name: helen.name, completedAt: "2026/08/28 12:00", abandonedAt: null },
+    { employeeId: jack.id, name: jack.name, completedAt: "2026/08/28 12:00", abandonedAt: null }
+  ]
+});
+assert.deepEqual(taskCompletionForMember(completedBothRoles, helen), { checked: true, canToggle: true, wholeTask: true },
+  "the creator-assignee's checked state must follow taskDoneForMember and uncheck through the whole-task reopen path");
+const abandonedBothRoles = task("abandoned-both-roles", {
+  creator: helen.name,
+  creatorId: helen.id,
+  assignees: [{ employeeId: helen.id, name: helen.name, completedAt: null, abandonedAt: "2026/08/28 11:00" }]
+});
+assert.deepEqual(taskCompletionForMember(abandonedBothRoles, helen), { checked: false, canToggle: false, wholeTask: true },
+  "an abandoned creator assignment must keep the creator whole-task identity while disabling its toggle");
+
+// Creator who is NOT an assignee keeps the same whole-task toggle.
 const creatorOnly = task("creator-only", { creator: helen.name, creatorId: helen.id, assignees: [], members: [] });
 assert.deepEqual(taskCompletionForMember(creatorOnly, helen), { checked: false, canToggle: true, wholeTask: true });
+
+// A non-creator assignee keeps the self-row behavior; 80%/strict/review routing remains downstream.
+assert.deepEqual(taskCompletionForMember(task("assignee-only"), helen), { checked: false, canToggle: true, wholeTask: false },
+  "ordinary assignees must remain on the existing row-only path");
 
 // ---------------------------------------------------------------------------
 // 2. Bidirectional at the ROW level too: an assignee whose own row is completed
@@ -121,6 +146,12 @@ assert.match(wholeCompleteWrite, /\.update\(\{ completed_at: completedAt \}\)[\s
   "whole-task complete must scope the fan-out to pending rows only (both .is(null) guards), mirroring old pendingIds");
 assert.match(wholeCompleteWrite, /const patch = \{ status: "done", completed_at: completedAt \};[\s\S]*?if \(needsApproval\) \{[\s\S]*?patch\.approved_at = completedAt;[\s\S]*?patch\.approved_by = currentUser\.employeeId;/,
   "needs_approval tasks completed by the creator are auto-verified in the same patch (old Tasks.jsx:360-361)");
+const completionToggle = tasksSource.slice(
+  tasksSource.indexOf("async function toggleTaskCompletion"),
+  tasksSource.indexOf("async function approveWaitingTask")
+);
+assert.match(completionToggle, /const completion = taskCompletionForMember\(task, state\.currentUser\);[\s\S]*?applyPredictedTaskCompletion\(task, \{ wholeTask: completion\.wholeTask,[\s\S]*?completeLiveTask\(\{[\s\S]*?wholeTask: completion\.wholeTask,/,
+  "the creator-assignee model choice must drive both optimistic and persisted whole-task completion");
 
 // 3b. Assignee path stays self-only at the API boundary (the RLS update_self policy's
 //     client-side twin) and recomputes allDone from freshly-read rows, not the cache.
@@ -148,8 +179,10 @@ assert.doesNotMatch(assigneeUncheckWrite, /approved_at: null/,
 // The creator wholeTask-uncheck branch, by contrast, still resets approval alongside
 // every assignee row (e821c45 / todo #260 semantics, unchanged by this fix).
 const creatorUndoWrite = completionWrite.slice(completionWrite.indexOf("if (!completed)"), completionWrite.indexOf("taskDone: false"));
+assert.match(creatorUndoWrite, /from\("task_assignees"\)[\s\S]*?\.update\(\{ completed_at: null \}\)[\s\S]*?\.eq\("task_id", taskId\)/,
+  "creator wholeTask uncheck must clear every assignee completion row");
 assert.match(creatorUndoWrite, /status: "open", completed_at: null, approved_at: null, approved_by: null/,
-  "creator wholeTask uncheck keeps clearing approval stamps");
+  "creator wholeTask uncheck must reopen the task and clear approval stamps");
 
 // 3d. Local echo parity in tasks.js: reopenWholeTask clears approvedAt/approvedBy only
 //     inside the resetAssignees (creator wholeTask) branch, so the bare assignee reopen
@@ -160,6 +193,8 @@ const reopenSource = tasksSource.slice(
 );
 assert.match(reopenSource, /if \(resetAssignees\) \{[\s\S]*?task\.approvedAt = "";\s*\n\s*task\.approvedBy = "";\s*\n\s*\}/,
   "approval-echo clearing must live inside the resetAssignees branch");
+assert.match(reopenSource, /if \(resetAssignees\) \{[\s\S]*?task\.assignees\.forEach\(\(assignee\) => \{\s*\n\s*assignee\.completedAt = null;/,
+  "optimistic creator uncheck must clear all assignee completion stamps before reopening");
 assert.equal((reopenSource.match(/task\.approvedAt = "";/g) ?? []).length, 1,
   "exactly one approvedAt clear — none on the bare (assignee) reopen path");
 
@@ -192,4 +227,4 @@ assert.match(rls083, /RAISE EXCEPTION 'task assignees can only update status\/co
 assert.doesNotMatch(rls094, /CREATE POLICY[^;]*ON (public\.)?task_assignees/,
   "094 must not have re-tightened task_assignees policies");
 
-console.log("task-creator-toggle-1 contracts: PASS (assignee-first precedence, row-level 取消完成, waiting-approval boundary, pending-only fan-out + auto-verify, self-guard + fresh allDone, trigger-compliant assignee uncheck, echo parity, RLS evidence 082/083/094)");
+console.log("task-creator-toggle-1 contracts: PASS (creator-assignee whole-task precedence, bidirectional fan-out/reopen, ordinary assignee parity, waiting-approval boundary, threshold/strict routing, RLS evidence 082/083/094)");
