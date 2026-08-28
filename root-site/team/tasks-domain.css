@@ -211,6 +211,7 @@
 
 .task-overview__member {
   min-width: 0;
+  flex-shrink: 0;
   border: 1px solid var(--gray-10);
   border-radius: var(--radius-10);
   background: var(--white);

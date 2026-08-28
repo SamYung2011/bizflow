@@ -59,5 +59,7 @@ assert.match(tasksCss, /\.team-member-rail\s*\{[^}]*max-height:\s*var\(--task-me
 assert.match(tasksCss, /\.team-task-page\[data-task-mode="overview"\]\[data-task-view="board"\] \.team-kanban\s*\{[^}]*max-height:\s*var\(--task-member-viewport-height\);[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/s, "only the non-calendar overview canvas should share the adaptive rail height");
 assert.match(domainCss, /\.task-overview\s*\{[^}]*min-height:\s*0;[^}]*flex:\s*1 1 auto;/s);
 assert.match(domainCss, /\.task-overview > div\s*\{[^}]*min-height:\s*0;[^}]*flex:\s*1 1 auto;[^}]*overflow-y:\s*auto;[^}]*overscroll-behavior:\s*contain;[^}]*scrollbar-gutter:\s*stable;/s, "expanded overview content must remain inside its own scroll container");
+assert.match(domainCss, /\.task-overview__member\s*\{[^}]*flex-shrink:\s*0;[^}]*overflow:\s*hidden;/s, "overview rows must keep their natural height so overflow belongs to the list container instead of being clipped inside flex items");
+assert.match(domainCss, /\.task-overview__member-head\s*\{[^}]*min-height:\s*60px;/s, "collapsed overview rows must keep their authored 60px height");
 
 console.log("task UX fixes 2 contracts passed");
