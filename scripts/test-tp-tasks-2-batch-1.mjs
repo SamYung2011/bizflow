@@ -84,7 +84,7 @@ assert.ok(contentControl, "content textarea must render");
 assert.doesNotMatch(contentControl, /\brequired\b/, "content must be optional for title-only publishing");
 assert.doesNotMatch(submitHtml, /form-task-submit__button--confirm" disabled/, "prefilled owner/due permit direct publish");
 
-const completedTasks = Array.from({ length: 6 }, (_, index) => ({
+const completedTasks = Array.from({ length: 125 }, (_, index) => ({
   ...jackTask,
   id: `completed-${index + 1}`,
   title: `已完成 ${index + 1}`,
@@ -101,7 +101,8 @@ const collapsedOverview = renderTaskOverview({
   helpers
 });
 assert.match(collapsedOverview, /data-completed-visible="5"/, "completed history defaults to five rows");
-assert.match(collapsedOverview, /data-overview-completed-toggle="employee-jack"/, "more toggle must render above five rows");
+assert.match(collapsedOverview, /data-overview-completed-toggle="employee-jack" aria-expanded="false">查看全部 125 條<\/button>/, "the default preview must keep the full-count expand action");
+assert.doesNotMatch(collapsedOverview, /task-overview__recent-list--expanded/, "the default five-row preview must remain uncapped and non-scrollable");
 const expandedOverview = renderTaskOverview({
   members: [{ ...jack, dept: "member" }],
   tasks: completedTasks,
@@ -109,13 +110,21 @@ const expandedOverview = renderTaskOverview({
   completedExpanded: new Set([jack.id]),
   helpers
 });
-assert.match(expandedOverview, /data-completed-visible="6"/, "expanded history must show every completed task");
+assert.match(expandedOverview, /data-completed-visible="125"/, "expanded history must keep the full completed count and render every task");
+assert.match(expandedOverview, /data-overview-completed-toggle="employee-jack" aria-expanded="true">收起<\/button>/, "expanded history must keep the existing collapse action");
+assert.match(expandedOverview, /task-overview__recent-head[\s\S]*?task-overview__recent-list task-overview__recent-list--expanded/, "the fixed recent-completed heading must sit outside the expanded row scroller");
+assert.match(expandedOverview, /data-task-detail-open="completed-125"/, "the expanded scroller must retain the last completed task");
+assert.equal((expandedOverview.match(/task-overview__task--completed/g) ?? []).length, 125, "all 125 completed rows must remain rendered inside the capped region");
 
-const [tasksSource, controllerSource, rlsSource] = await Promise.all([
+const [tasksSource, controllerSource, domainCssSource, rlsSource] = await Promise.all([
   readFile(new URL("../root-site/team/tasks.js", import.meta.url), "utf8"),
   readFile(new URL("../root-site/team/tasks-domain-controller.js", import.meta.url), "utf8"),
+  readFile(new URL("../root-site/team/tasks-domain.css", import.meta.url), "utf8"),
   readFile(new URL("../migrations/083_team_task_field_hardening.sql", import.meta.url), "utf8")
 ]);
+assert.match(domainCssSource, /\.task-overview__recent-list\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*gap:\s*var\(--space-4\);/s, "the completed row wrapper must preserve the existing vertical rhythm");
+assert.match(domainCssSource, /\.task-overview__recent-list--expanded\s*\{[^}]*max-height:\s*calc\(var\(--space-40\) \* 10\);[^}]*overflow-y:\s*auto;[^}]*scrollbar-gutter:\s*stable;/s, "expanded completion history must cap at about ten rows and scroll internally");
+assert.match(domainCssSource, /\.task-overview__recent-list--expanded > \.task-overview__task\s*\{[^}]*flex-shrink:\s*0;/s, "completed rows must not compress instead of overflowing the inner scroller");
 assert.match(tasksSource, /function canEditTask\(task\)[\s\S]*?isTaskCreator\(task, state\.currentUser\)/,
   "submit guard must authorize the creator independently of edit-others permission");
 assert.match(tasksSource, /updateLiveTask\(task\.id, \{[\s\S]*?title,/,
