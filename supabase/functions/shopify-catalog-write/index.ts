@@ -11,6 +11,7 @@ import {
   buildAlignmentPlan,
   confirmCatalogBinding,
   executeCatalogWrite,
+  linkShopifyVariantsFromAliases,
   mutateComponentLink,
   saveResourceMapping,
 } from "./catalog.ts";
@@ -24,7 +25,7 @@ import {
 type Payload = Record<string, unknown> & {
   action?: "health" | "alignment-plan" | "create" | "update" | "delete" |
     "confirm-binding" | "link-component" | "unlink-component" | "save-resource-mapping" |
-    "prepare-image-upload" | "verify-image-upload" | "cleanup-image-upload";
+    "link-from-aliases" | "prepare-image-upload" | "verify-image-upload" | "cleanup-image-upload";
 };
 
 Deno.serve(async (req) => {
@@ -70,6 +71,10 @@ Deno.serve(async (req) => {
         body.action === "link-component" ? "link" : "unlink",
         body,
       );
+      return jsonResponse(req, { ...result, health });
+    }
+    if (body.action === "link-from-aliases") {
+      const result = await linkShopifyVariantsFromAliases(auth.admin, credentials, body.confirm === true);
       return jsonResponse(req, { ...result, health });
     }
     if (body.action === "save-resource-mapping") {

@@ -556,14 +556,12 @@ function renderProductsPanel(helpers) {
 
 function renderPanel(helpers) {
   const domainHelpers = { ...helpers, liveReadOnly };
-  // Batch 5 opens only the Shopify-owned catalogue path. The older alias,
-  // supplier and pending panels keep their pre-existing production read-only
-  // boundary instead of becoming writable merely because Shopify scopes exist.
-  const legacyDomainHelpers = { ...helpers, liveReadOnly: authenticated };
-  if (state.tab === "itemMap") return renderItemMap(legacyDomainHelpers, data.mappingProducts);
+  const inventoryAdminReadOnly = currentUser?.isBfAdmin !== true || currentUser?.bizflowMainAccess !== true;
+  const liveDomainHelpers = { ...helpers, liveReadOnly: inventoryAdminReadOnly };
+  if (state.tab === "itemMap") return renderItemMap(liveDomainHelpers, data.mappingProducts);
   if (state.tab === "shopify") return renderShopify(domainHelpers, data.mappingProducts);
-  if (state.tab === "suppliers") return renderSuppliers(legacyDomainHelpers);
-  if (state.tab === "pending") return renderPendingDeduction(legacyDomainHelpers);
+  if (state.tab === "suppliers") return renderSuppliers(liveDomainHelpers);
+  if (state.tab === "pending") return renderPendingDeduction(liveDomainHelpers);
   return renderProductsPanel(helpers);
 }
 

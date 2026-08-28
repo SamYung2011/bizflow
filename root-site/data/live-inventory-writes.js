@@ -26,7 +26,7 @@ async function adminContext() {
   if (!client || !session?.user || currentUser?.isBfAdmin !== true || currentUser?.bizflowMainAccess !== true) {
     throw new ShopifyCatalogWriteError("BizFlow administrator required", { code: "SHOPIFY_ADMIN_REQUIRED" });
   }
-  return { client };
+  return { client, currentUser };
 }
 
 async function responsePayload(response) {
@@ -368,12 +368,309 @@ export async function unlinkLiveShopifyComponent({ shopifyVariantId, bizflowProd
   return result;
 }
 
+export async function previewLiveShopifyAliasLinks() {
+  return invokeCatalog("link-from-aliases", { confirm: false });
+}
+
+export async function confirmLiveShopifyAliasLinks() {
+  const result = await invokeCatalog("link-from-aliases", { confirm: true });
+  await invalidateLiveTables("shopify_variant_links");
+  return result;
+}
+
 export async function saveLiveShopifyResourceMapping({ kind, bizflowKey, shopifyResourceId, shopifyName = "" }) {
   const result = await invokeCatalog("save-resource-mapping", {
     kind, bizflowKey, shopifyResourceId, shopifyName
   });
   await invalidateLiveTables("shopify_resource_mappings");
   return result;
+}
+
+function inventoryDomainWriteError(message, code, detail = null) {
+  return new ShopifyCatalogWriteError(message, { code, detail });
+}
+
+function aliasPayload(draft) {
+  return {
+    alias_name: String(draft?.aliasName || draft?.alias_name || "").trim(),
+    skip: draft?.skip === true,
+    products: draft?.skip === true ? [] : (Array.isArray(draft?.products)
+      ? draft.products.filter((product) => product?.product_id && Number(product.qty) > 0)
+      : []),
+    note: String(draft?.note || "").trim() || null,
+    verified: true,
+    updated_at: new Date().toISOString()
+  };
+}
+
+export async function saveLiveInventoryAlias(draft) {
+  const { client } = await adminContext();
+  const payload = aliasPayload(draft);
+  if (!payload.alias_name) throw inventoryDomainWriteError("Alias name is required", "INVENTORY_ALIAS_NAME_REQUIRED");
+  const query = draft?.id
+    ? client.from("line_item_aliases").update(payload).eq("id", draft.id)
+    : client.from("line_item_aliases").insert(payload);
+  const saved = await query.select().single();
+  if (saved.error) throw inventoryDomainWriteError(saved.error.message, "INVENTORY_ALIAS_SAVE_FAILED");
+  await invalidateLiveTables("line_item_aliases");
+  return saved.data;
+}
+
+export async function deleteLiveInventoryAlias(aliasId) {
+  const { client } = await adminContext();
+  const removed = await client.from("line_item_aliases").delete().eq("id", aliasId);
+  if (removed.error) throw inventoryDomainWriteError(removed.error.message, "INVENTORY_ALIAS_DELETE_FAILED");
+  await invalidateLiveTables("line_item_aliases");
+  return { ok: true, aliasId };
+}
+
+export async function verifyLiveInventoryAlias(aliasId) {
+  const { client } = await adminContext();
+  const verified = await client.from("line_item_aliases")
+    .update({ verified: true, updated_at: new Date().toISOString() })
+    .eq("id", aliasId)
+    .select()
+    .single();
+  if (verified.error) throw inventoryDomainWriteError(verified.error.message, "INVENTORY_ALIAS_VERIFY_FAILED");
+  await invalidateLiveTables("line_item_aliases");
+  return verified.data;
+}
+
+function supplierPayload(draft) {
+  return {
+    name: String(draft?.name || "").trim(),
+    contact_url: String(draft?.contactUrl || draft?.contact_url || "").trim() || null,
+    contact_person: String(draft?.contactPerson || draft?.contact_person || "").trim() || null,
+    category: String(draft?.category || "").trim() || null,
+    note: String(draft?.note || "").trim() || null
+  };
+}
+
+export async function createLiveInventorySupplier(draft) {
+  const { client } = await adminContext();
+  const payload = supplierPayload(draft);
+  if (!payload.name) throw inventoryDomainWriteError("Supplier name is required", "INVENTORY_SUPPLIER_NAME_REQUIRED");
+  const saved = await client.from("suppliers").insert(payload).select().single();
+  if (saved.error) throw inventoryDomainWriteError(saved.error.message, "INVENTORY_SUPPLIER_CREATE_FAILED");
+  await invalidateLiveTables("suppliers");
+  return saved.data;
+}
+
+export async function updateLiveInventorySupplier(supplierId, draft) {
+  const { client } = await adminContext();
+  const patch = { ...supplierPayload(draft), updated_at: new Date().toISOString() };
+  if (!patch.name) throw inventoryDomainWriteError("Supplier name is required", "INVENTORY_SUPPLIER_NAME_REQUIRED");
+  const saved = await client.from("suppliers").update(patch).eq("id", supplierId).select().single();
+  if (saved.error) throw inventoryDomainWriteError(saved.error.message, "INVENTORY_SUPPLIER_UPDATE_FAILED");
+  await invalidateLiveTables("suppliers");
+  return saved.data;
+}
+
+export async function deleteLiveInventorySupplier(supplierId) {
+  const { client } = await adminContext();
+  const removed = await client.from("suppliers").delete().eq("id", supplierId);
+  if (removed.error) throw inventoryDomainWriteError(removed.error.message, "INVENTORY_SUPPLIER_DELETE_FAILED");
+  await invalidateLiveTables("suppliers");
+  return { ok: true, supplierId };
+}
+
+const pendingDeductionTables = [
+  "invoices", "inventory_stock", "inventory_movements", "stock_deduction_audit", "line_item_aliases"
+];
+
+function invoiceItems(invoice) {
+  let items = invoice?.items;
+  if (typeof items === "string") {
+    try { items = JSON.parse(items); } catch { items = []; }
+  }
+  return Array.isArray(items) ? items : [];
+}
+
+function normalizedAliasName(value) {
+  return String(value || "").toLowerCase().trim();
+}
+
+function buildLiveDeductionPlan({ invoice, products, warehouses, stocks, aliases }) {
+  if (invoice.legacy_skip_deduct === true) {
+    return [{ name: "Historical invoice", source_item_name: "Historical invoice", qty: 0, skip: true }];
+  }
+  if (String(invoice.notes || "").includes("__BROADWAY__")) {
+    return [{ name: "Broadway channel", source_item_name: "Broadway channel", qty: 0, skip: true }];
+  }
+  const defaultWarehouseId = warehouses[0]?.id || null;
+  const items = invoiceItems(invoice);
+  const parentIds = new Set(products.filter((product) => product.parent_product_id).map((product) => product.parent_product_id));
+  const aliasByName = new Map(aliases.map((alias) => [normalizedAliasName(alias.alias_name), alias]));
+  const plan = [];
+  for (const item of items) {
+    const itemName = String(item?.name || "");
+    const itemQty = Number(item?.qty) || 0;
+    const alias = aliasByName.get(normalizedAliasName(itemName));
+    if (!alias) {
+      const product = products.find((candidate) => candidate.name === itemName);
+      if (!product || product.is_virtual === true || product.category === "_archived" || parentIds.has(product.id)) {
+        plan.push({ name: itemName, source_item_name: itemName, qty: itemQty, skip: true });
+        continue;
+      }
+      const warehouseId = item?.warehouse_id || defaultWarehouseId;
+      if (!warehouseId) {
+        plan.push({ name: itemName, source_item_name: itemName, qty: itemQty, skip: true });
+        continue;
+      }
+      const current = Number(stocks.find((stock) => stock.product_id === product.id && stock.warehouse_id === warehouseId)?.qty) || 0;
+      plan.push({ product_id: product.id, warehouse_id: warehouseId, name: itemName, source_item_name: itemName, qty: itemQty, current, after: current - itemQty });
+      continue;
+    }
+    if (alias.skip === true) {
+      plan.push({ name: itemName, source_item_name: itemName, qty: itemQty, skip: true });
+      continue;
+    }
+    const mappedProducts = Array.isArray(alias.products) ? alias.products : [];
+    if (!mappedProducts.length) {
+      plan.push({ name: itemName, source_item_name: itemName, qty: itemQty, skip: true });
+      continue;
+    }
+    for (const mapped of mappedProducts) {
+      const product = products.find((candidate) => candidate.id === mapped.product_id);
+      if (!product || product.is_virtual === true || product.category === "_archived" || parentIds.has(product.id)) {
+        plan.push({ name: itemName, source_item_name: itemName, qty: 0, skip: true });
+        continue;
+      }
+      const warehouseId = item?.warehouse_id || defaultWarehouseId;
+      if (!warehouseId) {
+        plan.push({ name: itemName, source_item_name: itemName, qty: 0, skip: true });
+        continue;
+      }
+      const totalDeduct = (Number(mapped.qty) || 1) * itemQty;
+      const current = Number(stocks.find((stock) => stock.product_id === product.id && stock.warehouse_id === warehouseId)?.qty) || 0;
+      plan.push({ product_id: product.id, warehouse_id: warehouseId, name: `${itemName} -> ${product.name}`, source_item_name: itemName, qty: totalDeduct, current, after: current - totalDeduct });
+    }
+  }
+  return plan;
+}
+
+export async function dismissLivePendingDeduction(invoiceId) {
+  const { client, currentUser } = await adminContext();
+  const current = await client.from("invoices").select("id,notes").eq("id", invoiceId).maybeSingle();
+  if (current.error || !current.data) {
+    throw inventoryDomainWriteError(current.error?.message || "Invoice not found", "PENDING_INVOICE_NOT_FOUND");
+  }
+  const marker = `__DEDUCT_DISMISSED__ ${new Date().toISOString().slice(0, 10)}`;
+  const updates = {
+    legacy_skip_deduct: true,
+    notes: current.data.notes ? `${current.data.notes}\n${marker}` : marker
+  };
+  const updated = await client.from("invoices").update(updates).eq("id", invoiceId);
+  if (updated.error) throw inventoryDomainWriteError(updated.error.message, "PENDING_DISMISS_FAILED");
+  const audit = await client.from("stock_deduction_audit").insert({
+    invoice_id: invoiceId,
+    item_name: "__DISMISSED__",
+    mapped_product_id: null,
+    mapped_qty: 0,
+    warehouse_id: null,
+    decision: "dismissed",
+    audited_by: currentUser?.employeeId || null
+  });
+  if (audit.error) console.warn("[dismiss audit] insert failed", audit.error.message);
+  await invalidateLiveTables(...pendingDeductionTables);
+  return { ok: true, invoiceId, auditRecorded: !audit.error };
+}
+
+export async function reviewLivePendingDeduction(invoiceId, { allowDuplicate = false } = {}) {
+  const { client, currentUser } = await adminContext();
+  const [invoiceResult, productsResult, warehousesResult, stocksResult, aliasesResult, movementsResult] = await Promise.all([
+    client.from("invoices").select("id,invoice_number,status,items,notes,legacy_skip_deduct").eq("id", invoiceId).maybeSingle(),
+    client.from("products").select("id,name,is_virtual,category,parent_product_id"),
+    client.from("warehouses").select("id,name,code,sort_order").order("sort_order"),
+    client.from("inventory_stock").select("product_id,warehouse_id,qty"),
+    client.from("line_item_aliases").select("id,alias_name,skip,products,note,verified"),
+    client.from("inventory_movements").select("id,delta").eq("invoice_id", invoiceId).eq("type", "sale")
+  ]);
+  const failedRead = [invoiceResult, productsResult, warehousesResult, stocksResult, aliasesResult, movementsResult]
+    .find((result) => result.error);
+  if (failedRead?.error) throw inventoryDomainWriteError(failedRead.error.message, "PENDING_DEDUCTION_READ_FAILED");
+  if (!invoiceResult.data) throw inventoryDomainWriteError("Invoice not found", "PENDING_INVOICE_NOT_FOUND");
+  const deductedQty = (movementsResult.data || []).reduce((sum, row) => sum + Math.abs(Number(row.delta || 0)), 0);
+  if (deductedQty > 0 && !allowDuplicate) {
+    throw inventoryDomainWriteError("Invoice already has stock deductions", "PENDING_DEDUCTION_DUPLICATE", { deductedQty });
+  }
+
+  const invoice = invoiceResult.data;
+  const plan = buildLiveDeductionPlan({
+    invoice,
+    products: productsResult.data || [],
+    warehouses: warehousesResult.data || [],
+    stocks: stocksResult.data || [],
+    aliases: aliasesResult.data || []
+  });
+  const deductions = plan.filter((row) => !row.skip && row.qty > 0 && row.product_id && row.warehouse_id);
+  for (const deduction of deductions) {
+    const stock = await client.from("inventory_stock").upsert({
+      product_id: deduction.product_id,
+      warehouse_id: deduction.warehouse_id,
+      qty: deduction.after,
+      updated_at: new Date().toISOString()
+    }, { onConflict: "product_id,warehouse_id" });
+    if (stock.error) throw inventoryDomainWriteError(stock.error.message, "PENDING_STOCK_DEDUCTION_FAILED");
+    const movement = await client.from("inventory_movements").insert({
+      product_id: deduction.product_id,
+      warehouse_id: deduction.warehouse_id,
+      delta: -deduction.qty,
+      type: "sale",
+      reason: `發票 #${invoice.invoice_number || invoice.id} 補扣庫存`,
+      invoice_id: invoice.id
+    });
+    if (movement.error) throw inventoryDomainWriteError(movement.error.message, "PENDING_MOVEMENT_INSERT_FAILED");
+  }
+
+  let auditError = null;
+  if (plan.length) {
+    const auditRows = plan.map((row) => ({
+      invoice_id: invoice.id,
+      item_name: row.source_item_name || row.name,
+      mapped_product_id: row.product_id || null,
+      mapped_qty: row.qty || 0,
+      warehouse_id: row.warehouse_id || null,
+      decision: row.skip ? "skip" : "confirm",
+      audited_by: currentUser?.employeeId || null
+    }));
+    const audit = await client.from("stock_deduction_audit").insert(auditRows);
+    auditError = audit.error || null;
+    if (auditError) console.warn("[audit] insert failed", auditError.message);
+  }
+
+  const itemQtyByName = new Map(invoiceItems(invoice).map((item) => [item.name, Number(item.qty) || 1]));
+  const groups = new Map();
+  for (const row of plan) {
+    const key = row.source_item_name || row.name;
+    if (!key) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  const aliasUpserts = [];
+  for (const [alias_name, rows] of groups) {
+    if (rows.every((row) => row.skip)) continue;
+    const itemQty = itemQtyByName.get(alias_name) || 1;
+    const products = rows.filter((row) => !row.skip && row.product_id).map((row) => ({
+      product_id: row.product_id,
+      qty: itemQty > 0 ? +((Number(row.qty) || 0) / itemQty).toFixed(2) : (Number(row.qty) || 1)
+    }));
+    if (products.length) aliasUpserts.push({ alias_name, skip: false, products, verified: true });
+  }
+  let aliasError = null;
+  if (aliasUpserts.length) {
+    const aliases = await client.from("line_item_aliases").upsert(aliasUpserts, { onConflict: "alias_name" });
+    aliasError = aliases.error || null;
+    if (aliasError) console.warn("[alias] upsert failed", aliasError.message);
+  }
+  await invalidateLiveTables(...pendingDeductionTables);
+  return {
+    ok: true,
+    invoiceId,
+    deductions: deductions.length,
+    auditRecorded: !auditError,
+    aliasesRecorded: !aliasError
+  };
 }
 
 export function shopifyWriteReady(health) {

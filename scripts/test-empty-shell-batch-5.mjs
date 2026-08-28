@@ -182,8 +182,10 @@ assert.match(writes, /currentUser\?\.isBfAdmin !== true[^]*currentUser\?\.bizflo
 
 assert.match(inventory, /await createLiveInventoryProduct\(/,
   "authenticated product creation must use the live Shopify catalogue write");
-assert.match(inventory, /legacyDomainHelpers = \{ \.\.\.helpers, liveReadOnly: authenticated \}/,
-  "Shopify scope activation must not unlock the older fake alias/supplier/pending writes");
+assert.match(inventory, /inventoryAdminReadOnly = currentUser\?\.isBfAdmin !== true \|\| currentUser\?\.bizflowMainAccess !== true/,
+  "alias, supplier and pending writes must use the same administrator plus BizFlow-main gate as their live writers");
+assert.doesNotMatch(inventory, /liveReadOnly: authenticated/,
+  "the retired login-means-read-only gate must not return");
 assert.match(inventory, /Shopify 寫入憑證未就緒/);
 assert.match(inventory, /Shopify write credential is not ready/);
 assert.match(inventory, /Les identifiants d'écriture Shopify ne sont pas prêts/);

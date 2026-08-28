@@ -317,6 +317,154 @@ export async function fetchAllShopifyProducts(credentials: ShopifyCredentials): 
   return products;
 }
 
+function normalizeAliasDisplayName(value: unknown): string {
+  return text(value).replace(/\s+/g, " ").toLowerCase();
+}
+
+interface AliasLinkPlanRow {
+  action: "link" | "skip";
+  reason?: string;
+  alias_name: string;
+  bizflow_id?: string;
+  bizflow_name?: string;
+  bizflow_internal_code?: string;
+  shopify_product_id?: string;
+  shopify_variant_id?: string;
+  shopify_display_name?: string;
+  shopify_sku?: string | null;
+  shopify_qty?: number;
+  is_bundle?: boolean;
+}
+
+export async function linkShopifyVariantsFromAliases(
+  admin: SupabaseClient,
+  credentials: ShopifyCredentials,
+  confirm: boolean,
+) {
+  const [allShopifyProducts, aliasResult, productResult, linksResult] = await Promise.all([
+    fetchAllShopifyProducts(credentials),
+    admin.from("line_item_aliases").select("id,alias_name,skip,products,verified"),
+    admin.from("products").select("id,name,internal_code"),
+    admin.from("shopify_variant_links").select("shopify_variant_id,bizflow_product_id"),
+  ]);
+  if (aliasResult.error) throw new Error(`Read aliases failed: ${aliasResult.error.message}`);
+  if (productResult.error) throw new Error(`Read products failed: ${productResult.error.message}`);
+  if (linksResult.error) throw new Error(`Read links failed: ${linksResult.error.message}`);
+
+  // The legacy endpoint only indexed active Shopify products.
+  const shopifyProducts = allShopifyProducts.filter((product) => product.status.toUpperCase() === "ACTIVE");
+  const variantByName = new Map<string, Array<{ p: ShopifyProductNode; v: ShopifyVariantNode }>>();
+  for (const product of shopifyProducts) {
+    for (const variant of product.variants) {
+      const isDefault = variant.title === "Default Title";
+      const displayName = isDefault ? product.title : `${product.title} - ${variant.title}`;
+      const displayKey = normalizeAliasDisplayName(displayName);
+      const productKey = normalizeAliasDisplayName(product.title);
+      for (const key of [displayKey, productKey]) {
+        if (!variantByName.has(key)) variantByName.set(key, []);
+        variantByName.get(key)!.push({ p: product, v: variant });
+      }
+    }
+  }
+
+  const bizflowById = new Map<string, Record<string, unknown>>();
+  for (const product of productResult.data || []) bizflowById.set(String(product.id), product);
+  const linkedPairs = new Set<string>();
+  for (const link of linksResult.data || []) {
+    linkedPairs.add(`${link.bizflow_product_id}|${link.shopify_variant_id}`);
+  }
+
+  const plan: AliasLinkPlanRow[] = [];
+  for (const alias of aliasResult.data || []) {
+    const aliasName = String(alias.alias_name);
+    const base: AliasLinkPlanRow = { action: "skip", alias_name: aliasName };
+    if (alias.skip === true) {
+      plan.push({ ...base, reason: "alias.skip=true（押金/租務/Final Payment）" });
+      continue;
+    }
+    const mappedProducts = Array.isArray(alias.products) ? alias.products as Record<string, unknown>[] : [];
+    if (!mappedProducts.length) {
+      plan.push({ ...base, reason: "alias.products 空" });
+      continue;
+    }
+    const matches = variantByName.get(normalizeAliasDisplayName(aliasName)) || [];
+    if (!matches.length) {
+      plan.push({ ...base, reason: "Shopify 找不到匹配的 variant title" });
+      continue;
+    }
+    if (matches.length > 1) {
+      plan.push({ ...base, reason: `匹配到 ${matches.length} 個 Shopify variant（ambiguous，跳過）` });
+      continue;
+    }
+    const match = matches[0];
+    const isDefault = match.v.title === "Default Title";
+    const displayName = isDefault ? match.p.title : `${match.p.title} - ${match.v.title}`;
+    const isBundle = mappedProducts.length > 1;
+    for (const component of mappedProducts) {
+      const productId = String(component.product_id || "");
+      if (!productId) continue;
+      const bizflowProduct = bizflowById.get(productId);
+      if (!bizflowProduct) {
+        plan.push({ ...base, reason: `bizflow product ${productId.slice(0, 8)} 已刪除`, shopify_display_name: displayName });
+        continue;
+      }
+      const pairKey = `${productId}|${match.v.id}`;
+      if (linkedPairs.has(pairKey)) {
+        plan.push({
+          ...base,
+          bizflow_id: productId,
+          bizflow_name: String(bizflowProduct.name || ""),
+          bizflow_internal_code: String(bizflowProduct.internal_code || ""),
+          shopify_display_name: displayName,
+          reason: "已關聯（跳過）",
+          is_bundle: isBundle,
+        });
+        continue;
+      }
+      plan.push({
+        action: "link",
+        alias_name: aliasName,
+        bizflow_id: productId,
+        bizflow_name: String(bizflowProduct.name || ""),
+        bizflow_internal_code: String(bizflowProduct.internal_code || ""),
+        shopify_product_id: match.p.id,
+        shopify_variant_id: match.v.id,
+        shopify_display_name: displayName,
+        shopify_sku: match.v.sku || null,
+        shopify_qty: Number(component.qty) > 0 ? Number(component.qty) : 1,
+        is_bundle: isBundle,
+      });
+      linkedPairs.add(pairKey);
+    }
+  }
+
+  const stats = {
+    link: plan.filter((row) => row.action === "link").length,
+    skip: plan.filter((row) => row.action === "skip").length,
+    total: plan.length,
+  };
+  if (!confirm) return { ok: true, dryRun: true, stats, plan };
+
+  const results = { linked: 0, errors: [] as string[] };
+  for (const row of plan) {
+    if (row.action !== "link") continue;
+    const link = await admin.from("shopify_variant_links").upsert({
+      shopify_variant_id: row.shopify_variant_id,
+      bizflow_product_id: row.bizflow_id,
+      shopify_product_id: row.shopify_product_id || null,
+      shopify_sku: row.shopify_sku || null,
+      qty: row.shopify_qty || 1,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "shopify_variant_id,bizflow_product_id" });
+    if (link.error) {
+      results.errors.push(`link ${row.bizflow_id} <- ${row.shopify_variant_id}: ${link.error.message}`);
+      continue;
+    }
+    results.linked += 1;
+  }
+  return { ok: true, dryRun: false, stats, results };
+}
+
 async function fetchShopifyProduct(credentials: ShopifyCredentials, id: string): Promise<ShopifyProductNode | null> {
   const data = await shopifyGraphQL<{ product?: JsonRecord | null }>(credentials, PRODUCT_QUERY, { id });
   return data.product ? mapShopifyProduct(data.product) : null;
