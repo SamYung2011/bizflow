@@ -337,6 +337,23 @@
   margin: 0;
 }
 
+.task-overview__recent-list {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.task-overview__recent-list--expanded {
+  max-height: calc(var(--space-40) * 10);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.task-overview__recent-list--expanded > .task-overview__task {
+  flex-shrink: 0;
+}
+
 .task-overview__task {
   display: flex;
   min-width: 0;
