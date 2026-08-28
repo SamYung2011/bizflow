@@ -80,6 +80,8 @@
 }
 
 .team-board {
+  --task-member-viewport-height: calc(100vh - (var(--space-40) * 2));
+
   display: flex;
   min-height: 720px;
   min-width: 0;
@@ -91,7 +93,7 @@
 .team-member-rail {
   display: flex;
   width: 360px;
-  max-height: calc(100vh - (var(--space-40) * 2));
+  max-height: var(--task-member-viewport-height);
   min-width: 360px;
   min-height: 0;
   flex-direction: column;
@@ -252,6 +254,12 @@
   flex-direction: column;
   gap: var(--space-20);
   padding: var(--space-20);
+}
+
+.team-task-page[data-task-mode="overview"][data-task-view="board"] .team-kanban {
+  max-height: var(--task-member-viewport-height);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .team-kanban-toolbar {

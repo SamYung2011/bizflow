@@ -151,7 +151,8 @@ assert.equal((tasksSource.match(/rerenderTaskPageFromBackground\(/g) ?? []).leng
   "the helper plus realtime-data and unread background callers are pinned");
 
 const railCss = cssSource.slice(cssSource.indexOf(".team-member-rail"), cssSource.indexOf(".team-member-task"));
-assert.match(railCss, /max-height: calc\(100vh - /, "the rail limit follows the viewport instead of a fixed pixel height");
+assert.match(cssSource, /--task-member-viewport-height: calc\(100vh - /, "the shared member viewport limit follows the viewport instead of a fixed pixel height");
+assert.match(railCss, /max-height: var\(--task-member-viewport-height\);/, "the rail consumes the adaptive member viewport limit");
 assert.match(railCss, /\.team-member-list[\s\S]*?min-height: 0;/, "the member list may shrink inside its flex rail");
 assert.match(railCss, /\.team-member-list[\s\S]*?overflow-y: auto;/, "overflowing members scroll inside the rail");
 assert.match(railCss, /scrollbar-gutter: stable;/, "the scroll area follows the site's stable-scrollbar treatment");

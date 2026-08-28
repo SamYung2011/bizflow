@@ -27,6 +27,7 @@ import { matchesSearchValues } from "../components/search-match.js";
 import { createDebouncedTask } from "../components/debounced-task.js";
 import { createOptimisticWriteCoordinator } from "./task-optimistic-write.js";
 import { captureTaskCompletionEffects, createTaskCompletionSnapshot, restoreTaskCompletionSnapshot } from "./task-completion-state.js";
+import { orderedTaskRailMembers } from "./task-member-order.js";
 
 let data = null;
 let currentUser = null;
@@ -323,6 +324,7 @@ export function renderTaskManagement(helpers) {
   const memberTasks = state.onlyMine
     ? state.tasks.filter((task) => task.creatorId === state.currentUser.id || task.creator.toLocaleLowerCase() === state.currentUser.name.toLocaleLowerCase())
     : state.tasks;
+  const railMembers = orderedTaskRailMembers(state.members, currentUser);
   const calendarView = filterState.view === "calendar" && !state.detailOpen;
   // Figma member-rail Add uses the generic add-surface component but has no authored flow; live P0 keeps it disabled.
   return `<div class="team-task-page${state.detailOpen ? " team-task-page--detail" : ""}" data-task-view="${escapeHtml(filterState.view)}" data-task-mode="${escapeHtml(state.mode)}" data-only-mine="${state.onlyMine}" data-task-search-value="${escapeHtml(filterState.search)}">
@@ -333,7 +335,7 @@ export function renderTaskManagement(helpers) {
     ${state.detailOpen ? "" : renderTaskToolbar({ state, filterState, members: state.members, featureAiBatch: data.featureAiBatch, helpers })}
     <section class="team-board${calendarView ? " team-board--calendar" : ""}">
       ${calendarView ? "" : `<aside class="team-member-rail">
-        <div class="team-member-list">${state.members.map((member) => renderMember(member, memberTasks, helpers)).join("")}</div>
+        <div class="team-member-list">${railMembers.map((member) => renderMember(member, memberTasks, helpers)).join("")}</div>
         ${state.permissions.canManageEmployees ? `<button type="button" class="team-member-add" data-task-members-manage aria-label="${escapeHtml(tt("tasks.members.manage"))}" title="${escapeHtml(tt("tasks.members.manage"))}">${icon("icon-add-surface-add")}</button>` : ""}
       </aside>`}
       <main class="team-kanban${state.detailOpen ? " team-kanban--detail" : ""}" data-task-search-results>

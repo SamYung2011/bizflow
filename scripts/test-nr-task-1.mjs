@@ -640,8 +640,8 @@ assert.doesNotMatch(domainCssSource, /\.team-member-task--overview/,
   "the dead .team-member-task--overview rule must be removed from tasks-domain.css, not left orphaned");
 assert.doesNotMatch(domainCssSource, /team-member-task__overview-icon/,
   "the icon-square rule (and its --active variant) was only ever used by the deleted row; it must go with it");
-assert.match(tasksSource, /<div class="team-member-list">\$\{state\.members\.map\(\(member\) => renderMember\(member, memberTasks, helpers\)\)\.join\(""\)\}<\/div>/,
-  "the member rail must render only ordinary renderMember rows now — Honnmono all is included in that list already (it's a normal state.members entry with dept===\"all\"), no separate nav button alongside it");
+assert.match(tasksSource, /<div class="team-member-list">\$\{railMembers\.map\(\(member\) => renderMember\(member, memberTasks, helpers\)\)\.join\(""\)\}<\/div>/,
+  "the member rail must render only ordinary renderMember rows now — display-only ordering may change, but Honnmono all remains a normal member row with no separate nav button alongside it");
 // Explicit boundary, not a regression this commit causes: the admin default-landing screen
 // (tasks-overview.js, reached only via defaultTaskViewForUser's initial { mode: "overview" } for
 // admins — see G-task-10 above, still unchanged) stays. Only its now-redundant manual nav row is
