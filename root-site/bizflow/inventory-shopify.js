@@ -2,9 +2,11 @@ import { getShopifyLinksData } from "../data/provider.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import {
   confirmLiveShopifyBinding,
+  confirmLiveShopifyAliasLinks,
   getShopifyAlignmentPlan,
   getShopifyCredentialHealth,
   linkLiveShopifyComponent,
+  previewLiveShopifyAliasLinks,
   saveLiveShopifyResourceMapping,
   unlinkLiveShopifyComponent
 } from "../data/live-inventory-writes.js";
@@ -50,7 +52,19 @@ const copy = {
     unlinkConfirm: "確認解除這條商品關聯？",
     link: "關聯",
     reverse: "用 line item 映射倒推關聯",
-    reverseHint: "依賴寫入 API，正式接入後可用",
+    reverseHint: "讀取 line item 映射，用 alias_name 匹配 Shopify variant；套裝會逐個關聯，跳過項會列出原因。",
+    reversePreview: "預覽倒推計劃",
+    reverseCalculating: "正在計算",
+    reverseLinkable: "可關聯",
+    reverseSkipped: "跳過",
+    reverseTotal: "總計",
+    reverseAction: "動作",
+    reverseTarget: "Shopify variant / 原因",
+    reverseConfirm: "確認寫入 {count} 條 Shopify 反向關聯？",
+    reverseConfirmButton: "確認關聯 {count} 條",
+    reverseDone: "反向關聯完成：已寫入 {count} 條",
+    reverseFailed: "反向關聯失敗，請重試",
+    reverseErrors: "有 {count} 條關聯寫入失敗",
     linkTitle: "關聯 Shopify variant",
     findProduct: "搜尋 bizflow 商品",
     selected: "已選商品",
@@ -101,7 +115,19 @@ const copy = {
     unlinkConfirm: "Unlink this product association?",
     link: "Link",
     reverse: "Infer links from line item mappings",
-    reverseHint: "Requires the write API and will be available after integration",
+    reverseHint: "Reads line item mappings and matches alias_name to Shopify variants. Bundle components are linked separately and skipped rows include reasons.",
+    reversePreview: "Preview inferred links",
+    reverseCalculating: "Calculating",
+    reverseLinkable: "Can link",
+    reverseSkipped: "Skipped",
+    reverseTotal: "Total",
+    reverseAction: "Action",
+    reverseTarget: "Shopify variant / reason",
+    reverseConfirm: "Write {count} inferred Shopify links?",
+    reverseConfirmButton: "Confirm {count} links",
+    reverseDone: "Reverse linking complete: {count} links written",
+    reverseFailed: "Could not complete reverse linking. Try again",
+    reverseErrors: "{count} links could not be written",
     linkTitle: "Link Shopify variant",
     findProduct: "Search BizFlow products",
     selected: "Selected product",
@@ -152,7 +178,19 @@ const copy = {
     unlinkConfirm: "Dissocier ce produit ?",
     link: "Associer",
     reverse: "Déduire les liens depuis les mappages d'articles",
-    reverseHint: "Nécessite l'API d'écriture et sera disponible après l'intégration",
+    reverseHint: "Lit les mappages d’articles et associe alias_name aux variantes Shopify. Les composants sont liés séparément et les lignes ignorées affichent leur raison.",
+    reversePreview: "Prévisualiser les associations",
+    reverseCalculating: "Calcul en cours",
+    reverseLinkable: "Associables",
+    reverseSkipped: "Ignorés",
+    reverseTotal: "Total",
+    reverseAction: "Action",
+    reverseTarget: "Variante Shopify / raison",
+    reverseConfirm: "Écrire {count} associations Shopify déduites ?",
+    reverseConfirmButton: "Confirmer {count} associations",
+    reverseDone: "Associations inverses terminées : {count} enregistrées",
+    reverseFailed: "Impossible de terminer les associations inverses. Réessayez",
+    reverseErrors: "{count} associations n’ont pas pu être enregistrées",
     linkTitle: "Associer une variante Shopify",
     findProduct: "Rechercher des produits BizFlow",
     selected: "Produit sélectionné",
@@ -178,6 +216,8 @@ const state = {
   health: null,
   alignment: null,
   bindingSelections: new Map(),
+  aliasLinkPreview: null,
+  aliasLinkResult: null,
   busy: false,
   error: "",
   feedback: ""
@@ -189,11 +229,12 @@ let liveReadOnly = false;
 let dataLoadVersion = 0;
 
 function writeAttributes(disabled = liveReadOnly) {
-  return disabled ? ' disabled aria-disabled="true"' : "";
+  return disabled || state.busy ? ' disabled aria-disabled="true"' : "";
 }
 
-function t(lang, key) {
-  return copy[lang]?.[key] ?? copy.zh[key] ?? key;
+function t(lang, key, values = {}) {
+  const template = copy[lang]?.[key] ?? copy.zh[key] ?? key;
+  return Object.entries(values).reduce((text, [name, value]) => text.replace(`{${name}}`, String(value)), template);
 }
 
 export async function ensureShopifyData({ scope = null, signal = scope?.signal } = {}) {
@@ -329,6 +370,30 @@ function renderVariant(variant, helpers) {
   </div>`;
 }
 
+function renderReverseLinks(helpers) {
+  const { escapeHtml, lang } = helpers;
+  const preview = state.aliasLinkPreview;
+  const result = state.aliasLinkResult;
+  return `<div class="shopify-reverse-block">
+    <div class="shopify-reverse"><div><strong>${escapeHtml(t(lang, "reverse"))}</strong><span>${escapeHtml(t(lang, "reverseHint"))}</span></div>
+      ${preview ? "" : `<button type="button" class="inventory-domain-button inventory-domain-button--secondary" data-shopify-alias-preview data-inventory-write${writeAttributes()}>${escapeHtml(t(lang, state.busy ? "reverseCalculating" : "reversePreview"))}</button>`}
+    </div>
+    ${preview ? `<div class="shopify-reverse-preview" data-shopify-alias-preview-plan>
+      <div class="shopify-reverse-stats">
+        <span><strong>${escapeHtml(String(preview.stats?.link || 0))}</strong>${escapeHtml(t(lang, "reverseLinkable"))}</span>
+        <span><strong>${escapeHtml(String(preview.stats?.skip || 0))}</strong>${escapeHtml(t(lang, "reverseSkipped"))}</span>
+        <span><strong>${escapeHtml(String(preview.stats?.total || 0))}</strong>${escapeHtml(t(lang, "reverseTotal"))}</span>
+      </div>
+      <div class="shopify-reverse-plan" role="table">
+        <div class="shopify-reverse-plan__head" role="row"><span>${escapeHtml(t(lang, "reverseAction"))}</span><span>alias_name</span><span>${escapeHtml(t(lang, "reverseTarget"))}</span></div>
+        ${(preview.plan || []).map((row) => `<div class="shopify-reverse-plan__row" role="row" data-reverse-action="${escapeHtml(row.action)}"><span>${escapeHtml(row.action === "link" ? t(lang, "link") : t(lang, "reverseSkipped"))}</span><span>${escapeHtml(row.alias_name)}</span><span>${escapeHtml(row.action === "link" ? row.shopify_display_name : row.reason)}</span></div>`).join("")}
+      </div>
+      <div class="inventory-domain-actions"><button type="button" class="inventory-domain-button inventory-domain-button--secondary" data-shopify-alias-cancel${state.busy ? " disabled" : ""}>${escapeHtml(t(lang, "cancel"))}</button><button type="button" class="inventory-domain-button" data-shopify-alias-confirm data-inventory-write${writeAttributes(state.busy || Number(preview.stats?.link || 0) === 0)}>${escapeHtml(t(lang, "reverseConfirmButton", { count: preview.stats?.link || 0 }))}</button></div>
+    </div>` : ""}
+    ${result ? `<p class="inventory-domain-hint" data-shopify-alias-result>${escapeHtml(t(lang, "reverseDone", { count: result.results?.linked || 0 }))}${result.results?.errors?.length ? ` · ${escapeHtml(t(lang, "reverseErrors", { count: result.results.errors.length }))}` : ""}</p>` : ""}
+  </div>`;
+}
+
 function renderAssociations(helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const groups = groupedVariants();
@@ -343,7 +408,7 @@ function renderAssociations(helpers) {
       </button>${expanded ? `<div>${variants.map((variant) => renderVariant(variant, helpers)).join("")}</div>` : ""}</section>`;
     }).join("")}</div>
     ${groups.length ? "" : `<div class="inventory-domain-empty">${escapeHtml(t(lang, "empty"))}</div>`}
-    <div class="shopify-reverse"><div><strong>${escapeHtml(t(lang, "reverse"))}</strong><span>${escapeHtml(t(lang, "reverseHint"))}</span></div><button type="button" class="inventory-domain-button inventory-domain-button--secondary" disabled>${escapeHtml(t(lang, "reverse"))}</button></div>
+    ${renderReverseLinks(helpers)}
   </section>`;
 }
 
@@ -409,6 +474,49 @@ export function attachShopifyBehaviors({ rerender: nextRerender, scope }) {
       state.health = await getShopifyCredentialHealth({ refresh: true });
       state.busy = false;
       if (scope.isCurrent()) rerender();
+      return;
+    }
+    const aliasPreview = event.target.closest("[data-shopify-alias-preview]");
+    if (aliasPreview) {
+      state.busy = true;
+      state.error = "";
+      state.feedback = "";
+      state.aliasLinkResult = null;
+      rerender();
+      try {
+        state.aliasLinkPreview = await previewLiveShopifyAliasLinks();
+      } catch {
+        state.error = t(currentLang(), "reverseFailed");
+      } finally {
+        state.busy = false;
+        if (scope.isCurrent()) rerender();
+      }
+      return;
+    }
+    if (event.target.closest("[data-shopify-alias-cancel]")) {
+      state.aliasLinkPreview = null;
+      rerender();
+      return;
+    }
+    const aliasConfirm = event.target.closest("[data-shopify-alias-confirm]");
+    if (aliasConfirm && state.aliasLinkPreview) {
+      const count = Number(state.aliasLinkPreview.stats?.link || 0);
+      if (!await confirmInPage(t(currentLang(), "reverseConfirm", { count }))) return;
+      if (!scope.isCurrent()) return;
+      state.busy = true;
+      state.error = "";
+      rerender();
+      try {
+        const result = await confirmLiveShopifyAliasLinks();
+        if (!scope.isCurrent()) return;
+        state.aliasLinkPreview = null;
+        state.aliasLinkResult = result;
+        await reloadShopifyData(scope);
+      } catch {
+        state.error = t(currentLang(), "reverseFailed");
+        state.busy = false;
+        if (scope.isCurrent()) rerender();
+      }
       return;
     }
     const binding = event.target.closest("[data-shopify-confirm-binding]");
@@ -574,6 +682,8 @@ export function disposeShopifyState() {
   state.health = null;
   state.alignment = null;
   state.bindingSelections = new Map();
+  state.aliasLinkPreview = null;
+  state.aliasLinkResult = null;
   state.busy = false;
   state.error = "";
   state.feedback = "";

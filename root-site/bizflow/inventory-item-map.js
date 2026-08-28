@@ -1,5 +1,10 @@
 import { getInventoryAliasesData, getOrdersPageData } from "../data/provider.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
+import {
+  deleteLiveInventoryAlias,
+  saveLiveInventoryAlias,
+  verifyLiveInventoryAlias
+} from "../data/live-inventory-writes.js";
 
 const copy = {
   zh: {
@@ -37,7 +42,12 @@ const copy = {
     cancel: "取消",
     save: "儲存",
     close: "關閉",
-    loading: "正在載入映射資料"
+    loading: "正在載入映射資料",
+    required: "請輸入 alias_name",
+    saveFailed: "映射儲存失敗，請重試",
+    deleteFailed: "映射刪除失敗，請重試",
+    verifyFailed: "映射確認失敗，請重試",
+    operationFailed: "操作失敗"
   },
   en: {
     title: "Item mapping",
@@ -74,7 +84,12 @@ const copy = {
     cancel: "Cancel",
     save: "Save",
     close: "Close",
-    loading: "Loading mapping data"
+    loading: "Loading mapping data",
+    required: "Enter an alias_name",
+    saveFailed: "Could not save the mapping. Try again",
+    deleteFailed: "Could not delete the mapping. Try again",
+    verifyFailed: "Could not confirm the mapping. Try again",
+    operationFailed: "Operation failed"
   },
   fr: {
     title: "Mappage Item",
@@ -111,7 +126,12 @@ const copy = {
     cancel: "Annuler",
     save: "Enregistrer",
     close: "Fermer",
-    loading: "Chargement des mappages"
+    loading: "Chargement des mappages",
+    required: "Saisissez un alias_name",
+    saveFailed: "Impossible d’enregistrer le mappage. Réessayez",
+    deleteFailed: "Impossible de supprimer le mappage. Réessayez",
+    verifyFailed: "Impossible de confirmer le mappage. Réessayez",
+    operationFailed: "Échec de l'opération"
   }
 };
 
@@ -120,7 +140,9 @@ const state = {
   aliases: [],
   orders: [],
   expanded: new Set(),
-  draft: null
+  draft: null,
+  busy: false,
+  error: ""
 };
 
 let rerender = () => {};
@@ -128,8 +150,8 @@ let currentProducts = [];
 let liveReadOnly = false;
 let dataLoadVersion = 0;
 
-function writeAttributes(disabled = liveReadOnly) {
-  return disabled ? ' disabled aria-disabled="true"' : "";
+function writeAttributes(disabled = liveReadOnly || state.busy) {
+  return disabled || state.busy ? ' disabled aria-disabled="true"' : "";
 }
 
 function t(lang, key, values = {}) {
@@ -189,6 +211,20 @@ export function unmatchedLineItems(aliases = state.aliases, orders = state.order
 
 function productById() {
   return new Map(currentProducts.map((product) => [product.id, product]));
+}
+
+function aliasFromLiveRow(row) {
+  const products = Array.isArray(row?.products) ? row.products.map((product) => ({ ...product })) : [];
+  const names = productById();
+  return {
+    id: row.id,
+    aliasName: String(row.alias_name || ""),
+    skip: row.skip === true,
+    products,
+    productNames: products.map((product) => names.get(product.product_id)?.name ?? product.product_id),
+    verified: row.verified === true,
+    note: String(row.note || "")
+  };
 }
 
 function aliasGroups(lang) {
@@ -300,6 +336,7 @@ function renderModal(helpers) {
         </div>`}
         <label class="inventory-domain-field"><span>${escapeHtml(t(lang, "note"))}</span><textarea data-item-map-field="note" data-inventory-write placeholder="${escapeHtml(t(lang, "notePlaceholder"))}"${writeAttributes()}>${escapeHtml(draft.note)}</textarea></label>
       </div>
+      ${state.error ? `<p class="inventory-domain-error">${escapeHtml(state.error)}</p>` : ""}
       <footer><button type="button" class="inventory-domain-button inventory-domain-button--secondary" data-item-map-close>${escapeHtml(t(lang, "cancel"))}</button><button type="submit" class="inventory-domain-button" data-inventory-write${writeAttributes()}>${escapeHtml(t(lang, "save"))}</button></footer>
     </form>
   </div>`;
@@ -311,6 +348,7 @@ export function renderItemMap(helpers, products) {
   if (!state.loaded) return `<div class="inventory-domain-empty">${helpers.escapeHtml(t(helpers.lang, "loading"))}</div>`;
   const counts = itemMapGroupCounts();
   return `<section class="inventory-domain-page item-map-page" data-item-map-page data-live-read-only="${liveReadOnly}" data-alias-count="${state.aliases.length}" data-single-count="${counts.single}" data-bundle-count="${counts.bundle}" data-skip-count="${counts.skip}" data-no-product-count="${counts.noProduct}">
+    ${state.error && !state.draft ? `<p class="inventory-domain-error">${helpers.escapeHtml(state.error)}</p>` : ""}
     ${renderUnmatched(helpers)}
     <div class="inventory-domain-heading"><h2>${helpers.escapeHtml(t(helpers.lang, "configured"))}<span>${state.aliases.length}</span></h2><button type="button" class="inventory-domain-button" data-item-map-new data-inventory-write${writeAttributes()}>+ ${helpers.escapeHtml(t(helpers.lang, "add"))}</button></div>
     ${renderGroups(helpers)}
@@ -320,6 +358,7 @@ export function renderItemMap(helpers, products) {
 
 function closeModal() {
   state.draft = null;
+  state.error = "";
   rerender();
 }
 
@@ -337,29 +376,56 @@ export function attachItemMapBehaviors({ rerender: nextRerender, scope }) {
     }
     const create = event.target.closest("[data-item-map-new]");
     if (create) {
+      state.error = "";
       state.draft = emptyDraft(create.getAttribute("data-alias-name") || "");
       rerender();
       return;
     }
     const verify = event.target.closest("[data-item-map-verify]");
     if (verify) {
-      const alias = state.aliases.find((item) => item.id === verify.getAttribute("data-item-map-verify"));
-      if (alias) alias.verified = true;
+      const aliasId = verify.getAttribute("data-item-map-verify");
+      state.busy = true;
+      state.error = "";
       rerender();
+      try {
+        const saved = aliasFromLiveRow(await verifyLiveInventoryAlias(aliasId));
+        if (!scope.isCurrent()) return;
+        state.aliases = state.aliases.map((alias) => alias.id === aliasId ? saved : alias);
+      } catch (error) {
+        state.error = `${t(currentHelpersLang(), "operationFailed")}: ${error.message}`;
+      } finally {
+        state.busy = false;
+        if (scope.isCurrent()) rerender();
+      }
       return;
     }
     const edit = event.target.closest("[data-item-map-edit]");
     if (edit) {
       const alias = state.aliases.find((item) => item.id === edit.getAttribute("data-item-map-edit"));
-      if (alias) state.draft = { ...alias, products: alias.products.length ? alias.products.map((row) => ({ ...row })) : [{ product_id: "", qty: 1 }] };
+      if (alias) {
+        state.error = "";
+        state.draft = { ...alias, products: alias.products.length ? alias.products.map((row) => ({ ...row })) : [{ product_id: "", qty: 1 }] };
+      }
       rerender();
       return;
     }
     const remove = event.target.closest("[data-item-map-delete]");
     if (remove && await confirmInPage(t(currentHelpersLang(), "deleteConfirm"), { danger: true })) {
       if (!scope.isCurrent()) return;
-      state.aliases = state.aliases.filter((item) => item.id !== remove.getAttribute("data-item-map-delete"));
+      const aliasId = remove.getAttribute("data-item-map-delete");
+      state.busy = true;
+      state.error = "";
       rerender();
+      try {
+        await deleteLiveInventoryAlias(aliasId);
+        if (!scope.isCurrent()) return;
+        state.aliases = state.aliases.filter((item) => item.id !== aliasId);
+      } catch (error) {
+        state.error = `${t(currentHelpersLang(), "operationFailed")}: ${error.message}`;
+      } finally {
+        state.busy = false;
+        if (scope.isCurrent()) rerender();
+      }
       return;
     }
     if (event.target.closest("[data-item-map-close]") || event.target.matches("[data-item-map-overlay]")) return closeModal();
@@ -380,7 +446,7 @@ export function attachItemMapBehaviors({ rerender: nextRerender, scope }) {
     const field = event.target.closest("[data-item-map-field]");
     if (field) state.draft[field.getAttribute("data-item-map-field")] = field.value;
     const qty = event.target.closest("[data-item-map-qty]");
-    if (qty) state.draft.products[Number(qty.getAttribute("data-item-map-qty"))].qty = Math.max(1, Number(qty.value) || 1);
+    if (qty) state.draft.products[Number(qty.getAttribute("data-item-map-qty"))].qty = Number(qty.value) || 1;
   });
   scope.listen(document, "change", (event) => {
     if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
@@ -393,29 +459,39 @@ export function attachItemMapBehaviors({ rerender: nextRerender, scope }) {
     const product = event.target.closest("[data-item-map-product]");
     if (product) state.draft.products[Number(product.getAttribute("data-item-map-product"))].product_id = product.value;
   });
-  scope.listen(document, "submit", (event) => {
+  scope.listen(document, "submit", async (event) => {
     if (!event.target.matches("[data-item-map-form]") || !state.draft) return;
     event.preventDefault();
     if (liveReadOnly) return;
     const aliasName = state.draft.aliasName.trim();
-    if (!aliasName) return;
-    const products = state.draft.skip ? [] : state.draft.products
-      .filter((row) => row.product_id)
-      .map((row) => ({ product_id: row.product_id, qty: Math.max(1, Number(row.qty) || 1) }));
-    const names = productById();
-    const saved = {
+    if (!aliasName) {
+      state.error = t(currentHelpersLang(), "required");
+      rerender();
+      return;
+    }
+    const draft = {
       ...state.draft,
-      id: state.draft.id ?? `local-alias-${Date.now()}`,
       aliasName,
-      products,
-      productNames: products.map((row) => names.get(row.product_id)?.name ?? row.product_id),
-      verified: true,
-      note: state.draft.note.trim()
+      products: state.draft.skip ? [] : state.draft.products
+        .filter((row) => row.product_id)
+        .map((row) => ({ product_id: row.product_id, qty: Number(row.qty) || 1 }))
     };
-    const index = state.aliases.findIndex((alias) => alias.id === saved.id);
-    if (index >= 0) state.aliases[index] = saved;
-    else state.aliases.unshift(saved);
-    closeModal();
+    state.busy = true;
+    state.error = "";
+    rerender();
+    try {
+      const saved = aliasFromLiveRow(await saveLiveInventoryAlias(draft));
+      if (!scope.isCurrent()) return;
+      const index = state.aliases.findIndex((alias) => alias.id === saved.id);
+      if (index >= 0) state.aliases[index] = saved;
+      else state.aliases.unshift(saved);
+      state.draft = null;
+    } catch (error) {
+      state.error = `${t(currentHelpersLang(), "operationFailed")}: ${error.message}`;
+    } finally {
+      state.busy = false;
+      if (scope.isCurrent()) rerender();
+    }
   });
   scope.listen(document, "keydown", (event) => {
     if (event.key === "Escape" && state.draft) closeModal();
@@ -429,6 +505,7 @@ export function captureItemMapState() {
 export function restoreItemMapState(value = null) {
   state.expanded = new Set(Array.isArray(value?.expanded) ? value.expanded.map(String) : []);
   state.draft = null;
+  state.error = "";
 }
 
 export function hasItemMapUnsavedChanges() {
@@ -442,6 +519,8 @@ export function disposeItemMapState() {
   state.orders = [];
   state.expanded = new Set();
   state.draft = null;
+  state.busy = false;
+  state.error = "";
   currentProducts = [];
   liveReadOnly = false;
   rerender = () => {};

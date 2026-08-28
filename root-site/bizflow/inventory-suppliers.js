@@ -1,5 +1,10 @@
 import { getSuppliersData } from "../data/provider.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
+import {
+  createLiveInventorySupplier,
+  deleteLiveInventorySupplier,
+  updateLiveInventorySupplier
+} from "../data/live-inventory-writes.js";
 
 const copy = {
   zh: {
@@ -27,7 +32,10 @@ const copy = {
     cancel: "取消",
     save: "儲存",
     close: "關閉",
-    loading: "正在載入供應商"
+    loading: "正在載入供應商",
+    saveFailed: "供應商儲存失敗，請重試",
+    deleteFailed: "供應商刪除失敗，請重試",
+    operationFailed: "操作失敗"
   },
   en: {
     title: "Suppliers",
@@ -54,7 +62,10 @@ const copy = {
     cancel: "Cancel",
     save: "Save",
     close: "Close",
-    loading: "Loading suppliers"
+    loading: "Loading suppliers",
+    saveFailed: "Could not save the supplier. Try again",
+    deleteFailed: "Could not delete the supplier. Try again",
+    operationFailed: "Operation failed"
   },
   fr: {
     title: "Fournisseurs",
@@ -81,7 +92,10 @@ const copy = {
     cancel: "Annuler",
     save: "Enregistrer",
     close: "Fermer",
-    loading: "Chargement des fournisseurs"
+    loading: "Chargement des fournisseurs",
+    saveFailed: "Impossible d’enregistrer le fournisseur. Réessayez",
+    deleteFailed: "Impossible de supprimer le fournisseur. Réessayez",
+    operationFailed: "Échec de l'opération"
   }
 };
 
@@ -91,7 +105,8 @@ const state = {
   search: "",
   category: "all",
   draft: null,
-  error: ""
+  error: "",
+  busy: false
 };
 
 let rerender = () => {};
@@ -99,7 +114,7 @@ let liveReadOnly = false;
 let dataLoadVersion = 0;
 
 function writeAttributes() {
-  return liveReadOnly ? ' disabled aria-disabled="true"' : "";
+  return liveReadOnly || state.busy ? ' disabled aria-disabled="true"' : "";
 }
 
 function t(lang, key) {
@@ -136,6 +151,17 @@ function filteredSuppliers() {
 function safeContactUrl(value) {
   const url = String(value || "").trim();
   return /^(https?:\/\/|mailto:|wxwork:\/\/)/i.test(url) ? url : "";
+}
+
+function supplierFromLiveRow(row) {
+  return {
+    id: row.id,
+    name: String(row.name || ""),
+    contactUrl: String(row.contact_url || ""),
+    contactPerson: String(row.contact_person || ""),
+    category: String(row.category || ""),
+    note: String(row.note || "")
+  };
 }
 
 function renderCard(supplier, helpers) {
@@ -179,6 +205,7 @@ export function renderSuppliers(helpers) {
   const supplierCategories = categories();
   const suppliers = filteredSuppliers();
   return `<section class="inventory-domain-page suppliers-page" data-suppliers-page data-live-read-only="${liveReadOnly}" data-supplier-count="${state.suppliers.length}">
+    ${state.error && !state.draft ? `<p class="inventory-domain-error">${escapeHtml(state.error)}</p>` : ""}
     <div class="inventory-domain-heading"><h2>${escapeHtml(t(lang, "title"))}<span>${escapeHtml(`${state.suppliers.length} ${t(lang, "count")}`)}</span></h2><button type="button" class="inventory-domain-button" data-supplier-new data-inventory-write${writeAttributes()}>+ ${escapeHtml(t(lang, "add"))}</button></div>
     <label class="inventory-domain-search inventory-domain-search--wide">${icon("icon-nav-search", "icon")}<input type="search" data-supplier-search value="${escapeHtml(state.search)}" placeholder="${escapeHtml(t(lang, "search"))}"></label>
     ${supplierCategories.length ? `<div class="supplier-categories"><button type="button" class="${state.category === "all" ? "is-active" : ""}" data-supplier-category="all">${escapeHtml(t(lang, "all"))}</button>${supplierCategories.map((category) => `<button type="button" class="${state.category === category ? "is-active" : ""}" data-supplier-category="${escapeHtml(category)}">${escapeHtml(category)}</button>`).join("")}</div>` : ""}
@@ -202,6 +229,7 @@ export function attachSupplierBehaviors({ rerender: nextRerender, scope }) {
   scope.listen(document, "click", async (event) => {
     if (liveReadOnly && event.target.closest("[data-inventory-write]")) return;
     if (event.target.closest("[data-supplier-new]")) {
+      state.error = "";
       state.draft = blankSupplier();
       rerender();
       return;
@@ -209,16 +237,31 @@ export function attachSupplierBehaviors({ rerender: nextRerender, scope }) {
     const edit = event.target.closest("[data-supplier-edit]");
     if (edit) {
       const supplier = state.suppliers.find((item) => item.id === edit.getAttribute("data-supplier-edit"));
-      if (supplier) state.draft = { ...supplier };
+      if (supplier) {
+        state.error = "";
+        state.draft = { ...supplier };
+      }
       rerender();
       return;
     }
     const remove = event.target.closest("[data-supplier-delete]");
     if (remove && await confirmInPage(t(currentLang(), "deleteConfirm"), { danger: true })) {
       if (!scope.isCurrent()) return;
-      state.suppliers = state.suppliers.filter((item) => item.id !== remove.getAttribute("data-supplier-delete"));
-      if (state.category !== "all" && !categories().includes(state.category)) state.category = "all";
+      const supplierId = remove.getAttribute("data-supplier-delete");
+      state.busy = true;
+      state.error = "";
       rerender();
+      try {
+        await deleteLiveInventorySupplier(supplierId);
+        if (!scope.isCurrent()) return;
+        state.suppliers = state.suppliers.filter((item) => item.id !== supplierId);
+        if (state.category !== "all" && !categories().includes(state.category)) state.category = "all";
+      } catch (error) {
+        state.error = `${t(currentLang(), "operationFailed")}: ${error.message}`;
+      } finally {
+        state.busy = false;
+        if (scope.isCurrent()) rerender();
+      }
       return;
     }
     const category = event.target.closest("[data-supplier-category]");
@@ -244,7 +287,7 @@ export function attachSupplierBehaviors({ rerender: nextRerender, scope }) {
       state.error = "";
     }
   });
-  scope.listen(document, "submit", (event) => {
+  scope.listen(document, "submit", async (event) => {
     if (!event.target.matches("[data-supplier-form]") || !state.draft) return;
     event.preventDefault();
     if (liveReadOnly) return;
@@ -254,19 +297,26 @@ export function attachSupplierBehaviors({ rerender: nextRerender, scope }) {
       rerender();
       return;
     }
-    const saved = {
-      ...state.draft,
-      id: state.draft.id ?? `local-supplier-${Date.now()}`,
-      name,
-      contactUrl: state.draft.contactUrl.trim(),
-      contactPerson: state.draft.contactPerson.trim(),
-      category: state.draft.category.trim(),
-      note: state.draft.note.trim()
-    };
-    const index = state.suppliers.findIndex((supplier) => supplier.id === saved.id);
-    if (index >= 0) state.suppliers[index] = saved;
-    else state.suppliers.unshift(saved);
-    closeModal();
+    const draft = { ...state.draft, name };
+    state.busy = true;
+    state.error = "";
+    rerender();
+    try {
+      const row = draft.id
+        ? await updateLiveInventorySupplier(draft.id, draft)
+        : await createLiveInventorySupplier(draft);
+      if (!scope.isCurrent()) return;
+      const saved = supplierFromLiveRow(row);
+      const index = state.suppliers.findIndex((supplier) => supplier.id === saved.id);
+      if (index >= 0) state.suppliers[index] = saved;
+      else state.suppliers.unshift(saved);
+      state.draft = null;
+    } catch (error) {
+      state.error = `${t(currentLang(), "operationFailed")}: ${error.message}`;
+    } finally {
+      state.busy = false;
+      if (scope.isCurrent()) rerender();
+    }
   });
   scope.listen(document, "keydown", (event) => {
     if (event.key === "Escape" && state.draft) closeModal();
@@ -282,6 +332,7 @@ export function restoreSupplierState(value = null) {
   state.category = typeof value?.category === "string" ? value.category : "all";
   state.draft = null;
   state.error = "";
+  state.busy = false;
 }
 
 export function hasSupplierUnsavedChanges() {
@@ -300,6 +351,7 @@ export function disposeSupplierState() {
   state.category = "all";
   state.draft = null;
   state.error = "";
+  state.busy = false;
   liveReadOnly = false;
   rerender = () => {};
 }
