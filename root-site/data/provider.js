@@ -2203,7 +2203,7 @@ export async function getExpenseData() {
 const WHATSAPP_SETTING_KEYS = [
   "claudeMode", "openaiBaseUrl", "model", "maxRepliesPerMin", "replyDelayBase",
   "cooldownMinutes", "botPhone", "botName", "bossChatName", "dailyReportHour",
-  "knowledge", "chargersPrompt", "locationHintPrompt", "bossPromptChars", "latestExtVersion",
+  "knowledge", "chargersPrompt", "locationHintPrompt", "bossPrompt", "bossPromptChars", "latestExtVersion",
   "waOutboundMode", "metaGraphVersion", "metaPhoneNumberId", "metaWabaId", "metaTtsEnabled",
   "metaTtsRelayUrl", "metaTtsVoiceId", "metaTtsLanguageBoost", "metaTtsPrompt", "updatedAt"
 ];

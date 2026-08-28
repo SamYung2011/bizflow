@@ -17,8 +17,14 @@ import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
 import { WHATSAPP_REALTIME_TABLES, WHATSAPP_SNAPSHOT } from "../data/live-whatsapp-contract.js";
 import {
   addLiveWhatsappWhitelist,
+  loadLiveWhatsappSecretMasks,
   removeLiveWhatsappWhitelist,
+  resolveLiveWhatsappUnresolved,
+  saveLiveWhatsappSecrets,
+  setInitialLiveWhatsappPassword,
   setLiveWhatsappWhitelistActive,
+  skipLiveWhatsappReply,
+  unlockLiveWhatsappSecrets,
   updateLiveWhatsappSettings
 } from "../data/live-whatsapp-writes.js";
 
@@ -41,7 +47,7 @@ function initializeWhatsappState(historyState = null) {
   state = {
     liveMode,
     liveReadOnly: settingsReadOnly,
-    activityReadOnly: liveMode,
+    activityReadOnly: liveMode && currentUser?.isWaAdmin !== true,
     writeBlocked: settingsReadOnly,
     savingSection: "",
     writeError: "",
@@ -70,6 +76,11 @@ function initializeWhatsappState(historyState = null) {
     logLimit: Number.isInteger(restored.logLimit) && restored.logLimit >= 50 ? restored.logLimit : 50,
     skippedReplyIds: new Set(),
     resolvedIds: new Set(),
+    secretUnlocked: false,
+    unlockedApiKey: "",
+    secretMasks: {},
+    secretDrafts: {},
+    editingSecret: null,
     guideOpen: false,
     savedSection: ""
   };
@@ -171,7 +182,15 @@ export function renderWhatsapp(helpers) {
 
 function rerender() {
   const page = document.querySelector("[data-wa-page]");
-  if (page && currentHelpers) page.outerHTML = renderWhatsapp(currentHelpers);
+  if (page && currentHelpers) {
+    page.outerHTML = renderWhatsapp(currentHelpers);
+    syncApiKeyInputValue();
+  }
+}
+
+function syncApiKeyInputValue() {
+  const input = document.querySelector("[data-wa-api-key]");
+  if (input) input.value = state.secretUnlocked ? state.unlockedApiKey : "";
 }
 
 function closeGuide() {
@@ -223,11 +242,13 @@ function handleDateFilterClick(event) {
 }
 
 const SETTINGS_SECTION_KEYS = Object.freeze({
+  api: ["openaiBaseUrl", "model"],
   runtime: ["botName", "botPhone", "bossChatName", "replyDelayBase", "cooldownMinutes", "maxRepliesPerMin", "dailyReportHour"],
   meta: ["metaGraphVersion", "metaPhoneNumberId", "metaWabaId"],
   tts: ["metaTtsEnabled", "metaTtsRelayUrl", "metaTtsVoiceId", "metaTtsLanguageBoost", "metaTtsPrompt"],
   knowledge: ["knowledge"],
-  prompts: ["chargersPrompt", "locationHintPrompt"]
+  prompts: ["chargersPrompt", "locationHintPrompt"],
+  bossPrompt: ["bossPrompt"]
 });
 
 function settingsPatch(section) {
@@ -274,6 +295,209 @@ async function runLiveWrite(section, operation, commit) {
   return succeeded;
 }
 
+function secretErrorKey(error, fallbackKey) {
+  if (error?.code === "wrongPassword") return "wrongPassword";
+  if (error?.code === "networkError") return "secretNetworkError";
+  if (error?.code === "configError") return "secretConfigError";
+  return fallbackKey;
+}
+
+async function runSecretRequest(section, operation) {
+  if (!state || state.writeBlocked) return { ok: false, error: null };
+  const target = state;
+  target.savingSection = section;
+  target.writeError = "";
+  rerender();
+  try {
+    const value = await operation();
+    return state === target ? { ok: true, value } : { ok: false, error: null };
+  } catch (error) {
+    console.error("[live-whatsapp] protected request failed", error?.code || "unknown");
+    return { ok: false, error };
+  } finally {
+    if (state === target) {
+      target.savingSection = "";
+      rerender();
+    }
+  }
+}
+
+async function ensureUnlocked() {
+  if (state.secretUnlocked) return true;
+  if (currentUser?.isWaAdmin !== true) {
+    window.alert(t("waAdminRequired"));
+    return false;
+  }
+  const password = window.prompt(t("adminPasswordPrompt"));
+  if (!password?.trim()) return false;
+  const unlocked = await runSecretRequest("unlock", () => unlockLiveWhatsappSecrets(password));
+  if (unlocked.ok) {
+    state.unlockedApiKey = unlocked.value.openai_api_key || "";
+    state.secretUnlocked = true;
+    state.writeError = "";
+    rerender();
+    return true;
+  }
+  if (unlocked.error?.code !== "needsInitialPassword") {
+    window.alert(t(secretErrorKey(unlocked.error, "unlockFailed")));
+    return false;
+  }
+  if (!window.confirm(t("setInitialPasswordConfirm"))) return false;
+  const initialPassword = window.prompt(t("setInitialPasswordPrompt"));
+  if (!initialPassword?.trim()) return false;
+  const initialized = await runSecretRequest("unlock", () => setInitialLiveWhatsappPassword(initialPassword));
+  if (!initialized.ok) {
+    window.alert(t(secretErrorKey(initialized.error, "setPasswordFailed")));
+    return false;
+  }
+  state.unlockedApiKey = "";
+  state.secretUnlocked = true;
+  state.writeError = "";
+  rerender();
+  return true;
+}
+
+async function saveApiConfiguration() {
+  if (!await ensureUnlocked()) return;
+  const patch = settingsPatch("api");
+  if (state.liveMode) {
+    const saved = await runLiveWrite("api", () => updateLiveWhatsappSettings(patch), (_result, target) => {
+      markSettingsSaved(target, patch);
+    });
+    if (!saved) return;
+  } else {
+    markSettingsSaved(state, patch);
+    state.savedSection = "api";
+    rerender();
+  }
+  const password = window.prompt(t("confirmApiKeyPassword"));
+  if (!password?.trim()) {
+    window.alert(t("apiPlainSavedOnly"));
+    return;
+  }
+  const savedSecret = await runSecretRequest("api", () => saveLiveWhatsappSecrets({
+    password,
+    newApiKey: state.unlockedApiKey
+  }));
+  if (!savedSecret.ok) {
+    window.alert(t(secretErrorKey(savedSecret.error, "apiKeySaveFailed")));
+    return;
+  }
+  state.savedSection = "api";
+  rerender();
+  window.alert(t("apiConfigSaved"));
+}
+
+async function testApiConnection() {
+  if (!state.secretUnlocked) return;
+  const baseUrl = String(state.settings.openaiBaseUrl || "").trim();
+  const model = String(state.settings.model || "").trim();
+  const apiKey = state.unlockedApiKey;
+  if (!baseUrl || !model || !apiKey) return;
+  const allowedHosts = [
+    "api.openai.com",
+    "api.deepseek.com",
+    "api.anthropic.com",
+    "dashscope.aliyuncs.com",
+    "open.bigmodel.cn"
+  ];
+  let parsed;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    window.alert(t("invalidBaseUrl"));
+    return;
+  }
+  if (parsed.protocol !== "https:") {
+    window.alert(t("httpsBaseUrlRequired"));
+    return;
+  }
+  if (!allowedHosts.includes(parsed.host) && !window.confirm(t("customHostWarning", { host: parsed.host }))) return;
+  try {
+    const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: "ping（只需回復 pong）" }],
+        max_tokens: 8192
+      })
+    });
+    const payload = await response.json();
+    const content = payload?.choices?.[0]?.message?.content;
+    if (response.ok && content) {
+      window.alert(t("connectionSucceeded", { content: String(content).slice(0, 100) }));
+    } else if (response.ok) {
+      const finishReason = payload?.choices?.[0]?.finish_reason || "unknown";
+      const usage = payload?.usage ? `tokens=${payload.usage.completion_tokens}/${payload.usage.total_tokens}` : "";
+      window.alert(t("emptyApiResponse", {
+        finishReason,
+        usage,
+        response: JSON.stringify(payload).slice(0, 400)
+      }));
+    } else {
+      window.alert(t("connectionFailed", {
+        status: response.status,
+        error: payload?.error?.message || JSON.stringify(payload).slice(0, 200)
+      }));
+    }
+  } catch {
+    window.alert(t("connectionNetworkError"));
+  }
+}
+
+async function editMetaSecret(field) {
+  if (state.editingSecret === field) {
+    state.editingSecret = null;
+    state.secretDrafts[field] = "";
+    rerender();
+    return;
+  }
+  if (currentUser?.isWaAdmin !== true) {
+    window.alert(t("waAdminRequired"));
+    return;
+  }
+  if (!Object.keys(state.secretMasks).length) {
+    const password = window.prompt(t("viewMasksPasswordPrompt"));
+    if (!password?.trim()) return;
+    const loaded = await runSecretRequest("metaSecrets", () => loadLiveWhatsappSecretMasks(password));
+    if (!loaded.ok) {
+      window.alert(t(secretErrorKey(loaded.error, "secretMasksFailed")));
+      return;
+    }
+    state.secretMasks = { ...(loaded.value.meta_secrets || {}) };
+  }
+  state.editingSecret = field;
+  rerender();
+}
+
+async function saveMetaSecret(field) {
+  const nextValue = String(state.secretDrafts[field] || "").trim();
+  if (!nextValue) {
+    window.alert(t("secretCannotBeEmpty"));
+    return;
+  }
+  if (!window.confirm(t("replaceSecretConfirm"))) return;
+  const password = window.prompt(t("confirmSecretPassword"));
+  if (!password?.trim()) return;
+  const saved = await runSecretRequest("metaSecrets", () => saveLiveWhatsappSecrets({
+    password,
+    metaSecrets: { [field]: nextValue }
+  }));
+  if (!saved.ok) {
+    window.alert(t(secretErrorKey(saved.error, "secretSaveFailed")));
+    return;
+  }
+  state.secretMasks = { ...(saved.value.meta_secrets || {}) };
+  state.secretDrafts[field] = "";
+  state.editingSecret = null;
+  rerender();
+  window.alert(t("secretUpdated"));
+}
+
 async function onWhatsappClick(event) {
   if (handleDateFilterClick(event)) return;
   const writeControl = event.target.closest("[data-wa-write]");
@@ -294,6 +518,30 @@ async function onWhatsappClick(event) {
   }
   if (event.target.closest("[data-wa-guide-close]") || event.target.matches("[data-wa-guide-overlay]")) {
     closeGuide();
+    return;
+  }
+  if (event.target.closest("[data-wa-unlock], [data-wa-boss-unlock]")) {
+    await ensureUnlocked();
+    return;
+  }
+  const apiSave = event.target.closest("[data-wa-api-save]");
+  if (apiSave && !apiSave.disabled) {
+    await saveApiConfiguration();
+    return;
+  }
+  const apiTest = event.target.closest("[data-wa-api-test]");
+  if (apiTest && !apiTest.disabled) {
+    await testApiConnection();
+    return;
+  }
+  const secret = event.target.closest("[data-wa-secret]");
+  if (secret && !secret.disabled) {
+    await editMetaSecret(secret.getAttribute("data-wa-secret"));
+    return;
+  }
+  const secretSave = event.target.closest("[data-wa-secret-save]");
+  if (secretSave && !secretSave.disabled) {
+    await saveMetaSecret(secretSave.getAttribute("data-wa-secret-save"));
     return;
   }
   const mode = event.target.closest("[data-wa-mode]");
@@ -383,14 +631,30 @@ async function onWhatsappClick(event) {
   const replySkip = event.target.closest("[data-wa-reply-skip]");
   if (replySkip) {
     if (state.activityReadOnly) return;
-    state.skippedReplyIds.add(replySkip.getAttribute("data-wa-reply-skip"));
+    const id = replySkip.getAttribute("data-wa-reply-skip");
+    if (state.liveMode) {
+      await runLiveWrite("replySkip", () => skipLiveWhatsappReply(id), (row, target) => {
+        const reply = target.replies.find((item) => String(item.id) === id);
+        if (reply) reply.deliveredAt = row?.delivered_at || new Date().toISOString();
+      });
+    } else {
+      state.skippedReplyIds.add(id);
+    }
     rerender();
     return;
   }
   const resolve = event.target.closest("[data-wa-resolve]");
   if (resolve) {
     if (state.activityReadOnly) return;
-    state.resolvedIds.add(resolve.getAttribute("data-wa-resolve"));
+    const id = resolve.getAttribute("data-wa-resolve");
+    if (state.liveMode) {
+      await runLiveWrite("resolve", () => resolveLiveWhatsappUnresolved(id), (row, target) => {
+        const unresolved = target.unresolved.find((item) => String(item.id) === id);
+        if (unresolved) unresolved.resolvedAt = row?.resolved_at || new Date().toISOString();
+      });
+    } else {
+      state.resolvedIds.add(id);
+    }
     rerender();
     return;
   }
@@ -416,6 +680,17 @@ async function onWhatsappClick(event) {
 
 function onWhatsappInput(event) {
   if (state.writeBlocked && event.target.closest("[data-wa-write]")) return;
+  const apiKey = event.target.closest("[data-wa-api-key]");
+  if (apiKey) {
+    state.unlockedApiKey = apiKey.value;
+    state.savedSection = "";
+    state.writeError = "";
+    const testButton = document.querySelector("[data-wa-api-test]");
+    if (testButton) {
+      testButton.disabled = state.writeBlocked || !state.secretUnlocked || !apiKey.value.trim()
+        || !String(state.settings.openaiBaseUrl || "").trim() || !String(state.settings.model || "").trim();
+    }
+  }
   const setting = event.target.closest("[data-wa-setting]");
   if (setting && setting.type !== "checkbox") {
     const key = setting.getAttribute("data-wa-setting");
@@ -424,6 +699,17 @@ function onWhatsappInput(event) {
     state.writeError = "";
     if (key === "knowledge") updateKnowledgeMeta();
     if (key === "locationHintPrompt") updatePromptValidation();
+    if (key === "bossPrompt") {
+      const count = document.querySelector("[data-wa-boss-count]");
+      if (count) count.textContent = t("chars", { count: String(state.settings.bossPrompt || "").length });
+    }
+  }
+  const secretDraft = event.target.closest("[data-wa-secret-draft]");
+  if (secretDraft) {
+    const key = secretDraft.getAttribute("data-wa-secret-draft");
+    state.secretDrafts[key] = secretDraft.value;
+    const button = document.querySelector(`[data-wa-secret-save="${key}"]`);
+    if (button) button.disabled = state.writeBlocked || !secretDraft.value.trim();
   }
   const draft = event.target.closest("[data-wa-whitelist-draft]");
   if (draft) {
@@ -433,6 +719,38 @@ function onWhatsappInput(event) {
     const button = document.querySelector(`[data-wa-whitelist-add="${kind}"]`);
     if (button) button.disabled = state.writeBlocked || !state.whitelistDrafts[kind].value.trim();
   }
+}
+
+async function saveBossPromptOnBlur() {
+  if (!state.secretUnlocked || state.writeBlocked) return;
+  const patch = settingsPatch("bossPrompt");
+  if (patch.bossPrompt === state.savedSettings.bossPrompt) {
+    flushWhatsappRefreshAfterFocus();
+    return;
+  }
+  if (state.liveMode) {
+    await runLiveWrite("bossPrompt", () => updateLiveWhatsappSettings(patch), (_result, target) => {
+      const promptChars = String(patch.bossPrompt || "").length;
+      markSettingsSaved(target, patch);
+      target.settings.bossPromptChars = promptChars;
+      target.savedSettings.bossPromptChars = promptChars;
+    });
+  } else {
+    const promptChars = String(patch.bossPrompt || "").length;
+    markSettingsSaved(state, patch);
+    state.settings.bossPromptChars = promptChars;
+    state.savedSettings.bossPromptChars = promptChars;
+    state.savedSection = "bossPrompt";
+    rerender();
+  }
+}
+
+function onWhatsappFocusout(event) {
+  if (event.target.closest?.('[data-wa-setting="bossPrompt"]')) {
+    void saveBossPromptOnBlur();
+    return;
+  }
+  flushWhatsappRefreshAfterFocus();
 }
 
 async function onWhatsappChange(event) {
@@ -527,11 +845,12 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       title: "Honnmono · WhatsApp"
     },
     activate() {
+      syncApiKeyInputValue();
       void loadPageUnread({ scope, currentUser, onUpdate: (next) => { unread = next.unread; } });
       scope.listen(document, "click", onWhatsappClick);
       scope.listen(document, "input", onWhatsappInput);
       scope.listen(document, "change", onWhatsappChange);
-      scope.listen(document, "focusout", flushWhatsappRefreshAfterFocus);
+      scope.listen(document, "focusout", onWhatsappFocusout);
       scope.listen(document, "keydown", onWhatsappKeydown);
       const robotStatusInterval = setInterval(updateRobotStatus, WHATSAPP_CLIENT_HEARTBEAT_INTERVAL_MS);
       scope.onCleanup(() => clearInterval(robotStatusInterval));

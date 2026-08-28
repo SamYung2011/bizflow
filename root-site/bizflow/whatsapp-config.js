@@ -4,9 +4,13 @@ function writeAttributes(liveReadOnly, disabled = false) {
   return ` data-wa-write${liveReadOnly || disabled ? ' disabled aria-disabled="true"' : ""}`;
 }
 
-function field({ e, label, value = "", field, type = "text", hint = "", disabled = false, liveReadOnly = false, min = null, max = null }) {
+const EXTENSION_VERSION_FALLBACK = "1.3.3";
+
+function field({ e, label, value = "", field, dataAttribute = "", type = "text", hint = "", disabled = false, liveReadOnly = false, min = null, max = null, autocomplete = "", deferValue = false }) {
   const attributes = disabled ? " disabled" : writeAttributes(liveReadOnly);
-  return `<label class="wa-field"><span>${e(label)}</span><input type="${type}" value="${e(value)}" data-wa-setting="${e(field)}"${attributes}${min === null ? "" : ` min="${e(min)}"`}${max === null ? "" : ` max="${e(max)}"`}>${hint ? `<small>${e(hint)}</small>` : ""}</label>`;
+  const binding = dataAttribute ? ` ${dataAttribute}` : ` data-wa-setting="${e(field)}"`;
+  const valueAttribute = deferValue ? "" : ` value="${e(value)}"`;
+  return `<label class="wa-field"><span>${e(label)}</span><input type="${type}"${valueAttribute}${binding}${attributes}${autocomplete ? ` autocomplete="${e(autocomplete)}"` : ""}${min === null ? "" : ` min="${e(min)}"`}${max === null ? "" : ` max="${e(max)}"`}>${hint ? `<small>${e(hint)}</small>` : ""}</label>`;
 }
 
 function textarea({ e, label, value, field, rows = 8, liveReadOnly = false }) {
@@ -36,8 +40,14 @@ function renderSettings(state, helpers, t) {
   ];
   const modePanel = section(e(t("aiMode")), `<div class="wa-choice-grid">${modes.map(([value, key]) => `<button type="button" class="wa-choice${s.claudeMode === value ? " is-active" : ""}" data-wa-mode="${value}" data-wa-write aria-pressed="${s.claudeMode === value}"${state.writeBlocked ? ' disabled aria-disabled="true"' : ""}><strong>${e(t(key))}</strong><small>${e(t(state.liveMode ? "liveChange" : "localChange"))}</small></button>`).join("")}</div>`);
   const clients = state.clients.length ? state.clients.map((client) => `<li><div><strong>${e(client.ua || t("unknown"))}</strong><span>${e(client.clientId || t("empty"))}</span></div><div><span>${e(t("version"))}: ${e(client.version || t("empty"))}</span><span>${e(t("lastSeen"))}: ${e(client.lastSeen || t("empty"))}</span></div></li>`).join("") : `<li class="wa-empty-row">${e(t("noClients"))}</li>`;
-  const cloudPanel = section(e(t("cloudClients")), `<ul class="wa-client-list">${clients}</ul><div class="wa-button-row"><button type="button" class="wa-button" disabled title="${e(t("formalOnly"))}">${helpers.icon("icon-nav-cloud", "icon")}${e(t("downloadExtension"))}</button><button type="button" class="wa-button wa-button--secondary" data-wa-guide>${e(t("installGuide"))}</button></div>`);
-  const apiPanel = section(e(t("apiConfig")), `<div class="wa-form-grid">${field({ e, label: t("baseUrl"), value: s.openaiBaseUrl, field: "openaiBaseUrl", disabled: true })}${field({ e, label: t("apiKey"), value: WHATSAPP_MASK, field: "apiKey", disabled: true, hint: t("secretHint") })}${field({ e, label: t("model"), value: s.model, field: "model", disabled: true })}</div><button type="button" class="wa-button wa-button--secondary" disabled title="${e(t("formalOnly"))}">${e(t("unlockEdit"))}</button>`);
+  const extensionVersion = String(s.latestExtVersion || EXTENSION_VERSION_FALLBACK);
+  const cloudPanel = section(e(t("cloudClients")), `<ul class="wa-client-list">${clients}</ul><div class="wa-button-row"><a class="wa-button" href="/whatsapp-extension-cloud.zip" download>${helpers.icon("icon-nav-cloud", "icon")}${e(t("downloadExtension"))} v${e(extensionVersion)}</a><button type="button" class="wa-button wa-button--secondary" data-wa-guide>${e(t("installGuide"))}</button></div>`);
+  const apiLocked = state.secretUnlocked !== true;
+  const apiReady = !apiLocked && Boolean(String(s.openaiBaseUrl || "").trim() && String(state.unlockedApiKey || "") && String(s.model || "").trim());
+  const apiStatus = apiLocked
+    ? `<button type="button" class="wa-button wa-button--secondary" data-wa-unlock${writeAttributes(state.writeBlocked)}>${e(t("unlockEdit"))}</button>`
+    : `<span class="wa-saved">${e(t("unlocked"))}</span>`;
+  const apiPanel = section(e(t("apiConfig")), `<div class="wa-editor-meta"><span>${e(t(apiLocked ? "locked" : "unlocked"))}</span>${apiStatus}</div><div class="wa-form-grid">${field({ e, label: t("baseUrl"), value: s.openaiBaseUrl, field: "openaiBaseUrl", disabled: apiLocked, liveReadOnly: state.writeBlocked, hint: t("baseUrlHint") })}${field({ e, label: t("apiKey"), dataAttribute: "data-wa-api-key", type: "password", disabled: apiLocked, liveReadOnly: state.writeBlocked, hint: t("apiKeyMemoryHint"), autocomplete: "off", deferValue: true })}${field({ e, label: t("model"), value: s.model, field: "model", disabled: apiLocked, liveReadOnly: state.writeBlocked })}</div><div class="wa-button-row"><button type="button" class="wa-button" data-wa-api-save${writeAttributes(state.writeBlocked, apiLocked)}>${e(t("saveApiConfig"))}</button><button type="button" class="wa-button wa-button--secondary" data-wa-api-test${writeAttributes(state.writeBlocked, !apiReady)}>${e(t("testConnection"))}</button>${state.savedSection === "api" ? `<span class="wa-saved">${e(savedLabel(state, t))}</span>` : ""}</div>`);
   const runtimePanel = section(e(t("runtime")), `<div class="wa-form-grid">${field({ ...writable, label: t("botName"), value: s.botName, field: "botName" })}${field({ ...writable, label: t("botPhone"), value: s.botPhone, field: "botPhone" })}${field({ ...writable, label: t("specialChat"), value: s.bossChatName, field: "bossChatName" })}${field({ ...writable, label: t("replyDelay"), value: s.replyDelayBase, field: "replyDelayBase", type: "number", min: 0 })}${field({ ...writable, label: t("cooldown"), value: s.cooldownMinutes, field: "cooldownMinutes", type: "number", min: 0 })}${field({ ...writable, label: t("maxReplies"), value: s.maxRepliesPerMin, field: "maxRepliesPerMin", type: "number", min: 0 })}${field({ ...writable, label: t("reportHour"), value: s.dailyReportHour, field: "dailyReportHour", type: "number", min: 0, max: 23 })}</div><div class="wa-button-row"><button type="button" class="wa-button" data-wa-save="runtime"${writeAttributes(state.writeBlocked)}>${e(saveLabel(state, t))}</button>${state.savedSection === "runtime" ? `<span class="wa-saved">${e(savedLabel(state, t))}</span>` : ""}</div>`);
   return modePanel + cloudPanel + apiPanel + runtimePanel;
 }
@@ -48,7 +58,16 @@ function renderMeta(state, helpers, t) {
   const writable = { e, liveReadOnly: state.writeBlocked };
   const connection = section(e(t("officialConnection")), `<div class="wa-form-grid">${field({ ...writable, label: t("graphVersion"), value: s.metaGraphVersion, field: "metaGraphVersion", hint: t("graphHint") })}${field({ ...writable, label: t("phoneNumberId"), value: s.metaPhoneNumberId, field: "metaPhoneNumberId", hint: t("phoneIdHint") })}${field({ ...writable, label: t("wabaId"), value: s.metaWabaId, field: "metaWabaId", hint: t("wabaHint") })}${field({ e, label: t("webhookPassword"), value: WHATSAPP_MASK, field: "webhookPassword", disabled: true, hint: t("webhookHint") })}</div><div class="wa-button-row"><button type="button" class="wa-button" data-wa-save="meta"${writeAttributes(state.writeBlocked)}>${e(saveLabel(state, t))}</button>${state.savedSection === "meta" ? `<span class="wa-saved">${e(savedLabel(state, t))}</span>` : ""}</div>`);
   const voice = section(e(t("tts")), `<label class="wa-toggle-row"><input type="checkbox" data-wa-setting="metaTtsEnabled"${s.metaTtsEnabled ? " checked" : ""}${writeAttributes(state.writeBlocked)}><span>${e(t("ttsEnabled"))}</span></label><div class="wa-form-grid">${field({ ...writable, label: t("relayUrl"), value: s.metaTtsRelayUrl, field: "metaTtsRelayUrl" })}${field({ ...writable, label: t("voiceId"), value: s.metaTtsVoiceId, field: "metaTtsVoiceId" })}${field({ ...writable, label: t("languageBoost"), value: s.metaTtsLanguageBoost, field: "metaTtsLanguageBoost" })}</div>${textarea({ ...writable, label: t("ttsPrompt"), value: s.metaTtsPrompt, field: "metaTtsPrompt", rows: 7 })}<div class="wa-button-row"><button type="button" class="wa-button" data-wa-save="tts"${writeAttributes(state.writeBlocked)}>${e(saveLabel(state, t))}</button>${state.savedSection === "tts" ? `<span class="wa-saved">${e(savedLabel(state, t))}</span>` : ""}</div>`);
-  const secrets = [["metaToken", "meta-token"], ["appSecret", "app-secret"], ["relayToken", "relay-token"]].map(([label, id]) => `<div class="wa-secret-row"><div><strong>${e(t(label))}</strong><small>${e(t("secretHint"))}</small></div><code>${WHATSAPP_MASK}</code><button type="button" class="wa-button wa-button--secondary" disabled data-wa-secret="${id}" title="${e(t("formalOnly"))}">${e(t("viewOrReplace"))}</button></div>`).join("");
+  const secrets = [
+    ["metaToken", "meta_access_token"],
+    ["appSecret", "meta_app_secret"],
+    ["relayToken", "meta_tts_relay_token"]
+  ].map(([label, fieldName]) => {
+    const editing = state.editingSecret === fieldName;
+    const mask = state.secretMasks[fieldName] || t("secretNotViewed");
+    const draft = state.secretDrafts[fieldName] || "";
+    return `<div class="wa-secret-row${editing ? " is-editing" : ""}"><div><strong>${e(t(label))}</strong><small>${e(t("secretHint"))}</small></div><code>${e(mask)}</code><button type="button" class="wa-button wa-button--secondary" data-wa-secret="${fieldName}"${writeAttributes(state.writeBlocked)}>${e(t(editing ? "cancel" : "viewOrReplace"))}</button>${editing ? `<div class="wa-secret-edit"><input type="password" value="${e(draft)}" data-wa-secret-draft="${fieldName}" data-wa-write autocomplete="off" placeholder="${e(t("pasteNewSecret"))}"${state.writeBlocked ? ' disabled aria-disabled="true"' : ""}><button type="button" class="wa-button" data-wa-secret-save="${fieldName}"${writeAttributes(state.writeBlocked, !draft.trim())}>${e(t("saveNewSecret"))}</button></div>` : ""}</div>`;
+  }).join("");
   return connection + voice + section(e(t("secretKeys")), secrets, "wa-panel--secrets");
 }
 
@@ -66,7 +85,12 @@ function renderChargerPrompt(state, helpers, t) {
 
 function renderBossPrompt(state, helpers, t) {
   const { escapeHtml: e } = helpers;
-  return section(e(t("bossPrompt")), `<div class="wa-lock-card">${helpers.icon("icon-nav-cloud", "icon")}<strong>${e(t("encrypted", { count: state.settings.bossPromptChars || 0 }))}</strong><p>${e(t("lockedPromptHint"))}</p><button type="button" class="wa-button wa-button--secondary" disabled title="${e(t("formalOnly"))}">${e(t("unlock"))}</button></div>`);
+  const prompt = state.settings.bossPrompt || "";
+  const cloudHint = `<p class="wa-scope-hint">${e(t("cloudSpecialPromptHint"))}</p>`;
+  if (state.secretUnlocked) {
+    return section(e(t("bossPrompt")), `${cloudHint}${textarea({ e, liveReadOnly: state.writeBlocked, label: t("specialPrompt"), value: prompt, field: "bossPrompt", rows: 24 })}<div class="wa-editor-meta"><span>${e(t("autoSaveOnBlur"))}</span><span data-wa-boss-count>${e(t("chars", { count: prompt.length }))}</span></div>`, "wa-panel--editor");
+  }
+  return section(e(t("bossPrompt")), `${cloudHint}<div class="wa-lock-card">${helpers.icon("icon-nav-cloud", "icon")}<strong>${e(t("encrypted", { count: state.settings.bossPromptChars || 0 }))}</strong><p>${e(t("lockedPromptHint"))}</p><button type="button" class="wa-button wa-button--secondary" data-wa-boss-unlock${writeAttributes(state.writeBlocked)}>${e(t("unlock"))}</button></div>`);
 }
 
 function renderWhitelist(state, helpers, t) {

@@ -16,6 +16,8 @@ const patchMigrationPath = join(repoRoot, "migrations/105_bizflow_warranty_reven
 const homeRevenueGateMigrationPath = join(repoRoot, "migrations/106_bizflow_home_revenue_gate.sql");
 const homeSalesGateMigrationPath = join(repoRoot, "migrations/107_bizflow_home_sales_gate.sql");
 const customerPageMigrationPath = join(repoRoot, "migrations/108_bizflow_customer_page.sql");
+const waOriginalPolicyMigrationPath = join(repoRoot, "migrations/013_wa_admin_rls.sql");
+const waAdminMigrationPath = join(repoRoot, "migrations/109_wa_admin_rls_alignment.sql");
 
 function executable(name) {
   for (const candidate of [`/opt/homebrew/bin/${name}`, `/usr/local/bin/${name}`, name]) {
@@ -68,6 +70,14 @@ function asAuthenticatedUser(userId, statement) {
     SET ROLE authenticated;
     SET request.jwt.claim.sub = '${userId}';
     SET statement_timeout = '8s';
+    ${statement}
+  `).split("\n").filter(Boolean).at(-1);
+}
+
+function asAuthenticatedEmail(email, statement) {
+  return sql(`
+    SET ROLE authenticated;
+    SET request.jwt.claim.email = '${email}';
     ${statement}
   `).split("\n").filter(Boolean).at(-1);
 }
@@ -345,10 +355,13 @@ try {
     CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE
       AS $$ SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
     GRANT EXECUTE ON FUNCTION auth.uid() TO authenticated, anon;
+    CREATE FUNCTION auth.jwt() RETURNS jsonb LANGUAGE sql STABLE
+      AS $$ SELECT jsonb_build_object('email', NULLIF(current_setting('request.jwt.claim.email', true), '')) $$;
+    GRANT EXECUTE ON FUNCTION auth.jwt() TO authenticated, anon;
     CREATE TABLE public.employees (
       id uuid PRIMARY KEY, user_id uuid, name text, created_at timestamptz DEFAULT now(),
       active boolean DEFAULT true, bizflow_main_access boolean DEFAULT false, is_admin boolean DEFAULT false,
-      can_view_revenue boolean NOT NULL DEFAULT false
+      can_view_revenue boolean NOT NULL DEFAULT false, email text
     );
     CREATE FUNCTION public.has_bizflow_main_access() RETURNS boolean
       LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,auth
@@ -397,6 +410,16 @@ try {
     CREATE TABLE public.employee_departments (employee_id uuid, department_id uuid);
     CREATE TABLE public.task_pending (reviewed_at timestamptz);
     CREATE TABLE public.team_update_logs (created_at timestamptz DEFAULT now());
+    CREATE TABLE public.wa_settings (id integer PRIMARY KEY, value text);
+    CREATE TABLE public.wa_whitelist (id integer PRIMARY KEY, value text);
+    CREATE TABLE public.wa_unresolved (id integer PRIMARY KEY, value text);
+    INSERT INTO public.wa_settings VALUES (1, 'initial');
+    INSERT INTO public.wa_whitelist VALUES (1, 'initial');
+    INSERT INTO public.wa_unresolved VALUES (1, 'initial');
+    ALTER TABLE public.wa_settings ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE public.wa_whitelist ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE public.wa_unresolved ENABLE ROW LEVEL SECURITY;
+    GRANT SELECT, UPDATE ON public.wa_settings, public.wa_whitelist, public.wa_unresolved TO authenticated;
 
     DO $$
     DECLARE table_name text;
@@ -752,7 +775,50 @@ try {
   run(psql, psqlArgs(["-f", homeSalesGateMigrationPath]), { quiet: true });
   run(psql, psqlArgs(["-f", customerPageMigrationPath]), { quiet: true });
   run(psql, psqlArgs(["-f", customerPageMigrationPath]), { quiet: true });
+  sql(`
+    INSERT INTO public.employees(id,user_id,name,email,is_admin,bizflow_main_access) VALUES
+      ('90000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000003','WA admin by user id','stale-admin@example.test',true,true),
+      ('90000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000004','WA non-admin by user id','row-member@example.test',false,true);
+  `);
+  run(psql, psqlArgs(["-f", waOriginalPolicyMigrationPath]), { quiet: true });
+  assert.equal(asAuthenticatedUser(
+    '20000000-0000-0000-0000-000000000003',
+    "SELECT COALESCE(public.is_wa_admin(), false);"
+  ), "f", "migration 013 must reproduce the legacy email-only employee denial before 109 replaces it");
+  assert.equal(asAuthenticatedEmail("samyung2011@gmail.com", "SELECT public.is_wa_admin();"), "t",
+    "migration 013 must be active before migration 109 is applied");
+  run(psql, psqlArgs(["-f", waAdminMigrationPath]), { quiet: true });
+  run(psql, psqlArgs(["-f", waAdminMigrationPath]), { quiet: true });
   sql("ANALYZE;");
+
+  assert.equal(sql("SELECT prosecdef FROM pg_proc WHERE oid='public.is_wa_admin()'::regprocedure;"), "t",
+    "the RLS helper must stay SECURITY DEFINER while reading the employees table");
+  assert.match(sql("SELECT array_to_string(proconfig, ',') FROM pg_proc WHERE oid='public.is_wa_admin()'::regprocedure;"), /search_path=/,
+    "the RLS helper must pin its search_path");
+  const waAdminBody = activeFunctionBody("public.is_wa_admin()");
+  assert.match(waAdminBody, /FROM public\.employees AS e\s+WHERE e\.user_id = auth\.uid\(\)/,
+    "migration 109 must replace the legacy employee-email branch with the frontend user_id identity");
+  assert.doesNotMatch(waAdminBody, /(?:employee|e)\.email/,
+    "the active migration-109 helper must not retain the legacy employee-email identity branch");
+  assert.equal(asAuthenticatedEmail("SAMYUNG2011@GMAIL.COM", "SELECT public.is_wa_admin();"), "t");
+  assert.equal(asAuthenticatedEmail("a1017339632@gmail.com", "SELECT public.is_wa_admin();"), "t");
+  assert.equal(asAuthenticatedEmail("1017339632@qq.com", "SELECT public.is_wa_admin();"), "t");
+  assert.equal(asAuthenticatedUser('20000000-0000-0000-0000-000000000003', "SELECT public.is_wa_admin();"), "t",
+    "an employees.user_id + is_admin row must grant the same WhatsApp write access as the frontend");
+  assert.equal(asAuthenticatedUser('20000000-0000-0000-0000-000000000004', "SELECT public.is_wa_admin();"), "f");
+  assert.equal(asAuthenticatedUser('20000000-0000-0000-0000-000000000005', "SELECT public.is_wa_admin();"), "f");
+  for (const table of ["wa_settings", "wa_whitelist", "wa_unresolved"]) {
+    assert.equal(asAuthenticatedUser(
+      '20000000-0000-0000-0000-000000000003',
+      `WITH updated AS (UPDATE public.${table} SET value='admin-updated' WHERE id=1 RETURNING id) SELECT count(*) FROM updated;`
+    ), "1", `${table} update+select must pass for an employee admin after 013 is replaced by 109`);
+    assert.equal(asAuthenticatedUser(
+      '20000000-0000-0000-0000-000000000004',
+      `WITH updated AS (UPDATE public.${table} SET value='member-overwrite' WHERE id=1 RETURNING id) SELECT count(*) FROM updated;`
+    ), "0", `${table} update+select must be denied for an ordinary employee by the legacy policies calling the replaced helper`);
+    assert.equal(sql(`SELECT value FROM public.${table} WHERE id=1;`), "admin-updated",
+      `${table} must retain the admin write after the ordinary employee is denied`);
+  }
 
   assert.equal(sql("SELECT prosecdef FROM pg_proc WHERE oid='public.bizflow_customer_page(text,text,text,date,date,text,integer,integer)'::regprocedure;"), "f",
     "the customer page RPC must remain SECURITY INVOKER");

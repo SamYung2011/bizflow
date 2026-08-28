@@ -98,7 +98,7 @@ export async function buildExpenseSnapshot() {
 const SAFE_WHATSAPP_SETTINGS = [
   "claude_mode", "openai_base_url", "model", "max_replies_per_min", "reply_delay_base",
   "cooldown_minutes", "bot_phone", "bot_name", "boss_chat_name", "daily_report_hour",
-  "knowledge", "chargers_prompt", "location_hint_prompt", "latest_ext_version", "wa_outbound_mode",
+  "knowledge", "chargers_prompt", "location_hint_prompt", "boss_prompt", "latest_ext_version", "wa_outbound_mode",
   "meta_graph_version", "meta_phone_number_id", "meta_waba_id", "meta_tts_enabled", "meta_tts_relay_url",
   "meta_tts_voice_id", "meta_tts_language_boost", "meta_tts_prompt", "updated_at"
 ];
@@ -121,7 +121,7 @@ export async function buildWhatsappSnapshot() {
   const heartbeat = heartbeatRows[0] ?? {};
   return {
     generated_at: new Date().toISOString(),
-    scope: "RLS-visible WhatsApp data; credentials and prompt secrets excluded",
+    scope: "RLS-visible WhatsApp data; credentials excluded",
     settings: {
       claudeMode: settings.claude_mode,
       openaiBaseUrl: asText(settings.openai_base_url),
@@ -136,7 +136,8 @@ export async function buildWhatsappSnapshot() {
       knowledge: asText(settings.knowledge),
       chargersPrompt: asText(settings.chargers_prompt),
       locationHintPrompt: asText(settings.location_hint_prompt),
-      bossPromptChars: 0,
+      bossPrompt: asText(settings.boss_prompt),
+      bossPromptChars: asText(settings.boss_prompt).length,
       latestExtVersion: asText(settings.latest_ext_version),
       waOutboundMode: asText(settings.wa_outbound_mode),
       metaGraphVersion: asText(settings.meta_graph_version),
