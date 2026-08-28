@@ -140,6 +140,14 @@ export function taskCompletionForMember(task, member) {
   if (!task) {
     return { checked: false, canToggle: false, wholeTask: false };
   }
+  const creator = isTaskCreator(task, member);
+  if (creator) {
+    return {
+      checked: taskDoneForMember(task, member),
+      canToggle: !taskAbandonedForMember(task, member),
+      wholeTask: true
+    };
+  }
   const assignee = taskAssignee(task, member);
   if (assignee) {
     return {
@@ -148,11 +156,10 @@ export function taskCompletionForMember(task, member) {
       wholeTask: false
     };
   }
-  const creator = isTaskCreator(task, member);
   return {
     checked: taskDoneForMember(task, member),
-    canToggle: creator && !taskAbandonedForMember(task, member),
-    wholeTask: creator
+    canToggle: false,
+    wholeTask: false
   };
 }
 
