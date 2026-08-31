@@ -13,8 +13,9 @@ const CACHE_STORE_NAME = "rows";
 // when member fields or company-bound identity visibility semantics change.
 const SNAPSHOT_CONTRACT_GENERATIONS = new Map([
   ["home.json", 3],
-  ["members.json", 2],
-  ["team-extras.json", 1],
+  ["tasks.json", 2],
+  ["members.json", 3],
+  ["team-extras.json", 2],
   ["team-update-logs.json", 1],
   ["customers.json", 2],
   ["warranty.json", 2],

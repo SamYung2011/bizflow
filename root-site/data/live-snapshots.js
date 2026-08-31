@@ -447,17 +447,19 @@ async function buildWarrantySnapshot() {
   return { generated_at: new Date().toISOString(), scope: "RLS-visible invoice-line warranties with renewal overlay", items };
 }
 
-async function buildTasksSnapshot() {
-  const currentUser = await getCurrentUser();
+async function buildTasksSnapshot(rows = null) {
+  const currentUser = rows?.currentUser ?? await getCurrentUser();
   const companyId = currentUser?.activeCompanyId;
-  const [allTasks, employees, assignees, feedbacks, departments, employeeDepartments] = await Promise.all([
-    allRows("employee_tasks", "created_at", false),
-    allRows("employees", "created_at"),
-    allRows("task_assignees", "created_at", true, null),
-    allRows("employee_task_feedbacks", "created_at"),
-    allRows("departments", "name"),
-    allRows("employee_departments", "created_at", true, null)
-  ]);
+  const [allTasks, employees, assignees, feedbacks, departments, employeeDepartments] = rows
+    ? [rows.tasks, rows.members, rows.assignees, rows.feedbacks, rows.departments, rows.employeeDepartments]
+    : await Promise.all([
+        allRows("employee_tasks", "created_at", false),
+        allRows("employees", "created_at"),
+        allRows("task_assignees", "created_at", true, null),
+        allRows("employee_task_feedbacks", "created_at"),
+        allRows("departments", "name"),
+        allRows("employee_departments", "created_at", true, null)
+      ]);
   const tasks = companyId ? allTasks.filter((task) => task.company_id === companyId) : allTasks;
   const companyDepartments = companyId ? departments.filter((department) => department.company_id === companyId) : departments;
   const employeeById = new Map(employees.map((employee) => [employee.id, employee]));
@@ -554,15 +556,23 @@ async function buildTasksSnapshot() {
       count: task.feedback.length
     });
   }
+  const taskStats = rows?.taskStats
+    ? {
+        total: asNumber(rows.taskStats.total),
+        completed: asNumber(rows.taskStats.completed),
+        open: asNumber(rows.taskStats.open),
+        abandoned: asNumber(rows.taskStats.abandoned)
+      }
+    : {
+        total: normalized.length,
+        completed: normalized.filter((task) => task.status === "done").length,
+        open: open.length,
+        abandoned: normalized.filter((task) => task.status === "abandoned").length
+      };
   return {
     generated_at: new Date().toISOString(),
     scope: currentUser?.activeCompany?.name || "RLS-visible company",
-    taskStats: {
-      total: normalized.length,
-      completed: normalized.filter((task) => task.status === "done").length,
-      open: open.length,
-      abandoned: normalized.filter((task) => task.status === "abandoned").length
-    },
+    taskStats,
     kanbanCounts: {
       high: open.filter((task) => task.priority === "high").length,
       medium: open.filter((task) => task.priority === "mid").length,
@@ -579,20 +589,23 @@ async function buildTasksSnapshot() {
   };
 }
 
-async function memberSourceData() {
-  const currentUser = await getCurrentUser();
+async function memberSourceData(rows = null) {
+  const currentUser = rows?.currentUser ?? await getCurrentUser();
   const companyId = currentUser?.activeCompanyId;
-  const [employees, bindings, departments, employeeDepartments, roles, tasks, assignees, pending, joinPending] = await Promise.all([
-    allRows("employees", "created_at"),
-    allRows("employee_companies", "joined_at"),
-    allRows("departments", "name"),
-    allRows("employee_departments", "created_at", true, null),
-    allRows("roles", "name"),
-    allRows("employee_tasks", "created_at", false),
-    allRows("task_assignees", "created_at", true, null),
-    allRows("task_pending", "requested_at", false),
-    allRows("company_join_pending", "requested_at", false)
-  ]);
+  const [employees, bindings, departments, employeeDepartments, roles, tasks, assignees, pending, joinPending] = rows
+    ? [rows.members, rows.employeeCompanies, rows.departments, rows.employeeDepartments, rows.roles,
+        rows.tasks, rows.assignees, rows.taskPending, rows.companyJoinPending]
+    : await Promise.all([
+        allRows("employees", "created_at"),
+        allRows("employee_companies", "joined_at"),
+        allRows("departments", "name"),
+        allRows("employee_departments", "created_at", true, null),
+        allRows("roles", "name"),
+        allRows("employee_tasks", "created_at", false),
+        allRows("task_assignees", "created_at", true, null),
+        allRows("task_pending", "requested_at", false),
+        allRows("company_join_pending", "requested_at", false)
+      ]);
   const companyBindings = companyId ? bindings.filter((binding) => binding.company_id === companyId) : bindings;
   const memberIds = new Set(companyBindings.map((binding) => binding.employee_id));
   const members = employees.filter((employee) => memberIds.has(employee.id));
@@ -612,8 +625,8 @@ async function memberSourceData() {
   };
 }
 
-async function buildMembersSnapshot() {
-  const source = await memberSourceData();
+async function buildMembersSnapshot(rows = null) {
+  const source = await memberSourceData(rows);
   const employeeById = new Map(source.employees.map((employee) => [employee.id, employee]));
   const roleById = new Map(source.roles.map((role) => [role.id, role]));
   const bindingByEmployee = new Map(source.bindings.map((binding) => [binding.employee_id, binding]));
@@ -747,12 +760,14 @@ function mapTeamUpdateLogs(logs, comments, employees) {
   });
 }
 
-async function buildTeamUpdateLogsSnapshot() {
-  const [logs, comments, employees] = await Promise.all([
-    allRows("team_update_logs", "created_at", false),
-    allRows("team_update_log_comments", "created_at"),
-    allRows("employees", "created_at")
-  ]);
+async function buildTeamUpdateLogsSnapshot(rows = null) {
+  const [logs, comments, employees] = rows
+    ? [rows.updateLogs, rows.updateLogComments, rows.members]
+    : await Promise.all([
+        allRows("team_update_logs", "created_at", false),
+        allRows("team_update_log_comments", "created_at"),
+        allRows("employees", "created_at")
+      ]);
   return {
     generated_at: new Date().toISOString(),
     scope: "RLS-visible team update logs",
@@ -763,14 +778,22 @@ async function buildTeamUpdateLogsSnapshot() {
   };
 }
 
-async function buildTeamExtrasSnapshot() {
-  const [updateLogsSnapshot, employees, companies, bindings, joins] = await Promise.all([
-    buildTeamUpdateLogsSnapshot(),
-    allRows("employees", "created_at"),
-    allRows("companies", "created_at"),
-    allRows("employee_companies", "joined_at"),
-    allRows("company_join_pending", "requested_at", false)
-  ]);
+async function buildTeamExtrasSnapshot(rows = null) {
+  const [updateLogsSnapshot, employees, companies, bindings, joins] = rows
+    ? await Promise.all([
+        buildTeamUpdateLogsSnapshot(rows),
+        Promise.resolve(rows.members),
+        Promise.resolve(rows.companies),
+        Promise.resolve(rows.employeeCompanies),
+        Promise.resolve(rows.companyJoinPending)
+      ])
+    : await Promise.all([
+        buildTeamUpdateLogsSnapshot(),
+        allRows("employees", "created_at"),
+        allRows("companies", "created_at"),
+        allRows("employee_companies", "joined_at"),
+        allRows("company_join_pending", "requested_at", false)
+      ]);
   const employeeById = new Map(employees.map((employee) => [employee.id, employee]));
   const companyById = new Map(companies.map((company) => [company.id, company]));
   return {
@@ -795,6 +818,20 @@ async function buildTeamExtrasSnapshot() {
       rejectReason: asText(join.reject_reason)
     })),
     commission: []
+  };
+}
+
+export async function buildTeamTaskSnapshotsFromRows(payload, currentUser) {
+  const rows = { ...payload, currentUser };
+  const [tasksSnapshot, membersSnapshot, teamExtrasSnapshot] = await Promise.all([
+    buildTasksSnapshot(rows),
+    buildMembersSnapshot(rows),
+    buildTeamExtrasSnapshot(rows)
+  ]);
+  return {
+    tasksSnapshot: { ...tasksSnapshot, __live: true },
+    membersSnapshot: { ...membersSnapshot, __live: true },
+    teamExtrasSnapshot: { ...teamExtrasSnapshot, __live: true }
   };
 }
 

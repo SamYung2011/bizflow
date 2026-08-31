@@ -161,7 +161,7 @@ assert.match(tabLoaderFlow, /if \(!isCurrentMemberMount\(mountId, scope\)\) retu
   "late tab data must not merge into a stale SPA mount");
 assert.match(membersSource, /const initialIncludesMembers = MEMBER_DATA_TABS\.has\(initialTab\)/);
 assert.match(membersSource, /const initialExtrasScope = initialTab === "updates" \? "updates" : "all"/);
-assert.match(snapshotSource, /async function buildTeamUpdateLogsSnapshot\(\)[\s\S]*?allRows\("team_update_logs"[\s\S]*?allRows\("team_update_log_comments"[\s\S]*?allRows\("employees"/);
+assert.match(snapshotSource, /async function buildTeamUpdateLogsSnapshot\(rows = null\)[\s\S]*?allRows\("team_update_logs"[\s\S]*?allRows\("team_update_log_comments"[\s\S]*?allRows\("employees"/);
 assert.match(snapshotSource, /"team-update-logs\.json": buildTeamUpdateLogsSnapshot/);
 assert.match(snapshotSource, /"members\.json": buildMembersSnapshot/);
 assert.match(dependencySource, /"team-update-logs\.json": \["team_update_logs", "team_update_log_comments", "employees"\]/);

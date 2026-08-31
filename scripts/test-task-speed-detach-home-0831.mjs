@@ -25,7 +25,7 @@ const provider = await import("../root-site/data/provider.js");
 const readState = await import("../root-site/data/read-state.js");
 const providerSource = await readFile(new URL("../root-site/data/provider.js", import.meta.url), "utf8");
 const taskFlow = providerSource.slice(
-  providerSource.indexOf("export async function getTeamTaskData"),
+  providerSource.indexOf("function buildTeamTaskData"),
   providerSource.indexOf("// team/团队成员屏")
 );
 

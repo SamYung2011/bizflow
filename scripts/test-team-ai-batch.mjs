@@ -236,7 +236,7 @@ assert.match(edgeSource, /detail\.code[\s\S]*?detail\.diagnostic/,
 assert.match(edgeSource, /\.eq\("user_id", userData\.user\.id\)\s*\.order\("id", \{ ascending: true \}\)\s*\.limit\(1\)/,
   "duplicate employee rows must resolve deterministically without returning 500");
 assert.match(edgeSource, /\.from\("wa_settings"\)[\s\S]*?\.select\("openai_api_key,openai_base_url,model"\)[\s\S]*?\.eq\("id", 1\)/);
-const featureFlow = providerSource.slice(providerSource.indexOf("export async function getTeamTaskData"), providerSource.indexOf("// team/團隊成員屏"));
+const featureFlow = providerSource.slice(providerSource.indexOf("function buildTeamTaskData"), providerSource.indexOf("// team/團隊成員屏"));
 assert.match(featureFlow, /featureAiBatchForCompany\([\s\S]*?authUser\?\.bindings/);
 assert.doesNotMatch(providerSource, /company\.name\s*===\s*"Honnmono"\s*&&\s*company\.featureAiBatch/);
 assert.match(boardSource, /featureAiBatch && state\.permissions\.canCreate/);

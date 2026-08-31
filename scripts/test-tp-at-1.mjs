@@ -151,8 +151,8 @@ assert.doesNotMatch(memberSource, /employee\.kind/, "member snapshot visibility 
 assert.match(providerSource, /userId: member\.userId[\s\S]*?status: member\.status[\s\S]*?employmentActive: member\.status === "active"/,
   "task members must carry account id and employment status");
 assert.match(providerSource, /typeof member\.userId === "string"/, "old members snapshot shapes must fail validation");
-assert.match(cacheSource, /\["members\.json", 2\]/, "members snapshot cache contract must be bumped");
-assert.equal(liveSnapshotCacheVersion("members.json"), "0:2:0", "pre-release members cache entries must have a different version");
+assert.match(cacheSource, /\["members\.json", 3\]/, "members snapshot cache contract must include the task-RPC feed bump");
+assert.equal(liveSnapshotCacheVersion("members.json"), "0:3:0", "pre-RPC members cache entries must have a different version");
 assert.match(tasksSource, /mentionedUserIds\s*=\s*\[\.\.\.new Set/);
 assert.match(tasksSource, /createLiveTaskFeedback\(\{[\s\S]*?parentFeedbackId: null,[\s\S]*?mentionedUserIds/);
 assert.match(tasksSource, /mentionedUserIds: result\.feedback\.mentioned_user_ids \?\? mentionedUserIds/);
