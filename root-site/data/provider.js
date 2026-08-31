@@ -24,7 +24,8 @@ import {
   getLiveUnreadState,
   LIVE_HOME_QUERY_MISS
 } from "./live-home-query.js";
-import { getLiveSnapshot, LIVE_SNAPSHOT_MISS } from "./live-snapshots.js";
+import { getLiveTeamTaskPage, LIVE_TEAM_TASK_MISS } from "./live-team-task-query.js";
+import { buildTeamTaskSnapshotsFromRows, getLiveSnapshot, LIVE_SNAPSHOT_MISS } from "./live-snapshots.js";
 import { loadProviderSnapshot, providerSnapshotRevision } from "./provider-snapshot-cache.js";
 import {
   getLiveOcppChargingData,
@@ -40,7 +41,7 @@ import { customerSourceFromInvoices } from "./customer-source.js";
 import { compareHomeMetricSets } from "./home-metric-parity.js";
 import { resolveLiveQueryOrLegacy, resolveOrderPageRead } from "./live-query-fallback.js";
 import { invalidateLiveTables } from "./live-snapshot-utils.js";
-import { featureAiBatchForCompany } from "./team-feature-flags.js";
+import { featureAiBatchForCompany, TEAM_TASK_RPC_ENABLED } from "./team-feature-flags.js";
 import { rootSiteUrl } from "../components/root-site-url.js";
 import {
   aggregateInventoryStock,
@@ -328,14 +329,21 @@ async function syncReadStateAccount() {
   try {
     const session = await getSession();
     const account = session ? await getAuthCurrentUser() : null;
+    unreadAccountId = String(account?.id || "");
+    unreadCompanyId = String(account?.activeCompanyId || "");
     setReadStateAccount(account?.id || null);
   } catch {
+    unreadAccountId = "";
+    unreadCompanyId = "";
     setReadStateAccount(null);
   }
 }
 
 let unreadStateMemoKey = "";
 let unreadStatePromise = null;
+let pendingTeamTaskPagePromise = null;
+let unreadAccountId = "";
+let unreadCompanyId = "";
 
 // 件1: 改成 async 函数,在读 getReadState()/算未读之前先 await 账号身份解析完——不依赖调用方恰好
 // 把 getCurrentUser() 和 getUnread()/getUnreadWatermarks() 放进同一个 Promise.all 就"顺带"先后
@@ -360,6 +368,21 @@ async function buildUnreadState() {
 }
 
 async function computeUnreadState(read) {
+  const packedTaskPage = pendingTeamTaskPagePromise;
+  if (packedTaskPage) {
+    try {
+      const payload = await packedTaskPage;
+      const sameScope = unreadAccountId
+        && String(payload?.currentUser?.employeeId || "") === unreadAccountId
+        && String(payload?.currentUser?.activeCompanyId || "") === unreadCompanyId;
+      if (payload !== LIVE_TEAM_TASK_MISS && sameScope && payload?.unread?.unread && payload?.unread?.watermarks) {
+        return payload.unread;
+      }
+    } catch {
+      // getTeamTaskData owns the legacy-page fallback; unread continues through
+      // its existing direct RPC/fallback chain below.
+    }
+  }
   try {
     const live = await getLiveUnreadState();
     if (live !== LIVE_HOME_QUERY_MISS) return live;
@@ -608,15 +631,7 @@ async function loadTeamTaskUnread() {
   }
 }
 
-export async function getTeamTaskData() {
-  const [snap, membersSnap, teamExtras, authUser, unread] = await Promise.all([
-    loadTasksSnapshot(),
-    loadMembersSnapshot(),
-    loadTeamExtrasSnapshot(),
-    getSession().then((session) => session ? getAuthCurrentUser() : null).catch(() => null),
-    loadTeamTaskUnread()
-  ]);
-
+function buildTeamTaskData({ snap, membersSnap, teamExtras, authUser, unread }) {
   // 任务三数:真实 status 计数(total/completed/open),坏了整块回退 mock
   const ts = snap?.taskStats;
   const statsOk = ts && isNum(ts.total) && isNum(ts.completed) && isNum(ts.open);
@@ -734,6 +749,48 @@ export async function getTeamTaskData() {
       authUser?.bindings,
     )
   };
+}
+
+async function getLegacyTeamTaskData() {
+  const [snap, membersSnap, teamExtras, authUser, unread] = await Promise.all([
+    loadTasksSnapshot(),
+    loadMembersSnapshot(),
+    loadTeamExtrasSnapshot(),
+    getSession().then((session) => session ? getAuthCurrentUser() : null).catch(() => null),
+    loadTeamTaskUnread()
+  ]);
+  return buildTeamTaskData({ snap, membersSnap, teamExtras, authUser, unread });
+}
+
+async function getPackedTeamTaskData() {
+  const request = getLiveTeamTaskPage({ completedLimit: 10, includeDetail: true });
+  pendingTeamTaskPagePromise = request;
+  let payload;
+  try {
+    payload = await request;
+  } finally {
+    if (pendingTeamTaskPagePromise === request) pendingTeamTaskPagePromise = null;
+  }
+  if (payload === LIVE_TEAM_TASK_MISS) return LIVE_TEAM_TASK_MISS;
+  const authUser = await getAuthCurrentUser();
+  const { tasksSnapshot, membersSnapshot, teamExtrasSnapshot } =
+    await buildTeamTaskSnapshotsFromRows(payload, authUser);
+  return buildTeamTaskData({
+    snap: tasksSnapshot,
+    membersSnap: membersSnapshot,
+    teamExtras: teamExtrasSnapshot,
+    authUser,
+    unread: { ...EMPTY_TASK_UNREAD, ...payload.unread?.unread }
+  });
+}
+
+export async function getTeamTaskData() {
+  return resolveLiveQueryOrLegacy({
+    readLive: () => TEAM_TASK_RPC_ENABLED ? getPackedTeamTaskData() : LIVE_TEAM_TASK_MISS,
+    miss: LIVE_TEAM_TASK_MISS,
+    readLegacy: getLegacyTeamTaskData,
+    onError: (error) => console.warn("[provider] Team task RPC failed; falling back to legacy snapshots", error)
+  });
 }
 
 // team/团队成员屏数据契约。统计走快照 membersStats(all/active/pendingReview/left,口径见 README);

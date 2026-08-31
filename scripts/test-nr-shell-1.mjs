@@ -135,7 +135,7 @@ assert.match(snapshots, /updatedAt: commentEdited \? formatDateTime\(comment\.up
 assert.match(updateUi, /entry\.comments\.push\(/);
 assert.doesNotMatch(updateUi, /entry\.comments\.unshift\(/);
 assert.match(members, /formHasValue\("\[data-update-comment-edit-form\]"\)/);
-assert.match(cache, /\["team-extras\.json", 1\]/);
+assert.match(cache, /\["team-extras\.json", 2\]/);
 assert.match(cache, /\["team-update-logs\.json", 1\]/);
 
 console.log("NR-shell-1 contracts: PASS (menu adapters, shell skeleton, language preference, update-log edit/paging/order/time)");

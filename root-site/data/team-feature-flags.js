@@ -1,3 +1,5 @@
+export const TEAM_TASK_RPC_ENABLED = true;
+
 export function featureAiBatchForCompany(companies, activeCompanyId, bindings) {
   const companyId = String(activeCompanyId || "");
   if (!companyId || !Array.isArray(companies) || !Array.isArray(bindings)) return false;

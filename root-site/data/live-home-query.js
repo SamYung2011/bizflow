@@ -9,6 +9,7 @@ const HOME_DASHBOARD_NAMESPACE = "home-dashboard";
 const HOME_REQUESTS = new Map();
 const UNREAD_REQUESTS = new Map();
 const UNREAD_MEMO_TTL_MS = 30_000;
+const UNREAD_KEYS = Object.freeze(["tasks", "orders", "messages", "inventory", "updates"]);
 
 async function context() {
   const [client, session, currentUser] = await Promise.all([
@@ -20,6 +21,57 @@ async function context() {
 
 function metricNumber(source, key) {
   return asNumber(source?.[key]);
+}
+
+function mapUnreadState(payload) {
+  return {
+    unread: Object.fromEntries(UNREAD_KEYS.map((key) => [key, metricNumber(payload?.unread, key)])),
+    watermarks: Object.fromEntries(UNREAD_KEYS.map((key) => [key, asText(payload?.watermarks?.[key])]))
+  };
+}
+
+function unreadRequestKey(live, read) {
+  return liveQueryKey({
+    userId: live.userId,
+    companyId: live.currentUser.activeCompanyId || "",
+    read
+  });
+}
+
+function rememberUnreadMemo(live, read, value, now = Date.now()) {
+  const requestKey = unreadRequestKey(live, read);
+  const promise = Promise.resolve(value);
+  rememberUnreadWatermarks(value.watermarks);
+  UNREAD_REQUESTS.clear();
+  UNREAD_REQUESTS.set(requestKey, { expiresAt: now + UNREAD_MEMO_TTL_MS, promise });
+  return value;
+}
+
+function unreadAfterLocalWatermarks(value, read) {
+  const next = mapUnreadState(value);
+  for (const key of UNREAD_KEYS) {
+    const readValue = asText(read?.[key]);
+    const watermark = next.watermarks[key];
+    if (!readValue || !watermark) continue;
+    if (key === "inventory") {
+      if (readValue === watermark) next.unread[key] = 0;
+      continue;
+    }
+    const readTime = Date.parse(readValue);
+    const watermarkTime = Date.parse(watermark);
+    if (Number.isFinite(readTime) && Number.isFinite(watermarkTime) && readTime >= watermarkTime) {
+      next.unread[key] = 0;
+    }
+  }
+  return next;
+}
+
+export async function rememberLiveUnreadSummary(value) {
+  const live = await context();
+  if (!live || !value || typeof value !== "object" || Array.isArray(value)) return null;
+  setReadStateAccount(live.currentUser.id || null);
+  const read = getReadState();
+  return rememberUnreadMemo(live, read, unreadAfterLocalWatermarks(value, read));
 }
 
 function mapDashboard(payload, currentUser) {
@@ -137,11 +189,7 @@ export async function getLiveUnreadState() {
   if (!live) return LIVE_HOME_QUERY_MISS;
   setReadStateAccount(live.currentUser.id || null);
   const read = getReadState();
-  const requestKey = liveQueryKey({
-    userId: live.userId,
-    companyId: live.currentUser.activeCompanyId || "",
-    read
-  });
+  const requestKey = unreadRequestKey(live, read);
   const now = Date.now();
   const memo = UNREAD_REQUESTS.get(requestKey);
   if (memo?.expiresAt > now) return memo.promise;
@@ -158,12 +206,9 @@ export async function getLiveUnreadState() {
     p_updates_read: read.updates || null
   }).then((result) => {
     if (result.error) throw result.error;
-    const unread = Object.fromEntries(["tasks", "orders", "messages", "inventory", "updates"]
-      .map((key) => [key, metricNumber(result.data?.unread, key)]));
-    const watermarks = Object.fromEntries(["tasks", "orders", "messages", "inventory", "updates"]
-      .map((key) => [key, asText(result.data?.watermarks?.[key])]));
-    rememberUnreadWatermarks(watermarks);
-    return { unread, watermarks };
+    const value = mapUnreadState(result.data);
+    rememberUnreadWatermarks(value.watermarks);
+    return value;
   }).catch((error) => {
     if (UNREAD_REQUESTS.get(requestKey)?.promise === promise) UNREAD_REQUESTS.delete(requestKey);
     throw error;
