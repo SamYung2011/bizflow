@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { accessSync, constants, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { accessSync, constants, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,10 @@ import { performance } from "node:perf_hooks";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const migrationPath = join(repoRoot, "migrations/111_bizflow_team_task_page.sql");
+const source036 = readFileSync(join(repoRoot, "migrations/036_employees_kind_and_pending.sql"), "utf8");
+const source052 = readFileSync(join(repoRoot, "migrations/052_departments.sql"), "utf8");
+const source055 = readFileSync(join(repoRoot, "migrations/055_task_pending_company_admin.sql"), "utf8");
+const source082 = readFileSync(join(repoRoot, "migrations/082_team_rls_hardening.sql"), "utf8");
 
 function executable(name) {
   for (const candidate of [`/opt/homebrew/bin/${name}`, `/usr/local/bin/${name}`, name]) {
@@ -137,13 +141,16 @@ try {
     GRANT EXECUTE ON FUNCTION auth.uid() TO authenticated, anon;
 
     CREATE TABLE public.companies (
-      id uuid PRIMARY KEY, name text, feature_ai_batch boolean DEFAULT false, created_at timestamptz DEFAULT now()
+      id uuid PRIMARY KEY, name text, note text, created_at timestamptz DEFAULT now(), created_by uuid,
+      feature_ai_batch boolean DEFAULT false NOT NULL
     );
     CREATE TABLE public.employees (
-      id uuid PRIMARY KEY, user_id uuid, name text, email text, phone text, role text,
+      id uuid PRIMARY KEY, user_id uuid, name text, email text, phone text, role text, note text,
       active boolean DEFAULT true, is_admin boolean DEFAULT false, is_super_admin boolean DEFAULT false,
+      must_change_password boolean DEFAULT false, show_update_log boolean DEFAULT false,
+      kind text DEFAULT 'employee' NOT NULL, company_id uuid,
       bizflow_main_access boolean DEFAULT true, can_view_revenue boolean DEFAULT false, can_ship boolean DEFAULT false,
-      deactivated_at date, created_at timestamptz DEFAULT now()
+      deactivated_at timestamptz, created_at timestamptz DEFAULT now()
     );
     CREATE TABLE public.roles (
       id uuid PRIMARY KEY, company_id uuid, name text, permissions jsonb DEFAULT '{}'::jsonb,
@@ -151,38 +158,43 @@ try {
     );
     CREATE TABLE public.employee_companies (
       id uuid PRIMARY KEY, employee_id uuid, company_id uuid, role_id uuid,
-      is_company_admin boolean DEFAULT false, joined_at timestamptz DEFAULT now()
+      is_company_admin boolean DEFAULT false, is_default boolean DEFAULT false, joined_at timestamptz DEFAULT now()
     );
     CREATE TABLE public.departments (
       id uuid PRIMARY KEY, company_id uuid, name text, created_at timestamptz DEFAULT now()
     );
     CREATE TABLE public.employee_departments (
-      id uuid PRIMARY KEY, employee_id uuid, department_id uuid, created_at timestamptz DEFAULT now()
+      employee_id uuid, department_id uuid, created_at timestamptz DEFAULT now(),
+      PRIMARY KEY (employee_id, department_id)
     );
     CREATE TABLE public.employee_tasks (
       id uuid PRIMARY KEY, company_id uuid, department_id uuid, creator_employee_id uuid, employee_id uuid,
       title text, note text, attachments jsonb DEFAULT '[]'::jsonb, status text DEFAULT 'open',
-      priority text DEFAULT 'none', due_date date, start_date date, created_at timestamptz DEFAULT now(),
+      priority text DEFAULT 'none', feedback text, sort_order integer DEFAULT 0,
+      due_date date, start_date date, created_at timestamptz DEFAULT now(),
       completed_at timestamptz, parent_task_id uuid, needs_approval boolean DEFAULT false,
       completion_mode text DEFAULT 'ratio', approved_at timestamptz, approved_by uuid,
       title_edited_by uuid, title_edited_at timestamptz
     );
     CREATE TABLE public.task_assignees (
-      id uuid PRIMARY KEY, task_id uuid, employee_id uuid, created_at timestamptz DEFAULT now(),
-      completed_at timestamptz, abandoned_at timestamptz
+      task_id uuid, employee_id uuid, created_at timestamptz DEFAULT now(),
+      completed_at timestamptz, abandoned_at timestamptz, PRIMARY KEY (task_id, employee_id)
     );
     CREATE TABLE public.employee_task_feedbacks (
       id uuid PRIMARY KEY, task_id uuid, author_name text, author_user_id uuid, body text,
       parent_feedback_id uuid, mentioned_user_ids jsonb DEFAULT '[]'::jsonb,
-      attachments jsonb DEFAULT '[]'::jsonb, created_at timestamptz DEFAULT now()
+      attachments jsonb DEFAULT '[]'::jsonb, created_at timestamptz DEFAULT now(),
+      updated_at timestamptz DEFAULT now()
     );
     CREATE TABLE public.task_pending (
       id uuid PRIMARY KEY, name text, email text, company_name text, note text,
-      requested_at timestamptz, reviewed_at timestamptz, approved boolean, reject_reason text
+      user_id uuid, requested_at timestamptz, reviewed_at timestamptz, reviewed_by uuid,
+      approved boolean, reject_reason text
     );
     CREATE TABLE public.company_join_pending (
       id uuid PRIMARY KEY, employee_id uuid, company_id uuid, note text,
-      requested_at timestamptz, reviewed_at timestamptz, approved boolean, reject_reason text
+      requested_at timestamptz, reviewed_at timestamptz, reviewed_by uuid,
+      approved boolean, reject_reason text
     );
     CREATE TABLE public.team_update_logs (
       id uuid PRIMARY KEY, author_user_id uuid, summary text, detail text,
@@ -193,62 +205,80 @@ try {
       parent_comment_id uuid, created_at timestamptz, updated_at timestamptz
     );
 
-    CREATE FUNCTION public.bizflow_jsonb_array(value jsonb) RETURNS jsonb
+    CREATE FUNCTION public.bizflow_jsonb_array(input_value jsonb) RETURNS jsonb
       LANGUAGE sql IMMUTABLE SECURITY INVOKER SET search_path=''
-      AS $$ SELECT CASE WHEN jsonb_typeof(value) = 'array' THEN value ELSE '[]'::jsonb END $$;
+      AS $$ SELECT CASE WHEN jsonb_typeof(input_value) = 'array' THEN input_value ELSE '[]'::jsonb END $$;
+    CREATE FUNCTION public.current_employee_id() RETURNS uuid
+      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+      AS $$ SELECT id FROM public.employees
+        WHERE user_id = auth.uid() AND active = true LIMIT 1 $$;
     CREATE FUNCTION public.is_bf_admin() RETURNS boolean
-      LANGUAGE sql STABLE SECURITY DEFINER SET search_path=''
+      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+      AS $$ SELECT COALESCE((SELECT is_super_admin FROM public.employees
+        WHERE user_id = auth.uid() AND active = true LIMIT 1), false) $$;
+    CREATE FUNCTION public.is_member_of_company(comp_id uuid) RETURNS boolean
+      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
       AS $$ SELECT EXISTS (
-        SELECT 1 FROM public.employees employee
-        WHERE employee.user_id = auth.uid() AND employee.is_super_admin
+        SELECT 1 FROM public.employee_companies ec
+        JOIN public.employees e ON e.id = ec.employee_id
+        WHERE e.user_id = auth.uid() AND e.active = true AND ec.company_id = comp_id
       ) $$;
-    CREATE FUNCTION public.is_member_of_company(target_company uuid) RETURNS boolean
-      LANGUAGE sql STABLE SECURITY DEFINER SET search_path=''
+    CREATE FUNCTION public.is_admin_of_company(comp_id uuid) RETURNS boolean
+      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
       AS $$ SELECT EXISTS (
-        SELECT 1 FROM public.employee_companies link
-        JOIN public.employees employee ON employee.id = link.employee_id
-        WHERE employee.user_id = auth.uid() AND link.company_id = target_company
+        SELECT 1 FROM public.employee_companies ec
+        JOIN public.employees e ON e.id = ec.employee_id
+        WHERE e.user_id = auth.uid() AND e.active = true AND ec.company_id = comp_id
+          AND ec.is_company_admin = true
       ) $$;
-    CREATE FUNCTION public.is_member_of_department(target_department uuid) RETURNS boolean
-      LANGUAGE sql STABLE SECURITY DEFINER SET search_path=''
+    CREATE FUNCTION public.is_member_of_department(dept_id uuid) RETURNS boolean
+      LANGUAGE sql STABLE SECURITY DEFINER
       AS $$ SELECT EXISTS (
-        SELECT 1 FROM public.employee_departments link
-        JOIN public.employees employee ON employee.id = link.employee_id
-        WHERE employee.user_id = auth.uid() AND link.department_id = target_department
+        SELECT 1 FROM public.employee_departments ed
+        WHERE ed.employee_id = public.current_employee_id() AND ed.department_id = dept_id
       ) $$;
-    CREATE FUNCTION public.can_select_employee(target_employee uuid, target_user uuid) RETURNS boolean
-      LANGUAGE sql STABLE SECURITY DEFINER SET search_path=''
-      AS $$ SELECT public.is_bf_admin() OR target_user = auth.uid() OR EXISTS (
-        SELECT 1
-        FROM public.employee_companies mine
-        JOIN public.employees me ON me.id = mine.employee_id AND me.user_id = auth.uid()
-        JOIN public.employee_companies theirs ON theirs.company_id = mine.company_id
-        WHERE theirs.employee_id = target_employee
+    CREATE FUNCTION public.is_admin_of_company_by_name(comp_name text) RETURNS boolean
+      LANGUAGE sql STABLE
+      AS $$ SELECT EXISTS (
+        SELECT 1 FROM public.employee_companies ec
+        JOIN public.employees e ON e.id = ec.employee_id
+        JOIN public.companies co ON co.id = ec.company_id
+        WHERE e.user_id = auth.uid() AND ec.is_company_admin = true
+          AND lower(trim(co.name)) = lower(trim(comp_name))
+      ) $$;
+    CREATE FUNCTION public.can_select_employee(emp_id uuid, emp_user_id uuid) RETURNS boolean
+      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+      AS $$ SELECT public.is_bf_admin() OR emp_user_id = auth.uid() OR EXISTS (
+        SELECT 1 FROM public.employee_companies target
+        JOIN public.employee_companies mine ON mine.company_id = target.company_id
+        JOIN public.employees me ON me.id = mine.employee_id
+        WHERE target.employee_id = emp_id AND me.user_id = auth.uid() AND me.active = true
       ) $$;
     CREATE FUNCTION public.can_select_employee_task(
-      target_company uuid, target_department uuid, target_creator uuid
+      task_company_id uuid, task_department_id uuid, task_creator_employee_id uuid
     ) RETURNS boolean
-      LANGUAGE sql STABLE SECURITY DEFINER SET search_path=''
-      AS $$ SELECT public.is_bf_admin() OR (
-        public.is_member_of_company(target_company)
-        AND (target_department IS NULL OR public.is_member_of_department(target_department))
-      ) $$;
-    CREATE FUNCTION public.can_select_employee_task_by_id(target_task uuid) RETURNS boolean
-      LANGUAGE sql STABLE SECURITY DEFINER SET search_path=''
+      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+      AS $$ SELECT public.is_bf_admin()
+        OR public.is_admin_of_company(task_company_id)
+        OR task_creator_employee_id = public.current_employee_id()
+        OR (public.is_member_of_company(task_company_id) AND (
+          task_department_id IS NULL OR public.is_member_of_department(task_department_id)
+        )) $$;
+    CREATE FUNCTION public.can_select_employee_task_by_id(p_task_id uuid) RETURNS boolean
+      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
       AS $$ SELECT EXISTS (
-        SELECT 1 FROM public.employee_tasks task
-        WHERE task.id = target_task
-          AND public.can_select_employee_task(task.company_id, task.department_id, task.creator_employee_id)
+        SELECT 1 FROM public.employee_tasks t
+        WHERE t.id = p_task_id
+          AND public.can_select_employee_task(t.company_id, t.department_id, t.creator_employee_id)
       ) $$;
-    CREATE FUNCTION public.has_company_permission(target_company uuid, permission_key text) RETURNS boolean
-      LANGUAGE sql STABLE SECURITY DEFINER SET search_path=''
-      AS $$ SELECT public.is_bf_admin() OR EXISTS (
-        SELECT 1
-        FROM public.employee_companies link
-        JOIN public.employees employee ON employee.id = link.employee_id
-        LEFT JOIN public.roles role ON role.id = link.role_id
-        WHERE employee.user_id = auth.uid() AND link.company_id = target_company
-          AND (link.is_company_admin OR COALESCE((role.permissions ->> permission_key)::boolean, false))
+    CREATE FUNCTION public.has_company_permission(comp_id uuid, permission_key text) RETURNS boolean
+      LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+      AS $$ SELECT public.is_bf_admin() OR public.is_admin_of_company(comp_id) OR EXISTS (
+        SELECT 1 FROM public.employee_companies ec
+        JOIN public.employees e ON e.id = ec.employee_id
+        JOIN public.roles r ON r.id = ec.role_id
+        WHERE e.user_id = auth.uid() AND e.active = true AND ec.company_id = comp_id
+          AND r.company_id = comp_id AND r.permissions ->> permission_key = 'true'
       ) $$;
     CREATE FUNCTION public.bizflow_unread_summary(
       p_company_id uuid DEFAULT NULL,
@@ -287,33 +317,45 @@ try {
     ALTER TABLE public.team_update_logs ENABLE ROW LEVEL SECURITY;
     ALTER TABLE public.team_update_log_comments ENABLE ROW LEVEL SECURITY;
 
-    CREATE POLICY company_read ON public.companies FOR SELECT TO authenticated
-      USING (public.is_bf_admin() OR public.is_member_of_company(id));
-    CREATE POLICY employee_read ON public.employees FOR SELECT TO authenticated
+    CREATE POLICY companies_read_all ON public.companies FOR SELECT TO authenticated USING (true);
+    CREATE POLICY employees_select_by_company ON public.employees FOR SELECT TO authenticated
       USING (public.can_select_employee(id, user_id));
-    CREATE POLICY role_read ON public.roles FOR SELECT TO authenticated
+    CREATE POLICY roles_select_by_company ON public.roles FOR SELECT TO authenticated
       USING (public.is_bf_admin() OR public.is_member_of_company(company_id));
-    CREATE POLICY employee_company_read ON public.employee_companies FOR SELECT TO authenticated
+    CREATE POLICY employee_companies_select_by_company ON public.employee_companies FOR SELECT TO authenticated
+      USING (public.is_bf_admin() OR employee_id = public.current_employee_id()
+        OR public.is_member_of_company(company_id));
+    CREATE POLICY dept_select ON public.departments FOR SELECT TO authenticated
       USING (public.is_bf_admin() OR public.is_member_of_company(company_id));
-    CREATE POLICY department_read ON public.departments FOR SELECT TO authenticated
-      USING (public.is_bf_admin() OR public.is_member_of_company(company_id));
-    CREATE POLICY employee_department_read ON public.employee_departments FOR SELECT TO authenticated
+    CREATE POLICY emp_dept_select ON public.employee_departments FOR SELECT TO authenticated
       USING (public.is_bf_admin() OR EXISTS (
         SELECT 1 FROM public.departments department
         WHERE department.id = department_id AND public.is_member_of_company(department.company_id)
       ));
-    CREATE POLICY task_read ON public.employee_tasks FOR SELECT TO authenticated
+    CREATE POLICY tasks_select_by_company ON public.employee_tasks FOR SELECT TO authenticated
       USING (public.can_select_employee_task(company_id, department_id, creator_employee_id));
-    CREATE POLICY assignee_read ON public.task_assignees FOR SELECT TO authenticated
+    CREATE POLICY task_assignees_select ON public.task_assignees FOR SELECT TO authenticated
       USING (public.can_select_employee_task_by_id(task_id));
-    CREATE POLICY feedback_read ON public.employee_task_feedbacks FOR SELECT TO authenticated
+    CREATE POLICY fb_select_by_task_scope ON public.employee_task_feedbacks FOR SELECT TO authenticated
       USING (public.can_select_employee_task_by_id(task_id));
-    CREATE POLICY task_pending_read ON public.task_pending FOR SELECT TO authenticated
-      USING (public.is_bf_admin());
-    CREATE POLICY join_pending_read ON public.company_join_pending FOR SELECT TO authenticated
-      USING (public.is_bf_admin() OR public.is_member_of_company(company_id));
-    CREATE POLICY update_log_read ON public.team_update_logs FOR SELECT TO authenticated USING (true);
-    CREATE POLICY update_comment_read ON public.team_update_log_comments FOR SELECT TO authenticated USING (true);
+    CREATE POLICY task_pending_admin_all ON public.task_pending FOR ALL TO authenticated
+      USING (public.is_bf_admin()) WITH CHECK (public.is_bf_admin());
+    CREATE POLICY task_pending_anon_insert ON public.task_pending FOR INSERT TO anon
+      WITH CHECK (true);
+    CREATE POLICY task_pending_self_read ON public.task_pending FOR SELECT TO authenticated
+      USING (auth.uid() = user_id);
+    CREATE POLICY task_pending_company_admin_select ON public.task_pending FOR SELECT TO authenticated
+      USING (public.is_admin_of_company_by_name(company_name));
+    CREATE POLICY task_pending_company_admin_update ON public.task_pending FOR UPDATE TO authenticated
+      USING (public.is_admin_of_company_by_name(company_name))
+      WITH CHECK (public.is_admin_of_company_by_name(company_name));
+    CREATE POLICY company_join_pending_select ON public.company_join_pending FOR SELECT TO authenticated
+      USING (public.is_bf_admin()
+        OR EXISTS (SELECT 1 FROM public.employees e
+          WHERE e.id = company_join_pending.employee_id AND e.user_id = auth.uid())
+        OR public.is_admin_of_company(company_id));
+    CREATE POLICY team_log_select_all ON public.team_update_logs FOR SELECT TO authenticated USING (true);
+    CREATE POLICY team_log_comment_select_all ON public.team_update_log_comments FOR SELECT TO authenticated USING (true);
     GRANT SELECT ON ALL TABLES IN SCHEMA public TO authenticated;
 
     INSERT INTO public.companies(id,name,feature_ai_batch,created_at) VALUES
@@ -340,9 +382,9 @@ try {
       ('60000000-0000-0000-0000-000000000002','30000000-0000-0000-0000-000000000001','Hidden','2026-01-02'),
       ('60000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','Allowed','2026-01-01'),
       ('60000000-0000-0000-0000-000000000003','30000000-0000-0000-0000-000000000002','Beta','2026-01-03');
-    INSERT INTO public.employee_departments(id,employee_id,department_id,created_at) VALUES
-      ('70000000-0000-0000-0000-000000000002','10000000-0000-0000-0000-000000000005','60000000-0000-0000-0000-000000000002','2026-01-02'),
-      ('70000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000002','60000000-0000-0000-0000-000000000001','2026-01-01');
+    INSERT INTO public.employee_departments(employee_id,department_id,created_at) VALUES
+      ('10000000-0000-0000-0000-000000000005','60000000-0000-0000-0000-000000000002','2026-01-02'),
+      ('10000000-0000-0000-0000-000000000002','60000000-0000-0000-0000-000000000001','2026-01-01');
 
     INSERT INTO public.employee_tasks(
       id,company_id,department_id,creator_employee_id,employee_id,title,note,attachments,status,priority,created_at,completed_at
@@ -358,15 +400,15 @@ try {
       ('80000000-0000-0000-0000-000000000002','30000000-0000-0000-0000-000000000001',NULL,'10000000-0000-0000-0000-000000000002','10000000-0000-0000-0000-000000000002','Open company','company note','{}','open','low','2026-08-31 11:00+00'),
       ('80000000-0000-0000-0000-000000000003','30000000-0000-0000-0000-000000000001','60000000-0000-0000-0000-000000000002','10000000-0000-0000-0000-000000000005','10000000-0000-0000-0000-000000000005','Hidden task','secret','[]','open','high','2026-08-31 10:00+00'),
       ('80000000-0000-0000-0000-000000000004','30000000-0000-0000-0000-000000000002','60000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000003','Other task','other','[]','open','high','2026-08-31 09:00+00');
-    INSERT INTO public.task_assignees(id,task_id,employee_id,created_at) VALUES
-      ('90000000-0000-0000-0000-000000000002','80000000-0000-0000-0000-000000000002','10000000-0000-0000-0000-000000000002','2026-08-31 11:02+00'),
-      ('90000000-0000-0000-0000-000000000001','80000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000002','2026-08-31 11:01+00');
+    INSERT INTO public.task_assignees(task_id,employee_id,created_at) VALUES
+      ('80000000-0000-0000-0000-000000000002','10000000-0000-0000-0000-000000000002','2026-08-31 11:02+00'),
+      ('80000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000002','2026-08-31 11:01+00');
     INSERT INTO public.employee_task_feedbacks(id,task_id,author_name,body,created_at) VALUES
       ('91000000-0000-0000-0000-000000000002','80000000-0000-0000-0000-000000000002','Member','Second','2026-08-31 11:04+00'),
       ('91000000-0000-0000-0000-000000000001','80000000-0000-0000-0000-000000000001','Member','First','2026-08-31 11:03+00');
-    INSERT INTO public.task_pending(id,name,requested_at) VALUES
-      ('92000000-0000-0000-0000-000000000001','Older','2026-08-30'),
-      ('92000000-0000-0000-0000-000000000002','Newer','2026-08-31');
+    INSERT INTO public.task_pending(id,name,email,company_name,user_id,requested_at) VALUES
+      ('92000000-0000-0000-0000-000000000001','Older','member@example.test','Alpha','${MEMBER_USER}','2026-08-30'),
+      ('92000000-0000-0000-0000-000000000002','Newer','other@example.test','Beta','${OTHER_USER}','2026-08-31');
     INSERT INTO public.company_join_pending(id,employee_id,company_id,note,requested_at) VALUES
       ('93000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000002','30000000-0000-0000-0000-000000000001','Older','2026-08-30'),
       ('93000000-0000-0000-0000-000000000002','10000000-0000-0000-0000-000000000005','30000000-0000-0000-0000-000000000001','Newer','2026-08-31');
@@ -393,6 +435,31 @@ try {
     assert.deepEqual(ARRAY_KEYS.filter((key) => !Array.isArray(admin[key])), []);
     assert.equal(admin.permissions.isBfAdmin, true);
     assert.deepEqual(admin.taskStats, { total: 15, completed: 12, open: 3, abandoned: 0 });
+  });
+
+  scenario(() => {
+    assert.match(source052,
+      /CREATE OR REPLACE FUNCTION public\.is_member_of_department\(dept_id uuid\) RETURNS boolean\s+LANGUAGE sql STABLE SECURITY DEFINER AS \$\$/);
+    assert.match(source055,
+      /CREATE OR REPLACE FUNCTION public\.is_admin_of_company_by_name\(comp_name text\)[\s\S]*?LANGUAGE sql STABLE\s+AS \$\$/);
+    assert.match(source082,
+      /CREATE OR REPLACE FUNCTION public\.is_bf_admin\(\) RETURNS boolean\s+LANGUAGE sql STABLE SECURITY DEFINER\s+SET search_path = public/);
+    assert.match(source036,
+      /CREATE POLICY task_pending_self_read ON task_pending[\s\S]*?USING \(auth\.uid\(\) = user_id\)/);
+    assert.equal(sql(`SELECT prosecdef::text || '|' || COALESCE(array_to_string(proconfig, ','), '')
+      FROM pg_proc WHERE oid = 'public.is_member_of_department(uuid)'::regprocedure;`), "true|");
+    assert.equal(sql(`SELECT prosecdef::text || '|' || COALESCE(array_to_string(proconfig, ','), '')
+      FROM pg_proc WHERE oid = 'public.is_admin_of_company_by_name(text)'::regprocedure;`), "false|");
+    assert.equal(sql(`SELECT prosecdef::text || '|' || COALESCE(array_to_string(proconfig, ','), '')
+      FROM pg_proc WHERE oid = 'public.is_bf_admin()'::regprocedure;`), "true|search_path=public");
+    assert.equal(sql(`SELECT string_agg(policyname, ',' ORDER BY policyname) FROM pg_policies
+      WHERE schemaname = 'public' AND tablename = 'task_pending';`),
+      "task_pending_admin_all,task_pending_anon_insert,task_pending_company_admin_select,task_pending_company_admin_update,task_pending_self_read");
+    assert.deepEqual(payload(MEMBER_USER).taskPending.map((row) => row.id),
+      ["92000000-0000-0000-0000-000000000001"],
+      "the real self_read policy must expose only the caller's own pending row");
+    assert.equal(payload(ADMIN_USER).taskPending.length, 2,
+      "the real admin-all policy must expose every pending row to a BF admin");
   });
 
   scenario(() => {
@@ -507,8 +574,8 @@ try {
     assert.ok(elapsedMs < 1500, `authenticated packed task RPC must stay below 1500ms, got ${elapsedMs.toFixed(1)}ms`);
   });
 
-  assert.equal(passed, 12);
-  console.log(`TEAM_TASK_PAGE_PG=12/12 (INVOKER/RLS, NULL=full completed, full taskStats, partial-read exact unread, detail, dirty JSON, anon deny, 13 sorts, <1500ms)`);
+  assert.equal(passed, 13);
+  console.log(`TEAM_TASK_PAGE_PG=13/13 (production helper/search_path + pending policies, INVOKER/RLS, NULL=full completed, full taskStats, partial-read exact unread, detail, dirty JSON, anon deny, 13 sorts, <1500ms)`);
 } finally {
   if (started) run(pgCtl, ["-D", dataDir, "-m", "fast", "-w", "stop"], { quiet: true, allowFailure: true });
   rmSync(probeRoot, { recursive: true, force: true });

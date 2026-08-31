@@ -371,13 +371,11 @@ async function computeUnreadState(read) {
   const packedTaskPage = pendingTeamTaskPagePromise;
   if (packedTaskPage) {
     try {
-      let payload = await packedTaskPage;
-      if (payload?.cached === true && payload.revalidate) payload = await payload.revalidate;
+      const { payload, authUser } = await packedTaskPage;
       const sameScope = unreadAccountId
-        && String(payload?.currentUser?.employeeId || "") === unreadAccountId
-        && String(payload?.currentUser?.activeCompanyId || "") === unreadCompanyId;
-      const fresh = payload?.cached !== true && payload?.offline !== true;
-      if (payload !== LIVE_TEAM_TASK_MISS && fresh && sameScope && payload?.unread?.unread && payload?.unread?.watermarks) {
+        && String(authUser?.id || "") === unreadAccountId
+        && String(authUser?.activeCompanyId || "") === unreadCompanyId;
+      if (payload !== LIVE_TEAM_TASK_MISS && sameScope && payload?.unread?.unread && payload?.unread?.watermarks) {
         return payload.unread;
       }
     } catch {
@@ -765,16 +763,19 @@ async function getLegacyTeamTaskData() {
 }
 
 async function getPackedTeamTaskData() {
-  const request = getLiveTeamTaskPage({ completedLimit: null, includeDetail: true });
+  const request = Promise.all([
+    getLiveTeamTaskPage({ completedLimit: null, includeDetail: true }),
+    getAuthCurrentUser()
+  ]).then(([payload, authUser]) => ({ payload, authUser }));
   pendingTeamTaskPagePromise = request;
-  let payload;
+  let packed;
   try {
-    payload = await request;
+    packed = await request;
   } finally {
     if (pendingTeamTaskPagePromise === request) pendingTeamTaskPagePromise = null;
   }
+  const { payload, authUser } = packed;
   if (payload === LIVE_TEAM_TASK_MISS) return LIVE_TEAM_TASK_MISS;
-  const authUser = await getAuthCurrentUser();
   const { tasksSnapshot, membersSnapshot, teamExtrasSnapshot } =
     await buildTeamTaskSnapshotsFromRows(payload, authUser);
   return buildTeamTaskData({

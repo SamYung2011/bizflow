@@ -43,8 +43,6 @@ const packedPayload = {
   companyJoinPending: [],
   updateLogs: [],
   updateLogComments: [],
-  currentUser: { employeeId: "employee-test", name: "KC", activeCompanyId: "company-test" },
-  permissions: { isBfAdmin: false, canDeleteOthersTasks: false, featureAiBatch: false },
   unread: {
     unread: { tasks: 2, orders: 3, messages: 4, inventory: 5, updates: 6 },
     watermarks: {
@@ -54,8 +52,7 @@ const packedPayload = {
       inventory: "inventory-fingerprint",
       updates: "2026-08-31T01:00:00.000Z"
     }
-  },
-  generatedAt: "2026-08-31T09:00:00"
+  }
 };
 
 auth.__reset();
@@ -80,6 +77,10 @@ assert.deepEqual(packedCalls[0].args, {
 });
 assert.equal(auth.__calls().filter((call) => call.name === "bizflow_unread_summary").length, 0,
   "a successful packed response must not issue the legacy unread RPC");
+assert.equal("currentUser" in packedPayload, false);
+assert.equal("permissions" in packedPayload, false);
+assert.equal("generatedAt" in packedPayload, false,
+  "unused optional RPC metadata must not be able to force the task page onto legacy fallback");
 assert.deepEqual(taskData.unread, packedPayload.unread.unread);
 assert.deepEqual(unread, packedPayload.unread.unread);
 assert.deepEqual(watermarks, packedPayload.unread.watermarks);
@@ -121,12 +122,12 @@ const [, partiallyReadUnread] = await Promise.all([
   provider.getUnread()
 ]);
 const refreshedPackedCalls = auth.__calls().filter((call) => call.name === "bizflow_team_task_page");
-assert.equal(refreshedPackedCalls.length, 2, "a cache hit must launch one packed background revalidation");
+assert.equal(refreshedPackedCalls.length, 2, "a second task read must make one fresh packed request");
 assert.equal(refreshedPackedCalls.at(-1).args.p_tasks_read, "2026-08-31T00:30:00.000Z");
 assert.equal(partiallyReadUnread.tasks, 1,
-  "a partial read watermark must converge to the fresh server count instead of memoizing the cached total");
+  "a partial read watermark must use the fresh server count");
 assert.equal(auth.__calls().filter((call) => call.name === "bizflow_unread_summary").length, 0,
-  "cached task data must share its fresh packed revalidation instead of starting a separate unread RPC");
+  "task data and unread must share the in-flight fresh packed request instead of starting a separate unread RPC");
 
 assert.equal(liveSnapshotCacheVersion("tasks.json"), "0:2:0");
 assert.equal(liveSnapshotCacheVersion("members.json"), "0:3:0");
@@ -153,13 +154,14 @@ const [querySource, providerSource, snapshotsSource, flagsSource, cacheSource, m
   readFile(new URL("../migrations/111_bizflow_team_task_page.sql", import.meta.url), "utf8")
 ]);
 assert.match(querySource, /LIVE_TEAM_TASK_MISS/);
-assert.match(querySource, /writeLiveQueryCache\(/);
 assert.match(querySource, /p_tasks_read: live\.read\.tasks \|\| null[\s\S]*?p_updates_read: live\.read\.updates \|\| null/);
-assert.match(querySource, /clampLiveUnreadSummary\(cached\.value\.unread\)/,
-  "cached unread may clamp for immediate paint but must not seed the fresh memo");
-assert.match(querySource, /Object\.defineProperty\(value, "revalidate", \{ value: revalidate \}\)/);
+assert.match(querySource, /include_detail=false plus lazy detail fetching/);
+assert.doesNotMatch(querySource, /from "\.\/live-query-cache\.js"/);
+assert.doesNotMatch(querySource,
+  /\b(?:readLiveQueryCache|writeLiveQueryCache|markLiveQueryCacheStale|backgroundTeamTaskRefresh|revalidate)\b/,
+  "the phase-one packed path must remain fresh-only and never touch live-query-cache/localStorage");
 assert.match(providerSource, /resolveLiveQueryOrLegacy\(\{[\s\S]*?TEAM_TASK_RPC_ENABLED[\s\S]*?getLegacyTeamTaskData/);
-assert.match(providerSource, /payload\?\.cached === true && payload\.revalidate[\s\S]*?payload = await payload\.revalidate/);
+assert.doesNotMatch(providerSource, /payload\?\.cached|payload\?\.offline|payload\.revalidate/);
 assert.match(providerSource, /getLiveTeamTaskPage\(\{ completedLimit: null, includeDetail: true \}\)/);
 assert.match(snapshotsSource, /export async function buildTeamTaskSnapshotsFromRows/);
 assert.match(snapshotsSource, /const taskStats = rows\?\.taskStats[\s\S]*?taskStats,/);
@@ -168,6 +170,7 @@ assert.match(cacheSource, /\["tasks\.json", 2\][\s\S]*?\["members\.json", 3\][\s
 assert.match(migrationSource, /SECURITY INVOKER/);
 assert.match(migrationSource, /p_completed_limit integer DEFAULT NULL/);
 assert.match(migrationSource, /'taskStats', jsonb_build_object/);
+assert.match(migrationSource, /migration 082 must keep public\.is_bf_admin\(\) SECURITY DEFINER[\s\S]*?reverting that helper breaks the entire packed read/);
 assert.doesNotMatch(migrationSource, /\b(?:CREATE|ALTER|DROP)\s+POLICY\b/i);
 
-console.log("task-speed-rpc-0831: PASS (NULL=all completed, full taskStats, five read watermarks, fresh-only unread memo, fallback, generation 2/3/2)");
+console.log("task-speed-rpc-0831: PASS (fresh-only packed path, optional metadata, NULL=all completed, full taskStats, five read watermarks, fallback, generation 2/3/2)");

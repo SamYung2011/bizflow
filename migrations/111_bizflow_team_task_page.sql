@@ -4,6 +4,9 @@
 -- separately paged table reads plus unread with one RLS-scoped response.
 -- Safe to rerun. This migration only adds one SECURITY INVOKER read function;
 -- it does not change tables, policies, write paths, or realtime publication.
+-- Dependency: migration 082 must keep public.is_bf_admin() SECURITY DEFINER
+-- with SET search_path = public. This function runs with search_path = '', so
+-- reverting that helper breaks the entire packed read for authenticated callers.
 
 BEGIN;
 
