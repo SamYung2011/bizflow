@@ -112,7 +112,7 @@ const mock = {
   }))
 };
 
-// team/任务管理屏数据契约(mock 形状 = 契约;真数据走 snapshots/tasks.json + home.json,逐字段回退)。
+// team/任务管理屏数据契约(mock 形状 = 契约;真数据走 tasks/members/team-extras 三份窄快照,逐字段回退)。
 // 库里任务优先级枚举是 high/mid/low/none;展示层 mid→medium,none→low(煊煊 2026-07-11 已拍)。
 const teamTaskMock = {
   summary: { total: 90, completed: 20, inProgress: 12 },
@@ -596,14 +596,25 @@ function normalizeTeamTaskDetail(task, priority, index) {
   };
 }
 
+const EMPTY_TASK_UNREAD = Object.freeze({ tasks: 0, orders: 0, inventory: 0, messages: 0, updates: 0 });
+
+async function loadTeamTaskUnread() {
+  try {
+    const live = await getLiveUnreadState();
+    return live === LIVE_HOME_QUERY_MISS ? { ...mock.unread } : { ...EMPTY_TASK_UNREAD, ...live.unread };
+  } catch (error) {
+    console.warn("[provider] Task unread RPC failed; using the safe zero state", error);
+    return { ...EMPTY_TASK_UNREAD };
+  }
+}
+
 export async function getTeamTaskData() {
-  const [home, homeSnap, snap, membersSnap, teamExtras, authUser] = await Promise.all([
-    getHomeData(),
-    loadSnapshot(),
+  const [snap, membersSnap, teamExtras, authUser, unread] = await Promise.all([
     loadTasksSnapshot(),
     loadMembersSnapshot(),
     loadTeamExtrasSnapshot(),
-    getSession().then((session) => session ? getAuthCurrentUser() : null).catch(() => null)
+    getSession().then((session) => session ? getAuthCurrentUser() : null).catch(() => null),
+    loadTeamTaskUnread()
   ]);
 
   // 任务三数:真实 status 计数(total/completed/open),坏了整块回退 mock
@@ -614,15 +625,14 @@ export async function getTeamTaskData() {
     ? { total: ts.total, completed: ts.completed, inProgress: ts.open }
     : { ...teamTaskMock.summary };
 
-  // 成员栏:home 快照真成员 + openTasks(真·个人未完成数;快照没带该字段就显 0,宁缺毋假);
+  // 成员栏:members 快照真成员 + openTasks(真·个人未完成数;快照没带该字段就显 0,宁缺毋假);
   // badge=未读数,库里无按人未读概念 => 一律 0(红点宁灭不假亮,Honnmono all 行仍用它决定圆钮/徽标)。
   // position=employees.role 透传(件3,2026-08-04):成员快照 buildMembersSnapshot 早已算好
   // asText(employee.role),只是先前没转发给任务页;没有就是空字符串,tasks.js renderMember 端
   // 空值不落回部门枚举,原样留空("没有就留空不造")。首项 Honnmono 为全员汇总。
-  // 只有 home 快照真的载入且成员字段合法才走真数据;否则整栏回退 teamTaskMock 离线样例
+  // members 快照坏契约时整栏回退 teamTaskMock 离线样例,不再借 home 快照兜底。
   const r9Members = isR9MembersSnapshot(membersSnap);
-  const realMembers = !!homeSnap && validators.members(homeSnap.members) && homeSnap.members.length > 0;
-  if (membersSnap && !r9Members && !realMembers) warnProviderFallback("members.json", "task member mock");
+  if (membersSnap && !r9Members) warnProviderFallback("members.json", "task member mock");
   const members = r9Members
     ? [
         { name: "Honnmono", dept: "all", taskCount: statsOk ? ts.open : 0, active: true, badge: 0 },
@@ -637,17 +647,6 @@ export async function getTeamTaskData() {
           badge: 0,
           status: member.status,
           employmentActive: member.status === "active",
-          active: false
-        }))
-      ]
-    : realMembers
-    ? [
-        { name: "Honnmono", dept: "all", taskCount: statsOk ? ts.open : 0, active: true, badge: 0 },
-        ...home.members.map((m) => ({
-          name: m.name,
-          dept: m.dept ?? "design",
-          taskCount: isNum(m.openTasks) ? m.openTasks : 0,
-          badge: 0,
           active: false
         }))
       ]
@@ -668,7 +667,7 @@ export async function getTeamTaskData() {
   if (snap && !fullTasksOk && !kbOk) warnProviderFallback("tasks.json:tasks/kanban", "task board mock");
   const today = hongKongDateInput();
   const normalizedTasks = fullTasksOk
-    ? snap.tasks.map((task) => normalizeFullTask(task, home.currentUser?.name ?? "", today))
+    ? snap.tasks.map((task) => normalizeFullTask(task, authUser?.name ?? "", today))
     : [];
   const normalizedById = new Map(normalizedTasks.map((task) => [task.id, task]));
   normalizedTasks.forEach((task) => {
@@ -721,7 +720,7 @@ export async function getTeamTaskData() {
     : { defaults: { ...teamTaskMock.form.defaults } };
 
   return {
-    unread: home.unread ?? mock.unread,
+    unread,
     summary,
     filters: { ...teamTaskMock.filters },
     form,

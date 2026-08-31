@@ -7,6 +7,8 @@ export const LIVE_HOME_QUERY_MISS = Symbol("live-home-query-miss");
 
 const HOME_DASHBOARD_NAMESPACE = "home-dashboard";
 const HOME_REQUESTS = new Map();
+const UNREAD_REQUESTS = new Map();
+const UNREAD_MEMO_TTL_MS = 30_000;
 
 async function context() {
   const [client, session, currentUser] = await Promise.all([
@@ -135,19 +137,38 @@ export async function getLiveUnreadState() {
   if (!live) return LIVE_HOME_QUERY_MISS;
   setReadStateAccount(live.currentUser.id || null);
   const read = getReadState();
-  const result = await live.client.rpc("bizflow_unread_summary", {
+  const requestKey = liveQueryKey({
+    userId: live.userId,
+    companyId: live.currentUser.activeCompanyId || "",
+    read
+  });
+  const now = Date.now();
+  const memo = UNREAD_REQUESTS.get(requestKey);
+  if (memo?.expiresAt > now) return memo.promise;
+
+  // The first realtime SUBSCRIBED catch-up can advance snapshot revisions while
+  // a page is mounting. Keep the resolved result briefly so that follow-up
+  // getUnread()/getUnreadWatermarks() reads do not repeat the same RPC.
+  const promise = live.client.rpc("bizflow_unread_summary", {
     p_company_id: live.currentUser.activeCompanyId || null,
     p_tasks_read: read.tasks || null,
     p_orders_read: read.orders || null,
     p_messages_read: read.messages || null,
     p_inventory_read: read.inventory || null,
     p_updates_read: read.updates || null
+  }).then((result) => {
+    if (result.error) throw result.error;
+    const unread = Object.fromEntries(["tasks", "orders", "messages", "inventory", "updates"]
+      .map((key) => [key, metricNumber(result.data?.unread, key)]));
+    const watermarks = Object.fromEntries(["tasks", "orders", "messages", "inventory", "updates"]
+      .map((key) => [key, asText(result.data?.watermarks?.[key])]));
+    rememberUnreadWatermarks(watermarks);
+    return { unread, watermarks };
+  }).catch((error) => {
+    if (UNREAD_REQUESTS.get(requestKey)?.promise === promise) UNREAD_REQUESTS.delete(requestKey);
+    throw error;
   });
-  if (result.error) throw result.error;
-  const unread = Object.fromEntries(["tasks", "orders", "messages", "inventory", "updates"]
-    .map((key) => [key, metricNumber(result.data?.unread, key)]));
-  const watermarks = Object.fromEntries(["tasks", "orders", "messages", "inventory", "updates"]
-    .map((key) => [key, asText(result.data?.watermarks?.[key])]));
-  rememberUnreadWatermarks(watermarks);
-  return { unread, watermarks };
+  UNREAD_REQUESTS.clear();
+  UNREAD_REQUESTS.set(requestKey, { expiresAt: now + UNREAD_MEMO_TTL_MS, promise });
+  return promise;
 }
