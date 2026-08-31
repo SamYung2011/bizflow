@@ -642,15 +642,12 @@ assert.doesNotMatch(domainCssSource, /team-member-task__overview-icon/,
   "the icon-square rule (and its --active variant) was only ever used by the deleted row; it must go with it");
 assert.match(tasksSource, /<div class="team-member-list">\$\{railMembers\.map\(\(member\) => renderMember\(member, memberTasks, helpers\)\)\.join\(""\)\}<\/div>/,
   "the member rail must render only ordinary renderMember rows now — display-only ordering may change, but Honnmono all remains a normal member row with no separate nav button alongside it");
-// Explicit boundary, not a regression this commit causes: the admin default-landing screen
-// (tasks-overview.js, reached only via defaultTaskViewForUser's initial { mode: "overview" } for
-// admins — see G-task-10 above, still unchanged) stays. Only its now-redundant manual nav row is
-// gone; there's simply no click path back to it once you leave, which is the accepted tradeoff of
-// keeping exactly one rail entry point instead of two that did the same thing.
-assert.match(tasksSource, /import \{ renderTaskOverview \} from "\.\/tasks-overview\.js";/,
-  "the overview screen module import must survive — it still serves the admin landing case");
+// 2026-08-31 件B: the duplicate rail row stays deleted, while the admin-only segmented control
+// now provides the missing board <-> overview return path without creating another member row.
+assert.match(tasksSource, /import \{[^}]*renderTaskModeSwitch[^}]*renderTaskOverview[^}]*resolveTaskModeSwitch[^}]*\} from "\.\/tasks-overview\.js";/,
+  "the overview screen and its admin-only mode switch must share the existing overview module");
 assert.match(tasksSource, /if \(state\.mode === "overview"\)[\s\S]*?return renderTaskOverview\(/,
-  "the overview render branch itself must be untouched");
+  "the overview render branch itself must survive the new manual return path");
 
 for (const lang of ["zh", "en", "fr"]) {
   for (const key of [

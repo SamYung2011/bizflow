@@ -6,7 +6,7 @@ import { renderTaskDetail } from "./tasks-detail.js";
 import { availableTaskDepartments, renderTaskSubmitDialog, taskMembersForDepartment } from "./tasks-submit.js";
 import { isTaskFilterGroup } from "./tasks-filters.js";
 import { renderTaskCalendar } from "./tasks-calendar.js";
-import { renderTaskOverview } from "./tasks-overview.js";
+import { renderTaskModeSwitch, renderTaskOverview, resolveTaskModeSwitch } from "./tasks-overview.js";
 import { createTaskAiState, createTaskAiTasks, normalizeTaskAiCards, renderTaskAiDialog, taskAiCardsReady, taskAiErrorKey, taskAiPublishItems, updateTaskAiCardDepartment } from "./tasks-ai.js";
 import { calendarRelatedTasks, canDeleteTaskForUser, defaultTaskViewForUser, isOpenTask, isTaskAssignedTo, isTaskCreator, isTaskMentionedForMember, isWaitingApproval, memberIdentity, openAssignedTaskCount, taskAssignee, taskCompletionForMember, taskReadFingerprintRootId } from "./tasks-model.js";
 import { attachTaskDomainController } from "./tasks-domain-controller.js";
@@ -77,6 +77,8 @@ function createTaskState(nextData, historyState = null) {
   const storedViewMode = getSessionValue("team-tasks-view-mode");
   const restored = historyState && typeof historyState === "object" ? historyState : {};
   const initialView = defaultTaskViewForUser(currentUser, currentMember);
+  const canViewOverview = initialView.mode === "overview";
+  const restoredMode = ["overview", "board"].includes(restored.mode) ? restored.mode : initialView.mode;
   const nextState = {
     summary: { ...nextData.summary },
     members: clonedMembers,
@@ -90,7 +92,8 @@ function createTaskState(nextData, historyState = null) {
     permissions,
     liveReadOnly: authenticated,
     liveTaskWrites: authenticated,
-    mode: ["overview", "board"].includes(restored.mode) ? restored.mode : initialView.mode,
+    mode: restoredMode === "overview" && !canViewOverview ? "board" : restoredMode,
+    canViewOverview,
     overviewExpanded: new Set(Array.isArray(restored.overviewExpanded) ? restored.overviewExpanded : []),
     overviewCompletedExpanded: new Set(Array.isArray(restored.overviewCompletedExpanded) ? restored.overviewCompletedExpanded : []),
     boardExpandedPriorities: new Set(Array.isArray(restored.boardExpandedPriorities)
@@ -311,6 +314,13 @@ function taskSearchResults(helpers) {
   return `<div class="team-kanban-grid">${renderTaskBoardGrid({ state: { ...state, tasks: searchedTasks }, filterState, helpers })}</div>`;
 }
 
+function taskSearchSurface(helpers) {
+  const modeSwitch = !state.detailOpen && filterState.view === "board"
+    ? renderTaskModeSwitch({ mode: state.mode, canViewOverview: state.canViewOverview, helpers })
+    : "";
+  return `${modeSwitch}${taskSearchResults(helpers)}`;
+}
+
 export function renderTaskManagement(helpers) {
   currentHelpers = helpers;
   const { icon, escapeHtml, lang } = helpers;
@@ -339,7 +349,7 @@ export function renderTaskManagement(helpers) {
         ${state.permissions.canManageEmployees ? `<button type="button" class="team-member-add" data-task-members-manage aria-label="${escapeHtml(tt("tasks.members.manage"))}" title="${escapeHtml(tt("tasks.members.manage"))}">${icon("icon-add-surface-add")}</button>` : ""}
       </aside>`}
       <main class="team-kanban${state.detailOpen ? " team-kanban--detail" : ""}" data-task-search-results>
-        ${taskSearchResults(helpers)}
+        ${taskSearchSurface(helpers)}
       </main>
     </section>
     ${renderTaskSubmitDialog({ state, data: { ...data, members: state.members }, helpers })}
@@ -407,7 +417,7 @@ function rerenderTaskPageFromBackground(options = {}) {
 function rerenderTaskSearchResults() {
   const results = document.querySelector("[data-task-search-results]");
   if (!results || !currentHelpers || state.detailOpen) return;
-  results.innerHTML = taskSearchResults(currentHelpers);
+  results.innerHTML = taskSearchSurface(currentHelpers);
   document.querySelector(".team-task-page")?.setAttribute("data-task-search-value", filterState.search);
   activeScope?.animationFrame(observeTaskBoardUnreadColumns);
 }
@@ -1350,6 +1360,20 @@ async function onTaskClick(event) {
   }
   if (state.feedbackDraft.mentionMenu?.open && !event.target.closest("[data-task-feedback-mention-editor]")) {
     closeFeedbackMentionMenuInPlace();
+  }
+
+  const modeSwitch = event.target.closest("[data-task-mode-switch]");
+  if (modeSwitch) {
+    const requestedMode = modeSwitch.getAttribute("data-task-mode-switch");
+    const nextMode = resolveTaskModeSwitch(state.mode, requestedMode, state.canViewOverview);
+    if (nextMode === state.mode) return;
+    state.mode = nextMode;
+    filterState.view = "board";
+    setSessionValue("team-tasks-view-mode", "board");
+    closeAllFilterMenus(null);
+    rerenderTaskPage();
+    activeScope?.animationFrame(() => document.querySelector(`[data-task-mode-switch="${CSS.escape(nextMode)}"]`)?.focus());
+    return;
   }
 
   if (event.target.closest("[data-task-ai-back]")) {

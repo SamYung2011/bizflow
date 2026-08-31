@@ -81,6 +81,24 @@
   height: 16px;
 }
 
+.task-mode-switch {
+  display: inline-flex;
+  width: fit-content;
+  align-self: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border-radius: var(--radius-10);
+  background: var(--gray-5);
+}
+
+.task-mode-switch .tab-chip {
+  min-width: 88px;
+  max-width: none;
+  justify-content: center;
+  border: 0;
+  cursor: pointer;
+}
+
 .team-member-task {
   border: 0;
   text-align: left;
@@ -1226,6 +1244,15 @@
 
   .team-domain-toolbar__actions {
     align-items: flex-start;
+  }
+
+  .task-mode-switch {
+    width: 100%;
+  }
+
+  .task-mode-switch .tab-chip {
+    min-width: 0;
+    flex: 1 1 0;
   }
 
   .team-ai-task {

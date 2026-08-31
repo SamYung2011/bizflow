@@ -1,6 +1,21 @@
 import { taskT } from "./tasks-i18n.js";
 import { isTaskMentionedForMember, overviewForMember } from "./tasks-model.js";
 
+export function resolveTaskModeSwitch(currentMode, requestedMode, canViewOverview) {
+  if (requestedMode === "overview") return canViewOverview ? "overview" : "board";
+  if (requestedMode === "board") return "board";
+  return currentMode === "overview" && canViewOverview ? "overview" : "board";
+}
+
+export function renderTaskModeSwitch({ mode, canViewOverview, helpers }) {
+  if (!canViewOverview) return "";
+  const { escapeHtml, lang } = helpers;
+  return `<div class="task-mode-switch" data-task-mode-switcher role="tablist" aria-label="${escapeHtml(taskT(lang, "tasks.title"))}">
+    <button type="button" class="tab-chip${mode === "board" ? " tab-chip--active" : ""}" data-task-mode-switch="board" role="tab" aria-selected="${mode === "board"}">${escapeHtml(taskT(lang, "tasks.view.board"))}</button>
+    <button type="button" class="tab-chip${mode === "overview" ? " tab-chip--active" : ""}" data-task-mode-switch="overview" role="tab" aria-selected="${mode === "overview"}">${escapeHtml(taskT(lang, "tasks.overview.title"))}</button>
+  </div>`;
+}
+
 function renderTaskRow(row, member, helpers, completed = false) {
   const { escapeHtml, lang } = helpers;
   const task = row.task;
