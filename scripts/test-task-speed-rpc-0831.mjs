@@ -24,9 +24,12 @@ if (typeof globalThis.CustomEvent === "undefined") {
 
 const auth = await import("../root-site/data/auth.js");
 const provider = await import("../root-site/data/provider.js");
+const { buildTeamTaskSnapshotsFromRows } = await import("../root-site/data/live-snapshots.js");
 const { liveSnapshotCacheVersion } = await import("../root-site/data/live-table-cache.js");
+const readState = await import("../root-site/data/read-state.js");
 
 const packedPayload = {
+  taskStats: { total: 0, completed: 0, open: 0, abandoned: 0 },
   tasks: [],
   assignees: [],
   feedbacks: [],
@@ -67,8 +70,13 @@ const packedCalls = auth.__calls().filter((call) => call.name === "bizflow_team_
 assert.equal(packedCalls.length, 1, "task page and unread consumers must share one packed RPC trip");
 assert.deepEqual(packedCalls[0].args, {
   p_company_id: "company-test",
-  p_completed_limit: 10,
-  p_include_detail: true
+  p_completed_limit: null,
+  p_include_detail: true,
+  p_tasks_read: null,
+  p_orders_read: null,
+  p_messages_read: null,
+  p_inventory_read: null,
+  p_updates_read: null
 });
 assert.equal(auth.__calls().filter((call) => call.name === "bizflow_unread_summary").length, 0,
   "a successful packed response must not issue the legacy unread RPC");
@@ -77,6 +85,48 @@ assert.deepEqual(unread, packedPayload.unread.unread);
 assert.deepEqual(watermarks, packedPayload.unread.watermarks);
 assert.deepEqual(taskData.summary, { total: 0, completed: 0, inProgress: 0 },
   "an empty but valid packed tenant must stay mountable instead of using demo data");
+
+const limitedCompletedRows = Array.from({ length: 10 }, (_, index) => ({
+  id: `done-${index + 1}`,
+  company_id: "company-test",
+  creator_employee_id: "employee-test",
+  employee_id: "employee-test",
+  title: `Done ${index + 1}`,
+  note: "",
+  attachments: [],
+  status: "done",
+  priority: "low",
+  created_at: `2026-08-30T${String(index + 1).padStart(2, "0")}:00:00.000Z`,
+  completed_at: `2026-08-31T${String(index + 1).padStart(2, "0")}:00:00.000Z`
+}));
+const { tasksSnapshot: limitedSnapshot } = await buildTeamTaskSnapshotsFromRows({
+  ...packedPayload,
+  tasks: limitedCompletedRows,
+  taskStats: { total: 14, completed: 12, open: 2, abandoned: 0 }
+}, await auth.getCurrentUser());
+assert.equal(limitedSnapshot.tasks.length, 10, "a future bounded row feed may contain only ten completed tasks");
+assert.deepEqual(limitedSnapshot.taskStats, { total: 14, completed: 12, open: 2, abandoned: 0 },
+  "server taskStats must remain full-count even when a future row feed is truncated");
+
+readState.markRead("tasks", "2026-08-31T00:30:00.000Z");
+auth.__setRpcHandler("bizflow_team_task_page", (args) => ({
+  ...packedPayload,
+  unread: {
+    ...packedPayload.unread,
+    unread: { ...packedPayload.unread.unread, tasks: args.p_tasks_read ? 1 : 2 }
+  }
+}));
+const [, partiallyReadUnread] = await Promise.all([
+  provider.getTeamTaskData(),
+  provider.getUnread()
+]);
+const refreshedPackedCalls = auth.__calls().filter((call) => call.name === "bizflow_team_task_page");
+assert.equal(refreshedPackedCalls.length, 2, "a cache hit must launch one packed background revalidation");
+assert.equal(refreshedPackedCalls.at(-1).args.p_tasks_read, "2026-08-31T00:30:00.000Z");
+assert.equal(partiallyReadUnread.tasks, 1,
+  "a partial read watermark must converge to the fresh server count instead of memoizing the cached total");
+assert.equal(auth.__calls().filter((call) => call.name === "bizflow_unread_summary").length, 0,
+  "cached task data must share its fresh packed revalidation instead of starting a separate unread RPC");
 
 assert.equal(liveSnapshotCacheVersion("tasks.json"), "0:2:0");
 assert.equal(liveSnapshotCacheVersion("members.json"), "0:3:0");
@@ -104,11 +154,20 @@ const [querySource, providerSource, snapshotsSource, flagsSource, cacheSource, m
 ]);
 assert.match(querySource, /LIVE_TEAM_TASK_MISS/);
 assert.match(querySource, /writeLiveQueryCache\(/);
+assert.match(querySource, /p_tasks_read: live\.read\.tasks \|\| null[\s\S]*?p_updates_read: live\.read\.updates \|\| null/);
+assert.match(querySource, /clampLiveUnreadSummary\(cached\.value\.unread\)/,
+  "cached unread may clamp for immediate paint but must not seed the fresh memo");
+assert.match(querySource, /Object\.defineProperty\(value, "revalidate", \{ value: revalidate \}\)/);
 assert.match(providerSource, /resolveLiveQueryOrLegacy\(\{[\s\S]*?TEAM_TASK_RPC_ENABLED[\s\S]*?getLegacyTeamTaskData/);
+assert.match(providerSource, /payload\?\.cached === true && payload\.revalidate[\s\S]*?payload = await payload\.revalidate/);
+assert.match(providerSource, /getLiveTeamTaskPage\(\{ completedLimit: null, includeDetail: true \}\)/);
 assert.match(snapshotsSource, /export async function buildTeamTaskSnapshotsFromRows/);
+assert.match(snapshotsSource, /const taskStats = rows\?\.taskStats[\s\S]*?taskStats,/);
 assert.match(flagsSource, /export const TEAM_TASK_RPC_ENABLED = true/);
 assert.match(cacheSource, /\["tasks\.json", 2\][\s\S]*?\["members\.json", 3\][\s\S]*?\["team-extras\.json", 2\]/);
 assert.match(migrationSource, /SECURITY INVOKER/);
+assert.match(migrationSource, /p_completed_limit integer DEFAULT NULL/);
+assert.match(migrationSource, /'taskStats', jsonb_build_object/);
 assert.doesNotMatch(migrationSource, /\b(?:CREATE|ALTER|DROP)\s+POLICY\b/i);
 
-console.log("task-speed-rpc-0831: PASS (single packed trip, unread reuse, legacy fallback, SWR, generation 2/3/2, no policy DDL)");
+console.log("task-speed-rpc-0831: PASS (NULL=all completed, full taskStats, five read watermarks, fresh-only unread memo, fallback, generation 2/3/2)");

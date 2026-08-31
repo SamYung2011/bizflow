@@ -9,8 +9,13 @@ BEGIN;
 
 CREATE OR REPLACE FUNCTION public.bizflow_team_task_page(
   p_company_id uuid DEFAULT NULL,
-  p_completed_limit integer DEFAULT 10,
-  p_include_detail boolean DEFAULT false
+  p_completed_limit integer DEFAULT NULL,
+  p_include_detail boolean DEFAULT false,
+  p_tasks_read timestamptz DEFAULT NULL,
+  p_orders_read timestamptz DEFAULT NULL,
+  p_messages_read timestamptz DEFAULT NULL,
+  p_inventory_read text DEFAULT NULL,
+  p_updates_read timestamptz DEFAULT NULL
 )
 RETURNS jsonb
 LANGUAGE sql
@@ -52,19 +57,33 @@ AS $function$
     WHERE company.id = (SELECT company_id FROM scope)
     LIMIT 1
   ),
-  completed_task_ids AS MATERIALIZED (
-    SELECT task.id
-    FROM public.employee_tasks AS task
-    WHERE task.company_id = (SELECT company_id FROM scope)
-      AND task.status = 'done'
-    ORDER BY task.completed_at DESC NULLS LAST, task.id ASC
-    LIMIT GREATEST(COALESCE(p_completed_limit, 10), 0)
-  ),
-  task_rows AS MATERIALIZED (
+  visible_task_rows AS MATERIALIZED (
     SELECT task.*
     FROM public.employee_tasks AS task
     WHERE task.company_id = (SELECT company_id FROM scope)
-      AND (
+  ),
+  task_stats AS MATERIALIZED (
+    SELECT
+      count(*) AS total,
+      count(*) FILTER (WHERE task.status = 'done') AS completed,
+      count(*) FILTER (WHERE COALESCE(task.status, 'open') NOT IN ('done', 'abandoned')) AS open,
+      count(*) FILTER (WHERE task.status = 'abandoned') AS abandoned
+    FROM visible_task_rows AS task
+  ),
+  completed_task_ids AS MATERIALIZED (
+    SELECT task.id
+    FROM visible_task_rows AS task
+    WHERE task.status = 'done'
+    ORDER BY task.completed_at DESC NULLS LAST, task.id ASC
+    LIMIT CASE
+      WHEN p_completed_limit IS NULL THEN NULL
+      ELSE GREATEST(p_completed_limit, 0)
+    END
+  ),
+  task_rows AS MATERIALIZED (
+    SELECT task.*
+    FROM visible_task_rows AS task
+    WHERE (
         COALESCE(task.status, 'open') <> 'done'
         OR task.id IN (SELECT completed.id FROM completed_task_ids AS completed)
       )
@@ -80,6 +99,12 @@ AS $function$
     JOIN task_rows AS task ON task.id = feedback.task_id
   )
   SELECT jsonb_build_object(
+    'taskStats', jsonb_build_object(
+      'total', COALESCE((SELECT total FROM task_stats), 0),
+      'completed', COALESCE((SELECT completed FROM task_stats), 0),
+      'open', COALESCE((SELECT open FROM task_stats), 0),
+      'abandoned', COALESCE((SELECT abandoned FROM task_stats), 0)
+    ),
     'tasks', COALESCE((
       SELECT jsonb_agg(
         CASE
@@ -153,20 +178,26 @@ AS $function$
     ),
     'unread', COALESCE(public.bizflow_unread_summary(
       (SELECT company_id FROM scope),
-      NULL::timestamptz,
-      NULL::timestamptz,
-      NULL::timestamptz,
-      NULL::text,
-      NULL::timestamptz
+      p_tasks_read,
+      p_orders_read,
+      p_messages_read,
+      p_inventory_read,
+      p_updates_read
     ), jsonb_build_object('unread', '{}'::jsonb, 'watermarks', '{}'::jsonb)),
     'generatedAt', to_char(now() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD"T"HH24:MI:SS')
   );
 $function$;
 
-REVOKE ALL ON FUNCTION public.bizflow_team_task_page(uuid, integer, boolean) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.bizflow_team_task_page(uuid, integer, boolean) TO authenticated;
+REVOKE ALL ON FUNCTION public.bizflow_team_task_page(
+  uuid, integer, boolean, timestamptz, timestamptz, timestamptz, text, timestamptz
+) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.bizflow_team_task_page(
+  uuid, integer, boolean, timestamptz, timestamptz, timestamptz, text, timestamptz
+) TO authenticated;
 
-COMMENT ON FUNCTION public.bizflow_team_task_page(uuid, integer, boolean) IS
+COMMENT ON FUNCTION public.bizflow_team_task_page(
+  uuid, integer, boolean, timestamptz, timestamptz, timestamptz, text, timestamptz
+) IS
   'RLS-scoped one-trip raw-row payload for the team task page and task overview.';
 
 NOTIFY pgrst, 'reload schema';
@@ -175,6 +206,8 @@ COMMIT;
 
 -- Rollback reference (manual only):
 -- BEGIN;
---   DROP FUNCTION IF EXISTS public.bizflow_team_task_page(uuid, integer, boolean);
+--   DROP FUNCTION IF EXISTS public.bizflow_team_task_page(
+--     uuid, integer, boolean, timestamptz, timestamptz, timestamptz, text, timestamptz
+--   );
 --   NOTIFY pgrst, 'reload schema';
 -- COMMIT;

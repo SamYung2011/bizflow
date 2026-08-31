@@ -1,5 +1,5 @@
 import { getCurrentUser, getSession, getSupabaseClient, TRANSIENT_AUTH_RESET_EVENT } from "./auth.js";
-import { rememberLiveUnreadSummary } from "./live-home-query.js";
+import { clampLiveUnreadSummary, rememberLiveUnreadSummary } from "./live-home-query.js";
 import {
   liveQueryKey,
   markLiveQueryCacheStale,
@@ -7,6 +7,7 @@ import {
   writeLiveQueryCache
 } from "./live-query-cache.js";
 import { LIVE_SNAPSHOT_INVALIDATED_EVENT, LIVE_SNAPSHOT_UPDATED_EVENT } from "./live-snapshot-dependencies.js";
+import { getReadState, setReadStateAccount } from "./read-state.js";
 
 export const LIVE_TEAM_TASK_MISS = Symbol("live-team-task-miss");
 
@@ -48,12 +49,14 @@ async function context() {
   if (!client || !session?.user?.id || !currentUser) return null;
   if (activeUserId && activeUserId !== session.user.id) NETWORK_REQUESTS.clear();
   activeUserId = session.user.id;
-  return { client, currentUser, userId: session.user.id };
+  setReadStateAccount(currentUser.id || null);
+  return { client, currentUser, read: { ...getReadState() }, userId: session.user.id };
 }
 
 function completedLimit(value) {
+  if (value == null) return null;
   const number = Number(value);
-  return Number.isInteger(number) ? Math.max(0, number) : 10;
+  return Number.isInteger(number) ? Math.max(0, number) : null;
 }
 
 function validatePayload(payload) {
@@ -62,6 +65,14 @@ function validatePayload(payload) {
   }
   for (const key of ARRAY_KEYS) {
     if (!Array.isArray(payload[key])) throw new Error(`Team task RPC payload.${key} must be an array`);
+  }
+  if (!payload.taskStats || typeof payload.taskStats !== "object" || Array.isArray(payload.taskStats)) {
+    throw new Error("Team task RPC payload.taskStats must be an object");
+  }
+  for (const key of ["total", "completed", "open", "abandoned"]) {
+    if (!Number.isFinite(Number(payload.taskStats[key]))) {
+      throw new Error(`Team task RPC payload.taskStats.${key} must be numeric`);
+    }
   }
   if (!payload.currentUser || typeof payload.currentUser !== "object" || Array.isArray(payload.currentUser)) {
     throw new Error("Team task RPC payload.currentUser must be an object");
@@ -89,8 +100,8 @@ function validatePayload(payload) {
   return payload;
 }
 
-async function withCurrentUnread(payload) {
-  const unread = await rememberLiveUnreadSummary(payload.unread);
+async function withCurrentUnread(payload, read) {
+  const unread = await rememberLiveUnreadSummary(payload.unread, { read });
   return unread ? { ...payload, unread } : payload;
 }
 
@@ -102,12 +113,17 @@ function notifyTeamTaskUpdated() {
 }
 
 async function fetchTeamTaskPage(live, query, { notify = false } = {}) {
-  const requestKey = `${live.userId}:${liveQueryKey(query)}`;
+  const requestKey = `${live.userId}:${liveQueryKey({ query, read: live.read })}`;
   if (NETWORK_REQUESTS.has(requestKey)) return NETWORK_REQUESTS.get(requestKey);
   const promise = live.client.rpc("bizflow_team_task_page", {
     p_company_id: query.companyId || null,
     p_completed_limit: query.completedLimit,
-    p_include_detail: query.includeDetail
+    p_include_detail: query.includeDetail,
+    p_tasks_read: live.read.tasks || null,
+    p_orders_read: live.read.orders || null,
+    p_messages_read: live.read.messages || null,
+    p_inventory_read: live.read.inventory || null,
+    p_updates_read: live.read.updates || null
   }).then(async (result) => {
     if (result.error) throw result.error;
     const payload = validatePayload(result.data);
@@ -117,7 +133,7 @@ async function fetchTeamTaskPage(live, query, { notify = false } = {}) {
       query,
       value: payload
     });
-    const value = await withCurrentUnread(payload);
+    const value = await withCurrentUnread(payload, live.read);
     if (notify) notifyTeamTaskUpdated();
     return value;
   }).finally(() => {
@@ -128,13 +144,15 @@ async function fetchTeamTaskPage(live, query, { notify = false } = {}) {
 }
 
 function backgroundTeamTaskRefresh(live, query, { notify = false } = {}) {
-  void fetchTeamTaskPage(live, query, { notify })
+  const promise = fetchTeamTaskPage(live, query, { notify });
+  void promise
     .catch((error) => console.warn("[team-task-query] background refresh failed", error));
+  return promise;
 }
 
 export async function getLiveTeamTaskPage({
   companyId = "",
-  completedLimit: limit = 10,
+  completedLimit: limit = null,
   includeDetail = true,
   refresh = false
 } = {}) {
@@ -151,13 +169,17 @@ export async function getLiveTeamTaskPage({
     query
   });
   if (cached && !refresh) {
-    backgroundTeamTaskRefresh(live, query, { notify: cached.stale === true });
-    return { ...await withCurrentUnread(cached.value), cached: true, stale: cached.stale };
+    const revalidate = backgroundTeamTaskRefresh(live, query, { notify: cached.stale === true });
+    const value = { ...cached.value, unread: await clampLiveUnreadSummary(cached.value.unread), cached: true, stale: cached.stale };
+    Object.defineProperty(value, "revalidate", { value: revalidate });
+    return value;
   }
   try {
     return await fetchTeamTaskPage(live, query);
   } catch (error) {
-    if (cached) return { ...await withCurrentUnread(cached.value), cached: true, stale: true, offline: true };
+    if (cached) {
+      return { ...cached.value, unread: await clampLiveUnreadSummary(cached.value.unread), cached: true, stale: true, offline: true };
+    }
     throw error;
   }
 }

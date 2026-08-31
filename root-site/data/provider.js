@@ -371,11 +371,13 @@ async function computeUnreadState(read) {
   const packedTaskPage = pendingTeamTaskPagePromise;
   if (packedTaskPage) {
     try {
-      const payload = await packedTaskPage;
+      let payload = await packedTaskPage;
+      if (payload?.cached === true && payload.revalidate) payload = await payload.revalidate;
       const sameScope = unreadAccountId
         && String(payload?.currentUser?.employeeId || "") === unreadAccountId
         && String(payload?.currentUser?.activeCompanyId || "") === unreadCompanyId;
-      if (payload !== LIVE_TEAM_TASK_MISS && sameScope && payload?.unread?.unread && payload?.unread?.watermarks) {
+      const fresh = payload?.cached !== true && payload?.offline !== true;
+      if (payload !== LIVE_TEAM_TASK_MISS && fresh && sameScope && payload?.unread?.unread && payload?.unread?.watermarks) {
         return payload.unread;
       }
     } catch {
@@ -763,7 +765,7 @@ async function getLegacyTeamTaskData() {
 }
 
 async function getPackedTeamTaskData() {
-  const request = getLiveTeamTaskPage({ completedLimit: 10, includeDetail: true });
+  const request = getLiveTeamTaskPage({ completedLimit: null, includeDetail: true });
   pendingTeamTaskPagePromise = request;
   let payload;
   try {

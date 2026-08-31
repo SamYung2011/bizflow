@@ -7,6 +7,7 @@ export const RBAC_KEYS = Object.freeze([]);
 const calls = [];
 const errors = new Map();
 const rpcData = new Map();
+const rpcHandlers = new Map();
 let heldRpc = "";
 let releaseHeld = null;
 let tableError = null;
@@ -53,6 +54,7 @@ const client = {
       releaseHeld = null;
     }
     if (errors.has(name)) return { data: null, error: errors.get(name) };
+    if (rpcHandlers.has(name)) return { data: await rpcHandlers.get(name)(args), error: null };
     if (rpcData.has(name)) return { data: rpcData.get(name), error: null };
     if (name === "bizflow_order_page") return { data: orderPage(), error: null };
     if (name === "bizflow_unread_summary") return {
@@ -81,6 +83,7 @@ export function __reset() {
   calls.length = 0;
   errors.clear();
   rpcData.clear();
+  rpcHandlers.clear();
   tableError = null;
   heldRpc = "";
   if (releaseHeld) releaseHeld();
@@ -90,6 +93,7 @@ export function __reset() {
 }
 export function __setRpcError(name, error) { errors.set(name, error); }
 export function __setRpcData(name, data) { rpcData.set(name, data); }
+export function __setRpcHandler(name, handler) { rpcHandlers.set(name, handler); }
 export function __setCanViewRevenue(value) { currentUser.canViewRevenue = value === true; }
 export function __setTableError(error) { tableError = error; }
 export function __setSessionUser(id) { sessionUserId = id; }

@@ -61,9 +61,27 @@ function asUser(userId, statement) {
   `).split("\n").filter(Boolean).at(-1);
 }
 
-function payload(userId, company = "'30000000-0000-0000-0000-000000000001'::uuid", limit = 10, detail = true) {
+function typedRead(value, type) {
+  if (!value) return `NULL::${type}`;
+  return `'${String(value).replaceAll("'", "''")}'::${type}`;
+}
+
+function payload(
+  userId,
+  company = "'30000000-0000-0000-0000-000000000001'::uuid",
+  limit = "NULL",
+  detail = true,
+  read = {}
+) {
   return JSON.parse(asUser(userId,
-    `SELECT public.bizflow_team_task_page(${company}, ${limit}, ${detail})::text;`));
+    `SELECT public.bizflow_team_task_page(
+      ${company}, ${limit}, ${detail},
+      ${typedRead(read.tasks, "timestamptz")},
+      ${typedRead(read.orders, "timestamptz")},
+      ${typedRead(read.messages, "timestamptz")},
+      ${typedRead(read.inventory, "text")},
+      ${typedRead(read.updates, "timestamptz")}
+    )::text;`));
 }
 
 function scenario(callback) {
@@ -243,7 +261,8 @@ try {
       LANGUAGE sql STABLE SECURITY INVOKER SET search_path=''
       AS $$ SELECT jsonb_build_object(
         'unread', jsonb_build_object(
-          'tasks', count(*), 'orders', 0, 'messages', 0, 'inventory', 0, 'updates', 0
+          'tasks', count(*) FILTER (WHERE p_tasks_read IS NULL OR task.created_at > p_tasks_read),
+          'orders', 0, 'messages', 0, 'inventory', 0, 'updates', 0
         ),
         'watermarks', jsonb_build_object(
           'tasks', COALESCE(max(task.created_at)::text, ''), 'orders', '', 'messages', '', 'inventory', '', 'updates', ''
@@ -366,12 +385,14 @@ try {
 
   scenario(() => {
     const admin = payload(ADMIN_USER);
-    assert.equal(sql("SELECT prosecdef FROM pg_proc WHERE oid='public.bizflow_team_task_page(uuid,integer,boolean)'::regprocedure;"), "f");
+    const signature = "public.bizflow_team_task_page(uuid,integer,boolean,timestamptz,timestamptz,timestamptz,text,timestamptz)";
+    assert.equal(sql(`SELECT prosecdef FROM pg_proc WHERE oid='${signature}'::regprocedure;`), "f");
     assert.equal(policiesAfter, policiesBefore, "the read RPC migration must not add, alter, or remove RLS policies");
-    assert.equal(sql("SELECT has_function_privilege('authenticated','public.bizflow_team_task_page(uuid,integer,boolean)','EXECUTE');"), "t");
-    assert.equal(sql("SELECT has_function_privilege('anon','public.bizflow_team_task_page(uuid,integer,boolean)','EXECUTE');"), "f");
+    assert.equal(sql(`SELECT has_function_privilege('authenticated','${signature}','EXECUTE');`), "t");
+    assert.equal(sql(`SELECT has_function_privilege('anon','${signature}','EXECUTE');`), "f");
     assert.deepEqual(ARRAY_KEYS.filter((key) => !Array.isArray(admin[key])), []);
     assert.equal(admin.permissions.isBfAdmin, true);
+    assert.deepEqual(admin.taskStats, { total: 15, completed: 12, open: 3, abandoned: 0 });
   });
 
   scenario(() => {
@@ -379,6 +400,9 @@ try {
     assert.deepEqual(ARRAY_KEYS.filter((key) => !Array.isArray(member[key])), []);
     assert.equal(member.permissions.isBfAdmin, false);
     assert.equal(member.permissions.canDeleteOthersTasks, false);
+    assert.deepEqual(member.taskStats, { total: 14, completed: 12, open: 2, abandoned: 0 });
+    assert.equal(member.tasks.filter((task) => task.status === "done").length, 12,
+      "the phase-one NULL limit must keep every completed row reachable");
     assert.ok(member.tasks.some((task) => task.title === "Open allowed"));
     assert.ok(member.tasks.some((task) => task.title === "Open company"));
     assert.ok(!member.tasks.some((task) => task.title === "Hidden task" || task.title === "Other task"));
@@ -401,6 +425,7 @@ try {
     assert.ok(emptyTenant && typeof emptyTenant === "object");
     assert.equal(emptyTenant.currentUser.activeCompanyId, "30000000-0000-0000-0000-000000000003");
     assert.deepEqual(emptyTenant.tasks, []);
+    assert.deepEqual(emptyTenant.taskStats, { total: 0, completed: 0, open: 0, abandoned: 0 });
     assert.deepEqual(ARRAY_KEYS.filter((key) => !Array.isArray(emptyTenant[key])), []);
   });
 
@@ -408,7 +433,24 @@ try {
     const limited = payload(MEMBER_USER, undefined, 10);
     const done = limited.tasks.filter((task) => task.status === "done");
     assert.equal(done.length, 10);
+    assert.deepEqual(limited.taskStats, { total: 14, completed: 12, open: 2, abandoned: 0 },
+      "a bounded row set must retain full RLS-visible summary counts");
     assert.deepEqual(new Set(done.map((task) => task.title)), new Set(Array.from({ length: 10 }, (_, index) => `Done ${index + 1}`)));
+    const unlimited = payload(MEMBER_USER, undefined, "NULL");
+    assert.equal(unlimited.tasks.filter((task) => task.status === "done").length, 12,
+      "p_completed_limit NULL must expose the full completed history");
+    assert.deepEqual(unlimited.taskStats, limited.taskStats);
+  });
+
+  scenario(() => {
+    const neverRead = payload(MEMBER_USER);
+    const partiallyRead = payload(MEMBER_USER, undefined, "NULL", true, {
+      tasks: "2026-08-31 10:30:00+00"
+    });
+    assert.equal(neverRead.unread.unread.tasks, 14);
+    assert.equal(partiallyRead.unread.unread.tasks, 2,
+      "a partial read watermark must count only newer visible tasks instead of the all-time total");
+    assert.equal(partiallyRead.unread.watermarks.tasks, neverRead.unread.watermarks.tasks);
   });
 
   scenario(() => {
@@ -465,8 +507,8 @@ try {
     assert.ok(elapsedMs < 1500, `authenticated packed task RPC must stay below 1500ms, got ${elapsedMs.toFixed(1)}ms`);
   });
 
-  assert.equal(passed, 11);
-  console.log(`TEAM_TASK_PAGE_PG=11/11 (SECURITY INVOKER/RLS, shape, scope, limit, detail, dirty JSON, anon deny, 13 sorts, <1500ms)`);
+  assert.equal(passed, 12);
+  console.log(`TEAM_TASK_PAGE_PG=12/12 (INVOKER/RLS, NULL=full completed, full taskStats, partial-read exact unread, detail, dirty JSON, anon deny, 13 sorts, <1500ms)`);
 } finally {
   if (started) run(pgCtl, ["-D", dataDir, "-m", "fast", "-w", "stop"], { quiet: true, allowFailure: true });
   rmSync(probeRoot, { recursive: true, force: true });

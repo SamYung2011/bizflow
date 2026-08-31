@@ -556,15 +556,23 @@ async function buildTasksSnapshot(rows = null) {
       count: task.feedback.length
     });
   }
+  const taskStats = rows?.taskStats
+    ? {
+        total: asNumber(rows.taskStats.total),
+        completed: asNumber(rows.taskStats.completed),
+        open: asNumber(rows.taskStats.open),
+        abandoned: asNumber(rows.taskStats.abandoned)
+      }
+    : {
+        total: normalized.length,
+        completed: normalized.filter((task) => task.status === "done").length,
+        open: open.length,
+        abandoned: normalized.filter((task) => task.status === "abandoned").length
+      };
   return {
     generated_at: new Date().toISOString(),
     scope: currentUser?.activeCompany?.name || "RLS-visible company",
-    taskStats: {
-      total: normalized.length,
-      completed: normalized.filter((task) => task.status === "done").length,
-      open: open.length,
-      abandoned: normalized.filter((task) => task.status === "abandoned").length
-    },
+    taskStats,
     kanbanCounts: {
       high: open.filter((task) => task.priority === "high").length,
       medium: open.filter((task) => task.priority === "mid").length,

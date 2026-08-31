@@ -66,12 +66,21 @@ function unreadAfterLocalWatermarks(value, read) {
   return next;
 }
 
-export async function rememberLiveUnreadSummary(value) {
+async function currentLiveUnreadSummary(value, remember, suppliedRead = null) {
   const live = await context();
   if (!live || !value || typeof value !== "object" || Array.isArray(value)) return null;
   setReadStateAccount(live.currentUser.id || null);
-  const read = getReadState();
-  return rememberUnreadMemo(live, read, unreadAfterLocalWatermarks(value, read));
+  const read = suppliedRead && typeof suppliedRead === "object" ? suppliedRead : getReadState();
+  const current = unreadAfterLocalWatermarks(value, read);
+  return remember ? rememberUnreadMemo(live, read, current) : current;
+}
+
+export function clampLiveUnreadSummary(value) {
+  return currentLiveUnreadSummary(value, false);
+}
+
+export function rememberLiveUnreadSummary(value, { read = null } = {}) {
+  return currentLiveUnreadSummary(value, true, read);
 }
 
 function mapDashboard(payload, currentUser) {
