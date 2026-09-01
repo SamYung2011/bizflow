@@ -1,0 +1,51 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_pg:
+        description: Run both PostgreSQL contract suites
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  quick:
+    name: Lightweight contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run test:quick
+
+  # The full PostgreSQL suites create isolated databases and are intentionally
+  # opt-in: Actions -> Run workflow -> run_pg=true. They are still mandatory
+  # before merging any branch that changes a PostgreSQL function or RPC.
+  postgres:
+    name: PostgreSQL contracts (manual)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_pg }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Install PostgreSQL tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql
+          echo "$(pg_config --bindir)" >> "$GITHUB_PATH"
+      - run: npm run test:pg
