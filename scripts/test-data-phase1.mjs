@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 
 import { buildCustomerGroups } from "../root-site/data/customer-groups.js";
 import { compareHomeMetricSets } from "../root-site/data/home-metric-parity.js";
+import { assertHomeRevenueGateBehavior } from "./test-support/home-revenue-gate-fixture.mjs";
 import { resolveLiveQueryOrLegacy, resolveOrderPageRead } from "../root-site/data/live-query-fallback.js";
 import {
   clearLiveQueryCache,
@@ -17,12 +19,15 @@ import { normalizeOrderQuery, ORDER_PAGE_SIZE } from "../root-site/data/live-ord
 import { completePasswordSignIn, readSignedInUser } from "../root-site/login/signed-in-user.js";
 
 const read = (relative) => readFile(new URL(`../${relative}`, import.meta.url), "utf8");
+const homeRevenueGateOverride = process.env.BIZFLOW_HOME_REVENUE_GATE_SQL_PATH;
 const [migration, guardMigration, repairMigration, patchMigration, homeRevenueGateMigration, homeSalesGateMigration, orders, revenue, orderQuery, orderWrites, liveHome, provider, home, customers, tasks, pending, customerDetail, itemMap] = await Promise.all([
   read("migrations/102_bizflow_data_phase1.sql"),
   read("migrations/103_guard_non_array_invoice_items.sql"),
   read("migrations/104_bizflow_data_phase1_r5.sql"),
   read("migrations/105_bizflow_warranty_revenue_gate.sql"),
-  read("migrations/106_bizflow_home_revenue_gate.sql"),
+  homeRevenueGateOverride
+    ? readFile(resolve(homeRevenueGateOverride), "utf8")
+    : read("migrations/106_bizflow_home_revenue_gate.sql"),
   read("migrations/107_bizflow_home_sales_gate.sql"),
   read("root-site/bizflow/orders.js"),
   read("root-site/bizflow/orders-revenue.js"),
@@ -87,6 +92,7 @@ assert.match(executableHomeRevenueGateMigration,
 assert.match(executableHomeRevenueGateMigration,
   /'revenue', \(SELECT jsonb_build_object\([\s\S]*'total_revenue'[\s\S]*'paid_count'[\s\S]*'average'[\s\S]*'unpaid_count'[\s\S]*'unpaid_amount'/,
   "the Home revenue wire object must keep its five-key structure");
+assertHomeRevenueGateBehavior(executableHomeRevenueGateMigration);
 
 const executableHomeSalesGateMigration = stripSqlComments(homeSalesGateMigration);
 assert.doesNotMatch(executableHomeSalesGateMigration, /SECURITY\s+DEFINER/i,
@@ -362,4 +368,4 @@ assert.equal(compareHomeMetricSets(legacyState, listMismatch).equal, false,
 assert.doesNotMatch(customers, /live-orders-query|bizflow_order_page|bizflow_home_dashboard/);
 assert.doesNotMatch(tasks, /live-orders-query|bizflow_order_page|bizflow_home_dashboard/);
 
-console.log("DATA-phase1 contracts: PASS (50/page, invoker RLS, v2 query cache, live fallback, 29-field parity)");
+console.log("DATA-phase1 contracts: PASS (50/page, invoker RLS, Home revenue allow/deny behavior, v2 query cache, live fallback, 29-field parity)");

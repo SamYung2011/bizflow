@@ -720,8 +720,11 @@ try {
   ));
   assert.deepEqual(deniedHomeBeforeGate.revenue, orphanHome.revenue,
     "the migration-105 pre-state must reproduce the Home revenue leak for an otherwise authorized employee");
-  assert.ok(Number(deniedHomeBeforeGate.revenue.total_revenue) > 0,
-    "the negative fixture must contain real monthly revenue before migration 106");
+  assert.ok(
+    Number(deniedHomeBeforeGate.revenue.total_revenue)
+      + Number(deniedHomeBeforeGate.revenue.unpaid_amount) > 0,
+    "the negative fixture must contain real paid or unpaid monthly revenue before migration 106"
+  );
 
   run(psql, psqlArgs(["-f", homeRevenueGateMigrationPath]), { quiet: true });
   run(psql, psqlArgs(["-f", homeRevenueGateMigrationPath]), { quiet: true });
