@@ -7,7 +7,7 @@
     "build:shell": "node scripts/build-shell-bundle.mjs",
     "build:root-site": "node scripts/build-root-site.mjs --outdir dist",
     "check:shell": "node scripts/build-shell-bundle.mjs --check",
-    "test:quick": "node scripts/test-data-phase1.mjs && node scripts/test-data-phase1-runtime.mjs && npm run check:shell",
+    "test:quick": "node scripts/test-data-phase1.mjs && node scripts/test-data-phase1-runtime.mjs && node scripts/test-auth-context-timeout.mjs && node scripts/test-task-write-context-timeout.mjs && npm run check:shell",
     "test:pg": "node scripts/test-data-phase1-pg.mjs && node scripts/test-team-task-page-pg.mjs",
     "build": "npm run build:shell && node scripts/build-front-door.mjs",
     "preview": "vite preview"

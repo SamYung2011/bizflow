@@ -1,5 +1,10 @@
 import { createClient } from "../vendor/supabase-js.esm.js";
 import {
+  AUTH_CONTEXT_TIMEOUT_MS,
+  AuthContextTimeoutError,
+  withTimeout
+} from "./auth-context-timeout.js";
+import {
   activateLiveTableCacheUser,
   clearLiveTableCache,
   invalidateLiveAuthCache,
@@ -44,6 +49,10 @@ const tableFetchPromises = new Map();
 function clearCurrentUserMemory() {
   currentUserPromise = null;
   currentUserPromiseVersion = "";
+}
+
+export function resetCurrentUserMemory() {
+  clearCurrentUserMemory();
 }
 
 function notifyTransientAuthReset() {
@@ -164,12 +173,24 @@ function requireClient(client) {
   return client;
 }
 
-export async function getSession() {
+async function loadSession() {
   const client = await getSupabaseClient();
   if (!client) return null;
   const { data, error } = await client.auth.getSession();
   if (error) throw error;
   return data.session ?? null;
+}
+
+export async function getSession({ timeoutMs = AUTH_CONTEXT_TIMEOUT_MS } = {}) {
+  try {
+    return await withTimeout(loadSession(), timeoutMs, "getSession");
+  } catch (error) {
+    clearCurrentUserMemory();
+    if (error instanceof AuthContextTimeoutError) {
+      console.warn("auth getSession timeout");
+    }
+    throw error;
+  }
 }
 
 export async function onAuthStateChange(callback) {
@@ -357,8 +378,8 @@ export function deriveAuthContext({ session, employee, bindings, companies, role
   return context;
 }
 
-async function loadCurrentUser() {
-  const session = await getSession();
+async function loadCurrentUser({ timeoutMs = AUTH_CONTEXT_TIMEOUT_MS } = {}) {
+  const session = await getSession({ timeoutMs });
   if (!session) return null;
   const client = requireClient(await getSupabaseClient());
   const userId = session.user.id;
@@ -407,14 +428,22 @@ async function loadCurrentUser() {
   });
 }
 
-export async function getCurrentUser({ refresh = false } = {}) {
+export async function getCurrentUser({
+  refresh = false,
+  timeoutMs = AUTH_CONTEXT_TIMEOUT_MS
+} = {}) {
   const cacheVersion = liveAuthCacheVersion();
   if (refresh || currentUserPromiseVersion !== cacheVersion) clearCurrentUserMemory();
   if (!currentUserPromise) {
-    const promise = loadCurrentUser().catch((error) => {
-      if (currentUserPromise === promise) currentUserPromise = null;
-      throw error;
-    });
+    const promise = withTimeout(
+      loadCurrentUser({ timeoutMs }),
+      timeoutMs,
+      "getCurrentUser"
+    )
+      .catch((error) => {
+        if (currentUserPromise === promise) clearCurrentUserMemory();
+        throw error;
+      });
     currentUserPromise = promise;
     currentUserPromiseVersion = cacheVersion;
   }

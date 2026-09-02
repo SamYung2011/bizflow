@@ -1,4 +1,14 @@
-import { getCurrentUser, getSession, getSupabaseClient } from "./auth.js";
+import {
+  getCurrentUser,
+  getSession,
+  getSupabaseClient,
+  resetCurrentUserMemory
+} from "./auth.js";
+import {
+  AUTH_CONTEXT_TIMEOUT_MS,
+  AuthContextTimeoutError,
+  withTimeout
+} from "./auth-context-timeout.js";
 import { invalidateLiveTables } from "./live-snapshot-utils.js";
 import { isStrictCompletionMode, meetsTaskCompletionThreshold } from "./task-completion-threshold.js";
 
@@ -7,12 +17,20 @@ function normalizedCompletionMode(value) {
   return isStrictCompletionMode(value) ? "strict" : "ratio";
 }
 
-async function writeContext() {
-  const [client, session, currentUser] = await Promise.all([
-    getSupabaseClient(),
-    getSession(),
-    getCurrentUser()
-  ]);
+export async function writeContext({ timeoutMs = AUTH_CONTEXT_TIMEOUT_MS } = {}) {
+  let client;
+  let session;
+  let currentUser;
+  try {
+    [client, session, currentUser] = await Promise.all([
+      withTimeout(getSupabaseClient(), timeoutMs, "getSupabaseClient"),
+      withTimeout(getSession(), timeoutMs, "getSession"),
+      withTimeout(getCurrentUser(), timeoutMs, "getCurrentUser")
+    ]);
+  } catch (error) {
+    if (error instanceof AuthContextTimeoutError) resetCurrentUserMemory();
+    throw error;
+  }
   if (!client || !session?.user || !currentUser?.employeeId || !currentUser?.activeCompanyId) {
     throw new Error("Authenticated task write context required");
   }
