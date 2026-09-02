@@ -28,6 +28,7 @@ import { createDebouncedTask } from "../components/debounced-task.js";
 import { createOptimisticWriteCoordinator } from "./task-optimistic-write.js";
 import { captureTaskCompletionEffects, createTaskCompletionSnapshot, restoreTaskCompletionSnapshot } from "./task-completion-state.js";
 import { orderedTaskRailMembers } from "./task-member-order.js";
+import { taskWriteErrorKey } from "./task-write-error.js";
 
 let data = null;
 let currentUser = null;
@@ -1081,7 +1082,7 @@ async function toggleTaskCompletion(taskId, { forceComplete = false, forceUncomp
       },
       onFailure(error) {
         console.warn("Task completion update failed", error);
-        state.writeError = "tasks.write.failed";
+        state.writeError = taskWriteErrorKey(error);
         taskBoardReadTracker?.refresh(state.tasks);
         rerenderTaskPage({ focusBoard: true });
       }
@@ -1121,7 +1122,7 @@ async function approveWaitingTask(task) {
   } catch (error) {
     if (!isCurrentTaskMount(mountId, scope)) return;
     console.warn("Task approval failed", error);
-    state.writeError = "tasks.write.failed";
+    state.writeError = taskWriteErrorKey(error);
   } finally {
     if (!isCurrentTaskMount(mountId, scope)) return;
     state.writeBusy = false;
@@ -1155,7 +1156,7 @@ async function performTaskAction(taskId, action) {
       } catch (error) {
         if (!isCurrentTaskMount(mountId, scope)) return;
         console.warn("Task deletion failed", error);
-        state.writeError = "tasks.write.failed";
+        state.writeError = taskWriteErrorKey(error);
         state.writeBusy = false;
         rerenderTaskPage({ focusBoard: true });
         return;
@@ -1226,7 +1227,7 @@ async function toggleTaskParticipation(task) {
   } catch (error) {
     if (!isCurrentTaskMount(mountId, scope)) return;
     console.warn("Task participation update failed", error);
-    state.writeError = "tasks.write.failed";
+    state.writeError = taskWriteErrorKey(error);
   } finally {
     if (isCurrentTaskMount(mountId, scope)) state.writeBusy = false;
   }
@@ -1274,7 +1275,7 @@ async function toggleSubtaskCompletion(subtask) {
     },
     onFailure(error) {
       console.warn("Subtask completion update failed", error);
-      state.writeError = "tasks.write.failed";
+      state.writeError = taskWriteErrorKey(error);
       taskBoardReadTracker?.refresh(state.tasks);
       rerenderTaskPage({ focusSubtaskId: subtask.id });
     }
@@ -1301,7 +1302,7 @@ async function createSubtaskWrite(parent, title, member) {
   } catch (error) {
     if (!isCurrentTaskMount(mountId, scope)) return null;
     console.warn("Subtask create failed", error);
-    state.writeError = "tasks.write.failed";
+    state.writeError = taskWriteErrorKey(error);
     return null;
   } finally {
     if (isCurrentTaskMount(mountId, scope)) state.writeBusy = false;
@@ -1324,7 +1325,7 @@ async function updateSubtaskTitleWrite(subtask, title) {
   } catch (error) {
     if (!isCurrentTaskMount(mountId, scope)) return null;
     console.warn("Subtask title update failed", error);
-    state.writeError = "tasks.write.failed";
+    state.writeError = taskWriteErrorKey(error);
     return null;
   } finally {
     if (isCurrentTaskMount(mountId, scope)) state.writeBusy = false;
@@ -1347,7 +1348,7 @@ async function deleteSubtaskWrite(subtask) {
   } catch (error) {
     if (!isCurrentTaskMount(mountId, scope)) return false;
     console.warn("Subtask deletion failed", error);
-    state.writeError = "tasks.write.failed";
+    state.writeError = taskWriteErrorKey(error);
     return false;
   } finally {
     if (isCurrentTaskMount(mountId, scope)) state.writeBusy = false;
@@ -1727,7 +1728,7 @@ async function onTaskClick(event) {
     } catch (error) {
       if (!isCurrentTaskMount(mountId, scope)) return;
       console.warn("Task feedback delete failed", error);
-      state.feedbackError = "tasks.write.failed";
+      state.feedbackError = taskWriteErrorKey(error);
     } finally {
       if (isCurrentTaskMount(mountId, scope)) state.writeBusy = false;
     }
@@ -1934,7 +1935,7 @@ async function onTaskSubmit(event) {
     } catch (error) {
       if (!isCurrentTaskMount(mountId, scope)) return;
       console.warn("Task feedback edit failed", error);
-      state.feedbackEditError = "tasks.write.failed";
+      state.feedbackEditError = taskWriteErrorKey(error);
     } finally {
       if (isCurrentTaskMount(mountId, scope)) state.writeBusy = false;
     }
@@ -2153,7 +2154,7 @@ async function onTaskSubmit(event) {
       } catch (error) {
         if (!isCurrentTaskMount(mountId, scope)) return;
         console.warn("Task save failed", error);
-        state.submitError = "tasks.write.failed";
+        state.submitError = taskWriteErrorKey(error);
       } finally {
         if (isCurrentTaskMount(mountId, scope)) state.writeBusy = false;
       }
@@ -2250,7 +2251,7 @@ async function onTaskSubmit(event) {
     } catch (error) {
       if (!isCurrentTaskMount(mountId, scope)) return;
       console.warn("Task feedback save failed", error);
-      state.feedbackError = "tasks.write.failed";
+      state.feedbackError = taskWriteErrorKey(error);
     } finally {
       if (isCurrentTaskMount(mountId, scope)) state.writeBusy = false;
     }
