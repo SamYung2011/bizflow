@@ -1,3 +1,37 @@
+// Per-route upstream budgets. The defaults are 10 s / 16 KB; three routes need
+// more room, and they are named here so index.ts and its tests read the same
+// numbers instead of each keeping a copy.
+export const UPSTREAM_TIMEOUT_MS = 10_000;
+export const DEVICE_UNBIND_TIMEOUT_MS = 90_000;
+export const SIM_LOOKUP_TIMEOUT_MS = 60_000;
+export const MAX_REQUEST_JSON_BYTES = 16_384;
+export const SIM_IMPORT_MAX_REQUEST_BYTES = 65_536;
+
+// One SIM lookup fans out to five or six OneLink calls behind Shenzhen
+// (S00 -> R00 -> U07/U12 -> B01 -> M40/S02), and a forced refresh repeats the
+// whole chain, so both get a minute instead of the default ten seconds.
+export function upstreamTimeoutFor(upstreamPath) {
+  if (upstreamPath === "/internal/admin/device/unbind") {
+    return DEVICE_UNBIND_TIMEOUT_MS;
+  }
+  if (
+    upstreamPath === "/internal/admin/sim/lookup" ||
+    upstreamPath === "/internal/admin/sim/refresh"
+  ) {
+    return SIM_LOOKUP_TIMEOUT_MS;
+  }
+  return UPSTREAM_TIMEOUT_MS;
+}
+
+// The bulk paste carries up to 500 lines of "iccid[,imei][,remark]", roughly
+// 22 KB, which the default 16 KB cap would turn into a 413.
+export function maxRequestBytesFor(upstreamPath) {
+  if (upstreamPath === "/internal/admin/sim/cards/import") {
+    return SIM_IMPORT_MAX_REQUEST_BYTES;
+  }
+  return MAX_REQUEST_JSON_BYTES;
+}
+
 export function stripFunctionPrefix(pathname) {
   return pathname.replace(/^\/honnmono-admin(?=\/|$)/, "") || "/";
 }

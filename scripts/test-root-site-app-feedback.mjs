@@ -58,8 +58,14 @@ import {
   simUsagePercent,
 } from "../root-site/bizflow/app-feedback-sim.js";
 import {
+  MAX_REQUEST_JSON_BYTES,
+  SIM_IMPORT_MAX_REQUEST_BYTES,
+  SIM_LOOKUP_TIMEOUT_MS,
+  UPSTREAM_TIMEOUT_MS,
   isAllowedHonnmonoUpstream,
   mapHonnmonoAdminPath,
+  maxRequestBytesFor,
+  upstreamTimeoutFor,
 } from "../supabase/functions/honnmono-admin/routing.mjs";
 import {
   FEEDBACK_POLL_INTERVAL_MS,
@@ -1471,6 +1477,67 @@ for (const route of [
   );
 }
 
+// Per-route budgets: a lookup chains five or six OneLink calls behind
+// Shenzhen, and the bulk paste is far bigger than a normal admin body.
+assert.equal(upstreamTimeoutFor("/internal/admin/sim/lookup"), 60_000);
+assert.equal(upstreamTimeoutFor("/internal/admin/sim/refresh"), 60_000);
+assert.equal(SIM_LOOKUP_TIMEOUT_MS, 60_000);
+assert.equal(maxRequestBytesFor("/internal/admin/sim/cards/import"), 65_536);
+assert.equal(SIM_IMPORT_MAX_REQUEST_BYTES, 65_536);
+for (const upstreamPath of [
+  "/internal/admin/sim/cards",
+  "/internal/admin/feedback",
+  "/internal/admin/device/binding",
+]) {
+  assert.equal(
+    upstreamTimeoutFor(upstreamPath),
+    UPSTREAM_TIMEOUT_MS,
+    `${upstreamPath} must keep the 10s default`,
+  );
+  assert.equal(
+    maxRequestBytesFor(upstreamPath),
+    MAX_REQUEST_JSON_BYTES,
+    `${upstreamPath} must keep the 16 KB default`,
+  );
+}
+assert.equal(maxRequestBytesFor("/internal/admin/sim/lookup"), MAX_REQUEST_JSON_BYTES);
+assert.equal(upstreamTimeoutFor("/internal/admin/sim/cards/import"), UPSTREAM_TIMEOUT_MS);
+// The Deno entrypoint cannot be imported from Node, so pin that it actually
+// asks routing.mjs for the budget instead of hard-coding one.
+assert.match(
+  edgeFunctionSource,
+  /const upstreamTimeoutMs = upstreamTimeoutFor\(upstreamPath\);/,
+);
+assert.match(
+  edgeFunctionSource,
+  /const maxRequestBytes = maxRequestBytesFor\(upstreamPath\);/,
+);
+assert.doesNotMatch(
+  edgeFunctionSource,
+  /requestLength > MAX_REQUEST_JSON_BYTES[\s\S]{0,400}upstreamBody = await req\.text\(\)/,
+  "the Shenzhen branch must size its body cap per route, not by the shared default",
+);
+// A 500-line paste at the page's own limit must fit inside the raised cap.
+const worstCaseImportBody = JSON.stringify({
+  lines: Array.from(
+    { length: SIM_IMPORT_MAX_LINES },
+    (_, index) =>
+      `8986048019209099${String(index).padStart(4, "0")},86263506612${String(
+        index,
+      ).padStart(4, "0")},備註`,
+  ).join("\n"),
+});
+assert.ok(
+  new TextEncoder().encode(worstCaseImportBody).byteLength >
+    MAX_REQUEST_JSON_BYTES,
+  "a full paste would have been rejected by the old 16 KB cap",
+);
+assert.ok(
+  new TextEncoder().encode(worstCaseImportBody).byteLength <=
+    maxRequestBytesFor("/internal/admin/sim/cards/import"),
+  "a full 500-line paste must fit inside the SIM import cap",
+);
+
 // ICCID vs card number is decided by shape alone: 19-20 alphanumerics is an
 // ICCID, up to 13 digits is the card number (msisdn). Nothing else is queried.
 for (const [value, kind] of [
@@ -1901,6 +1968,15 @@ assert.match(simSource, /escapeHtml/);
 assert.match(pageSource, /data-app-feedback-tab="sim"/);
 assert.match(pageSource, /if \(nextTab === "sim"\)/);
 assert.match(pageSource, /isSimTab: \(\) => state\?\.activeTab === "sim"/);
+// 413 is what the bridge answers when a paste outruns the import cap.
+assert.match(
+  pageSource,
+  /if \(error\.status === 413\) return t\("simImportTooLarge"\);/,
+);
+for (const language of feedbackLanguages) {
+  assert.equal(typeof appFeedbackCopy[language].simImportTooLarge, "string");
+  assert.notEqual(appFeedbackCopy[language].simImportTooLarge.trim(), "");
+}
 assert.match(pageSource, /simState: state\.sim/);
 for (const [label, source] of [
   ["the SIM module", simSource],

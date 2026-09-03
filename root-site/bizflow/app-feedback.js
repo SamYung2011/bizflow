@@ -241,6 +241,7 @@ function simErrorCopy(error) {
       return t(error.code);
     }
     if (error.status === 400) return t("simQueryValidation");
+    if (error.status === 413) return t("simImportTooLarge");
     if (error.status === 502) return t("simUnreachable");
     if (error.status === 503) return t("simNotConfigured");
   }
