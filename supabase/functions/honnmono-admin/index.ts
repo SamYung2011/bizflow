@@ -15,12 +15,24 @@
 //   POST /honnmono-admin/devices/flash/{certid}/unbind
 //   GET  /honnmono-admin/ota/legacy-packages
 //   POST /honnmono-admin/ota/legacy-packages/{slot}
+//   GET  /honnmono-admin/sim/lookup?iccid={19-20}|msisdn={<=13 digits}
+//   GET  /honnmono-admin/sim/cards?page&size&q
+//   POST /honnmono-admin/sim/cards
+//   POST /honnmono-admin/sim/cards/import
+//   POST /honnmono-admin/sim/refresh
+//
+// Budgets: every upstream call gets 10 s and a 16 KB request body, except the
+// device unbind (90 s), the SIM lookup and refresh (60 s each: Shenzhen chains
+// five or six OneLink calls per lookup), and the SIM bulk import (64 KB: 500
+// pasted lines run to roughly 22 KB).
 //
 // Log bytes are intentionally outside this allowlist. The link-issuance route
 // returns a short-lived, one-time Shenzhen URL that the browser downloads
 // directly, so files up to 200 MB never traverse the HK Edge Function.
 
 import {
+  MAX_REQUEST_JSON_BYTES,
+  UPSTREAM_TIMEOUT_MS,
   isAllowedFlashAdminBase,
   isAllowedHonnmonoApiBase,
   isAllowedHonnmonoUpstream,
@@ -28,7 +40,9 @@ import {
   mapHonnmonoAdminPath,
   mapFlashAdminPath,
   mapOtaAdminPath,
+  maxRequestBytesFor,
   stripFunctionPrefix,
+  upstreamTimeoutFor,
   validateOtaAdminBody,
 } from "./routing.mjs";
 
@@ -45,12 +59,13 @@ const OTA_ADMIN_URL = (Deno.env.get("OTA_ADMIN_URL") ?? "").replace(/\/+$/, "");
 const OTA_ADMIN_TOKEN = Deno.env.get("OTA_ADMIN_TOKEN") ?? "";
 const FLASH_ADMIN_URL = (Deno.env.get("FLASH_ADMIN_URL") ?? "").replace(/\/+$/, "");
 const FLASH_ADMIN_TOKEN = Deno.env.get("FLASH_ADMIN_TOKEN") ?? "";
-const UPSTREAM_TIMEOUT_MS = 10_000;
-const DEVICE_UNBIND_TIMEOUT_MS = 90_000;
 const MAX_JSON_BYTES = 2_000_000;
 const MAX_OTA_JSON_BYTES = 2_900_000;
-const MAX_REQUEST_JSON_BYTES = 16_384;
 const MAX_OTA_REQUEST_JSON_BYTES = 2_800_000;
+// UPSTREAM_TIMEOUT_MS / MAX_REQUEST_JSON_BYTES are the defaults; the per-route
+// exceptions (device unbind, SIM lookup/refresh, SIM bulk import) live in
+// routing.mjs behind upstreamTimeoutFor() / maxRequestBytesFor() so the
+// budgets stay testable from Node.
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -387,17 +402,14 @@ Deno.serve(async (req) => {
 
   let upstreamBody: string | undefined;
   if (req.method === "POST") {
+    const maxRequestBytes = maxRequestBytesFor(upstreamPath);
     const requestLength = Number(req.headers.get("content-length") ?? "0");
-    if (
-      Number.isFinite(requestLength) &&
-      requestLength > MAX_REQUEST_JSON_BYTES
-    ) {
+    if (Number.isFinite(requestLength) && requestLength > maxRequestBytes) {
       return json({ error: "Request body too large" }, 413);
     }
     upstreamBody = await req.text();
     if (
-      new TextEncoder().encode(upstreamBody).byteLength >
-      MAX_REQUEST_JSON_BYTES
+      new TextEncoder().encode(upstreamBody).byteLength > maxRequestBytes
     ) {
       return json({ error: "Request body too large" }, 413);
     }
@@ -414,10 +426,7 @@ Deno.serve(async (req) => {
   }
 
   let upstream: Response;
-  const upstreamTimeoutMs =
-    upstreamPath === "/internal/admin/device/unbind"
-      ? DEVICE_UNBIND_TIMEOUT_MS
-      : UPSTREAM_TIMEOUT_MS;
+  const upstreamTimeoutMs = upstreamTimeoutFor(upstreamPath);
   try {
     upstream = await fetch(upstreamUrl, {
       method: req.method,

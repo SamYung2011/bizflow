@@ -22,6 +22,11 @@ import {
   createOtaPackageState,
   renderOtaPackage,
 } from "./app-feedback-ota.js";
+import {
+  createSimCardController,
+  createSimCardState,
+  renderSimCards,
+} from "./app-feedback-sim.js";
 import { translateAppFeedback } from "./app-feedback-i18n.js";
 import {
   applyFeedbackListPayload,
@@ -39,6 +44,7 @@ let activeScope = null;
 let activePoller = null;
 let activeDeviceController = null;
 let activeOtaController = null;
+let activeSimController = null;
 let instanceSequence = 0;
 let activeInstance = 0;
 
@@ -218,6 +224,26 @@ function otaErrorCopy(error) {
     ) {
       return t(error.code);
     }
+  }
+  return errorCopy(error);
+}
+
+function simErrorCopy(error) {
+  if (error instanceof HonnmonoAdminError) {
+    if (
+      [
+        "simQueryValidation",
+        "simManualImeiValidation",
+        "simImportRequired",
+        "simImportTooManyLines",
+      ].includes(error.code)
+    ) {
+      return t(error.code);
+    }
+    if (error.status === 400) return t("simQueryValidation");
+    if (error.status === 413) return t("simImportTooLarge");
+    if (error.status === 502) return t("simUnreachable");
+    if (error.status === 503) return t("simNotConfigured");
   }
   return errorCopy(error);
 }
@@ -676,6 +702,7 @@ function renderTabs() {
     <button type="button" class="app-feedback-tab${state.activeTab === "feedback" ? " is-active" : ""}" data-app-feedback-tab="feedback" aria-selected="${state.activeTab === "feedback"}">${rawE(t("feedbackTab"))}</button>
     <button type="button" class="app-feedback-tab${state.activeTab === "device" ? " is-active" : ""}" data-app-feedback-tab="device" aria-selected="${state.activeTab === "device"}">${rawE(t("deviceUnbindTab"))}</button>
     <button type="button" class="app-feedback-tab${state.activeTab === "devices" ? " is-active" : ""}" data-app-feedback-tab="devices" aria-selected="${state.activeTab === "devices"}">${rawE(t("deviceListTab"))}</button>
+    <button type="button" class="app-feedback-tab${state.activeTab === "sim" ? " is-active" : ""}" data-app-feedback-tab="sim" aria-selected="${state.activeTab === "sim"}">${rawE(t("simCardTab"))}</button>
   </nav>`;
 }
 
@@ -686,7 +713,9 @@ function render(nextHelpers) {
     ? "subtitle"
     : state.activeTab === "devices"
       ? "deviceListSubtitle"
-      : "deviceUnbindSubtitle";
+      : state.activeTab === "sim"
+        ? "simSubtitle"
+        : "deviceUnbindSubtitle";
   return `<section class="app-feedback-page" data-app-feedback-page>
     <header class="app-feedback-head">
       <div><h1>${rawE(t("honnmonoAppTitle"))}</h1><p>${rawE(t(subtitleKey))}</p></div>
@@ -698,7 +727,15 @@ function render(nextHelpers) {
         ? renderFeedbackPanel()
         : state.activeTab === "devices"
           ? renderAdapterPanel()
-          : `<div class="app-feedback-device-panel">
+          : state.activeTab === "sim"
+            ? `<div class="app-feedback-device-panel">${renderSimCards({
+              simState: state.sim,
+              t,
+              escapeHtml: helpers.escapeHtml,
+              formatTime: (value) => formatFeedbackTime(value, helpers.lang),
+              errorCopy: simErrorCopy,
+            })}</div>`
+            : `<div class="app-feedback-device-panel">
             ${renderDeviceUnbind({
               deviceState: state.device,
               t,
@@ -1410,7 +1447,9 @@ async function downloadLog(id) {
 }
 
 function switchAppTab(nextTab) {
-  if (!state || !["feedback", "device", "devices"].includes(nextTab)) return;
+  if (!state || !["feedback", "device", "devices", "sim"].includes(nextTab)) {
+    return;
+  }
   if (state.activeTab === nextTab) return;
   state.activeTab = nextTab;
   state.detailRequest += 1;
@@ -1425,6 +1464,16 @@ function switchAppTab(nextTab) {
     if (!state.ota.loaded) void activeOtaController?.load();
     activeScope?.animationFrame(() =>
       document.querySelector("[data-device-imei]")?.focus(),
+    );
+    return;
+  }
+  if (nextTab === "sim") {
+    // SIM lookups are one-shot operator queries, so this tab polls nothing.
+    activePoller?.pause();
+    rerender();
+    if (!state.sim.cards.loaded) void activeSimController?.loadCards();
+    activeScope?.animationFrame(() =>
+      document.querySelector("[data-sim-query]")?.focus(),
     );
     return;
   }
@@ -1448,6 +1497,35 @@ function onFeedbackClick(event) {
   const tab = event.target.closest?.("[data-app-feedback-tab]");
   if (tab) {
     switchAppTab(tab.getAttribute("data-app-feedback-tab"));
+    return;
+  }
+  const simView = event.target.closest?.("[data-sim-view]");
+  if (simView && !simView.disabled) {
+    void activeSimController?.viewCard(simView.getAttribute("data-sim-view"));
+    return;
+  }
+  const simRefreshCard = event.target.closest?.("[data-sim-refresh-card]");
+  if (simRefreshCard && !simRefreshCard.disabled) {
+    void activeSimController?.refreshCard(
+      simRefreshCard.getAttribute("data-sim-refresh-card"),
+    );
+    return;
+  }
+  const simRefetch = event.target.closest?.("[data-sim-refetch]");
+  if (simRefetch && !simRefetch.disabled) {
+    void activeSimController?.refetch();
+    return;
+  }
+  const simCardsRefresh = event.target.closest?.("[data-sim-cards-refresh]");
+  if (simCardsRefresh && !simCardsRefresh.disabled) {
+    void activeSimController?.loadCards();
+    return;
+  }
+  const simPage = event.target.closest?.("[data-sim-page]");
+  if (simPage && !simPage.disabled) {
+    void activeSimController?.goToCardsPage(
+      simPage.getAttribute("data-sim-page"),
+    );
     return;
   }
   const adapterKind = event.target.closest?.("[data-adapter-kind]");
@@ -1629,6 +1707,34 @@ function onFeedbackInput(event) {
     activeOtaController?.setVersionInput(event.target.value);
     return;
   }
+  if (event.target.matches("[data-sim-query]")) {
+    const value = activeSimController?.setQueryInput(event.target.value) ?? "";
+    event.target.value = value;
+    return;
+  }
+  if (event.target.matches("[data-sim-cards-query]")) {
+    activeSimController?.setCardsQueryInput(event.target.value);
+    return;
+  }
+  if (event.target.matches("[data-sim-manual-value]")) {
+    const value =
+      activeSimController?.setManualField("valueInput", event.target.value) ??
+      "";
+    event.target.value = value;
+    return;
+  }
+  if (event.target.matches("[data-sim-manual-imei]")) {
+    activeSimController?.setManualField("imeiInput", event.target.value);
+    return;
+  }
+  if (event.target.matches("[data-sim-manual-remark]")) {
+    activeSimController?.setManualField("remarkInput", event.target.value);
+    return;
+  }
+  if (event.target.matches("[data-sim-import-lines]")) {
+    activeSimController?.setImportInput(event.target.value);
+    return;
+  }
   if (event.target.matches("[data-device-imei]")) {
     const value = activeDeviceController?.setImeiInput(event.target.value) ?? "";
     event.target.value = value;
@@ -1678,6 +1784,26 @@ function onFeedbackSubmit(event) {
     void loadAdapters();
     return;
   }
+  if (event.target.matches("[data-sim-search]")) {
+    event.preventDefault();
+    void activeSimController?.lookup();
+    return;
+  }
+  if (event.target.matches("[data-sim-cards-search]")) {
+    event.preventDefault();
+    void activeSimController?.searchCards();
+    return;
+  }
+  if (event.target.matches("[data-sim-manual]")) {
+    event.preventDefault();
+    void activeSimController?.submitManual();
+    return;
+  }
+  if (event.target.matches("[data-sim-import]")) {
+    event.preventDefault();
+    void activeSimController?.submitImport();
+    return;
+  }
   if (event.target.matches("[data-device-search]")) {
     event.preventDefault();
     void activeDeviceController?.lookup();
@@ -1718,10 +1844,11 @@ function createState(historyState) {
   const saved =
     historyState && typeof historyState === "object" ? historyState : {};
   return {
-    activeTab: ["device", "devices"].includes(saved.activeTab)
+    activeTab: ["device", "devices", "sim"].includes(saved.activeTab)
       ? saved.activeTab
       : "feedback",
     device: createDeviceUnbindState(saved),
+    sim: createSimCardState(saved),
     ota: createOtaPackageState(),
     adapters: createAdapterDeviceState(saved),
     rows: [],
@@ -1821,6 +1948,16 @@ export async function mountPage({
       scope.animationFrame(() => document.querySelector(selector)?.focus()),
   });
   activeOtaController = otaController;
+  const simController = createSimCardController({
+    simState: nextState.sim,
+    scope,
+    isActive: () => isActive(instance, scope),
+    isSimTab: () => state?.activeTab === "sim",
+    rerender,
+    focus: (selector) =>
+      scope.animationFrame(() => document.querySelector(selector)?.focus()),
+  });
+  activeSimController = simController;
   let poller = null;
 
   return {
@@ -1838,13 +1975,17 @@ export async function mountPage({
         poll: pollActiveTab,
       });
       activePoller = poller;
-      if (state.activeTab !== "device") poller.start();
+      if (!["device", "sim"].includes(state.activeTab)) poller.start();
       if (["device", "devices"].includes(state.activeTab)) void otaController.load();
       if (state.activeTab === "devices") void loadAdapters();
+      if (state.activeTab === "sim") void simController.loadCards();
     },
     captureState: () => ({
       activeTab: state.activeTab,
       deviceImeiInput: state.device.imeiInput,
+      simQueryInput: state.sim.queryInput,
+      simCardsQuery: state.sim.cards.query,
+      simCardsPage: state.sim.cards.page,
       adapterKind: state.adapters.kind,
       adapterPage: state.adapters.page,
       adapterQuery: state.adapters.query,
@@ -1863,6 +2004,7 @@ export async function mountPage({
         activeDeviceController = null;
       }
       if (activeOtaController === otaController) activeOtaController = null;
+      if (activeSimController === simController) activeSimController = null;
       if (activeInstance === instance) activeInstance = 0;
       if (activeScope === scope) activeScope = null;
       state = null;

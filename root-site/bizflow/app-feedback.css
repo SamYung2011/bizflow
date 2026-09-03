@@ -911,6 +911,157 @@
   margin-top: var(--space-10);
 }
 
+.app-feedback-sim-card,
+.app-feedback-sim-list-card,
+.app-feedback-sim-entry-card {
+  display: grid;
+  gap: var(--space-20);
+}
+
+.app-feedback-sim-card-title {
+  margin: 0;
+  color: var(--gray-80);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+}
+
+.app-feedback-sim-section h2 {
+  margin: 0 0 var(--space-10);
+  color: var(--gray-80);
+  font-size: var(--font-title-3-size);
+  font-weight: var(--font-title-3-weight);
+}
+
+.app-feedback-sim-section .app-feedback-table-shell {
+  margin-top: var(--space-10);
+}
+
+.app-feedback-sim-table {
+  min-width: 720px;
+}
+
+.app-feedback-sim-list-card .app-feedback-sim-table {
+  min-width: var(--feedback-table-width);
+}
+
+.app-feedback-sim-missing,
+.app-feedback-sim-hint {
+  margin: var(--space-10) 0 0;
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+}
+
+.app-feedback-sim-card > .app-feedback-sim-hint:first-of-type {
+  margin-top: 0;
+}
+
+.app-feedback-sim-meta {
+  display: flex;
+  margin: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-10);
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+}
+
+.app-feedback-sim-days--danger,
+.app-feedback-sim-days--expired {
+  color: var(--red);
+}
+
+.app-feedback-sim-days--warning {
+  color: color-mix(in srgb, var(--yellow) 80%, var(--black));
+}
+
+.app-feedback-sim-days--normal {
+  color: var(--gray-60);
+}
+
+.app-feedback-sim-expired {
+  margin-left: var(--space-4);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-10);
+  background: color-mix(in srgb, var(--red) 10%, var(--white));
+  color: var(--red);
+  font-size: var(--font-body-size);
+}
+
+.app-feedback-sim-progress {
+  height: var(--space-10);
+  margin-top: var(--space-10);
+  border-radius: var(--radius-10);
+  background: var(--gray-10);
+  overflow: hidden;
+}
+
+.app-feedback-sim-progress > span {
+  display: block;
+  width: var(--sim-usage-percent, 0%);
+  height: 100%;
+  border-radius: var(--radius-10);
+  background: var(--blue);
+}
+
+.app-feedback-sim-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.app-feedback-sim-row-error {
+  display: block;
+  margin-top: var(--space-4);
+  color: var(--red);
+  font-size: var(--font-body-size);
+}
+
+.app-feedback-sim-manual {
+  display: grid;
+  align-items: end;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: var(--space-10);
+}
+
+.app-feedback-sim-field {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-4);
+  color: var(--gray-60);
+  font-size: var(--font-description-size);
+}
+
+.app-feedback-sim-import {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-10);
+}
+
+.app-feedback-sim-textarea {
+  width: 100%;
+  padding: var(--space-10);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  resize: vertical;
+}
+
+.app-feedback-sim-failed {
+  margin: var(--space-4) 0 0;
+  padding-left: var(--space-20);
+  color: var(--gray-60);
+  font-size: var(--font-description-size);
+}
+
+.app-feedback-sim-recharge {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-10);
+}
+
+.app-feedback-sim-recharge .app-feedback-sim-hint {
+  margin-top: 0;
+}
+
 @media (max-width: 768px) {
   .app-feedback-page {
     min-height: calc(100vh - var(--feedback-mobile-offset));
@@ -1003,6 +1154,15 @@
 
   .app-feedback-adapter-live {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .app-feedback-sim-manual {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-feedback-sim-recharge {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .app-feedback-device-detail {
