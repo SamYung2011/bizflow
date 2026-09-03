@@ -1846,7 +1846,10 @@ simController.setImportInput(
 await simController.submitImport();
 assert.equal(simCalls.length, importCallCount);
 assert.equal(simState.importer.error.code, "simImportTooManyLines");
-const importLines = "89860480192090995900,862635066123456,測試機\n14765004176";
+// The card table is keyed by ICCID, so a bulk paste carries ICCID-led lines
+// only; a bare card number has to go through the single-card form instead.
+const importLines =
+  "89860480192090995900,862635066123456,測試機\n89860480192090995901";
 simController.setImportInput(importLines);
 await simController.submitImport();
 const importCall = simCalls.find(([path]) => path === "/sim/cards/import");
@@ -1977,6 +1980,29 @@ for (const language of feedbackLanguages) {
   assert.equal(typeof appFeedbackCopy[language].simImportTooLarge, "string");
   assert.notEqual(appFeedbackCopy[language].simImportTooLarge.trim(), "");
 }
+// The bulk paste must not offer a bare card number: sim_cards is keyed by
+// ICCID, so those rows would come back in failed[]. Every example line is an
+// ICCID, and the copy points at the single-card form for the other case.
+for (const language of feedbackLanguages) {
+  const placeholderLines =
+    appFeedbackCopy[language].simImportPlaceholder.split("\n");
+  assert.ok(placeholderLines.length >= 2);
+  for (const line of placeholderLines) {
+    assert.match(
+      line,
+      /^[0-9A-Za-z]{19,20}(?:,|$)/,
+      `${language}.simImportPlaceholder must show ICCID-led lines only`,
+    );
+  }
+  assert.doesNotMatch(
+    appFeedbackCopy[language].simImportHint,
+    /ICCID (?:或|or |ou )/,
+    `${language}.simImportHint must not offer a card number for bulk paste`,
+  );
+}
+assert.ok(appFeedbackCopy.zh.simImportHint.includes("單條補錄"));
+assert.ok(appFeedbackCopy.en.simImportHint.includes("single-card entry"));
+assert.ok(appFeedbackCopy.fr.simImportHint.includes("saisie unitaire"));
 assert.match(pageSource, /simState: state\.sim/);
 for (const [label, source] of [
   ["the SIM module", simSource],
