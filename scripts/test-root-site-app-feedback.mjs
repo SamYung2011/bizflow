@@ -638,6 +638,22 @@ assert.match(unverifiedHtml, /app-feedback-device-check--unverified/);
 assert.match(unverifiedHtml, />stepUnverified</);
 assert.match(unverifiedHtml, /providerUnverifiedWarning/);
 
+deviceState.result = {
+  status: "unbound",
+  lufengzhe: { status: "already_unbound" },
+  steps: [{ key: "lufengzhe_inner", status: "already_unbound" }],
+};
+const alreadyUnboundHtml = renderDeviceUnbind({
+  deviceState,
+  t: (key) => key,
+  escapeHtml,
+  formatTime: () => "2026-08-12 12:00:00",
+  errorCopy: () => "error",
+});
+assert.match(alreadyUnboundHtml, /app-feedback-device-check--ok/);
+assert.match(alreadyUnboundHtml, />stepOk</);
+assert.doesNotMatch(alreadyUnboundHtml, /app-feedback-device-check--fail/);
+
 const controllerState = createDeviceUnbindState();
 const controllerCalls = [];
 let controllerRenders = 0;
