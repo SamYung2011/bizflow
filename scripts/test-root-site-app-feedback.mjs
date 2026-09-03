@@ -8,7 +8,10 @@ import {
   normalizeFeedbackLogStatus,
   safeHttpUrl,
 } from "../root-site/bizflow/app-feedback-api.js";
-import { appFeedbackCopy } from "../root-site/bizflow/app-feedback-i18n.js";
+import {
+  appFeedbackCopy,
+  translateAppFeedback,
+} from "../root-site/bizflow/app-feedback-i18n.js";
 import {
   ADAPTER_SESSION_HISTORY_DAYS,
   adapterActionsForKind,
@@ -37,6 +40,27 @@ import {
   validateOtaFile,
   validateOtaVersion,
 } from "../root-site/bizflow/app-feedback-ota.js";
+import {
+  SIM_CARDS_PAGE_SIZE,
+  SIM_IMPORT_MAX_LINES,
+  createSimCardController,
+  createSimCardState,
+  detectSimQueryKind,
+  formatSimData,
+  normalizeSimQuery,
+  renderSimCards,
+  simCardsPageCount,
+  simCardsSubPath,
+  simDaysLeftLevel,
+  simImportLineCount,
+  simLookupSubPath,
+  simManualRequestBody,
+  simUsagePercent,
+} from "../root-site/bizflow/app-feedback-sim.js";
+import {
+  isAllowedHonnmonoUpstream,
+  mapHonnmonoAdminPath,
+} from "../supabase/functions/honnmono-admin/routing.mjs";
 import {
   FEEDBACK_POLL_INTERVAL_MS,
   FEEDBACK_POLL_MAX_INTERVAL_MS,
@@ -1302,7 +1326,11 @@ tabScope.dispose();
 
 // Source contracts for the tab-dispatched, silent adapter refresh.
 assert.match(pageSource, /poll:\s*pollActiveTab/);
-assert.match(pageSource, /if \(state\.activeTab !== "device"\) poller\.start\(\)/);
+assert.match(
+  pageSource,
+  /if \(!\["device", "sim"\]\.includes\(state\.activeTab\)\) poller\.start\(\)/,
+  "the SIM tab is a one-shot lookup form, so it must not start the poller",
+);
 assert.match(pageSource, /return pollAdapterList\(\{ signal \}\)/);
 assert.match(pageSource, /loadAdapters\(\{ silent: true, signal \}\)/);
 // A poll must not flash the spinner, blank the table on a failed request, or
@@ -1312,6 +1340,623 @@ assert.match(pageSource, /if \(silent\) return false;/);
 assert.match(pageSource, /adapterRefreshWouldInterrupt\(\)/);
 assert.match(pageSource, /state\.adapters\.loading\s*\)\s*\{\s*return true;/);
 
+// ---------------------------------------------------------------------------
+// SIM cards (OneLink) tab
+// ---------------------------------------------------------------------------
+
+// Browser allowlist: the lookup route pins the ICCID / card-number shapes so a
+// hand-built sub-path cannot smuggle extra query parameters past the bridge.
+for (const [method, subPath] of [
+  ["GET", "/sim/lookup?iccid=89860480192090995900"],
+  ["GET", "/sim/lookup?iccid=8986048019209099590"],
+  ["GET", "/sim/lookup?iccid=8986048019209099590A"],
+  ["GET", "/sim/lookup?msisdn=14765004176"],
+  ["GET", "/sim/lookup?msisdn=1"],
+  ["GET", "/sim/lookup?iccid=89860480192090995900&refresh=1"],
+  ["GET", "/sim/lookup?msisdn=14765004176&refresh=1"],
+  ["GET", "/sim/cards"],
+  ["GET", "/sim/cards?page=1&size=50"],
+  ["GET", "/sim/cards?page=2&size=50&q=8986"],
+  ["POST", "/sim/cards"],
+  ["POST", "/sim/cards/import"],
+  ["POST", "/sim/refresh"],
+]) {
+  assert.doesNotThrow(() => assertHonnmonoAdminRequest(subPath, method));
+}
+for (const [method, subPath] of [
+  ["GET", "/sim/lookup"],
+  ["GET", "/sim/lookup?iccid=898604801920909959001"],
+  ["GET", "/sim/lookup?iccid=898604801920909959"],
+  ["GET", "/sim/lookup?iccid=8986048019209099590_"],
+  ["GET", "/sim/lookup?msisdn=14765004176543"],
+  ["GET", "/sim/lookup?msisdn=1476500417a"],
+  ["GET", "/sim/lookup?iccid=89860480192090995900&msisdn=14765004176"],
+  ["GET", "/sim/lookup?iccid=89860480192090995900&refresh=2"],
+  ["GET", "/sim/lookup?iccid=89860480192090995900#https://evil.example"],
+  ["POST", "/sim/lookup?iccid=89860480192090995900"],
+  ["GET", "/sim/refresh"],
+  ["POST", "/sim/lookup"],
+  ["POST", "/sim/cards/import/extra"],
+  ["POST", "/sim/cards/89860480192090995900"],
+  ["DELETE", "/sim/cards"],
+  ["GET", "/sim/cards#https://evil.example"],
+  ["GET", "//evil.example/sim/cards"],
+]) {
+  assert.throws(
+    () => assertHonnmonoAdminRequest(subPath, method),
+    (error) =>
+      error instanceof HonnmonoAdminError && error.code === "requestError",
+    `${method} ${subPath} must remain outside the browser allowlist`,
+  );
+}
+
+// HK bridge: the same five routes, and nothing else, reach /internal/admin/sim.
+assert.equal(
+  mapHonnmonoAdminPath("/sim/lookup", "GET"),
+  "/internal/admin/sim/lookup",
+);
+assert.equal(
+  mapHonnmonoAdminPath("/sim/cards", "GET"),
+  "/internal/admin/sim/cards",
+);
+assert.equal(
+  mapHonnmonoAdminPath("/sim/cards", "POST"),
+  "/internal/admin/sim/cards",
+);
+assert.equal(
+  mapHonnmonoAdminPath("/sim/cards/", "POST"),
+  "/internal/admin/sim/cards",
+);
+assert.equal(
+  mapHonnmonoAdminPath("/sim/cards/import", "POST"),
+  "/internal/admin/sim/cards/import",
+);
+assert.equal(
+  mapHonnmonoAdminPath("/sim/refresh", "POST"),
+  "/internal/admin/sim/refresh",
+);
+for (const [pathname, method] of [
+  ["/sim/lookup", "POST"],
+  ["/sim/lookup", "DELETE"],
+  ["/sim/refresh", "GET"],
+  ["/sim/cards/import", "GET"],
+  ["/sim/cards/89860480192090995900", "GET"],
+  ["/sim", "GET"],
+  ["/sim/anything", "GET"],
+]) {
+  assert.equal(
+    mapHonnmonoAdminPath(pathname, method),
+    "",
+    `${method} ${pathname} must not map to a Shenzhen admin route`,
+  );
+}
+for (const pathname of [
+  "/internal/admin/sim/lookup",
+  "/internal/admin/sim/cards",
+  "/internal/admin/sim/cards/import",
+  "/internal/admin/sim/refresh",
+]) {
+  assert.equal(
+    isAllowedHonnmonoUpstream(
+      new URL(`https://app-api.honnmono.top${pathname}`),
+    ),
+    true,
+    `${pathname} must be reachable upstream`,
+  );
+}
+assert.equal(
+  isAllowedHonnmonoUpstream(
+    new URL("https://app-api.honnmono.top/internal/admin/sim/cards/extra"),
+  ),
+  false,
+);
+assert.equal(
+  isAllowedHonnmonoUpstream(new URL("https://evil.example/internal/admin/sim/lookup")),
+  false,
+);
+
+const edgeFunctionSource = await read(
+  "supabase/functions/honnmono-admin/index.ts",
+);
+for (const route of [
+  "GET  /honnmono-admin/sim/lookup",
+  "GET  /honnmono-admin/sim/cards",
+  "POST /honnmono-admin/sim/cards",
+  "POST /honnmono-admin/sim/cards/import",
+  "POST /honnmono-admin/sim/refresh",
+]) {
+  assert.ok(
+    edgeFunctionSource.includes(route),
+    `the bridge header must list ${route}`,
+  );
+}
+
+// ICCID vs card number is decided by shape alone: 19-20 alphanumerics is an
+// ICCID, up to 13 digits is the card number (msisdn). Nothing else is queried.
+for (const [value, kind] of [
+  ["89860480192090995900", "iccid"],
+  ["8986048019209099590", "iccid"],
+  ["8986048019209099590A", "iccid"],
+  ["14765004176", "msisdn"],
+  ["1234567890123", "msisdn"],
+  ["1", "msisdn"],
+]) {
+  assert.equal(detectSimQueryKind(value), kind, `${value} must read as ${kind}`);
+}
+for (const value of [
+  "",
+  "   ",
+  "12345678901234",
+  "898604801920909959",
+  "898604801920909959001",
+  "8986048019209099590!",
+  "iccid=89860480192090995900",
+]) {
+  assert.equal(detectSimQueryKind(value), null, `${value} must not be queried`);
+}
+assert.equal(
+  normalizeSimQuery(" 8986 0480 1920 9099 5900 "),
+  "89860480192090995900",
+);
+
+assert.equal(
+  simLookupSubPath("89860480192090995900"),
+  "/sim/lookup?iccid=89860480192090995900",
+);
+assert.equal(
+  simLookupSubPath(" 14765004176 ", { refresh: true }),
+  "/sim/lookup?msisdn=14765004176&refresh=1",
+);
+assert.equal(simLookupSubPath("nope"), "");
+assert.equal(SIM_CARDS_PAGE_SIZE, 50);
+assert.equal(SIM_IMPORT_MAX_LINES, 500);
+assert.equal(simCardsSubPath(), "/sim/cards?page=1&size=50");
+assert.equal(
+  simCardsSubPath({ page: 3, query: " 8986 " }),
+  "/sim/cards?page=3&size=50&q=8986",
+);
+assert.equal(simCardsSubPath({ page: 0 }), "/sim/cards?page=1&size=50");
+for (const subPath of [
+  simLookupSubPath("89860480192090995900"),
+  simLookupSubPath("89860480192090995900", { refresh: true }),
+  simLookupSubPath("14765004176"),
+  simCardsSubPath({ page: 2, query: "8986" }),
+  simCardsSubPath({ page: 1, query: "a&b=c" }),
+]) {
+  assert.doesNotThrow(
+    () => assertHonnmonoAdminRequest(subPath, "GET"),
+    `${subPath} is built by the page, so it must satisfy the allowlist`,
+  );
+}
+
+// OneLink reports KB; the page rescales to MB / GB with two decimals.
+assert.deepEqual(formatSimData(87214), { key: "simSizeMb", size: "85.17" });
+assert.deepEqual(formatSimData(102400), { key: "simSizeMb", size: "100.00" });
+assert.deepEqual(formatSimData(1024), { key: "simSizeMb", size: "1.00" });
+assert.deepEqual(formatSimData(1024 * 1024), { key: "simSizeGb", size: "1.00" });
+assert.deepEqual(formatSimData(2_621_440), { key: "simSizeGb", size: "2.50" });
+assert.deepEqual(formatSimData(1023), { key: "simSizeKb", size: "1023" });
+assert.deepEqual(formatSimData(0), { key: "simSizeKb", size: "0" });
+assert.deepEqual(formatSimData(1.5), { key: "simSizeKb", size: "1.50" });
+assert.equal(formatSimData(null), null);
+assert.equal(formatSimData(""), null);
+assert.equal(formatSimData("abc"), null);
+
+for (const [days, level] of [
+  [119, "normal"],
+  [31, "normal"],
+  [30, "warning"],
+  [8, "warning"],
+  [7, "danger"],
+  [1, "danger"],
+  [0, "danger"],
+  [-1, "expired"],
+  [-33, "expired"],
+]) {
+  assert.equal(
+    simDaysLeftLevel(days),
+    level,
+    `${days} days left must colour as ${level}`,
+  );
+}
+assert.equal(simDaysLeftLevel(null), null);
+assert.equal(simDaysLeftLevel(undefined), null);
+assert.equal(simDaysLeftLevel("soon"), null);
+
+assert.equal(simUsagePercent({ totalKb: 102400, usedKb: 15186 }), 15);
+assert.equal(simUsagePercent({ totalKb: 102400, usedKb: 204800 }), 100);
+assert.equal(simUsagePercent({ totalKb: 0, usedKb: 10 }), null);
+assert.equal(simUsagePercent(null), null);
+assert.equal(simCardsPageCount(0), 1);
+assert.equal(simCardsPageCount(50), 1);
+assert.equal(simCardsPageCount(51), 2);
+assert.equal(simCardsPageCount(null), 1);
+assert.equal(simImportLineCount("a\n\n  b  \n"), 2);
+assert.equal(simImportLineCount(""), 0);
+
+assert.deepEqual(
+  simManualRequestBody({
+    value: " 89860480192090995900 ",
+    imei: "862635066123456",
+    remark: " 測試機 ",
+  }),
+  {
+    iccid: "89860480192090995900",
+    imei: "862635066123456",
+    remark: "測試機",
+  },
+);
+assert.deepEqual(simManualRequestBody({ value: "14765004176" }), {
+  msisdn: "14765004176",
+});
+assert.throws(
+  () => simManualRequestBody({ value: "12345678901234" }),
+  (error) => error.code === "simQueryValidation",
+);
+assert.throws(
+  () => simManualRequestBody({ value: "14765004176", imei: "12345" }),
+  (error) => error.code === "simManualImeiValidation",
+);
+
+// Fixtures are the sample payloads from the task contract (sections 3.1 / 3.2);
+// nothing here touches a real OneLink endpoint.
+const simLookupFixture = {
+  query: { iccid: "89860480192090995900", msisdn: "14765004176" },
+  card: {
+    iccid: "89860480192090995900",
+    msisdn: "14765004176",
+    imsi: "460041234567890",
+    openDate: "2018-04-21 08:00:00",
+    activeDate: "2018-04-22 08:00:00",
+    remark: "",
+  },
+  status: { code: "1", label: "正常", changedAt: "2026-08-01 10:00:00" },
+  offerings: [
+    {
+      offeringId: "21000032",
+      offeringName: "全國通用流量 8 元套餐",
+      effectiveDate: "2026-01-01 00:00:00",
+      expiriedDate: "2026-12-31 23:59:59",
+      apnName: "CMIOT",
+    },
+  ],
+  renewal: { expiresAt: "2026-12-31 23:59:59", daysLeft: 119, dueAt: "2026-12-31" },
+  usage: {
+    month: "2026-09",
+    totalKb: 102400,
+    usedKb: 15186,
+    remainKb: 87214,
+    items: [
+      {
+        offeringName: "全國通用流量 8 元套餐",
+        totalKb: 102400,
+        usedKb: 15186,
+        remainKb: 87214,
+      },
+    ],
+  },
+  balance: {
+    accountName: "Honnmono",
+    amount: "0.62",
+    overDue: "5",
+    lateFee: "0",
+    conSume: "10",
+  },
+  device: {
+    certid: "0DB897034096400000EC7547",
+    imei: "862635066123456",
+    uuid: "uuid-1",
+    userid: 123,
+    username: "xx@qq.com",
+  },
+  fetchedAt: 1788345671734,
+  cached: false,
+  errors: {},
+};
+const simCardsFixture = {
+  total: 8,
+  page: 1,
+  size: 50,
+  items: [
+    {
+      iccid: "89860480192090995900",
+      msisdn: "14765004176",
+      imsi: "460041234567890",
+      certid: "0DB897034096400000EC7547",
+      imei: "862635066123456",
+      source: "device_report",
+      remark: "",
+      statusLabel: "正常",
+      expiresAt: "2026-12-31 23:59:59",
+      daysLeft: 119,
+      remainKb: 87214,
+      snapshotAt: 1788345671734,
+      snapshotError: null,
+    },
+  ],
+};
+
+const simState = createSimCardState({
+  simQueryInput: " 8986 0480 1920 9099 5900 ",
+});
+assert.equal(simState.queryInput, "89860480192090995900");
+assert.equal(simState.cards.page, 1);
+const simCalls = [];
+let simRenders = 0;
+const simController = createSimCardController({
+  simState,
+  scope: { signal: new AbortController().signal },
+  isActive: () => true,
+  isSimTab: () => true,
+  rerender: () => {
+    simRenders += 1;
+  },
+  focus: () => {},
+  request: async (path, options = {}) => {
+    simCalls.push([path, options]);
+    assert.doesNotThrow(
+      () => assertHonnmonoAdminRequest(path, options.method ?? "GET"),
+      `the SIM controller must only issue allowlisted requests (${path})`,
+    );
+    if (path.startsWith("/sim/lookup")) return simLookupFixture;
+    if (path === "/sim/refresh") return { ...simLookupFixture, cached: false };
+    if (path === "/sim/cards/import") {
+      return {
+        added: 1,
+        updated: 1,
+        failed: [{ line: 3, reason: "iccid 不合法" }],
+      };
+    }
+    if (path === "/sim/cards") return simCardsFixture.items[0];
+    if (path.startsWith("/sim/cards?")) return simCardsFixture;
+    throw new Error(`unexpected sub-path ${path}`);
+  },
+});
+
+await simController.lookup();
+assert.equal(simCalls[0][0], "/sim/lookup?iccid=89860480192090995900");
+assert.equal(simState.lookup.renewal.daysLeft, 119);
+assert.equal(simState.queriedValue, "89860480192090995900");
+await simController.refetch();
+assert.equal(
+  simCalls[1][0],
+  "/sim/lookup?iccid=89860480192090995900&refresh=1",
+  "『重新拉取』must bypass the backend cache",
+);
+simController.setQueryInput("14765004176");
+await simController.lookup();
+assert.equal(
+  simCalls[2][0],
+  "/sim/lookup?msisdn=14765004176",
+  "a card number must be sent as msisdn, not iccid",
+);
+simController.setQueryInput("12345678901234");
+await simController.lookup();
+assert.equal(simCalls.length, 3, "an unparseable query must not hit the bridge");
+assert.equal(simState.lookupError.code, "simQueryValidation");
+
+simController.setCardsQueryInput("8986");
+await simController.searchCards();
+assert.equal(simCalls[3][0], "/sim/cards?page=1&size=50&q=8986");
+assert.equal(simState.cards.total, 8);
+assert.equal(simState.cards.rows.length, 1);
+assert.equal(simState.cards.loaded, true);
+await simController.goToCardsPage(2);
+assert.equal(simCalls[4][0], "/sim/cards?page=2&size=50&q=8986");
+
+simController.setManualField("valueInput", "89860480192090995901");
+simController.setManualField("imeiInput", "862635066123456");
+simController.setManualField("remarkInput", " 測試機 ");
+await simController.submitManual();
+const manualCall = simCalls.find(
+  ([path, options]) => path === "/sim/cards" && options.method === "POST",
+);
+assert.deepEqual(manualCall[1].body, {
+  iccid: "89860480192090995901",
+  imei: "862635066123456",
+  remark: "測試機",
+});
+assert.equal(simState.manual.valueInput, "");
+assert.ok(simState.manual.result);
+
+simController.setManualField("valueInput", "14765004176");
+simController.setManualField("imeiInput", "12345");
+const manualCallCount = simCalls.length;
+await simController.submitManual();
+assert.equal(simCalls.length, manualCallCount, "a bad IMEI must not be posted");
+assert.equal(simState.manual.error.code, "simManualImeiValidation");
+
+simController.setImportInput("   ");
+const importCallCount = simCalls.length;
+await simController.submitImport();
+assert.equal(simCalls.length, importCallCount);
+assert.equal(simState.importer.error.code, "simImportRequired");
+simController.setImportInput(
+  Array.from({ length: SIM_IMPORT_MAX_LINES + 1 }, (_, index) =>
+    String(14765004176 + index),
+  ).join("\n"),
+);
+await simController.submitImport();
+assert.equal(simCalls.length, importCallCount);
+assert.equal(simState.importer.error.code, "simImportTooManyLines");
+const importLines = "89860480192090995900,862635066123456,測試機\n14765004176";
+simController.setImportInput(importLines);
+await simController.submitImport();
+const importCall = simCalls.find(([path]) => path === "/sim/cards/import");
+assert.deepEqual(importCall[1].body, { lines: importLines });
+assert.equal(simState.importer.result.added, 1);
+assert.equal(simState.importer.result.failed[0].line, 3);
+assert.equal(simState.importer.linesInput, "");
+
+await simController.refreshCard("89860480192090995900");
+const refreshCall = simCalls.find(([path]) => path === "/sim/refresh");
+assert.deepEqual(refreshCall[1].body, { iccid: "89860480192090995900" });
+assert.equal(simState.queriedValue, "89860480192090995900");
+assert.equal(simState.cards.refreshingIccid, "");
+assert.ok(simRenders >= 10);
+
+const simT = (key, values = {}) => translateAppFeedback("zh", key, values);
+const simRenderState = createSimCardState();
+simRenderState.queryInput = "89860480192090995900";
+simRenderState.queriedValue = "89860480192090995900";
+simRenderState.lookup = {
+  ...simLookupFixture,
+  card: { ...simLookupFixture.card, remark: "<script>alert(1)</script>" },
+  status: null,
+  renewal: { expiresAt: "2026-09-05 23:59:59", daysLeft: 4, dueAt: "2026-09-05" },
+  cached: true,
+  errors: { status: "<img src=x onerror=alert(1)> 12010 查不到" },
+};
+simRenderState.cards.rows = simCardsFixture.items;
+simRenderState.cards.total = simCardsFixture.total;
+simRenderState.cards.loaded = true;
+const simHtml = renderSimCards({
+  simState: simRenderState,
+  t: simT,
+  escapeHtml,
+  formatTime: () => "2026-09-03 12:00:00",
+  errorCopy: () => "error",
+});
+assert.doesNotMatch(simHtml, /<script>alert\(1\)<\/script>/);
+assert.doesNotMatch(simHtml, /<img src=x/);
+assert.match(simHtml, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+assert.match(simHtml, /&lt;img src=x onerror=alert\(1\)&gt;/);
+assert.ok(
+  simHtml.includes(appFeedbackCopy.zh.simSectionUnavailable.split("{")[0]),
+  "a null section must show its errors[] copy instead of a blank block",
+);
+assert.match(simHtml, /app-feedback-sim-days--danger/);
+assert.match(
+  simHtml,
+  /--sim-usage-percent:15%/,
+  "the monthly data bar must reflect used / total",
+);
+assert.ok(simHtml.includes("85.17"), "87214 KB must render as 85.17 MB");
+assert.match(simHtml, /data-sim-query/);
+assert.match(simHtml, /data-sim-refetch/);
+assert.match(simHtml, /data-sim-cards-search/);
+assert.match(simHtml, /data-sim-view="89860480192090995900"/);
+assert.match(simHtml, /data-sim-refresh-card="89860480192090995900"/);
+assert.match(simHtml, /data-sim-manual/);
+assert.match(simHtml, /data-sim-import-lines/);
+assert.ok(
+  simHtml.includes(`>${appFeedbackCopy.zh.simRecharge}<`),
+  "the top-up slot must be present",
+);
+assert.match(
+  simHtml,
+  /class="app-feedback-button" disabled>充值/,
+  "the top-up button ships disabled this round",
+);
+assert.ok(simHtml.includes(appFeedbackCopy.zh.simCached));
+assert.ok(simHtml.includes(appFeedbackCopy.zh.simSourceDeviceReport));
+
+simRenderState.lookup = {
+  ...simLookupFixture,
+  renewal: { expiresAt: "2026-08-01 00:00:00", daysLeft: -33, dueAt: "2026-08-01" },
+  usage: null,
+  balance: null,
+  offerings: null,
+  errors: {},
+};
+const simExpiredHtml = renderSimCards({
+  simState: simRenderState,
+  t: simT,
+  escapeHtml,
+  formatTime: () => "2026-09-03 12:00:00",
+  errorCopy: () => "error",
+});
+assert.match(simExpiredHtml, /app-feedback-sim-days--expired/);
+assert.match(simExpiredHtml, /app-feedback-sim-expired/);
+assert.ok(
+  simExpiredHtml.includes(
+    appFeedbackCopy.zh.simExpiredDays.replaceAll("{days}", "33"),
+  ),
+);
+assert.ok(
+  simExpiredHtml.includes(appFeedbackCopy.zh.simSectionUnknownError),
+  "a null section without an errors[] entry still gets readable copy",
+);
+
+simRenderState.lookup = null;
+simRenderState.cards.rows = [];
+simRenderState.cards.total = 0;
+const simEmptyHtml = renderSimCards({
+  simState: simRenderState,
+  t: simT,
+  escapeHtml,
+  formatTime: () => "2026-09-03 12:00:00",
+  errorCopy: () => "error",
+});
+assert.ok(simEmptyHtml.includes(appFeedbackCopy.zh.simQueryPrompt));
+assert.ok(simEmptyHtml.includes(appFeedbackCopy.zh.simNoCards));
+
+const simSource = await read("root-site/bizflow/app-feedback-sim.js");
+assert.doesNotMatch(simSource, /HONNMONO_ADMIN_INTERNAL_TOKEN/);
+assert.doesNotMatch(simSource, /app-api/i);
+assert.doesNotMatch(simSource, /\bsetInterval\s*\(/);
+assert.doesNotMatch(simSource, /\bsetTimeout\s*\(/);
+assert.doesNotMatch(simSource, /window\.confirm/);
+assert.match(simSource, /escapeHtml/);
+assert.match(pageSource, /data-app-feedback-tab="sim"/);
+assert.match(pageSource, /if \(nextTab === "sim"\)/);
+assert.match(pageSource, /isSimTab: \(\) => state\?\.activeTab === "sim"/);
+assert.match(pageSource, /simState: state\.sim/);
+for (const [label, source] of [
+  ["the SIM module", simSource],
+  ["the SIM copy", JSON.stringify(appFeedbackCopy)],
+]) {
+  assert.doesNotMatch(source, /老板|老闆/, `${label} must not say 老板`);
+}
+
+// Every literal copy key the SIM module reaches for must exist in all three
+// languages -- a missing key would silently render as the raw key name.
+const simCopyKeys = [
+  ...new Set(
+    [...simSource.matchAll(/"(sim[A-Za-z0-9]+)"/g)].map((match) => match[1]),
+  ),
+];
+assert.ok(simCopyKeys.length >= 25, "the SIM module must be fully translated");
+const simDictionaryKeys = Object.keys(appFeedbackCopy.zh).filter((key) =>
+  key.startsWith("sim"),
+);
+assert.ok(simDictionaryKeys.length >= 90);
+for (const language of feedbackLanguages) {
+  for (const key of [
+    ...simCopyKeys,
+    ...simDictionaryKeys,
+    "basicInfo",
+    "bindingUser",
+    "status",
+    "actions",
+    "search",
+    "refresh",
+    "refreshing",
+    "page",
+    "previous",
+    "next",
+  ]) {
+    assert.equal(
+      typeof appFeedbackCopy[language][key],
+      "string",
+      `${language}.${key} must exist for the SIM card tab`,
+    );
+    assert.notEqual(appFeedbackCopy[language][key].trim(), "");
+  }
+}
+assert.equal(appFeedbackCopy.zh.simCardTab, "流量卡");
+assert.equal(appFeedbackCopy.en.simCardTab, "SIM cards");
+assert.equal(appFeedbackCopy.fr.simCardTab, "Cartes SIM");
+
+assert.match(cssSource, /\.app-feedback-sim-days--expired/);
+assert.match(cssSource, /\.app-feedback-sim-days--warning/);
+assert.match(cssSource, /\.app-feedback-sim-progress/);
+assert.doesNotMatch(
+  cssSource,
+  /border-radius:\s*var\(--radius-40\)/,
+  "the feedback page keeps its 20px corner ceiling",
+);
+
 console.log(
-  "Honnmono APP root-site contracts: PASS (feedback + device unbind + OTA package card, allowlists, confirmations, escaped fields, tab-dispatched polling, i18n)",
+  "Honnmono APP root-site contracts: PASS (feedback + device unbind + OTA package card + SIM card lookup, allowlists, confirmations, escaped fields, tab-dispatched polling, i18n)",
 );
