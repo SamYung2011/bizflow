@@ -254,9 +254,11 @@ export function renderDeviceUnbind({
       <ul class="app-feedback-device-checklist">
         ${steps
           .map((step) => {
-            const status = ["ok", "skip", "fail", "unverified"].includes(step?.status)
-              ? step.status
-              : "fail";
+            const status = step?.status === "already_unbound"
+              ? "ok"
+              : ["ok", "skip", "fail", "unverified"].includes(step?.status)
+                ? step.status
+                : "fail";
             const labelKey = STEP_LABEL_KEYS[step?.key];
             const label = labelKey ? t(labelKey) : step?.key;
             return `<li class="app-feedback-device-check app-feedback-device-check--${status}"><span>${e(label)}</span><strong>${rawE(t(STEP_STATUS_KEYS[status]))}</strong></li>`;
