@@ -28,6 +28,18 @@ export function mapHonnmonoAdminPath(pathname, method) {
   ) {
     return `/internal/admin/adapter-devices${normalized.slice("/devices".length)}`;
   }
+  if (method === "GET" && normalized === "/sim/lookup") {
+    return "/internal/admin/sim/lookup";
+  }
+  if (["GET", "POST"].includes(method) && normalized === "/sim/cards") {
+    return "/internal/admin/sim/cards";
+  }
+  if (method === "POST" && normalized === "/sim/cards/import") {
+    return "/internal/admin/sim/cards/import";
+  }
+  if (method === "POST" && normalized === "/sim/refresh") {
+    return "/internal/admin/sim/refresh";
+  }
   if (method === "GET" && normalized === "/ota/legacy-packages") {
     return "/internal/admin/ota/legacy-packages";
   }
@@ -127,6 +139,10 @@ export function isAllowedHonnmonoUpstream(url) {
       url.pathname === "/internal/admin/device/unbind" ||
       url.pathname === "/internal/admin/adapter-devices/dc-pro" ||
       /^\/internal\/admin\/adapter-devices\/dc-pro\/[A-Za-z0-9_-]{1,64}\/sessions$/.test(url.pathname) ||
+      url.pathname === "/internal/admin/sim/lookup" ||
+      url.pathname === "/internal/admin/sim/cards" ||
+      url.pathname === "/internal/admin/sim/cards/import" ||
+      url.pathname === "/internal/admin/sim/refresh" ||
       url.pathname === "/internal/admin/ota/legacy-packages" ||
       /^\/internal\/admin\/ota\/legacy-packages\/(150001|150002|150003|150004)$/.test(url.pathname)
     )

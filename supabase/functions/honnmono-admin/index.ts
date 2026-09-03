@@ -15,6 +15,11 @@
 //   POST /honnmono-admin/devices/flash/{certid}/unbind
 //   GET  /honnmono-admin/ota/legacy-packages
 //   POST /honnmono-admin/ota/legacy-packages/{slot}
+//   GET  /honnmono-admin/sim/lookup?iccid={19-20}|msisdn={<=13 digits}
+//   GET  /honnmono-admin/sim/cards?page&size&q
+//   POST /honnmono-admin/sim/cards
+//   POST /honnmono-admin/sim/cards/import
+//   POST /honnmono-admin/sim/refresh
 //
 // Log bytes are intentionally outside this allowlist. The link-issuance route
 // returns a short-lived, one-time Shenzhen URL that the browser downloads

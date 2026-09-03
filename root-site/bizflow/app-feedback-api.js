@@ -16,6 +16,15 @@ const ALLOWED_REQUESTS = [
   { method: "GET", path: /^\/devices\/flash\/[A-Za-z0-9_-]{1,64}\/uploads\/[1-9]\d*$/ },
   { method: "POST", path: /^\/devices\/flash\/[A-Za-z0-9_-]{1,64}\/actions$/ },
   { method: "POST", path: /^\/devices\/flash\/[A-Za-z0-9_-]{1,64}\/unbind$/ },
+  // OneLink SIM lookup: exactly one of iccid / msisdn, optional cache bypass.
+  {
+    method: "GET",
+    path: /^\/sim\/lookup\?(?:iccid=[0-9A-Za-z]{19,20}|msisdn=\d{1,13})(?:&refresh=1)?$/,
+  },
+  { method: "GET", path: /^\/sim\/cards(?:\?[^#]*)?$/ },
+  { method: "POST", path: /^\/sim\/cards$/ },
+  { method: "POST", path: /^\/sim\/cards\/import$/ },
+  { method: "POST", path: /^\/sim\/refresh$/ },
 ];
 
 export class HonnmonoAdminError extends Error {

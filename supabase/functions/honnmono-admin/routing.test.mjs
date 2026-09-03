@@ -50,6 +50,50 @@ test("rejects writes, raw download proxying, and unrelated routes", () => {
 });
 
 
+test("maps only the five OneLink SIM routes", () => {
+  assert.equal(
+    stripFunctionPrefix("/honnmono-admin/sim/lookup"),
+    "/sim/lookup",
+  );
+  assert.equal(
+    mapHonnmonoAdminPath("/sim/lookup", "GET"),
+    "/internal/admin/sim/lookup",
+  );
+  assert.equal(
+    mapHonnmonoAdminPath("/sim/cards", "GET"),
+    "/internal/admin/sim/cards",
+  );
+  assert.equal(
+    mapHonnmonoAdminPath("/sim/cards", "POST"),
+    "/internal/admin/sim/cards",
+  );
+  assert.equal(
+    mapHonnmonoAdminPath("/sim/cards/", "POST"),
+    "/internal/admin/sim/cards",
+  );
+  assert.equal(
+    mapHonnmonoAdminPath("/sim/cards/import", "POST"),
+    "/internal/admin/sim/cards/import",
+  );
+  assert.equal(
+    mapHonnmonoAdminPath("/sim/refresh", "POST"),
+    "/internal/admin/sim/refresh",
+  );
+  // The lookup itself is read-only, the refresh is the only write that reaches
+  // OneLink, and nothing else under /sim is proxied.
+  assert.equal(mapHonnmonoAdminPath("/sim/lookup", "POST"), "");
+  assert.equal(mapHonnmonoAdminPath("/sim/lookup", "DELETE"), "");
+  assert.equal(mapHonnmonoAdminPath("/sim/refresh", "GET"), "");
+  assert.equal(mapHonnmonoAdminPath("/sim/cards/import", "GET"), "");
+  assert.equal(mapHonnmonoAdminPath("/sim/cards/89860480192090995900", "GET"), "");
+  assert.equal(mapHonnmonoAdminPath("/sim", "GET"), "");
+  assert.equal(mapHonnmonoAdminPath("/sim/recharge", "POST"), "");
+  // SIM paths must not leak into the OTA or flash-admin branches.
+  assert.equal(mapOtaAdminPath("/sim/lookup", "GET"), "");
+  assert.equal(mapFlashAdminPath("/sim/refresh", "POST"), "");
+});
+
+
 test("maps only the OTA package read and replace routes", () => {
   assert.equal(stripFunctionPrefix("/honnmono-admin/ota/package"), "/ota/package");
   assert.equal(mapOtaAdminPath("/ota/package", "GET"), "/package");
@@ -117,6 +161,31 @@ test("pins the bridge to the Shenzhen app-api host and JSON endpoints", () => {
       new URL("https://app-api.honnmono.top/internal/admin/device/unbind"),
     ),
     true,
+  );
+  for (const pathname of [
+    "/internal/admin/sim/lookup",
+    "/internal/admin/sim/cards",
+    "/internal/admin/sim/cards/import",
+    "/internal/admin/sim/refresh",
+  ]) {
+    assert.equal(
+      isAllowedHonnmonoUpstream(
+        new URL(`https://app-api.honnmono.top${pathname}`),
+      ),
+      true,
+    );
+  }
+  assert.equal(
+    isAllowedHonnmonoUpstream(
+      new URL("https://app-api.honnmono.top/internal/admin/sim"),
+    ),
+    false,
+  );
+  assert.equal(
+    isAllowedHonnmonoUpstream(
+      new URL("https://app-api.honnmono.top/internal/admin/sim/cards/extra"),
+    ),
+    false,
   );
   assert.equal(
     isAllowedHonnmonoUpstream(
