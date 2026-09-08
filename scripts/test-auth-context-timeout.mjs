@@ -8,6 +8,7 @@ import {
 import { taskWriteErrorKey } from "../root-site/team/task-write-error.js";
 import { taskDictionaries } from "../root-site/team/tasks-i18n.js";
 import * as auth from "../root-site/data/auth.js";
+import { liveAuthCacheVersion, readLiveAuthCache, writeLiveAuthCache } from "../root-site/data/live-table-cache.js";
 
 await assert.rejects(
   withTimeout(new Promise(() => {}), 5, "unit-test"),
@@ -99,3 +100,95 @@ try {
 }
 
 console.log("Auth context timeout: PASS (typed timeout, session warning, timeout/error memo recovery, task i18n mapping)");
+
+// Drive the vendored SDK's real subscribers, including auth.js's session wiring.
+// No remote auth/table calls: these fixtures use only the real local cache.
+const storage = new Map();
+globalThis.window = new EventTarget();
+window.localStorage = {
+  get length() { return storage.size; },
+  key: (index) => [...storage.keys()][index] ?? null,
+  getItem: (key) => storage.get(key) ?? null,
+  setItem: (key, value) => storage.set(key, String(value)),
+  removeItem: (key) => storage.delete(key)
+};
+globalThis.CustomEvent ??= class CustomEvent extends Event {
+  constructor(type, options = {}) { super(type); this.detail = options.detail; }
+};
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async () => { throw new Error("Auth cache tests must not use the network"); };
+let sessionReads = 0;
+client.auth.getSession = async () => { sessionReads += 1; return { data: { session: null }, error: null }; };
+const session = { user: { id: "cache-user", email: "cache@example.test" } };
+const employee = { id: "cache-employee", user_id: session.user.id, company_id: "cache-company" };
+const seed = () => writeLiveAuthCache({ userId: session.user.id, employee });
+const emit = (event, value = session) => client.auth._notifyAllSubscribers(event, value, false);
+let authCacheTests = 0;
+try {
+  auth.deriveAuthContext({ session, employee, bindings: [], companies: [], roles: [] });
+  assert.equal(storage.get("team-last-user"), session.user.id);
+  assert.equal(storage.get("team-employee-cache-user"), employee.id);
+  const before = [...storage];
+  assert.equal(auth.getRememberedEmployeeId(session.user.id), employee.id);
+  assert.equal(auth.getRememberedEmployeeId("other-user"), "");
+  assert.equal(auth.getRememberedEmployeeId(""), "");
+  assert.deepEqual([...storage], before);
+  authCacheTests += 1;
+
+  await seed();
+  await auth.getCurrentUser({ refresh: true });
+  const readsBefore = sessionReads;
+  let version = liveAuthCacheVersion();
+  await emit("SIGNED_IN");
+  assert.equal(liveAuthCacheVersion(), version, "same user keeps the auth cache version");
+  assert.equal((await readLiveAuthCache(session.user.id)).employee.id, employee.id);
+  await auth.getCurrentUser();
+  assert.equal(sessionReads, readsBefore + 1, "same-user SIGNED_IN still clears the memory memo");
+  authCacheTests += 1;
+
+  await emit("SIGNED_IN", { user: { id: "different-user" } });
+  assert.notEqual(liveAuthCacheVersion(), version, "different user invalidates the persistent auth cache");
+  assert.equal(await readLiveAuthCache(session.user.id), null);
+  authCacheTests += 1;
+
+  await seed();
+  storage.delete("team-last-user");
+  version = liveAuthCacheVersion();
+  await emit("SIGNED_IN");
+  assert.notEqual(liveAuthCacheVersion(), version, "missing last-user hint keeps the original invalidation");
+  assert.equal(await readLiveAuthCache(session.user.id), null);
+  authCacheTests += 1;
+
+  await seed();
+  let resets = 0;
+  window.addEventListener(auth.TRANSIENT_AUTH_RESET_EVENT, () => { resets += 1; });
+  version = liveAuthCacheVersion();
+  await emit("SIGNED_OUT", null);
+  assert.equal(resets, 1);
+  assert.equal(liveAuthCacheVersion(), version, "transient SIGNED_OUT keeps its existing cache policy");
+  assert.ok(await readLiveAuthCache(session.user.id));
+  authCacheTests += 1;
+
+  await emit("USER_UPDATED");
+  assert.notEqual(liveAuthCacheVersion(), version);
+  assert.equal(await readLiveAuthCache(session.user.id), null);
+  authCacheTests += 1;
+
+  await seed();
+  version = liveAuthCacheVersion();
+  await auth.getCurrentUser({ refresh: true });
+  const initialReads = sessionReads;
+  await emit("INITIAL_SESSION");
+  await auth.getCurrentUser();
+  assert.equal(sessionReads, initialReads, "INITIAL_SESSION leaves the memory memo untouched");
+  assert.equal(liveAuthCacheVersion(), version);
+  assert.ok(await readLiveAuthCache(session.user.id));
+  authCacheTests += 1;
+} finally {
+  client.auth.getSession = originalGetSession;
+  globalThis.fetch = originalFetch;
+  auth.resetCurrentUserMemory();
+  delete globalThis.window;
+}
+assert.equal(authCacheTests, 7);
+console.log("AUTH_CACHE_R1=7/7 (identity hints, same/different user SIGNED_IN, missing hint, SIGNED_OUT, USER_UPDATED, INITIAL_SESSION)");

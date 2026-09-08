@@ -22,9 +22,10 @@ import {
 import {
   getLiveHomeDashboard,
   getLiveUnreadState,
+  rememberLiveUnreadSummary,
   LIVE_HOME_QUERY_MISS
 } from "./live-home-query.js";
-import { getLiveTeamTaskPage, LIVE_TEAM_TASK_MISS } from "./live-team-task-query.js";
+import { getLiveTeamTaskPage, peekPrefetchedTeamTaskPage, LIVE_TEAM_TASK_MISS } from "./live-team-task-query.js";
 import { buildTeamTaskSnapshotsFromRows, getLiveSnapshot, LIVE_SNAPSHOT_MISS } from "./live-snapshots.js";
 import { loadProviderSnapshot, providerSnapshotRevision } from "./provider-snapshot-cache.js";
 import {
@@ -342,6 +343,7 @@ async function syncReadStateAccount() {
 let unreadStateMemoKey = "";
 let unreadStatePromise = null;
 let pendingTeamTaskPagePromise = null;
+let taskPageUnreadHandoff = null;
 let unreadAccountId = "";
 let unreadCompanyId = "";
 
@@ -368,20 +370,40 @@ async function buildUnreadState() {
 }
 
 async function computeUnreadState(read) {
-  const packedTaskPage = pendingTeamTaskPagePromise;
+  const packedTaskPage = pendingTeamTaskPagePromise ?? peekPrefetchedTeamTaskPage();
   if (packedTaskPage) {
     try {
-      const { payload, authUser } = await packedTaskPage;
+      const packed = await packedTaskPage;
+      const payload = packed?.payload ?? packed;
       const sameScope = unreadAccountId
-        && String(authUser?.id || "") === unreadAccountId
-        && String(authUser?.activeCompanyId || "") === unreadCompanyId;
+        && String(payload?.currentUser?.employeeId || "") === unreadAccountId
+        && String(payload?.currentUser?.activeCompanyId || "") === unreadCompanyId;
       if (payload !== LIVE_TEAM_TASK_MISS && sameScope && payload?.unread?.unread && payload?.unread?.watermarks) {
-        return payload.unread;
+        taskPageUnreadHandoff = {
+          accountId: unreadAccountId, companyId: unreadCompanyId,
+          revision: providerSnapshotRevision(), read, value: payload.unread
+        };
+        return await rememberLiveUnreadSummary(payload.unread, { read }) ?? payload.unread;
       }
     } catch {
       // getTeamTaskData owns the legacy-page fallback; unread continues through
       // its existing direct RPC/fallback chain below.
     }
+  }
+  // loadPageUnread publishes its result, marks tasks read, then asks the bell
+  // again. Reuse only that next fully-read transition, never a partial watermark
+  // change or a newer snapshot revision that needs a fresh count.
+  const handoff = taskPageUnreadHandoff;
+  taskPageUnreadHandoff = null;
+  if (handoff && handoff.accountId === unreadAccountId && handoff.companyId === unreadCompanyId
+      && handoff.revision === providerSnapshotRevision()
+      && ["tasks", "orders", "messages", "inventory", "updates"].every((key) => {
+        if ((read[key] || null) === (handoff.read[key] || null)) return true;
+        const watermark = handoff.value.watermarks[key];
+        return read[key] && watermark && (key === "inventory"
+          ? read[key] === watermark : Date.parse(read[key]) >= Date.parse(watermark));
+      })) {
+    return await rememberLiveUnreadSummary(handoff.value, { read }) ?? handoff.value;
   }
   try {
     const live = await getLiveUnreadState();
