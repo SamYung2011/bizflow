@@ -26,6 +26,7 @@ import {
 
 const ADMIN_EMAIL = "samyung2011@gmail.com";
 const WA_ADMIN_EMAILS = Object.freeze([ADMIN_EMAIL, "a1017339632@gmail.com"]);
+const LAST_USER_STORAGE_KEY = "team-last-user";
 export const TRANSIENT_AUTH_RESET_EVENT = "tp:auth-transient-reset";
 
 export const RBAC_KEYS = Object.freeze([
@@ -61,10 +62,13 @@ function notifyTransientAuthReset() {
   }
 }
 
-function handleAuthCacheEvent(event) {
+function handleAuthCacheEvent(event, session) {
   // INITIAL_SESSION is page bootstrap, not a state transition; clearing it would defeat cross-page caching.
   if (event === "INITIAL_SESSION") return;
   clearCurrentUserMemory();
+  // The SDK also emits SIGNED_IN on same-user page bootstrap; keep the TTL cache.
+  if (event === "SIGNED_IN" && session?.user?.id
+      && session.user.id === safeLocalStorageGet(LAST_USER_STORAGE_KEY)) return;
   if (event === "SIGNED_OUT") {
     // Only explicit signOut() owns persistent cache removal; SDK refresh races can emit transient SIGNED_OUT.
     notifyTransientAuthReset();
@@ -159,8 +163,8 @@ export async function getSupabaseClient() {
           detectSessionInUrl: true
         }
       });
-      client.auth.onAuthStateChange((event) => {
-        handleAuthCacheEvent(event);
+      client.auth.onAuthStateChange((event, session) => {
+        handleAuthCacheEvent(event, session);
       });
       return client;
     });
@@ -320,6 +324,14 @@ export function getRememberedActiveCompanyId(userId) {
   return userId ? safeLocalStorageGet(activeCompanyStorageKey({ user_id: userId })) || "" : "";
 }
 
+function employeeIdStorageKey(userId) {
+  return `team-employee-${userId}`;
+}
+
+export function getRememberedEmployeeId(userId) {
+  return userId ? safeLocalStorageGet(employeeIdStorageKey(userId)) || "" : "";
+}
+
 export function hasPermission(context, key) {
   if (!RBAC_KEYS.includes(key)) return false;
   if (context?.isSuperAdmin || context?.isAdminOfActive) return true;
@@ -337,6 +349,8 @@ export function deriveAuthContext({ session, employee, bindings, companies, role
   const fallbackCompanyId = defaultBinding?.company_id ?? employee.company_id ?? allowedCompanyIds[0] ?? null;
   const activeCompanyId = allowedCompanyIds.includes(rememberedCompanyId) ? rememberedCompanyId : fallbackCompanyId;
   if (activeCompanyId) safeLocalStorageSet(activeCompanyStorageKey(employee), activeCompanyId);
+  safeLocalStorageSet(employeeIdStorageKey(session.user.id), employee.id);
+  safeLocalStorageSet(LAST_USER_STORAGE_KEY, session.user.id);
   const activeBinding = ownBindings.find((binding) => binding.company_id === activeCompanyId) ?? null;
   const activeCompany = companies.find((company) => company.id === activeCompanyId) ?? null;
   const activeRole = roles.find((role) => role.id === activeBinding?.role_id) ?? null;

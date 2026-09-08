@@ -40,6 +40,7 @@ function payload(companyId = "company-test", employeeId = "employee-test", count
 async function reset({ companyId = "company-test", cached = true, read = {} } = {}) {
   window.dispatchEvent(new Event(auth.TRANSIENT_AUTH_RESET_EVENT));
   auth.__reset();
+  await cache.invalidateLiveAuthCache();
   storage.clear();
   readState.setReadStateAccount(null);
   if (companyId) storage.set("team-active-company-test-user", companyId);
@@ -114,6 +115,29 @@ await test("unknown company with matching server company reuses one RPC", async 
   }
 });
 
+await test("employee hint supplies read watermarks when auth cache is missing", async () => {
+  const watermark = "2026-09-07T00:00:00Z";
+  await reset({ cached: false, read: { tasks: watermark } });
+  storage.set("team-employee-test-user", "employee-test");
+  await query.prefetchTeamTaskPage();
+  assert.equal(auth.__calls()[0].args.p_tasks_read, watermark);
+  await query.getLiveTeamTaskPage();
+  assert.equal(auth.__calls().length, 1);
+});
+
+await test("stale employee hint cannot reuse different read watermarks", async () => {
+  await reset({ cached: false, read: { tasks: "2026-09-08T00:00:00Z" } });
+  storage.set("team-employee-test-user", "old-employee");
+  storage.set("tp-read-state-v1:acct:old-employee", JSON.stringify({ tasks: "2026-09-07T00:00:00Z" }));
+  auth.__setRpcHandler(RPC, (args) => ({ ...payload(),
+    taskStats: { total: args.p_tasks_read === "2026-09-08T00:00:00Z" ? 3 : 7, completed: 0, open: 0, abandoned: 0 }
+  }));
+  await query.prefetchTeamTaskPage();
+  assert.equal(auth.__calls()[0].args.p_tasks_read, "2026-09-07T00:00:00Z");
+  assert.equal((await query.getLiveTeamTaskPage()).taskStats.total, 3);
+  assert.equal(auth.__calls().length, 2);
+});
+
 await test("unknown company mismatch returns the second RPC payload", async () => {
   await reset({ companyId: "" });
   auth.__setRpcHandler(RPC, (args) => payload(args.p_company_id || "other-company"));
@@ -186,6 +210,22 @@ await test("auth reset during setup cannot revive the old prefetch", async () =>
   assert.equal(auth.__calls().length, 0);
 });
 
+await test("auth reset while claiming prefetch retries RPC instead of returning MISS", async () => {
+  await reset();
+  auth.__holdNextRpc(RPC);
+  const warm = query.prefetchTeamTaskPage();
+  await waitForRpc();
+  const page = query.getLiveTeamTaskPage();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  window.dispatchEvent(new Event(auth.TRANSIENT_AUTH_RESET_EVENT));
+  let response = 0;
+  auth.__setRpcHandler(RPC, () => payload("company-test", "employee-test", ++response === 1 ? 7 : 3));
+  auth.__releaseRpc();
+  assert.equal((await page).unread.unread.tasks, 3);
+  await warm;
+  assert.equal(auth.__calls().length, 2);
+});
+
 await test("account change does not reuse another user's result", async () => {
   await reset();
   await query.prefetchTeamTaskPage();
@@ -255,5 +295,5 @@ await test("company switch rejects the prior bell handoff", async () => {
 
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.deepEqual(unhandled, []);
-assert.equal(passed, 17);
-console.log("TEAM_TASK_PREFETCH=17/17 (runtime RPC reuse, retry, scopes, watermarks, bell, reset)");
+assert.equal(passed, 20);
+console.log("TEAM_TASK_PREFETCH=20/20 (runtime RPC reuse, retry, scopes, watermarks, bell, reset, employee hint)");

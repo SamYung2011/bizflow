@@ -114,7 +114,8 @@ export async function load(url, context, nextLoad) {
   if (new URL(url).pathname.endsWith(AUTH_SUFFIX)) {
     // Exercise the production storage helper while keeping network auth stubbed.
     const production = await readFile(new URL(url), "utf8");
-    const helpers = ["safeLocalStorageGet", "activeCompanyStorageKey", "getRememberedActiveCompanyId"]
+    const helpers = ["safeLocalStorageGet", "activeCompanyStorageKey", "getRememberedActiveCompanyId",
+      "employeeIdStorageKey", "getRememberedEmployeeId"]
       .map((name) => production.match(new RegExp(`(?:export )?function ${name}\\([^]*?\\n}`, "m"))?.[0]);
     if (helpers.some((helper) => !helper)) throw new Error("Auth storage helper missing");
     return { format: "module", shortCircuit: true, source: AUTH_SOURCE + "\n" + helpers.join("\n") };

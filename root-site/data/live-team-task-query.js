@@ -1,7 +1,7 @@
 // Phase 1 deliberately keeps the full-detail packed response out of
 // live-query-cache/localStorage. Restore a bounded cache only after phase 2
 // ships include_detail=false plus lazy detail fetching.
-import { getCurrentUser, getRememberedActiveCompanyId, getSession, getSupabaseClient, TRANSIENT_AUTH_RESET_EVENT } from "./auth.js";
+import { getCurrentUser, getRememberedActiveCompanyId, getRememberedEmployeeId, getSession, getSupabaseClient, TRANSIENT_AUTH_RESET_EVENT } from "./auth.js";
 import { rememberLiveUnreadSummary } from "./live-home-query.js";
 import { getReadState, peekReadState, setReadStateAccount } from "./read-state.js";
 import { readLiveAuthCache } from "./live-table-cache.js";
@@ -139,7 +139,7 @@ export async function prefetchTeamTaskPage() {
         const companyId = getRememberedActiveCompanyId(userId);
         const cached = await readLiveAuthCache(userId);
         if (generation !== authGeneration) return null;
-        const read = peekReadState(cached?.employee?.id);
+        const read = peekReadState(cached?.employee?.id || getRememberedEmployeeId(userId));
         const promise = fetchTeamTaskPage({ client, userId, read }, {
           companyId, completedLimit: null, includeDetail: true
         });
@@ -188,8 +188,8 @@ export async function getLiveTeamTaskPage({
     try {
       // Keep the settled promise too: a fast RPC can finish before shellReady.
       const payload = await prefetched.promise;
-      if (generation !== authGeneration) return LIVE_TEAM_TASK_MISS;
-      if (String(payload.currentUser?.activeCompanyId || "") === query.companyId) {
+      if (generation === authGeneration
+          && String(payload.currentUser?.activeCompanyId || "") === query.companyId) {
         return withCurrentUnread(payload, live.read);
       }
     } catch {
