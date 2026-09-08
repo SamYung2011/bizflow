@@ -176,7 +176,11 @@ function functionInfo(signature) {
   return JSON.parse(sql(`SELECT to_jsonb(p) FROM pg_proc p WHERE oid='${signature}'::regprocedure;`));
 }
 const scopeFunctions = ["bizflow_visible_task_ids", "bizflow_scoped_task_assignees", "bizflow_scoped_task_feedbacks"];
-const scopeCatalog = () => scopeFunctions.map((name) => functionInfo(`public.${name}()`));
+const scopeCatalog = () => scopeFunctions.map((name) => {
+  // DROP/recreate intentionally changes these three OIDs; RPC OID stays checked.
+  const { oid, ...metadata } = functionInfo(`public.${name}()`);
+  return metadata;
+});
 function rpcStatement(company = A, limit = "NULL", detail = true) {
   return `SELECT public.bizflow_team_task_page('${company}', ${limit}, ${detail});`;
 }
@@ -216,7 +220,9 @@ try {
   run(pgCtl, ["-D", dataDir, "-o", `-k ${socketDir} -c listen_addresses=''`, "-w", "start"], { stdio: "ignore" });
   started = true;
   console.log(`POSTGRES_VERSION=${sql("SHOW server_version;")}`);
-  sql(`CREATE ROLE authenticated; CREATE ROLE anon; CREATE SCHEMA auth;
+  sql(`CREATE ROLE authenticated; CREATE ROLE anon; CREATE ROLE service_role BYPASSRLS;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO anon, authenticated, service_role;
+    CREATE SCHEMA auth;
     GRANT USAGE ON SCHEMA auth TO authenticated, anon;
     CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE
       AS $$ SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
@@ -282,6 +288,7 @@ try {
   const policiesBefore = policies();
   const helpersBefore = helpers();
   const rpcBefore = functionInfo(rpcSignature);
+  const rpcCommentBefore = sql(`SELECT obj_description('${rpcSignature}'::regprocedure, 'pg_proc');`);
   const callsBefore = functionCalls(users[2], rpcStatement());
   scenario("old direct policies match the fourteen-identity visibility oracle", () => {
     for (const user of users) assert.deepEqual(beforeLists[user.name], expectedLists(user), user.name);
@@ -410,6 +417,41 @@ try {
       console.log(`RETURNING_${index + 1}=1 row (${name})`);
     });
   });
+  scenario("116 alone recreates a dropped RPC with safe ACL and original COMMENT under Supabase defaults", () => {
+    const oldOid = functionInfo(rpcSignature).oid;
+    sql(`DROP FUNCTION ${rpcSignature};`);
+    sql(migration);
+    assert.notEqual(functionInfo(rpcSignature).oid, oldOid, "fixture must recreate the RPC from scratch");
+    assert.equal(sql(`SELECT has_function_privilege('anon','${rpcSignature}','EXECUTE');`), "f");
+    assert.equal(sql(`SELECT has_function_privilege('authenticated','${rpcSignature}','EXECUTE');`), "t");
+    assert.deepEqual(rpcPayload(users.at(-1)), { sqlstate: "42501" });
+    assert.deepEqual(rpcPayload(users[2]), beforePayloads[users[2].name]);
+    assert.ok(rpcCommentBefore.length > 0);
+    assert.equal(sql(`SELECT obj_description('${rpcSignature}'::regprocedure, 'pg_proc');`), rpcCommentBefore);
+    console.log("FRESH_116_RPC=anon:42501; authenticated:full payload equal; COMMENT:exact 111");
+  });
+  scenario("service_role cannot execute the private visible-set function despite explicit default grants", () => {
+    assert.equal(sql("SELECT has_function_privilege('service_role','public.bizflow_visible_task_ids()','EXECUTE');"), "f");
+    const denied = asUser({ role: "service_role", uid: "" }, "SELECT public.bizflow_visible_task_ids();", true);
+    assert.equal(denied.status, 3);
+    assert.match(denied.stderr, /42501: permission denied for function bizflow_visible_task_ids/);
+    console.log("PRIVATE_VISIBLE_SET_SERVICE_ROLE=execute:false; call:42501");
+  });
+  scenario("116 replaces all three stale return types while preserving the RPC object and ACL", () => {
+    const expectedScope = scopeCatalog();
+    const expectedRpc = functionInfo(rpcSignature);
+    sql(`DROP FUNCTION public.bizflow_scoped_task_assignees();
+      DROP FUNCTION public.bizflow_scoped_task_feedbacks();
+      DROP FUNCTION public.bizflow_visible_task_ids();
+      ${scopeFunctions.map((name) => `CREATE FUNCTION public.${name}() RETURNS integer LANGUAGE sql AS $$ SELECT 1 $$;`).join("\n")}`);
+    assert.equal(sql("SELECT has_function_privilege('service_role','public.bizflow_visible_task_ids()','EXECUTE');"), "t",
+      "Supabase default privileges must explicitly grant service_role before the migration revoke");
+    sql(migration);
+    assert.deepEqual(scopeCatalog(), expectedScope);
+    assert.deepEqual(functionInfo(rpcSignature), expectedRpc, "RPC OID and ACL must survive 116 reruns");
+    assert.deepEqual(rpcPayload(users[2]), beforePayloads[users[2].name]);
+    console.log("STALE_RETURN_TYPES=3 replaced; RPC OID/ACL:unchanged; payload:equal");
+  });
   if (!mutation) {
     for (const name of Object.keys(mutations)) {
       scenario(`${name} mutation makes the independent script fail`, () => {
@@ -420,7 +462,7 @@ try {
       });
     }
   }
-  assert.equal(passed, 48);
+  assert.equal(passed, 51);
   console.log(`TASK_SCOPE_RPC_PG=${passed}/${passed} (policies unchanged, 14 RPC identities, reader no-extra-row gate, three mutations, legacy single-row plans, two RPC visible sets)`);
 } finally {
   if (started) run(pgCtl, ["-D", dataDir, "-m", "fast", "-w", "stop"], { allowFailure: true });

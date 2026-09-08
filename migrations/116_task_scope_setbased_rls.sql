@@ -6,6 +6,11 @@
 -- 116 尚未灌库；本文件替代 R0/R1，不负责修复已手动灌过的旧实验策略。Safe to rerun.
 BEGIN;
 
+-- 先清理三个内部函数的旧返回类型；RPC 保留原对象，不 DROP。
+DROP FUNCTION IF EXISTS public.bizflow_scoped_task_assignees();
+DROP FUNCTION IF EXISTS public.bizflow_scoped_task_feedbacks();
+DROP FUNCTION IF EXISTS public.bizflow_visible_task_ids();
+
 -- (1) owner 内部可见集合，原 R1 函数正文不变。
 CREATE OR REPLACE FUNCTION public.bizflow_visible_task_ids()
 RETURNS SETOF uuid
@@ -43,7 +48,7 @@ AS $function$
      );
 $function$;
 
-REVOKE ALL ON FUNCTION public.bizflow_visible_task_ids() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.bizflow_visible_task_ids() FROM PUBLIC, anon, authenticated, service_role;
 
 -- (2) 受控读取：权限过滤必须在 DEFINER 函数内，不能只依赖 RPC 外层 JOIN。
 CREATE OR REPLACE FUNCTION public.bizflow_scoped_task_assignees()
@@ -250,6 +255,18 @@ AS $function$
     'generatedAt', to_char(now() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD"T"HH24:MI:SS')
   );
 $function$;
+
+REVOKE ALL ON FUNCTION public.bizflow_team_task_page(
+  uuid, integer, boolean, timestamptz, timestamptz, timestamptz, text, timestamptz
+) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.bizflow_team_task_page(
+  uuid, integer, boolean, timestamptz, timestamptz, timestamptz, text, timestamptz
+) TO authenticated;
+
+COMMENT ON FUNCTION public.bizflow_team_task_page(
+  uuid, integer, boolean, timestamptz, timestamptz, timestamptz, text, timestamptz
+) IS
+  'RLS-scoped one-trip raw-row payload for the team task page and task overview.';
 
 NOTIFY pgrst, 'reload schema';
 COMMIT;
