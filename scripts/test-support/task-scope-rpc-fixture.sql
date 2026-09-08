@@ -13,6 +13,19 @@ ALTER TABLE public.employee_tasks ADD COLUMN created_at timestamptz DEFAULT '202
   ADD COLUMN note text, ADD COLUMN attachments jsonb DEFAULT '[]';
 ALTER TABLE public.task_assignees ADD COLUMN created_at timestamptz DEFAULT '2026-09-08';
 ALTER TABLE public.employee_task_feedbacks ADD COLUMN created_at timestamptz DEFAULT '2026-09-08';
+-- Give each row an unambiguous ORDER BY key before the write trigger is installed.
+-- RPC comparison must preserve array order, not sort payloads to hide a difference.
+UPDATE public.task_assignees a SET created_at='2026-09-08'::timestamptz + r.n * interval '1 second'
+FROM (SELECT task_id, employee_id, row_number() OVER (ORDER BY task_id, employee_id) n FROM public.task_assignees) r
+WHERE a.task_id=r.task_id AND a.employee_id=r.employee_id;
+UPDATE public.employee_task_feedbacks f SET created_at='2026-09-08'::timestamptz + r.n * interval '1 second'
+FROM (SELECT id, row_number() OVER (ORDER BY id) n FROM public.employee_task_feedbacks) r WHERE f.id=r.id;
+UPDATE public.employee_departments d SET created_at='2026-09-08'::timestamptz + r.n * interval '1 second'
+FROM (SELECT employee_id, department_id, row_number() OVER (ORDER BY employee_id, department_id) n FROM public.employee_departments) r
+WHERE d.employee_id=r.employee_id AND d.department_id=r.department_id;
+UPDATE public.employee_tasks SET status='done', completed_at='2026-09-08'::timestamptz +
+  right(id::text, 1)::integer * interval '1 minute'
+WHERE id IN ('50000000-0000-0000-0000-000000000001', '50000000-0000-0000-0000-000000000002');
 CREATE TABLE public.departments (id uuid PRIMARY KEY, company_id uuid, name text);
 INSERT INTO public.departments VALUES
   ('40000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','A-D1'),

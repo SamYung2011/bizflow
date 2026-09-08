@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
-import { checkSetPlan, explainRpc, normalizePayload } from "./test-support/task-scope-rls-plans.mjs";
+import { normalizePayload, assertLegacyPlan } from "./test-support/task-scope-rls-plans.mjs";
 import { spawnSync } from "node:child_process";
 import { accessSync, constants, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const scriptPath = fileURLToPath(import.meta.url);
+const repoRoot = dirname(dirname(scriptPath));
 const read = (path) => readFileSync(join(repoRoot, path), "utf8");
 const migration = read("migrations/116_task_scope_setbased_rls.sql");
 const sources = {
@@ -33,9 +34,9 @@ function without(fragment) {
 const mutations = {
   creator: without("OR (t.creator_employee_id IS NOT NULL AND t.creator_employee_id = me.employee_id)"),
   department: without("t.department_id IS NULL OR "),
-  all: migration.replaceAll("\n  FOR SELECT TO authenticated\n", "\n  FOR ALL TO authenticated\n")
+  unfiltered: without("  WHERE assignee.task_id IN (SELECT public.bizflow_visible_task_ids())")
+    .replace("  WHERE feedback.task_id IN (SELECT public.bizflow_visible_task_ids())", "")
 };
-assert.equal(migration.split("\n  FOR SELECT TO authenticated\n").length, 3);
 const mutation = process.argv.find((arg) => arg.startsWith("--mutation="))?.split("=")[1];
 if (mutation) assert.ok(mutations[mutation], "Unknown mutation");
 
@@ -167,27 +168,41 @@ function policies() {
 }
 function helpers() {
   return JSON.parse(sql(`SELECT jsonb_agg(to_jsonb(p) ORDER BY p.oid) FROM pg_proc p
-    JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname <> 'bizflow_visible_task_ids';`));
+    JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname NOT IN
+      ('bizflow_visible_task_ids','bizflow_scoped_task_assignees','bizflow_scoped_task_feedbacks','bizflow_team_task_page');`));
 }
-const untouchedPolicy = (p) => !["task_assignees_select", "fb_select_by_task_scope"].includes(p.policyname);
-function functionInfo() {
-  return JSON.parse(sql(`SELECT to_jsonb(p) FROM pg_proc p WHERE oid='public.bizflow_visible_task_ids()'::regprocedure;`));
+const rpcSignature = "public.bizflow_team_task_page(uuid, integer, boolean, timestamptz, timestamptz, timestamptz, text, timestamptz)";
+function functionInfo(signature) {
+  return JSON.parse(sql(`SELECT to_jsonb(p) FROM pg_proc p WHERE oid='${signature}'::regprocedure;`));
 }
-function assertEquivalent(before, after) {
-  for (const user of users) for (const table of ["tasks", "assignees", "feedbacks"]) {
-    assert.deepEqual(after[user.name][table], before[user.name][table], `${user.name}/${table} visibility changed`);
+const scopeFunctions = ["bizflow_visible_task_ids", "bizflow_scoped_task_assignees", "bizflow_scoped_task_feedbacks"];
+const scopeCatalog = () => scopeFunctions.map((name) => functionInfo(`public.${name}()`));
+function rpcStatement(company = A, limit = "NULL", detail = true) {
+  return `SELECT public.bizflow_team_task_page('${company}', ${limit}, ${detail});`;
+}
+function rpcPayload(user, statement = rpcStatement(user.company || user.companies[0] || A)) {
+  if (user.role === "anon") {
+    const denied = asUser(user, statement, true);
+    assert.equal(denied.status, 3);
+    assert.match(denied.stderr, /42501: permission denied for function bizflow_team_task_page/);
+    return { sqlstate: "42501" };
   }
+  return normalizePayload(JSON.parse(asUser(user, statement)));
 }
-
-function assertSelectPolicies() {
-  const selected = policies().filter((p) => !untouchedPolicy(p));
-  assert.equal(selected.length, 2);
-  for (const p of selected) {
-    assert.equal(p.cmd, "SELECT", `${p.policyname} must be SELECT-only`);
-    assert.deepEqual(p.roles, ["authenticated"]);
-    assert.equal(p.permissive, "PERMISSIVE");
-    assert.equal(p.with_check, null);
-  }
+function childRows(user, scoped = false) {
+  return JSON.parse(asUser(user, `SELECT jsonb_build_object(
+    'assignees', (SELECT COALESCE(jsonb_agg(to_jsonb(a) ORDER BY a.task_id, a.employee_id), '[]'::jsonb)
+      FROM public.${scoped ? "bizflow_scoped_task_assignees()" : "task_assignees"} a),
+    'feedbacks', (SELECT COALESCE(jsonb_agg(to_jsonb(f) ORDER BY f.id), '[]'::jsonb)
+      FROM public.${scoped ? "bizflow_scoped_task_feedbacks()" : "employee_task_feedbacks"} f)
+  );`));
+}
+function functionCalls(user, statement) {
+  sql("SELECT pg_stat_reset();");
+  sql(`SET track_functions='all'; BEGIN; SET LOCAL ROLE authenticated;
+    SET LOCAL request.jwt.claim.sub='${user.uid}'; ${statement} COMMIT;
+    SELECT pg_stat_force_next_flush();`);
+  return JSON.parse(sql("SELECT COALESCE(jsonb_object_agg(funcname,calls),'{}'::jsonb) FROM pg_stat_user_functions;"));
 }
 const deniedTask = id(5, 2); // A/NULL department, creator admin-A; readable by member-A-none, not manageable.
 const negativeWrites = [
@@ -220,8 +235,7 @@ try {
     ${helper(31, "is_task_assignee")}
     ${["has_company_permission", "can_manage_task_assignees", "is_valid_task_assignee", "prevent_task_assignee_identity_update"].map((name) => helper(82, name)).join("\n")}
     ${["can_manage_task_subtasks", "can_insert_task_subtask"].map((name) => helper(94, name)).join("\n")}
-    CREATE TRIGGER trg_prevent_task_assignee_identity_update BEFORE UPDATE ON public.task_assignees
-      FOR EACH ROW EXECUTE FUNCTION public.prevent_task_assignee_identity_update();
+
     ALTER TABLE public.employee_tasks ENABLE ROW LEVEL SECURITY;
     ALTER TABLE public.task_assignees ENABLE ROW LEVEL SECURITY;
     ALTER TABLE public.employee_task_feedbacks ENABLE ROW LEVEL SECURITY;
@@ -250,6 +264,8 @@ try {
   }
   // Full original 111 + 104 unread function; additional empty read tables are fixture-only.
   sql(read("scripts/test-support/task-scope-rpc-fixture.sql"));
+  sql(`CREATE TRIGGER trg_prevent_task_assignee_identity_update BEFORE UPDATE ON public.task_assignees
+    FOR EACH ROW EXECUTE FUNCTION public.prevent_task_assignee_identity_update();`);
   sql(helper(82, "can_select_employee"));
   sql(["employees_select_by_company", "employee_companies_select_by_company", "roles_select_by_company"]
     .map((name) => policy(82, name)).join("\n"));
@@ -259,83 +275,122 @@ try {
     sql(extract(read(path), new RegExp(`CREATE OR REPLACE FUNCTION public\\.${name}\\([^]*?\\$function\\$;`), name));
   }
   sql(read("migrations/111_bizflow_team_task_page.sql"));
-  const rpcStatement = `SELECT public.bizflow_team_task_page('${A}', NULL, true);`;
-  const rpcBefore = normalizePayload(JSON.parse(asUser(users[2], rpcStatement)));
-  const before = capture();
+  const beforeLists = capture();
+  const beforeRows = Object.fromEntries(users.map((user) => [user.name, childRows(user)]));
+  const beforePayloads = Object.fromEntries(users.map((user) => [user.name, rpcPayload(user)]));
+  const limitedBefore = rpcPayload(users[2], rpcStatement(A, "1", false));
   const policiesBefore = policies();
   const helpersBefore = helpers();
-  scenario("old policies match the independent fourteen-identity visibility oracle", () => {
-    for (const user of users) assert.deepEqual(before[user.name], expectedLists(user), user.name);
-    assert.equal(before.super.tasks.length, tasks.length);
-    assert.equal(before.super.assignees.length, tasks.length * 2);
-    assert.equal(before.super.feedbacks.length, feedbacks.length, "fb_admin_all must retain orphan visibility");
+  const rpcBefore = functionInfo(rpcSignature);
+  const callsBefore = functionCalls(users[2], rpcStatement());
+  scenario("old direct policies match the fourteen-identity visibility oracle", () => {
+    for (const user of users) assert.deepEqual(beforeLists[user.name], expectedLists(user), user.name);
+    assert.equal(beforeRows.super.feedbacks.length, 74, "the unchanged fb_admin_all exposes four orphan rows");
   });
-  scenario("116 can be applied twice with identical function and policy catalogs", () => {
-    sql(mutation ? mutations[mutation] : migration);
-    const once = { policies: policies(), fn: functionInfo() };
-    sql(mutation ? mutations[mutation] : migration);
-    assert.deepEqual({ policies: policies(), fn: functionInfo() }, once);
+  scenario("116 is repeatable with identical scope functions and RPC catalogs", () => {
+    const applied = mutation ? mutations[mutation] : migration;
+    sql(applied);
+    const once = { policies: policies(), scope: scopeCatalog(), rpc: functionInfo(rpcSignature) };
+    sql(applied);
+    assert.deepEqual({ policies: policies(), scope: scopeCatalog(), rpc: functionInfo(rpcSignature) }, once);
   });
-  scenario("employee_tasks, all write/admin_all policies and every old helper stay unchanged", () => {
-    assert.deepEqual(policies().filter(untouchedPolicy), policiesBefore.filter(untouchedPolicy));
+  scenario("every policy on all three task tables stays byte-identical", () => {
+    assert.deepEqual(policies(), policiesBefore);
+    assert.deepEqual(capture(), beforeLists);
+    console.log("POLICIES_UNCHANGED=all three tables; DIRECT_LISTS=42/42");
+  });
+  scenario("old helpers and RPC metadata stay unchanged; RPC body changes only two FROMs", () => {
     assert.deepEqual(helpers(), helpersBefore);
-    assert.equal(sql(`SELECT bool_and(relrowsecurity AND NOT relforcerowsecurity AND pg_get_userbyid(relowner)='postgres')
-      FROM pg_class WHERE oid IN ('public.employee_tasks'::regclass,'public.task_assignees'::regclass,'public.employee_task_feedbacks'::regclass);`), "t");
+    const rpcAfter = functionInfo(rpcSignature);
+    assert.equal(rpcAfter.provolatile, "s");
+    assert.equal(rpcAfter.prosecdef, false);
+    assert.deepEqual({ ...rpcAfter, prosrc: rpcBefore.prosrc }, rpcBefore);
+    const expected = rpcBefore.prosrc.replace("FROM public.task_assignees AS assignee", "FROM public.bizflow_scoped_task_assignees() AS assignee")
+      .replace("FROM public.employee_task_feedbacks AS feedback", "FROM public.bizflow_scoped_task_feedbacks() AS feedback");
+    assert.equal(rpcAfter.prosrc, expected);
   });
-  const after = capture();
   for (const user of users) {
-    scenario(`${user.name}: old/new full lists match across all three tables`, () => {
-      for (const table of ["tasks", "assignees", "feedbacks"]) {
-        assert.deepEqual(after[user.name][table], before[user.name][table], `${user.name}/${table} visibility changed`);
-      }
-      console.log(`EQUIVALENCE_${user.name}=${Object.entries(after[user.name]).map(([table, rows]) => `${table}:${rows.length}`).join(" ")}`);
+    scenario(`${user.name}: complete RPC payload retains array order and values`, () => {
+      const payload = rpcPayload(user);
+      assert.deepEqual(payload, beforePayloads[user.name], `${user.name}: RPC payload changed`);
+      const counts = user.role === "anon" ? "denied=42501" : `tasks:${payload.tasks.length} assignees:${payload.assignees.length} feedbacks:${payload.feedbacks.length}`;
+      console.log(`RPC_EQUIVALENCE_${user.name}=${counts}`);
     });
   }
-  scenario("new function has the exact definer/stable/search_path/role boundary", () => {
-    const fn = functionInfo();
-    assert.equal(fn.prosecdef, true);
-    assert.equal(fn.provolatile, "s");
-    assert.deepEqual(fn.proconfig, ['search_path=""']);
-    assertSelectPolicies();
-    assert.equal(sql("SELECT has_function_privilege('authenticated','public.bizflow_visible_task_ids()','EXECUTE');"), "t");
-    assert.equal(sql("SELECT has_function_privilege('anon','public.bizflow_visible_task_ids()','EXECUTE');"), "f");
-    const denied = asUser(users.at(-1), "SELECT public.bizflow_visible_task_ids();", true);
-    assert.notEqual(denied.status, 0);
-    assert.match(denied.stderr, /42501: permission denied for function bizflow_visible_task_ids/);
+  scenario("completed_limit=1 and summary mode preserve the exact RPC payload", () => {
+    const payload = rpcPayload(users[2], rpcStatement(A, "1", false));
+    assert.deepEqual(payload, limitedBefore);
+    assert.equal(payload.tasks.filter((task) => task.status === "done").length, 1);
+    assert.ok(payload.tasks.every((task) => !Object.hasOwn(task, "note") && !Object.hasOwn(task, "attachments")));
+    console.log(`RPC_LIMITED_MATCH=tasks:${payload.tasks.length}; done:1; detail:false`);
   });
-  scenario("duplicate user_id keeps the same LIMIT 1 identity and memberships", () => {
-    const selected = asUser(duplicateUser, "SELECT public.current_employee_id();");
-    assert.equal(selected, selectedEmployees.get(duplicateUser.name));
-    assert.ok([duplicateUser.employee, id(1, 114)].includes(selected));
-    console.log(`DUPLICATE_EMPLOYEE_SELECTED=${selected}; LINKED_EMPLOYEES=2; COMPANIES=A+B`);
+  for (const table of ["task_assignees", "employee_task_feedbacks"]) {
+    scenario(`${table}: single-row plan contains no visible-set function`, () => {
+      const statement = `SELECT count(*) FROM public.${table} WHERE task_id='${deniedTask}'`;
+      const plan = JSON.parse(asUser(users[2], `EXPLAIN (ANALYZE, VERBOSE, FORMAT JSON) ${statement};`))[0].Plan;
+      assertLegacyPlan(plan, table);
+      assert.equal(asUser(users[2], `${statement};`), "2");
+    });
+  }
+  scenario("scope function properties and direct execution ACLs are exact", () => {
+    scopeFunctions.forEach((name, index) => {
+      const fn = functionInfo(`public.${name}()`);
+      assert.equal(fn.provolatile, "s");
+      assert.equal(fn.prosecdef, true);
+      assert.equal(fn.proretset, true);
+      const returnType = index === 0 ? "uuid" : `public.${index === 1 ? "task_assignees" : "employee_task_feedbacks"}`;
+      assert.equal(fn.prorettype, sql(`SELECT '${returnType}'::regtype::oid;`));
+      assert.deepEqual(fn.proconfig, ['search_path=""']);
+      assert.equal(sql(`SELECT has_function_privilege('authenticated','public.${name}()','EXECUTE');`), index === 0 ? "f" : "t");
+      assert.equal(sql(`SELECT has_function_privilege('anon','public.${name}()','EXECUTE');`), "f");
+      const denied = asUser(users.at(-1), `SELECT * FROM public.${name}();`, true);
+      assert.equal(denied.status, 3);
+      assert.match(denied.stderr, new RegExp(`42501: permission denied for function ${name}`));
+    });
+    const privateCall = asUser(users[2], "SELECT public.bizflow_visible_task_ids();", true);
+    assert.equal(privateCall.status, 3);
+    assert.match(privateCall.stderr, /42501: permission denied for function bizflow_visible_task_ids/);
+  });
+  // Check an ordinary member first so the unfiltered mutation proves cross-scope
+  // leakage, rather than stopping only at the super admin's orphan-row exception.
+  for (const user of [users[2], ...users.filter((user) => user !== users[2] && user.role !== "anon")]) {
+    scenario(`${user.name}: direct controlled readers expose no extra child rows`, () => {
+      const actual = childRows(user, true);
+      const parentIds = new Set(tasks.map((task) => task.id));
+      const expected = Object.fromEntries(Object.entries(beforeRows[user.name]).map(([table, rows]) =>
+        [table, rows.filter((row) => parentIds.has(row.task_id))]));
+      // Confirmed R2 exception: fb_admin_all lets the super admin see orphans;
+      // controlled readers omit them, while the RPC's task_rows JOIN always did.
+      assert.deepEqual(actual, expected, `${user.name}: controlled reader scope changed`);
+      const omitted = beforeRows[user.name].feedbacks.length - actual.feedbacks.length;
+      assert.equal(omitted, user.name === "super" ? 4 : 0);
+      console.log(`READER_SCOPE_${user.name}=assignees:${actual.assignees.length} feedbacks:${actual.feedbacks.length} omitted_orphans:${omitted}`);
+    });
+  }
+  for (const name of scopeFunctions.slice(1)) {
+    scenario(`${name} computes one visible set and one admin identity`, () => {
+      const calls = functionCalls(users[2], `SELECT count(*) FROM public.${name}();`);
+      assert.equal(calls[name], 1);
+      assert.equal(calls.bizflow_visible_task_ids, 1);
+      assert.equal(calls.is_bf_admin, 1);
+      assert.equal(calls.can_select_employee_task_by_id || 0, 0);
+      console.log(`READER_FUNCTION_CALLS_${name}=${JSON.stringify(calls)}`);
+    });
+  }
+  // Count the entire real 111 RPC before and after the reader change; ancillary
+  // policies still invoke the original identity helpers and are not hidden here.
+  const callsAfter = functionCalls(users[2], rpcStatement());
+  console.log(`RPC_FUNCTION_CALLS_BEFORE=${JSON.stringify(callsBefore)}`);
+  console.log(`RPC_FUNCTION_CALLS_AFTER=${JSON.stringify(callsAfter)}`);
+  scenario("RPC computes two visible sets and never calls child row-by-row scope", () => {
+    assert.equal(callsAfter.bizflow_visible_task_ids, 2);
+    assert.equal(callsAfter.bizflow_scoped_task_assignees, 1);
+    assert.equal(callsAfter.bizflow_scoped_task_feedbacks, 1);
+    assert.equal(callsAfter.can_select_employee_task_by_id || 0, 0);
+    assert.ok(callsBefore.can_select_employee_task_by_id > 0);
   });
   for (const [name, statement] of negativeWrites) {
-    scenario(`${name} is denied with zero RETURNING rows`, () => {
-      assert.equal(asUser(users[2], statement), "", `${name} must affect zero rows`);
-      console.log(`NEGATIVE_WRITE_${name}=0 rows`);
-    });
-  }
-  for (const [name, altered] of Object.entries(mutations)) {
-    scenario(`${name} mutation is rejected by the security assertions`, () => {
-      try {
-        sql(altered);
-        if (name === "all") {
-          assert.throws(assertSelectPolicies, (error) => error instanceof assert.AssertionError && /SELECT-only/.test(error.message));
-          for (const [label, statement] of negativeWrites) {
-            const affected = asUser(users[2], statement).split("\n").filter(Boolean);
-            assert.equal(affected.length, 1, `${label}: FOR ALL must reproduce the write escalation`);
-            console.log(`FOR_ALL_ESCALATION_${label}=1 row (expected zero)`);
-          }
-        } else {
-          assert.throws(() => assertEquivalent(before, capture()), (error) =>
-            error instanceof assert.AssertionError && /visibility changed/.test(error.message));
-        }
-        console.log(`TASK_SCOPE_MUTATION_${name.toUpperCase()}=DETECTED`);
-      } finally { sql(migration); }
-      assertSelectPolicies();
-      assertEquivalent(before, capture());
-      for (const [label, statement] of negativeWrites) assert.equal(asUser(users[2], statement), "", label);
-    });
+    scenario(`${name} remains denied`, () => assert.equal(asUser(users[2], statement), "", name));
   }
   const returned = asUser(users[1], `
     INSERT INTO public.employee_tasks (id,company_id,creator_employee_id,title)
@@ -355,63 +410,18 @@ try {
       console.log(`RETURNING_${index + 1}=1 row (${name})`);
     });
   });
-  for (const table of ["task_assignees", "employee_task_feedbacks"]) {
-    scenario(`${table}: visible-task set is computed once`, () => {
-      const statement = `SELECT count(*) FROM public.${table}`;
-      const text = asUser(users[2], `EXPLAIN (ANALYZE, VERBOSE, FORMAT TEXT) ${statement};`);
-      const plan = JSON.parse(asUser(users[2], `EXPLAIN (ANALYZE, VERBOSE, FORMAT JSON) ${statement};`))[0].Plan;
-      checkSetPlan(plan, table, 1);
-      assert.match(text, /bizflow_visible_task_ids/);
-      console.log(`EXPLAIN_${table}\n${text}\nSET_EVALUATIONS_${table}=1`);
-    });
+  if (!mutation) {
+    for (const name of Object.keys(mutations)) {
+      scenario(`${name} mutation makes the independent script fail`, () => {
+        const result = run(process.execPath, [scriptPath, `--mutation=${name}`], { allowFailure: true });
+        assert.equal(result.status, 1);
+        assert.match(result.stderr, name === "unfiltered" ? /member-A-none: controlled reader scope changed/ : /RPC payload changed/);
+        console.log(`TASK_SCOPE_RPC_MUTATION_${name.toUpperCase()}=DETECTED exit=1; ${result.stderr.match(/AssertionError[^\n]*/)?.[0]}`);
+      });
+    }
   }
-  for (const table of ["task_assignees", "employee_task_feedbacks"]) {
-    scenario(`${table} single-task .eq plan materializes each set node once`, () => {
-      const statement = `SELECT * FROM public.${table} WHERE task_id='${id(5, 2)}'`;
-      const plan = JSON.parse(asUser(users[2], `EXPLAIN (ANALYZE, VERBOSE, FORMAT JSON) ${statement};`))[0].Plan;
-      checkSetPlan(plan, `${table}_eq`, 2);
-    });
-  }
-  scenario("own assignee UPDATE RETURNING materializes each set node once", () => {
-    const statement = `UPDATE public.task_assignees SET completed_at=now()
-      WHERE task_id='${id(5, 2)}' AND employee_id='${users[2].employee}' RETURNING task_id`;
-    const plan = JSON.parse(asUser(users[2], `EXPLAIN (ANALYZE, VERBOSE, FORMAT JSON) ${statement};`))[0].Plan;
-    checkSetPlan(plan, "assignee_update_returning", 2);
-  });
-  scenario("complete original 111 RPC preserves its payload and bounds set nodes", () => {
-    const { payload, plans } = explainRpc(query, users[2].uid, rpcStatement);
-    assert.deepEqual(normalizePayload(payload), rpcBefore);
-    assert.equal(plans.length, 1, "auto_explain must capture the actual 111 SQL body exactly once");
-    checkSetPlan(plans[0].Plan, "rpc_111", 2);
-    console.log(`RPC_111_PAYLOAD_MATCH=tasks:${payload.tasks.length} assignees:${payload.assignees.length} feedbacks:${payload.feedbacks.length}; unread=original-104`);
-  });
-  scenario("MATERIALIZED me computes identity once, scopes remain distinct", () => {
-    sql("SELECT pg_stat_reset();");
-    sql(`SET track_functions='all'; SET request.jwt.claim.sub='${users[2].uid}'; SET ROLE authenticated;
-      SELECT count(*) FROM public.bizflow_visible_task_ids(); RESET ROLE; SELECT pg_stat_force_next_flush();`);
-    const calls = JSON.parse(sql("SELECT jsonb_object_agg(funcname,calls) FROM pg_stat_user_functions;"));
-    assert.equal(calls.bizflow_visible_task_ids, 1);
-    assert.equal(calls.is_bf_admin, 1);
-    assert.equal(calls.is_admin_of_company, 2);
-    assert.equal(calls.is_member_of_company, 2);
-    assert.equal(calls.is_member_of_department, 4);
-    // The unchanged department helper can call current_employee_id once per
-    // matching membership row. Measure that dependency separately from me.
-    sql("SELECT pg_stat_reset();");
-    // Read distinct departments as the fixture owner, just as the DEFINER set
-    // function does, so employee_tasks' separate RLS does not pollute the count.
-    sql(`SET track_functions='all'; SET request.jwt.claim.sub='${users[2].uid}';
-      SELECT public.is_member_of_department(d.department_id) FROM
-        (SELECT DISTINCT department_id FROM public.employee_tasks WHERE department_id IS NOT NULL) d;
-      SELECT pg_stat_force_next_flush();`);
-    const departmentCalls = JSON.parse(sql("SELECT jsonb_object_agg(funcname,calls) FROM pg_stat_user_functions;"));
-    assert.equal(departmentCalls.is_member_of_department, 4);
-    assert.equal(calls.current_employee_id - departmentCalls.current_employee_id, 1, "me itself must resolve identity once");
-    console.log(`MATERIALIZED_HELPER_CALLS=${JSON.stringify(calls)}`);
-    console.log(`DEPARTMENT_CURRENT_EMPLOYEE_CALLS=${departmentCalls.current_employee_id}; ME_CURRENT_EMPLOYEE_CALLS=1`);
-  });
-  assert.equal(passed, 36);
-  console.log("TASK_SCOPE_RLS_PG=36/36 (14 identities x 3 tables=42/42, three mutation gates, negative writes 3/3, RETURNING 4/4, .eq/UPDATE/111 set-node bounds, MATERIALIZED helper counts)");
+  assert.equal(passed, 48);
+  console.log(`TASK_SCOPE_RPC_PG=${passed}/${passed} (policies unchanged, 14 RPC identities, reader no-extra-row gate, three mutations, legacy single-row plans, two RPC visible sets)`);
 } finally {
   if (started) run(pgCtl, ["-D", dataDir, "-m", "fast", "-w", "stop"], { allowFailure: true });
   rmSync(probeRoot, { recursive: true, force: true });

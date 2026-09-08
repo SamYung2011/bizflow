@@ -1,16 +1,12 @@
--- 116: task_assignees / employee_task_feedbacks 的 SELECT 策略改集合式。
--- 此前两条策略逐行调 can_select_employee_task_by_id(task_id)，每行回查 employee_tasks + employees +
--- employee_companies + employee_departments；bizflow_team_task_page 0.88s 里约 0.53s 是这两张表。
--- 本迁移新增 bizflow_visible_task_ids()：每条语句只算一遍当前用户可见任务 id 集合（按 distinct 公司 /
--- 部门各调一次原 helper，布尔式与 can_select_employee_task 逐字等价），两条策略改 IN (SELECT ...)。
--- employee_tasks 自己的 SELECT 策略不动：INSERT…RETURNING 校验时 STABLE 函数看不见本命令刚插的行。
--- 写策略、admin_all 策略、helper 函数一律不动。Safe to rerun.
--- 等价性：is_bf_admin() 为同一调用；is_admin_of_company(NULL)=false，等价于 LEFT JOIN 落空后 COALESCE false。
--- creator = current_employee_id() 任一边 NULL 时原式为 NULL（WHERE 不通过），IS NOT NULL AND = 仍不通过。
--- member/department 支同理：NULL 公司不会命中成员；NULL 部门保留原允许分支，非 NULL 部门由同一 helper 判权。
--- R1: MATERIALIZED 固定 me 为一次求值，避免身份 helper 被 CTE 内联成逐任务调用；函数使用空 search_path。
+-- 116: 任务页 RPC 内部整批判权，三张任务表的策略一字不动。
+-- 背景：子表逐行 SELECT 判权拖慢整页 RPC；把集合放进策略会让 .eq、realtime、RETURNING
+-- 的单行判权随任务总数增长。R2 保留全部旧策略，仅在 RPC 批量读取子行时使用受控 DEFINER 函数。
+-- 可见集合保留 R1 的 MATERIALIZED me / 空 search_path / 原布尔式，authenticated 不可直接执行。
+-- 两个读取函数自行按可见父任务过滤，RPC 仍按原 task_rows JOIN 和 ORDER BY 输出。
+-- 116 尚未灌库；本文件替代 R0/R1，不负责修复已手动灌过的旧实验策略。Safe to rerun.
 BEGIN;
 
+-- (1) owner 内部可见集合，原 R1 函数正文不变。
 CREATE OR REPLACE FUNCTION public.bizflow_visible_task_ids()
 RETURNS SETOF uuid
 LANGUAGE sql
@@ -47,30 +43,219 @@ AS $function$
      );
 $function$;
 
-REVOKE ALL ON FUNCTION public.bizflow_visible_task_ids() FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.bizflow_visible_task_ids() TO authenticated;
+REVOKE ALL ON FUNCTION public.bizflow_visible_task_ids() FROM PUBLIC, anon, authenticated;
 
-DROP POLICY IF EXISTS task_assignees_select ON public.task_assignees;
-CREATE POLICY task_assignees_select ON public.task_assignees
-  FOR SELECT TO authenticated
-  USING (task_id IN (SELECT public.bizflow_visible_task_ids()));
+-- (2) 受控读取：权限过滤必须在 DEFINER 函数内，不能只依赖 RPC 外层 JOIN。
+CREATE OR REPLACE FUNCTION public.bizflow_scoped_task_assignees()
+RETURNS SETOF public.task_assignees
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ''
+AS $function$
+  SELECT assignee.*
+  FROM public.task_assignees AS assignee
+  WHERE assignee.task_id IN (SELECT public.bizflow_visible_task_ids());
+$function$;
 
-DROP POLICY IF EXISTS fb_select_by_task_scope ON public.employee_task_feedbacks;
-CREATE POLICY fb_select_by_task_scope ON public.employee_task_feedbacks
-  FOR SELECT TO authenticated
-  USING (task_id IN (SELECT public.bizflow_visible_task_ids()));
+CREATE OR REPLACE FUNCTION public.bizflow_scoped_task_feedbacks()
+RETURNS SETOF public.employee_task_feedbacks
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = ''
+AS $function$
+  SELECT feedback.*
+  FROM public.employee_task_feedbacks AS feedback
+  WHERE feedback.task_id IN (SELECT public.bizflow_visible_task_ids());
+$function$;
+
+REVOKE ALL ON FUNCTION public.bizflow_scoped_task_assignees() FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.bizflow_scoped_task_feedbacks() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.bizflow_scoped_task_assignees() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.bizflow_scoped_task_feedbacks() TO authenticated;
+
+-- (3) 111 原函数仅替换两个子表 CTE 的 FROM，保持 STABLE / INVOKER 与原 ACL。
+CREATE OR REPLACE FUNCTION public.bizflow_team_task_page(
+  p_company_id uuid DEFAULT NULL,
+  p_completed_limit integer DEFAULT NULL,
+  p_include_detail boolean DEFAULT false,
+  p_tasks_read timestamptz DEFAULT NULL,
+  p_orders_read timestamptz DEFAULT NULL,
+  p_messages_read timestamptz DEFAULT NULL,
+  p_inventory_read text DEFAULT NULL,
+  p_updates_read timestamptz DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = ''
+AS $function$
+  WITH
+  me AS MATERIALIZED (
+    SELECT employee.id AS employee_id, employee.name AS employee_name
+    FROM public.employees AS employee
+    WHERE employee.user_id = auth.uid()
+    ORDER BY employee.created_at ASC, employee.id ASC
+    LIMIT 1
+  ),
+  scope AS MATERIALIZED (
+    SELECT COALESCE(
+      p_company_id,
+      (
+        SELECT link.company_id
+        FROM public.employee_companies AS link
+        JOIN me ON me.employee_id = link.employee_id
+        ORDER BY link.joined_at ASC, link.id ASC
+        LIMIT 1
+      )
+    ) AS company_id
+  ),
+  task_access AS MATERIALIZED (
+    SELECT
+      public.is_bf_admin() AS is_admin,
+      public.has_company_permission(
+        (SELECT company_id FROM scope),
+        'can_delete_others_tasks'
+      ) AS can_delete_others
+  ),
+  selected_company AS MATERIALIZED (
+    SELECT company.id, company.feature_ai_batch
+    FROM public.companies AS company
+    WHERE company.id = (SELECT company_id FROM scope)
+    LIMIT 1
+  ),
+  visible_task_rows AS MATERIALIZED (
+    SELECT task.*
+    FROM public.employee_tasks AS task
+    WHERE task.company_id = (SELECT company_id FROM scope)
+  ),
+  task_stats AS MATERIALIZED (
+    SELECT
+      count(*) AS total,
+      count(*) FILTER (WHERE task.status = 'done') AS completed,
+      count(*) FILTER (WHERE COALESCE(task.status, 'open') NOT IN ('done', 'abandoned')) AS open,
+      count(*) FILTER (WHERE task.status = 'abandoned') AS abandoned
+    FROM visible_task_rows AS task
+  ),
+  completed_task_ids AS MATERIALIZED (
+    SELECT task.id
+    FROM visible_task_rows AS task
+    WHERE task.status = 'done'
+    ORDER BY task.completed_at DESC NULLS LAST, task.id ASC
+    LIMIT CASE
+      WHEN p_completed_limit IS NULL THEN NULL
+      ELSE GREATEST(p_completed_limit, 0)
+    END
+  ),
+  task_rows AS MATERIALIZED (
+    SELECT task.*
+    FROM visible_task_rows AS task
+    WHERE (
+        COALESCE(task.status, 'open') <> 'done'
+        OR task.id IN (SELECT completed.id FROM completed_task_ids AS completed)
+      )
+  ),
+  assignee_rows AS MATERIALIZED (
+    SELECT assignee.*
+    FROM public.bizflow_scoped_task_assignees() AS assignee
+    JOIN task_rows AS task ON task.id = assignee.task_id
+  ),
+  feedback_rows AS MATERIALIZED (
+    SELECT feedback.*
+    FROM public.bizflow_scoped_task_feedbacks() AS feedback
+    JOIN task_rows AS task ON task.id = feedback.task_id
+  )
+  SELECT jsonb_build_object(
+    'taskStats', jsonb_build_object(
+      'total', COALESCE((SELECT total FROM task_stats), 0),
+      'completed', COALESCE((SELECT completed FROM task_stats), 0),
+      'open', COALESCE((SELECT open FROM task_stats), 0),
+      'abandoned', COALESCE((SELECT abandoned FROM task_stats), 0)
+    ),
+    'tasks', COALESCE((
+      SELECT jsonb_agg(
+        CASE
+          WHEN p_include_detail THEN to_jsonb(task)
+          ELSE (to_jsonb(task) - 'note' - 'attachments') || jsonb_build_object(
+            'has_note', COALESCE(task.note, '') <> '',
+            'attachment_count', jsonb_array_length(public.bizflow_jsonb_array(task.attachments))
+          )
+        END
+        ORDER BY task.created_at DESC, task.id ASC
+      )
+      FROM task_rows AS task
+    ), '[]'::jsonb),
+    'assignees', COALESCE((
+      SELECT jsonb_agg(to_jsonb(assignee) ORDER BY assignee.created_at ASC)
+      FROM assignee_rows AS assignee
+    ), '[]'::jsonb),
+    'feedbacks', COALESCE((
+      SELECT jsonb_agg(to_jsonb(feedback) ORDER BY feedback.created_at ASC, feedback.id ASC)
+      FROM feedback_rows AS feedback
+    ), '[]'::jsonb),
+    'members', COALESCE((
+      SELECT jsonb_agg(to_jsonb(employee) ORDER BY employee.created_at ASC, employee.id ASC)
+      FROM public.employees AS employee
+    ), '[]'::jsonb),
+    'departments', COALESCE((
+      SELECT jsonb_agg(to_jsonb(department) ORDER BY department.name ASC, department.id ASC)
+      FROM public.departments AS department
+    ), '[]'::jsonb),
+    'employeeDepartments', COALESCE((
+      SELECT jsonb_agg(to_jsonb(link) ORDER BY link.created_at ASC)
+      FROM public.employee_departments AS link
+    ), '[]'::jsonb),
+    'employeeCompanies', COALESCE((
+      SELECT jsonb_agg(to_jsonb(link) ORDER BY link.joined_at ASC, link.id ASC)
+      FROM public.employee_companies AS link
+    ), '[]'::jsonb),
+    'roles', COALESCE((
+      SELECT jsonb_agg(to_jsonb(role) ORDER BY role.name ASC, role.id ASC)
+      FROM public.roles AS role
+    ), '[]'::jsonb),
+    'companies', COALESCE((
+      SELECT jsonb_agg(to_jsonb(company) ORDER BY company.created_at ASC, company.id ASC)
+      FROM public.companies AS company
+    ), '[]'::jsonb),
+    'taskPending', COALESCE((
+      SELECT jsonb_agg(to_jsonb(pending) ORDER BY pending.requested_at DESC, pending.id ASC)
+      FROM public.task_pending AS pending
+    ), '[]'::jsonb),
+    'companyJoinPending', COALESCE((
+      SELECT jsonb_agg(to_jsonb(pending) ORDER BY pending.requested_at DESC, pending.id ASC)
+      FROM public.company_join_pending AS pending
+    ), '[]'::jsonb),
+    'updateLogs', COALESCE((
+      SELECT jsonb_agg(to_jsonb(log) ORDER BY log.created_at DESC, log.id ASC)
+      FROM public.team_update_logs AS log
+    ), '[]'::jsonb),
+    'updateLogComments', COALESCE((
+      SELECT jsonb_agg(to_jsonb(comment) ORDER BY comment.created_at ASC, comment.id ASC)
+      FROM public.team_update_log_comments AS comment
+    ), '[]'::jsonb),
+    'currentUser', jsonb_build_object(
+      'employeeId', COALESCE((SELECT employee_id::text FROM me), ''),
+      'name', COALESCE((SELECT employee_name FROM me), ''),
+      'activeCompanyId', COALESCE((SELECT company_id::text FROM scope), '')
+    ),
+    'permissions', jsonb_build_object(
+      'isBfAdmin', COALESCE((SELECT is_admin FROM task_access), false),
+      'canDeleteOthersTasks', COALESCE((SELECT can_delete_others FROM task_access), false),
+      'featureAiBatch', COALESCE((SELECT feature_ai_batch FROM selected_company), false)
+    ),
+    'unread', COALESCE(public.bizflow_unread_summary(
+      (SELECT company_id FROM scope),
+      p_tasks_read,
+      p_orders_read,
+      p_messages_read,
+      p_inventory_read,
+      p_updates_read
+    ), jsonb_build_object('unread', '{}'::jsonb, 'watermarks', '{}'::jsonb)),
+    'generatedAt', to_char(now() AT TIME ZONE 'Asia/Hong_Kong', 'YYYY-MM-DD"T"HH24:MI:SS')
+  );
+$function$;
 
 NOTIFY pgrst, 'reload schema';
 COMMIT;
 
--- 回滚（不要执行，留档；策略原文照 pg_policies 逐字）：
--- BEGIN;
--- DROP POLICY IF EXISTS task_assignees_select ON public.task_assignees;
--- CREATE POLICY task_assignees_select ON public.task_assignees FOR SELECT TO authenticated
---   USING (public.can_select_employee_task_by_id(task_id));
--- DROP POLICY IF EXISTS fb_select_by_task_scope ON public.employee_task_feedbacks;
--- CREATE POLICY fb_select_by_task_scope ON public.employee_task_feedbacks FOR SELECT TO authenticated
---   USING (public.can_select_employee_task_by_id(task_id));
--- DROP FUNCTION IF EXISTS public.bizflow_visible_task_ids(); -- removes the MATERIALIZED-me / empty-search_path helper too
+-- 回滚（留档，不在本文件执行）：先按 111 原文 CREATE OR REPLACE bizflow_team_task_page，
+-- 再 DROP FUNCTION public.bizflow_scoped_task_assignees();
+-- DROP FUNCTION public.bizflow_scoped_task_feedbacks();
+-- DROP FUNCTION public.bizflow_visible_task_ids();
 -- NOTIFY pgrst, 'reload schema';
--- COMMIT;
