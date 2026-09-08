@@ -3,11 +3,12 @@ import { mountPageModule } from "./page-lifecycle.js";
 import { routeForPath } from "./route-manifest.js";
 import * as shell from "../shell/shell.js";
 
+const url = new URL(window.location.href);
+void routeForPath(url.pathname)?.prefetch?.()?.catch?.(() => {});
 await shell.shellReady;
 
 let router = null;
 let fallbackController = null;
-const url = new URL(window.location.href);
 
 function hardNavigate(target, { replace = false } = {}) {
   const href = target?.href ?? String(target);

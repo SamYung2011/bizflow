@@ -28,7 +28,7 @@ export const spaRouteAllowlist = Object.freeze([
 
 const fromHere = (path) => rootSiteUrl(String(path || "").replace(/^\.\.\//, "")).href;
 
-function route(path, section, entry, styles, load = null) {
+function route(path, section, entry, styles, load = null, prefetch = null) {
   return Object.freeze({
     path,
     section,
@@ -36,7 +36,8 @@ function route(path, section, entry, styles, load = null) {
     frame: createRouteFrame(path),
     entry: fromHere(entry),
     styles: Object.freeze(styles.map(fromHere)),
-    load
+    load,
+    prefetch
   });
 }
 
@@ -90,7 +91,8 @@ const routes = [
     "../components/date-range-panel.css",
     "../bizflow/app-feedback.css"
   ], () => import("../bizflow/app-feedback.js")),
-  route("/team/index.html", "team", "../team/tasks.js", ["../components/date-range-panel.css", "../team/tasks.css", "../team/tasks-domain.css"], () => import("../team/tasks.js")),
+  route("/team/index.html", "team", "../team/tasks.js", ["../components/date-range-panel.css", "../team/tasks.css", "../team/tasks-domain.css"], () => import("../team/tasks.js"),
+    () => import("../data/live-team-task-query.js").then((module) => module.prefetchTeamTaskPage())),
   route("/team/members.html", "team", "../team/members.js", ["../team/members.css", "../team/members-domain.css"], () => import("../team/members.js"))
 ];
 

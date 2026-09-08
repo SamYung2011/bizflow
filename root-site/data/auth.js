@@ -316,6 +316,10 @@ function activeCompanyStorageKey(employee) {
   return `team-active-company-${employee.user_id || employee.id}`;
 }
 
+export function getRememberedActiveCompanyId(userId) {
+  return userId ? safeLocalStorageGet(activeCompanyStorageKey({ user_id: userId })) || "" : "";
+}
+
 export function hasPermission(context, key) {
   if (!RBAC_KEYS.includes(key)) return false;
   if (context?.isSuperAdmin || context?.isAdminOfActive) return true;
