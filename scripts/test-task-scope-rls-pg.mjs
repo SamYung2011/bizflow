@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { checkSetPlan, explainRpc, normalizePayload } from "./test-support/task-scope-rls-plans.mjs";
 import { spawnSync } from "node:child_process";
 import { accessSync, constants, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,6 +12,7 @@ const migration = read("migrations/116_task_scope_setbased_rls.sql");
 const sources = {
   15: read("migrations/015_employee_management_v3.sql"),
   31: read("migrations/031_task_multi_assignees.sql"),
+  52: read("migrations/052_departments.sql"),
   82: read("migrations/082_team_rls_hardening.sql"),
   94: read("migrations/094_team_subtask_writes.sql")
 };
@@ -30,8 +32,10 @@ function without(fragment) {
 }
 const mutations = {
   creator: without("OR (t.creator_employee_id IS NOT NULL AND t.creator_employee_id = me.employee_id)"),
-  department: without("t.department_id IS NULL OR ")
+  department: without("t.department_id IS NULL OR "),
+  all: migration.replaceAll("\n  FOR SELECT TO authenticated\n", "\n  FOR ALL TO authenticated\n")
 };
+assert.equal(migration.split("\n  FOR SELECT TO authenticated\n").length, 3);
 const mutation = process.argv.find((arg) => arg.startsWith("--mutation="))?.split("=")[1];
 if (mutation) assert.ok(mutations[mutation], "Unknown mutation");
 
@@ -94,8 +98,18 @@ const users = [
   { name: "member-B", number: 6, company: B, departments: [BD1] },
   { name: "inactive", number: 7, active: false, super: true, admin: true, company: A, departments: [D1] },
   { name: "no-employee", number: 8, missing: true, departments: [] },
+  { name: "member-AB", number: 10, companies: [A, B], departments: [D1, BD1] },
+  { name: "admin-A-member-B", number: 11, companies: [A, B], adminCompanies: [A], departments: [BD1] },
+  { name: "dept-only", number: 12, companies: [], departments: [D1] },
+  { name: "member-A-dept-B", number: 13, companies: [A], departments: [BD1] },
+  { name: "duplicate-employee", number: 14, companies: [A, B], boundCompanies: [A], departments: [D1] },
   { name: "anon", number: 9, role: "anon", missing: true, departments: [] }
-].map((user) => ({ active: true, ...user, uid: user.role === "anon" ? "" : id(2, user.number), employee: id(1, user.number) }));
+].map((user) => ({ active: true, companies: user.companies || (user.company ? [user.company] : []),
+  adminCompanies: user.adminCompanies || (user.admin ? [user.company] : []), ...user, uid: user.role === "anon" ? "" : id(2, user.number), employee: id(1, user.number) }));
+const duplicateUser = users.find((user) => user.name === "duplicate-employee");
+const employeeRows = [...users.filter((user) => !user.missing),
+  { ...duplicateUser, employee: id(1, 114), boundCompanies: [B], departments: [BD2] }];
+const selectedEmployees = new Map();
 const literal = (value) => value == null ? "NULL" : `'${value}'`;
 const tasks = [];
 for (const [company, departments, creators] of [
@@ -109,7 +123,12 @@ for (const [company, departments, creators] of [
 tasks.push(
   { id: id(5, 28), company: null, department: null, creator: id(1, 3) },
   { id: id(5, 29), company: null, department: null, creator: null },
-  { id: id(5, 30), company: null, department: D1, creator: null }
+  { id: id(5, 30), company: null, department: D1, creator: null },
+  { id: id(5, 31), company: A, department: BD1, creator: null },
+  { id: id(5, 32), company: A, department: D2, creator: id(1, 14) },
+  { id: id(5, 33), company: B, department: BD2, creator: id(1, 114) },
+  { id: id(5, 34), company: A, department: BD2, creator: null },
+  { id: id(5, 35), company: B, department: BD2, creator: id(1, 14) }
 );
 const orphanIds = [id(5, 9001), id(5, 9002)];
 const assignments = [...tasks.map((task) => task.id), ...orphanIds]
@@ -118,10 +137,12 @@ const feedbacks = assignments.map((assignment, index) => ({ id: id(6, index + 1)
 
 function expectedLists(user) {
   if (user.missing || !user.active) return { tasks: [], assignees: [], feedbacks: [] };
+  const employee = selectedEmployees.get(user.name) || user.employee;
+  const departments = employeeRows.find((row) => row.employee === employee).departments;
   const visible = new Set(tasks.filter((task) => user.super
-    || (user.admin && task.company === user.company)
-    || task.creator === user.employee
-    || (task.company === user.company && (task.department === null || user.departments.includes(task.department))))
+    || user.adminCompanies.includes(task.company)
+    || task.creator === employee
+    || (user.companies.includes(task.company) && (task.department === null || departments.includes(task.department))))
     .map((task) => task.id));
   return {
     tasks: [...visible].sort(),
@@ -157,6 +178,23 @@ function assertEquivalent(before, after) {
     assert.deepEqual(after[user.name][table], before[user.name][table], `${user.name}/${table} visibility changed`);
   }
 }
+
+function assertSelectPolicies() {
+  const selected = policies().filter((p) => !untouchedPolicy(p));
+  assert.equal(selected.length, 2);
+  for (const p of selected) {
+    assert.equal(p.cmd, "SELECT", `${p.policyname} must be SELECT-only`);
+    assert.deepEqual(p.roles, ["authenticated"]);
+    assert.equal(p.permissive, "PERMISSIVE");
+    assert.equal(p.with_check, null);
+  }
+}
+const deniedTask = id(5, 2); // A/NULL department, creator admin-A; readable by member-A-none, not manageable.
+const negativeWrites = [
+  ["DELETE_OTHER_ASSIGNEE", `DELETE FROM public.task_assignees WHERE task_id='${deniedTask}' AND employee_id='${users[3].employee}' RETURNING task_id;`],
+  ["UPDATE_OTHER_ASSIGNEE", `UPDATE public.task_assignees SET completed_at=now() WHERE task_id='${deniedTask}' AND employee_id='${users[3].employee}' RETURNING task_id;`],
+  ["UPDATE_NONAUTHOR_FEEDBACK", `UPDATE public.employee_task_feedbacks SET body='denied' WHERE id='${id(6, 3)}' RETURNING id;`]
+];
 
 try {
   run(initdb, ["-D", dataDir, "-U", "postgres", "-A", "trust", "--no-locale", "--encoding=UTF8"]);
@@ -196,25 +234,41 @@ try {
     ${["tasks_insert", "tasks_delete"].map((name) => policy(94, name)).join("\n")}
     INSERT INTO public.companies VALUES ('${A}','A'), ('${B}','B');
     INSERT INTO public.roles VALUES ('${id(7, 1)}','${A}','{}'), ('${id(7, 2)}','${B}','{}');
-    INSERT INTO public.employees VALUES ${users.filter((user) => !user.missing)
+    INSERT INTO public.employees VALUES ${employeeRows
       .map((user) => `('${user.employee}','${user.uid}',${user.active},${user.super === true})`).join(",")};
-    INSERT INTO public.employee_companies VALUES ${users.filter((user) => !user.missing && user.company)
-      .map((user) => `('${user.employee}','${user.company}','${id(7, user.company === A ? 1 : 2)}',${user.admin === true})`).join(",")};
-    INSERT INTO public.employee_departments VALUES ${users.flatMap((user) => user.departments.map((department) => `('${user.employee}','${department}')`)).join(",")};
+    INSERT INTO public.employee_companies VALUES ${employeeRows.flatMap((user) => (user.boundCompanies || user.companies)
+      .map((company) => `('${user.employee}','${company}','${id(7, company === A ? 1 : 2)}',${user.adminCompanies.includes(company)})`)).join(",")};
+    INSERT INTO public.employee_departments VALUES ${employeeRows.flatMap((user) => user.departments.map((department) => `('${user.employee}','${department}')`)).join(",")};
     INSERT INTO public.employee_tasks (id, company_id, department_id, creator_employee_id) VALUES
       ${tasks.map((task) => `('${task.id}',${literal(task.company)},${literal(task.department)},${literal(task.creator)})`).join(",")};
     INSERT INTO public.task_assignees (task_id,employee_id) VALUES ${assignments.map((row) => `('${row.task}','${row.employee}')`).join(",")};
     INSERT INTO public.employee_task_feedbacks (id,task_id,author_user_id) VALUES ${feedbacks.map((row) => `('${row.id}','${row.task}','${users[1].uid}')`).join(",")};
     ANALYZE;
   `);
+  for (const user of users.filter((user) => !user.missing && user.active)) {
+    selectedEmployees.set(user.name, asUser(user, "SELECT public.current_employee_id();"));
+  }
+  // Full original 111 + 104 unread function; additional empty read tables are fixture-only.
+  sql(read("scripts/test-support/task-scope-rpc-fixture.sql"));
+  sql(helper(82, "can_select_employee"));
+  sql(["employees_select_by_company", "employee_companies_select_by_company", "roles_select_by_company"]
+    .map((name) => policy(82, name)).join("\n"));
+  sql(["dept_select", "emp_dept_select"].map((name) => policy(52, name)).join("\n"));
+  for (const [path, name] of [["migrations/103_guard_non_array_invoice_items.sql", "bizflow_jsonb_array"],
+    ["migrations/104_bizflow_data_phase1_r5.sql", "bizflow_unread_summary"]]) {
+    sql(extract(read(path), new RegExp(`CREATE OR REPLACE FUNCTION public\\.${name}\\([^]*?\\$function\\$;`), name));
+  }
+  sql(read("migrations/111_bizflow_team_task_page.sql"));
+  const rpcStatement = `SELECT public.bizflow_team_task_page('${A}', NULL, true);`;
+  const rpcBefore = normalizePayload(JSON.parse(asUser(users[2], rpcStatement)));
   const before = capture();
   const policiesBefore = policies();
   const helpersBefore = helpers();
-  scenario("old policies match the independent nine-identity visibility oracle", () => {
+  scenario("old policies match the independent fourteen-identity visibility oracle", () => {
     for (const user of users) assert.deepEqual(before[user.name], expectedLists(user), user.name);
-    assert.equal(before.super.tasks.length, 30);
-    assert.equal(before.super.assignees.length, 60);
-    assert.equal(before.super.feedbacks.length, 64, "fb_admin_all must retain orphan visibility");
+    assert.equal(before.super.tasks.length, tasks.length);
+    assert.equal(before.super.assignees.length, tasks.length * 2);
+    assert.equal(before.super.feedbacks.length, feedbacks.length, "fb_admin_all must retain orphan visibility");
   });
   scenario("116 can be applied twice with identical function and policy catalogs", () => {
     sql(mutation ? mutations[mutation] : migration);
@@ -241,22 +295,46 @@ try {
     const fn = functionInfo();
     assert.equal(fn.prosecdef, true);
     assert.equal(fn.provolatile, "s");
-    assert.deepEqual(fn.proconfig, ["search_path=public"]);
+    assert.deepEqual(fn.proconfig, ['search_path=""']);
+    assertSelectPolicies();
     assert.equal(sql("SELECT has_function_privilege('authenticated','public.bizflow_visible_task_ids()','EXECUTE');"), "t");
     assert.equal(sql("SELECT has_function_privilege('anon','public.bizflow_visible_task_ids()','EXECUTE');"), "f");
     const denied = asUser(users.at(-1), "SELECT public.bizflow_visible_task_ids();", true);
     assert.notEqual(denied.status, 0);
     assert.match(denied.stderr, /42501: permission denied for function bizflow_visible_task_ids/);
   });
+  scenario("duplicate user_id keeps the same LIMIT 1 identity and memberships", () => {
+    const selected = asUser(duplicateUser, "SELECT public.current_employee_id();");
+    assert.equal(selected, selectedEmployees.get(duplicateUser.name));
+    assert.ok([duplicateUser.employee, id(1, 114)].includes(selected));
+    console.log(`DUPLICATE_EMPLOYEE_SELECTED=${selected}; LINKED_EMPLOYEES=2; COMPANIES=A+B`);
+  });
+  for (const [name, statement] of negativeWrites) {
+    scenario(`${name} is denied with zero RETURNING rows`, () => {
+      assert.equal(asUser(users[2], statement), "", `${name} must affect zero rows`);
+      console.log(`NEGATIVE_WRITE_${name}=0 rows`);
+    });
+  }
   for (const [name, altered] of Object.entries(mutations)) {
-    scenario(`removing ${name} branch makes full-list equivalence fail`, () => {
+    scenario(`${name} mutation is rejected by the security assertions`, () => {
       try {
         sql(altered);
-        assert.throws(() => assertEquivalent(before, capture()), (error) =>
-          error instanceof assert.AssertionError && /visibility changed/.test(error.message));
+        if (name === "all") {
+          assert.throws(assertSelectPolicies, (error) => error instanceof assert.AssertionError && /SELECT-only/.test(error.message));
+          for (const [label, statement] of negativeWrites) {
+            const affected = asUser(users[2], statement).split("\n").filter(Boolean);
+            assert.equal(affected.length, 1, `${label}: FOR ALL must reproduce the write escalation`);
+            console.log(`FOR_ALL_ESCALATION_${label}=1 row (expected zero)`);
+          }
+        } else {
+          assert.throws(() => assertEquivalent(before, capture()), (error) =>
+            error instanceof assert.AssertionError && /visibility changed/.test(error.message));
+        }
         console.log(`TASK_SCOPE_MUTATION_${name.toUpperCase()}=DETECTED`);
       } finally { sql(migration); }
+      assertSelectPolicies();
       assertEquivalent(before, capture());
+      for (const [label, statement] of negativeWrites) assert.equal(asUser(users[2], statement), "", label);
     });
   }
   const returned = asUser(users[1], `
@@ -282,18 +360,58 @@ try {
       const statement = `SELECT count(*) FROM public.${table}`;
       const text = asUser(users[2], `EXPLAIN (ANALYZE, VERBOSE, FORMAT TEXT) ${statement};`);
       const plan = JSON.parse(asUser(users[2], `EXPLAIN (ANALYZE, VERBOSE, FORMAT JSON) ${statement};`))[0].Plan;
-      const nodes = [];
-      function visit(node) { nodes.push(node); (node.Plans || []).forEach(visit); }
-      visit(plan);
-      const calls = nodes.filter((node) => node.Output?.some((output) => output.includes("bizflow_visible_task_ids")));
-      assert.equal(calls.length, 1, "one set-producing plan node");
-      assert.equal(calls[0]["Actual Loops"], 1);
+      checkSetPlan(plan, table, 1);
       assert.match(text, /bizflow_visible_task_ids/);
       console.log(`EXPLAIN_${table}\n${text}\nSET_EVALUATIONS_${table}=1`);
     });
   }
-  assert.equal(passed, 21);
-  console.log("TASK_SCOPE_RLS_PG=21/21 (9 identities x 3 tables=27/27, two mutation gates, RETURNING 4/4, both set plans loops=1)");
+  for (const table of ["task_assignees", "employee_task_feedbacks"]) {
+    scenario(`${table} single-task .eq plan materializes each set node once`, () => {
+      const statement = `SELECT * FROM public.${table} WHERE task_id='${id(5, 2)}'`;
+      const plan = JSON.parse(asUser(users[2], `EXPLAIN (ANALYZE, VERBOSE, FORMAT JSON) ${statement};`))[0].Plan;
+      checkSetPlan(plan, `${table}_eq`, 2);
+    });
+  }
+  scenario("own assignee UPDATE RETURNING materializes each set node once", () => {
+    const statement = `UPDATE public.task_assignees SET completed_at=now()
+      WHERE task_id='${id(5, 2)}' AND employee_id='${users[2].employee}' RETURNING task_id`;
+    const plan = JSON.parse(asUser(users[2], `EXPLAIN (ANALYZE, VERBOSE, FORMAT JSON) ${statement};`))[0].Plan;
+    checkSetPlan(plan, "assignee_update_returning", 2);
+  });
+  scenario("complete original 111 RPC preserves its payload and bounds set nodes", () => {
+    const { payload, plans } = explainRpc(query, users[2].uid, rpcStatement);
+    assert.deepEqual(normalizePayload(payload), rpcBefore);
+    assert.equal(plans.length, 1, "auto_explain must capture the actual 111 SQL body exactly once");
+    checkSetPlan(plans[0].Plan, "rpc_111", 2);
+    console.log(`RPC_111_PAYLOAD_MATCH=tasks:${payload.tasks.length} assignees:${payload.assignees.length} feedbacks:${payload.feedbacks.length}; unread=original-104`);
+  });
+  scenario("MATERIALIZED me computes identity once, scopes remain distinct", () => {
+    sql("SELECT pg_stat_reset();");
+    sql(`SET track_functions='all'; SET request.jwt.claim.sub='${users[2].uid}'; SET ROLE authenticated;
+      SELECT count(*) FROM public.bizflow_visible_task_ids(); RESET ROLE; SELECT pg_stat_force_next_flush();`);
+    const calls = JSON.parse(sql("SELECT jsonb_object_agg(funcname,calls) FROM pg_stat_user_functions;"));
+    assert.equal(calls.bizflow_visible_task_ids, 1);
+    assert.equal(calls.is_bf_admin, 1);
+    assert.equal(calls.is_admin_of_company, 2);
+    assert.equal(calls.is_member_of_company, 2);
+    assert.equal(calls.is_member_of_department, 4);
+    // The unchanged department helper can call current_employee_id once per
+    // matching membership row. Measure that dependency separately from me.
+    sql("SELECT pg_stat_reset();");
+    // Read distinct departments as the fixture owner, just as the DEFINER set
+    // function does, so employee_tasks' separate RLS does not pollute the count.
+    sql(`SET track_functions='all'; SET request.jwt.claim.sub='${users[2].uid}';
+      SELECT public.is_member_of_department(d.department_id) FROM
+        (SELECT DISTINCT department_id FROM public.employee_tasks WHERE department_id IS NOT NULL) d;
+      SELECT pg_stat_force_next_flush();`);
+    const departmentCalls = JSON.parse(sql("SELECT jsonb_object_agg(funcname,calls) FROM pg_stat_user_functions;"));
+    assert.equal(departmentCalls.is_member_of_department, 4);
+    assert.equal(calls.current_employee_id - departmentCalls.current_employee_id, 1, "me itself must resolve identity once");
+    console.log(`MATERIALIZED_HELPER_CALLS=${JSON.stringify(calls)}`);
+    console.log(`DEPARTMENT_CURRENT_EMPLOYEE_CALLS=${departmentCalls.current_employee_id}; ME_CURRENT_EMPLOYEE_CALLS=1`);
+  });
+  assert.equal(passed, 36);
+  console.log("TASK_SCOPE_RLS_PG=36/36 (14 identities x 3 tables=42/42, three mutation gates, negative writes 3/3, RETURNING 4/4, .eq/UPDATE/111 set-node bounds, MATERIALIZED helper counts)");
 } finally {
   if (started) run(pgCtl, ["-D", dataDir, "-m", "fast", "-w", "stop"], { allowFailure: true });
   rmSync(probeRoot, { recursive: true, force: true });

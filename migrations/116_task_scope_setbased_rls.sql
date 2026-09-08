@@ -8,6 +8,7 @@
 -- 等价性：is_bf_admin() 为同一调用；is_admin_of_company(NULL)=false，等价于 LEFT JOIN 落空后 COALESCE false。
 -- creator = current_employee_id() 任一边 NULL 时原式为 NULL（WHERE 不通过），IS NOT NULL AND = 仍不通过。
 -- member/department 支同理：NULL 公司不会命中成员；NULL 部门保留原允许分支，非 NULL 部门由同一 helper 判权。
+-- R1: MATERIALIZED 固定 me 为一次求值，避免身份 helper 被 CTE 内联成逐任务调用；函数使用空 search_path。
 BEGIN;
 
 CREATE OR REPLACE FUNCTION public.bizflow_visible_task_ids()
@@ -15,9 +16,9 @@ RETURNS SETOF uuid
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
-SET search_path = public
+SET search_path = ''
 AS $function$
-  WITH me AS (
+  WITH me AS MATERIALIZED (
     SELECT public.current_employee_id() AS employee_id,
            public.is_bf_admin()         AS is_bf_admin
   ),
@@ -70,6 +71,6 @@ COMMIT;
 -- DROP POLICY IF EXISTS fb_select_by_task_scope ON public.employee_task_feedbacks;
 -- CREATE POLICY fb_select_by_task_scope ON public.employee_task_feedbacks FOR SELECT TO authenticated
 --   USING (public.can_select_employee_task_by_id(task_id));
--- DROP FUNCTION IF EXISTS public.bizflow_visible_task_ids();
+-- DROP FUNCTION IF EXISTS public.bizflow_visible_task_ids(); -- removes the MATERIALIZED-me / empty-search_path helper too
 -- NOTIFY pgrst, 'reload schema';
 -- COMMIT;
