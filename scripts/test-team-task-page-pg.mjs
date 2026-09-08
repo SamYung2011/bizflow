@@ -9,6 +9,8 @@ import { performance } from "node:perf_hooks";
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const migrationPath = join(repoRoot, "migrations/111_bizflow_team_task_page.sql");
 const volatileMigrationPath = join(repoRoot, "migrations/115_scalar_rpc_volatile_single_eval.sql");
+const claimsMigrationPath = join(repoRoot, "migrations/117_pre_request_claims_and_revert_115.sql");
+const scopeMigrationPath = join(repoRoot, "migrations/116_task_scope_setbased_rls.sql");
 const source036 = readFileSync(join(repoRoot, "migrations/036_employees_kind_and_pending.sql"), "utf8");
 const source052 = readFileSync(join(repoRoot, "migrations/052_departments.sql"), "utf8");
 const source055 = readFileSync(join(repoRoot, "migrations/055_task_pending_company_admin.sql"), "utf8");
@@ -135,6 +137,8 @@ try {
   sql(`
     CREATE ROLE anon;
     CREATE ROLE authenticated;
+    CREATE ROLE service_role BYPASSRLS;
+    CREATE ROLE authenticator;
     CREATE SCHEMA auth;
     GRANT USAGE ON SCHEMA auth TO authenticated, anon;
     CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE
@@ -439,12 +443,14 @@ try {
       LANGUAGE sql STABLE SECURITY INVOKER SET search_path = '' AS $$ SELECT '{}'::jsonb $$;
   `);
   run(psql, [...psqlArgs(), "-f", volatileMigrationPath], { quiet: true });
+  run(psql, [...psqlArgs(), "-f", claimsMigrationPath], { quiet: true });
+  run(psql, [...psqlArgs(), "-f", scopeMigrationPath], { quiet: true });
   const policiesAfter = sql("SELECT count(*) FROM pg_policies WHERE schemaname='public';");
 
   scenario(() => {
     const admin = payload(ADMIN_USER);
     const signature = "public.bizflow_team_task_page(uuid,integer,boolean,timestamptz,timestamptz,timestamptz,text,timestamptz)";
-    assert.equal(sql(`SELECT provolatile FROM pg_proc WHERE oid='${signature}'::regprocedure;`), "v");
+    assert.equal(sql(`SELECT provolatile FROM pg_proc WHERE oid='${signature}'::regprocedure;`), "s");
     assert.equal(sql(`SELECT prosecdef FROM pg_proc WHERE oid='${signature}'::regprocedure;`), "f");
     assert.equal(policiesAfter, policiesBefore, "the read RPC migration must not add, alter, or remove RLS policies");
     assert.equal(sql(`SELECT has_function_privilege('authenticated','${signature}','EXECUTE');`), "t");
@@ -592,7 +598,7 @@ try {
   });
 
   assert.equal(passed, 13);
-  console.log(`TEAM_TASK_PAGE_PG=13/13 (111 + 115 VOLATILE, production helper/search_path + pending policies, INVOKER/RLS, NULL=full completed, full taskStats, partial-read exact unread, detail, dirty JSON, anon deny, 13 sorts, <1500ms)`);
+  console.log(`TEAM_TASK_PAGE_PG=13/13 (111 + 115 + 117 + 116 final STABLE, production helper/search_path + pending policies, INVOKER/RLS, NULL=full completed, full taskStats, partial-read exact unread, detail, dirty JSON, anon deny, 13 sorts, <1500ms)`);
 } finally {
   if (started) run(pgCtl, ["-D", dataDir, "-m", "fast", "-w", "stop"], { quiet: true, allowFailure: true });
   rmSync(probeRoot, { recursive: true, force: true });
