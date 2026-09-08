@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 const AUTH_SUFFIX = "/root-site/data/auth.js";
 
 const AUTH_SOURCE = String.raw`
@@ -12,6 +14,7 @@ let heldRpc = "";
 let releaseHeld = null;
 let tableError = null;
 let sessionUserId = "test-user";
+let clientMissing = false;
 
 function emptyQuery() {
   let proxy;
@@ -70,17 +73,23 @@ const currentUser = {
   hasPermission() { return true; }
 };
 
-export async function getSupabaseClient() { return client; }
-export async function getSession() { return { user: { id: sessionUserId } }; }
+export async function getSupabaseClient() { return clientMissing ? null : client; }
+export async function getSession() { return sessionUserId ? { user: { id: sessionUserId } } : null; }
 export async function getCurrentUser() { return currentUser; }
 export async function fetchAllTable() {
   if (tableError) throw tableError;
   return [];
 }
 
+export function __setCurrentUser(value) { Object.assign(currentUser, value); }
+export function __setClientMissing(value) { clientMissing = value; }
 export function __calls() { return calls.slice(); }
 export function __reset() {
   calls.length = 0;
+  sessionUserId = "test-user";
+  clientMissing = false;
+  currentUser.id = "employee-test";
+  currentUser.activeCompanyId = "company-test";
   errors.clear();
   rpcData.clear();
   rpcHandlers.clear();
@@ -91,7 +100,7 @@ export function __reset() {
   currentUser.isBfAdmin = false;
   currentUser.canViewRevenue = true;
 }
-export function __setRpcError(name, error) { errors.set(name, error); }
+export function __setRpcError(name, error) { if (error) errors.set(name, error); else errors.delete(name); }
 export function __setRpcData(name, data) { rpcData.set(name, data); }
 export function __setRpcHandler(name, handler) { rpcHandlers.set(name, handler); }
 export function __setCanViewRevenue(value) { currentUser.canViewRevenue = value === true; }
@@ -103,7 +112,13 @@ export function __releaseRpc() { if (releaseHeld) releaseHeld(); }
 
 export async function load(url, context, nextLoad) {
   if (new URL(url).pathname.endsWith(AUTH_SUFFIX)) {
-    return { format: "module", shortCircuit: true, source: AUTH_SOURCE };
+    // Exercise the production storage helper while keeping network auth stubbed.
+    const production = await readFile(new URL(url), "utf8");
+    const helpers = ["safeLocalStorageGet", "activeCompanyStorageKey", "getRememberedActiveCompanyId",
+      "employeeIdStorageKey", "getRememberedEmployeeId"]
+      .map((name) => production.match(new RegExp(`(?:export )?function ${name}\\([^]*?\\n}`, "m"))?.[0]);
+    if (helpers.some((helper) => !helper)) throw new Error("Auth storage helper missing");
+    return { format: "module", shortCircuit: true, source: AUTH_SOURCE + "\n" + helpers.join("\n") };
   }
   return nextLoad(url, context);
 }

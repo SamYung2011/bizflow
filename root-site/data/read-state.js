@@ -62,6 +62,15 @@ function purgeLegacyReadStateKeyOnce() {
   }
 }
 
+export function peekReadState(accountId) {
+  if (!accountId) return {};
+  try {
+    return normalizeState(JSON.parse(window.localStorage.getItem(accountStorageKey(accountId))));
+  } catch {
+    return {};
+  }
+}
+
 export function getReadState() {
   const storageKey = getActiveReadStateStorageKey();
   if (!storageKey) return {}; // 未登录/身份未就绪:不读旧全局 key 兜底,恒空。
