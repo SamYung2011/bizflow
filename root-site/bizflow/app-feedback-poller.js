@@ -1,10 +1,11 @@
 export const FEEDBACK_POLL_INTERVAL_MS = 30_000;
+export const DEVICES_POLL_INTERVAL_MS = 10_000;
 export const FEEDBACK_POLL_MAX_INTERVAL_MS = 120_000;
 
-export function feedbackPollDelay(consecutiveFailures = 0) {
+export function feedbackPollDelay(consecutiveFailures = 0, interval = FEEDBACK_POLL_INTERVAL_MS) {
   const failures = Math.max(0, Number(consecutiveFailures) || 0);
   return Math.min(
-    FEEDBACK_POLL_INTERVAL_MS * (2 ** failures),
+    interval * (2 ** failures),
     FEEDBACK_POLL_MAX_INTERVAL_MS,
   );
 }
@@ -83,6 +84,7 @@ export function createFeedbackPoller({
   let disposed = false;
   let enabled = false;
   let runAbortController = null;
+  let interval = FEEDBACK_POLL_INTERVAL_MS;
 
   function isVisibleAndActive() {
     return (
@@ -103,7 +105,7 @@ export function createFeedbackPoller({
     runAbortController?.abort();
   }
 
-  function schedule(delay = feedbackPollDelay(consecutiveFailures)) {
+  function schedule(delay = feedbackPollDelay(consecutiveFailures, interval)) {
     cancelTimer();
     if (!isVisibleAndActive()) return;
     timerId = scope.timeout(() => {
@@ -142,8 +144,8 @@ export function createFeedbackPoller({
       }
       consecutiveFailures = succeeded
         ? 0
-        : Math.min(consecutiveFailures + 1, 2);
-      schedule(feedbackPollDelay(consecutiveFailures));
+        : Math.min(consecutiveFailures + 1, Math.ceil(Math.log2(FEEDBACK_POLL_MAX_INTERVAL_MS / interval)));
+      schedule(feedbackPollDelay(consecutiveFailures, interval));
     }
   }
 
@@ -166,9 +168,10 @@ export function createFeedbackPoller({
   });
 
   return Object.freeze({
-    start() {
+    start(nextInterval = FEEDBACK_POLL_INTERVAL_MS) {
+      interval = nextInterval;
       enabled = true;
-      schedule(FEEDBACK_POLL_INTERVAL_MS);
+      schedule(interval);
     },
     pause() {
       enabled = false;
@@ -176,15 +179,16 @@ export function createFeedbackPoller({
       cancelTimer();
       abortRunningPoll();
     },
-    resume() {
+    resume(nextInterval = FEEDBACK_POLL_INTERVAL_MS) {
       if (disposed) return;
       enabled = true;
+      interval = nextInterval;
       consecutiveFailures = 0;
-      schedule(FEEDBACK_POLL_INTERVAL_MS);
+      schedule(interval);
     },
     restart() {
       consecutiveFailures = 0;
-      schedule(FEEDBACK_POLL_INTERVAL_MS);
+      schedule(interval);
     },
     refreshNow() {
       enabled = true;

@@ -16,6 +16,7 @@ import {
   ADAPTER_SESSION_HISTORY_DAYS,
   adapterActionsForKind,
   adapterLiveMetrics,
+  adapterListSignature,
   adapterOtaPackages,
   adapterSessionMinDate,
   adapterSessionSubPath,
@@ -68,6 +69,7 @@ import {
   upstreamTimeoutFor,
 } from "../supabase/functions/honnmono-admin/routing.mjs";
 import {
+  DEVICES_POLL_INTERVAL_MS,
   FEEDBACK_POLL_INTERVAL_MS,
   FEEDBACK_POLL_MAX_INTERVAL_MS,
   applyFeedbackListPayload,
@@ -75,6 +77,8 @@ import {
   feedbackListSignature,
   feedbackPollDelay,
 } from "../root-site/bizflow/app-feedback-poller.js";
+import { createAdapterOtaLoader, renderAdapterLocation, renderAdapterOta } from "../root-site/bizflow/app-feedback-device-live.js";
+import { wgs84ToGcj02 } from "../root-site/bizflow/geo-coords.js";
 import { SECTION_MENU_ITEMS } from "../root-site/components/navigation-registry.js";
 import { dictionaries } from "../root-site/shell/shell-i18n.js";
 import { createRouteFrame } from "../root-site/spa/route-menu.js";
@@ -250,6 +254,7 @@ assert.deepEqual(adapterActionsForKind("flash"), [
   "force_ota",
   "lock",
   "unlock",
+  "untask",
 ]);
 assert.deepEqual(adapterActionsForKind("dc-pro"), ["unbind"]);
 assert.deepEqual(adapterActionsForKind("unknown"), []);
@@ -1288,7 +1293,7 @@ const tabPoller = createFeedbackPoller({
 function switchPolledTab(nextTab) {
   tabState.activeTab = nextTab;
   if (nextTab === "device") tabPoller.pause();
-  else tabPoller.resume();
+  else tabPoller.resume(nextTab === "devices" ? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS);
 }
 
 if (tabState.activeTab !== "device") tabPoller.start();
@@ -1297,6 +1302,7 @@ assert.deepEqual(polledLists, ["feedback"]);
 
 switchPolledTab("devices");
 assert.equal(tabScope.timers.size, 1, "devices tab must stay on the poller");
+assert.equal(tabScope.nextDelay(), 10_000);
 await tabScope.runNextTimer();
 assert.deepEqual(
   polledLists,
@@ -1316,6 +1322,7 @@ assert.deepEqual(
 
 switchPolledTab("feedback");
 assert.equal(tabScope.timers.size, 1, "feedback tab must re-arm the poller");
+assert.equal(tabScope.nextDelay(), 30_000);
 await tabScope.runNextTimer();
 assert.deepEqual(polledLists, ["feedback", "adapters", "feedback"]);
 
@@ -1334,7 +1341,7 @@ tabScope.dispose();
 assert.match(pageSource, /poll:\s*pollActiveTab/);
 assert.match(
   pageSource,
-  /if \(!\["device", "sim"\]\.includes\(state\.activeTab\)\) poller\.start\(\)/,
+  /if \(!\["device", "sim"\]\.includes\(state\.activeTab\)\) poller\.start\(state\.activeTab === "devices" \? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS\)/,
   "the SIM tab is a one-shot lookup form, so it must not start the poller",
 );
 assert.match(pageSource, /return pollAdapterList\(\{ signal \}\)/);
@@ -2058,6 +2065,167 @@ assert.doesNotMatch(
   /border-radius:\s*var\(--radius-40\)/,
   "the feedback page keeps its 20px corner ceiling",
 );
+
+let deviceLiveChecks = 0;
+async function liveCheck(name, run) {
+  await run();
+  deviceLiveChecks++;
+  console.log(`device-live ${deviceLiveChecks}: ${name}`);
+}
+const liveHelpers = {
+  t: (key, values) => translateAppFeedback("en", key, values),
+  escapeHtml,
+  formatTime: (value) => value == null ? "—" : String(value),
+};
+
+await liveCheck("map coordinates equal backend outputs, including unshifted Hong Kong", () => {
+  for (const [point, expected] of [
+    [[22.630705, 114.107971], [22.62803262594255, 114.11309108661798]],
+    [[22.524790, 113.935379], [22.521760699482595, 113.94024618926493]],
+    [[22.3193, 114.1694], [22.3193, 114.1694]],
+  ]) wgs84ToGcj02(...point).forEach((value, index) => assert.ok(Math.abs(value - expected[index]) < 1e-10));
+});
+await liveCheck("location address, coordinate fallback and missing location render safely", () => {
+  const location = { latitude: 22.630705, longitude: 114.107971, address: "Main <street>", starnum: 0 };
+  const address = renderAdapterLocation(location, liveHelpers);
+  assert.match(address, /Main &lt;street&gt;/);
+  assert.match(address, /Non-satellite location/);
+  assert.match(address, /position=114.11309108661798,22.62803262594255/);
+  assert.match(address, /rel="noopener noreferrer"/);
+  const fallback = renderAdapterLocation({ ...location, address: "", starnum: null }, liveHelpers);
+  assert.match(fallback, /22.630705, 114.107971/);
+  assert.doesNotMatch(fallback, /Non-satellite/);
+  assert.match(renderAdapterLocation(null, liveHelpers), /No heartbeat location/);
+});
+for (const state of ["none", "armed", "delivered", "downloading", "downloaded", "installed", "expired", "untasked"]) {
+  await liveCheck(`OTA ${state} renders its task and timeline`, () => {
+    const details = { state, task: state === "none" ? null : { package: "test.bin", mainver: 1, subver: 2, force: 1, armedAt: 1000, expiresAt: 2000 }, downloads: [{ status: 200, bytes: 300, at: 1500 }], versionNow: { software: "v1.2" }, versionChangedAt: state === "installed" ? 1600 : null, stillPending: state === "installed" };
+    const html = renderAdapterOta({ certid: "CERT_1" }, details, liveHelpers);
+    assert.match(html, new RegExp(`data-ota-state="${state}"`));
+    if (state === "none") {
+      assert.match(html, /No upgrade task/);
+      assert.doesNotMatch(html, /data-adapter-action/);
+    } else {
+      assert.match(html, /test.bin/);
+      assert.match(html, /1.2/);
+      assert.match(html, /1 requests \/ 300 bytes/);
+      assert.equal((html.match(/<li /g) || []).length, 4);
+      if (state === "untasked") assert.doesNotMatch(html, /data-adapter-action="untask"/);
+      else assert.match(html, /data-adapter-action="untask"/);
+      if (state === "installed") assert.match(html, /still pending/);
+    }
+  });
+}
+await liveCheck("OTA remote text is escaped and summary errors stay visible", () => {
+  const html = renderAdapterOta({ certid: "CERT_1" }, { state: "armed", task: { package: '<img src=x onerror="x">' }, versionNow: { software: "<script>x</script>" } }, liveHelpers);
+  assert.doesNotMatch(html, /<img|<script>/);
+  assert.match(html, /&lt;img/);
+  assert.match(renderAdapterOta({ certid: "CERT_1", ota: { state: "armed" } }, null, { ...liveHelpers, error: true }), /could not be refreshed/);
+});
+await liveCheck("OTA API allows only a flash detail GET", () => {
+  assert.doesNotThrow(() => assertHonnmonoAdminRequest("/devices/flash/CERT_1/ota"));
+  for (const method of ["POST", "DELETE", "PUT"]) assert.throws(() => assertHonnmonoAdminRequest("/devices/flash/CERT_1/ota", method));
+  assert.throws(() => assertHonnmonoAdminRequest("/devices/dc-pro/CERT_1/ota"));
+});
+await liveCheck("list signature includes location, OTA and firmware date changes", () => {
+  const before = adapterListSignature([{ certid: "A" }], 1);
+  for (const changed of [
+    { location: { address: "new address" } }, { location: { latitude: 22, longitude: 114 } },
+    { location: { starnum: 0 } }, { ota: { state: "armed" } }, { ota: { updatedAt: 123 } },
+    { firmware: { softwareDate: "20260909" } }, { lastStatusTime: 999 },
+  ]) assert.notEqual(adapterListSignature([{ certid: "A", ...changed }], 1), before);
+  assert.match(pageSource, /if \(unchanged\) \{\s*void refreshAdapterOta/);
+});
+await liveCheck("OTA loader limits concurrency to three even across overlapping refresh rounds", async () => {
+  let inflight = 0, peak = 0;
+  const gates = [];
+  const calls = [];
+  const loader = createAdapterOtaLoader((path) => {
+    calls.push(path);
+    inflight++;
+    peak = Math.max(peak, inflight);
+    return new Promise((resolve) => gates.push(() => { inflight--; resolve({ state: "delivered" }); }));
+  });
+  const rows = Array.from({ length: 5 }, (_, i) => ({ certid: `OLD_${i}`, ota: { state: "armed" } }));
+  const old = loader.load(rows);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.length, 3);
+  const next = loader.load([{ certid: "NEW", ota: { state: "armed" } }, { certid: "NONE", ota: { state: "none" } }]);
+  while (gates.length) gates.shift()();
+  assert.equal(await old, null);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls.slice(3), ["/devices/flash/NEW/ota"]);
+  gates.shift()();
+  assert.deepEqual(await next, { items: { NEW: { state: "delivered" } }, failed: [] });
+  assert.equal(peak, 3);
+});
+await liveCheck("OTA failures remain scoped and aborted or stale rounds cannot apply", async () => {
+  const loader = createAdapterOtaLoader(async () => { throw new Error("offline"); });
+  const rows = [{ certid: "A", ota: { state: "armed" } }];
+  assert.deepEqual(await loader.load(rows), { items: {}, failed: ["A"] });
+  const controller = new AbortController();
+  controller.abort();
+  assert.equal(await loader.load(rows, { signal: controller.signal }), null);
+  assert.equal(await loader.load(rows, { isCurrent: () => false }), null);
+});
+await liveCheck("OTA responses update memory but preserve an input opened while in flight", async () => {
+  const source = pageSource.slice(pageSource.indexOf("async function refreshAdapterOta"), pageSource.indexOf("async function pollAdapterList"));
+  const target = { activeTab: "devices", adapters: { kind: "flash", request: 1, rows: [{ certid: "A", ota: { state: "armed" } }], ota: {}, otaErrors: {} } };
+  let resolve, blocked = false, renders = 0;
+  const loader = { load: () => new Promise((done) => { resolve = done; }) };
+  const refresh = new Function("state", "isActive", "document", "activeAdapterOtaLoader", "adapterRefreshWouldInterrupt", "rerender", `${source}; return refreshAdapterOta;`)(target, () => true, { visibilityState: "visible" }, loader, () => blocked, () => { renders++; });
+  const first = refresh(1, { signal: new AbortController().signal }, 1);
+  blocked = true;
+  resolve({ items: { A: { state: "downloaded" } }, failed: [] });
+  await first;
+  assert.equal(target.adapters.ota.A.state, "downloaded");
+  assert.equal(renders, 0);
+  blocked = false;
+  const second = refresh(1, {}, 1);
+  resolve({ items: { A: { state: "downloaded" } }, failed: [] });
+  await second;
+  assert.equal(renders, 1);
+  const stale = refresh(1, {}, 1);
+  target.adapters.request++;
+  resolve({ items: { A: { state: "armed" } }, failed: [] });
+  await stale;
+  assert.equal(target.adapters.ota.A.state, "downloaded");
+});
+await liveCheck("untask submit uses the existing actions POST and reloads", async () => {
+  const source = pageSource.slice(pageSource.indexOf("async function submitAdapterAction"), pageSource.indexOf("async function downloadAdapterReport"));
+  const target = { adapters: { actionConfirm: { action: "untask", device: { certid: "CERT_1" } }, actionLoading: false, ota: { CERT_1: { state: "armed" } } } };
+  const calls = [];
+  let reloads = 0;
+  const submit = new Function("state", "activeInstance", "activeScope", "callHonnmonoAdmin", "isActive", "loadAdapters", "rerender", `${source}; return submitAdapterAction;`)(target, 1, {}, async (path, options) => { calls.push({ path, method: options.method, body: options.body }); return { ok: true }; }, () => true, () => { reloads++; }, () => {});
+  await submit();
+  assert.deepEqual(calls, [{ path: "/devices/flash/CERT_1/actions", method: "POST", body: { action: "untask" } }]);
+  assert.equal(reloads, 1);
+  assert.equal(target.adapters.actionLoading, false);
+  assert.equal(target.adapters.actionConfirm, null);
+});
+await liveCheck("devices use 10 seconds with 120-second maximum backoff and feedback resets to 30", async () => {
+  assert.equal(DEVICES_POLL_INTERVAL_MS, 10_000);
+  const scope = createFakeScope(), doc = createFakeDocument();
+  const poll = createFeedbackPoller({ scope, documentRef: doc, poll: async () => false, clearTimeoutFn: (id) => scope.timers.delete(id) });
+  poll.start(DEVICES_POLL_INTERVAL_MS);
+  assert.equal(scope.nextDelay(), 10_000);
+  for (const delay of [20_000, 40_000, 80_000, 120_000, 120_000]) {
+    await scope.runNextTimer();
+    assert.equal(scope.nextDelay(), delay);
+  }
+  await doc.setVisibility("hidden");
+  assert.equal(scope.timers.size, 0);
+  poll.resume();
+  await doc.setVisibility("visible");
+  poll.resume();
+  assert.equal(scope.nextDelay(), 30_000);
+  scope.dispose();
+});
+await liveCheck("all live-device copy is present in three languages", () => {
+  const keys = ["location", "noLocation", "notSatelliteFix", "viewMap", "ota", "otaNoTask", "otaArmedAt", "otaExpiresAt", "otaUntask", "otaUntaskConfirm", "otaDownloads", "otaPackage", "otaTargetVersion", "otaForced", "otaNormal", "otaReceived", "otaDownload", "otaInstalled", "otaStillPending", "otaDetailsPending", "otaDetailsUnavailable", ...["armed", "delivered", "downloading", "downloaded", "installed", "expired", "untasked"].map((state) => `otaState.${state}`)];
+  for (const lang of ["zh", "en", "fr"]) for (const key of keys) assert.equal(typeof appFeedbackCopy[lang][key], "string", `${lang}:${key}`);
+});
+console.log(`DEVICE_PAGE_LIVE=${deviceLiveChecks}/${deviceLiveChecks}`);
 
 console.log(
   "Honnmono APP root-site contracts: PASS (feedback + device unbind + OTA package card + SIM card lookup, allowlists, confirmations, escaped fields, tab-dispatched polling, i18n)",

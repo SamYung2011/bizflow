@@ -28,7 +28,10 @@ import {
   renderSimCards,
 } from "./app-feedback-sim.js";
 import { translateAppFeedback } from "./app-feedback-i18n.js";
+import { createAdapterOtaLoader, renderAdapterLocation, renderAdapterOta } from "./app-feedback-device-live.js";
 import {
+  DEVICES_POLL_INTERVAL_MS,
+  FEEDBACK_POLL_INTERVAL_MS,
   applyFeedbackListPayload,
   createFeedbackPoller,
   feedbackListSignature,
@@ -45,6 +48,7 @@ let activePoller = null;
 let activeDeviceController = null;
 let activeOtaController = null;
 let activeSimController = null;
+let activeAdapterOtaLoader = null;
 let instanceSequence = 0;
 let activeInstance = 0;
 
@@ -114,6 +118,9 @@ function createAdapterDeviceState(saved = {}) {
     actionError: null,
     actionResult: null,
     actionLookupId: null,
+    ota: {},
+    otaErrors: {},
+    otaDirty: false,
   };
 }
 
@@ -123,7 +130,7 @@ function adapterPageCount() {
 
 export function adapterActionsForKind(kind) {
   return kind === "flash"
-    ? ["unbind", "force_ota", "lock", "unlock"]
+    ? ["unbind", "force_ota", "lock", "unlock", "untask"]
     : kind === "dc-pro"
       ? ["unbind"]
       : [];
@@ -553,6 +560,7 @@ function renderAdapterCards() {
           ${detailRow("softwareVersion", firmware.software || device.firmware)}
           ${detailRow("hardwareVersion", firmware.hardware)}
           ${detailRow("lastHeartbeat", formatFeedbackTime(device.lastHeartbeatAt || device.lastStatusTime, helpers.lang))}
+          ${renderAdapterLocation(device.location, { t, escapeHtml: rawE })}
           ${detailRow("chargeCount", t("chargeCount", { count: Number(device.chargeCount) || 0 }))}
         </dl>
         <section class="app-feedback-adapter-live" aria-label="${rawE(t("realtimeData"))}">
@@ -561,6 +569,7 @@ function renderAdapterCards() {
           <div><strong>${e(metric(live.amps, " A"))}</strong><span>${rawE(t("current"))}</span></div>
           <div><strong>${e(metric(live.kwh, " kWh"))}</strong><span>${rawE(t("chargedKwh"))}</span></div>
         </section>
+        ${kind === "flash" ? renderAdapterOta(device, state.adapters.ota[id], { t, escapeHtml: rawE, formatTime: (value) => formatFeedbackTime(value, helpers.lang), actionBusy, error: state.adapters.otaErrors[id] }) : ""}
         <div class="app-feedback-adapter-actions">
           <button type="button" class="app-feedback-button" data-adapter-detail="${rawE(id)}"${!device.certid || actionBusy ? " disabled" : ""}>${rawE(t("viewSessions"))}</button>
           ${availableActions.includes("unbind") ? `<button type="button" class="app-feedback-button app-feedback-button--danger" data-adapter-action="unbind" data-adapter-id="${rawE(id)}"${kind === "flash" && device.charging ? ` title="${rawE(t("flashUnbindChargingBlocked"))}"` : ""}${unbindDisabled || actionBusy ? " disabled" : ""}>${rawE(t(unbindLabelKey))}</button>` : ""}
@@ -583,11 +592,12 @@ function renderAdapterActionConfirm() {
     force_ota: "forceOta",
     lock: "lockDevice",
     unlock: "unlockDevice",
+    untask: "otaUntask",
   }[confirm.action];
   return `<div class="app-feedback-overlay app-feedback-device-confirm-overlay" data-adapter-confirm-overlay>
     <section class="app-feedback-device-confirm" role="alertdialog" aria-modal="true" aria-labelledby="app-feedback-adapter-confirm-title">
       <h2 id="app-feedback-adapter-confirm-title">${rawE(t("actionConfirmTitle"))}</h2>
-      <p>${rawE(t(confirm.action === "unbind" && state.adapters.kind === "flash" ? "flashUnbindConfirmText" : "actionConfirmText"))}</p>
+      <p>${rawE(t(confirm.action === "untask" ? "otaUntaskConfirm" : confirm.action === "unbind" && state.adapters.kind === "flash" ? "flashUnbindConfirmText" : "actionConfirmText"))}</p>
       <dl class="app-feedback-device-confirm__details">
         ${detailRow("actions", t(actionKey))}
         ${detailRow("uuid", adapterDeviceId(device), { mono: true })}
@@ -960,7 +970,7 @@ function adapterListSubPath() {
   return `/devices/${state.adapters.kind}?${params}`;
 }
 
-function adapterListSignature(rows, total) {
+export function adapterListSignature(rows, total) {
   return JSON.stringify([
     Number(total) || 0,
     (Array.isArray(rows) ? rows : []).map((row) => [
@@ -980,6 +990,14 @@ function adapterListSignature(rows, total) {
       row?.charger?.progressPercent ?? null,
       row?.charger?.kwh ?? null,
       row?.firmware?.software ?? null,
+      row?.firmware?.softwareDate ?? null,
+      row?.lastStatusTime ?? null,
+      row?.location?.address ?? null,
+      row?.location?.latitude ?? null,
+      row?.location?.longitude ?? null,
+      row?.location?.starnum ?? null,
+      row?.ota?.state ?? null,
+      row?.ota?.updatedAt ?? null,
     ]),
   ]);
 }
@@ -1027,7 +1045,11 @@ async function loadAdapters({ silent = false, signal } = {}) {
       const unchanged =
         adapterListSignature(rows, total) ===
         adapterListSignature(state.adapters.rows, state.adapters.total);
-      if (unchanged || adapterRefreshWouldInterrupt()) return true;
+      if (adapterRefreshWouldInterrupt()) return true;
+      if (unchanged) {
+        void refreshAdapterOta(instance, scope, request);
+        return true;
+      }
       const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
       if (state.adapters.page > lastPage) {
         // Rows vanished under this page: land on the new last page instead of
@@ -1039,6 +1061,7 @@ async function loadAdapters({ silent = false, signal } = {}) {
       state.adapters.total = total;
       state.adapters.error = null;
       rerender({ preserveScroll: true });
+      void refreshAdapterOta(instance, scope, request);
       return true;
     }
     state.adapters.rows = rows;
@@ -1048,6 +1071,7 @@ async function loadAdapters({ silent = false, signal } = {}) {
       void loadAdapters();
       return true;
     }
+    void refreshAdapterOta(instance, scope, request);
   } catch (error) {
     // A failed poll leaves the last good list on screen; only an explicit
     // load is allowed to blank the table and surface the error.
@@ -1070,6 +1094,26 @@ async function loadAdapters({ silent = false, signal } = {}) {
   return true;
 }
 
+async function refreshAdapterOta(instance, scope, request) {
+  const adapters = state?.adapters;
+  const current = () => isActive(instance, scope) && state?.adapters === adapters &&
+    state.activeTab === "devices" && adapters.kind === "flash" &&
+    request === adapters.request && document.visibilityState === "visible";
+  if (!current() || !activeAdapterOtaLoader) return;
+  const before = JSON.stringify([adapters.ota, adapters.otaErrors]);
+  const result = await activeAdapterOtaLoader.load(adapters.rows, { signal: scope.signal, isCurrent: current });
+  if (!result || !current()) return;
+  const visible = new Set(adapters.rows.filter((row) => row.ota?.state && row.ota.state !== "none").map((row) => row.certid));
+  adapters.ota = Object.fromEntries(Object.entries({ ...adapters.ota, ...result.items }).filter(([id]) => visible.has(id)));
+  adapters.otaErrors = Object.fromEntries(result.failed.map((id) => [id, true]));
+  const changed = before !== JSON.stringify([adapters.ota, adapters.otaErrors]);
+  if (changed) adapters.otaDirty = true;
+  if (adapters.otaDirty && !adapterRefreshWouldInterrupt()) {
+    adapters.otaDirty = false;
+    rerender({ preserveScroll: true });
+  }
+}
+
 async function pollAdapterList({ signal } = {}) {
   const instance = activeInstance;
   const scope = activeScope;
@@ -1086,7 +1130,7 @@ async function pollAdapterList({ signal } = {}) {
 }
 
 // One poller, dispatched by tab: the feedback list and the adapter list both
-// need a 30s refresh, and only one of them is on screen at a time.
+// use their own interval, and only one of them is on screen at a time.
 async function pollActiveTab({ signal } = {}) {
   if (!state) return true;
   if (state.activeTab === "devices") return pollAdapterList({ signal });
@@ -1184,7 +1228,7 @@ async function beginAdapterAction(action, id) {
   const device = state.adapters.rows.find(
     (item) => adapterDeviceId(item) === String(id),
   );
-  if (!device || !["unbind", "force_ota", "lock", "unlock"].includes(action)) {
+  if (!device || !["unbind", "force_ota", "lock", "unlock", "untask"].includes(action)) {
     return;
   }
   if (!adapterActionsForKind(state.adapters.kind).includes(action)) return;
@@ -1300,6 +1344,7 @@ async function submitAdapterAction() {
     if (!isActive(instance, scope)) return;
     state.adapters.actionResult = result;
     state.adapters.actionConfirm = null;
+    delete state.adapters.ota[confirm.device.certid];
     void loadAdapters();
   } catch (error) {
     if (isActive(instance, scope)) state.adapters.actionError = error;
@@ -1451,6 +1496,7 @@ function switchAppTab(nextTab) {
     return;
   }
   if (state.activeTab === nextTab) return;
+  activeAdapterOtaLoader?.cancel();
   state.activeTab = nextTab;
   state.detailRequest += 1;
   state.selectedId = null;
@@ -1479,7 +1525,7 @@ function switchAppTab(nextTab) {
   }
   if (nextTab === "devices") {
     // The adapter list is live data (online/charging), so it keeps polling.
-    activePoller?.resume();
+    activePoller?.resume(DEVICES_POLL_INTERVAL_MS);
     rerender();
     if (!state.ota.loaded) void activeOtaController?.load();
     void loadAdapters();
@@ -1927,6 +1973,8 @@ export async function mountPage({
   activeInstance = instance;
   activeScope = scope;
   state = nextState;
+  const adapterOtaLoader = createAdapterOtaLoader(callHonnmonoAdmin);
+  activeAdapterOtaLoader = adapterOtaLoader;
   helpers = null;
   const deviceController = createDeviceUnbindController({
     deviceState: nextState.device,
@@ -1975,7 +2023,7 @@ export async function mountPage({
         poll: pollActiveTab,
       });
       activePoller = poller;
-      if (!["device", "sim"].includes(state.activeTab)) poller.start();
+      if (!["device", "sim"].includes(state.activeTab)) poller.start(state.activeTab === "devices" ? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS);
       if (["device", "devices"].includes(state.activeTab)) void otaController.load();
       if (state.activeTab === "devices") void loadAdapters();
       if (state.activeTab === "sim") void simController.loadCards();
@@ -1998,6 +2046,8 @@ export async function mountPage({
     }),
     dispose() {
       adapterSessionDatePanel.close();
+      adapterOtaLoader.cancel();
+      if (activeAdapterOtaLoader === adapterOtaLoader) activeAdapterOtaLoader = null;
       poller?.dispose();
       if (activePoller === poller) activePoller = null;
       if (activeDeviceController === deviceController) {
