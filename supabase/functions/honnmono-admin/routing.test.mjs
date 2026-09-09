@@ -177,6 +177,15 @@ test("maps only the OTA package read and replace routes", () => {
 });
 
 
+test("routes flash OTA detail reads without widening other methods or services", () => {
+  assert.equal(mapOtaAdminPath("/devices/flash/CERT_1/ota", "GET"), "/devices/flash/CERT_1/ota");
+  for (const method of ["POST", "DELETE", "PUT"]) assert.equal(mapOtaAdminPath("/devices/flash/CERT_1/ota", method), "");
+  for (const path of ["/devices/dc-pro/CERT_1/ota", "/devices/flash/CERT_1/ota/extra", "/devices/flash/CERT%2F1/ota"]) assert.equal(mapOtaAdminPath(path, "GET"), "");
+  assert.equal(mapHonnmonoAdminPath("/devices/flash/CERT_1/ota", "GET"), "");
+  assert.equal(mapFlashAdminPath("/devices/flash/CERT_1/ota", "GET"), "");
+  assert.equal(validateOtaAdminBody('{"action":"untask"}'), '{"action":"untask"}');
+});
+
 test("maps only the flash-device key-rotation write to the HK test-server", () => {
   assert.equal(
     mapFlashAdminPath("/devices/flash/CERT_1/unbind", "POST"),

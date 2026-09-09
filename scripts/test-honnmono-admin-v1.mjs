@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 import {
+  DEVICE_UNBIND_TIMEOUT_MS,
+  MAX_REQUEST_JSON_BYTES,
   isAllowedFlashAdminBase,
   isAllowedHonnmonoUpstream,
   isAllowedOtaAdminBase,
   mapHonnmonoAdminPath,
   mapFlashAdminPath,
   mapOtaAdminPath,
+  upstreamTimeoutFor,
 } from "../supabase/functions/honnmono-admin/routing.mjs";
 
 
@@ -133,9 +136,11 @@ assert.match(edge, /"X-Internal-Token": HONNMONO_ADMIN_INTERNAL_TOKEN/);
 assert.match(edge, /operatorEmail\s*=\s*String\(user\?\.email/);
 assert.match(edge, /"X-Operator-Email": guard\.operatorEmail/);
 assert.match(edge, /body:\s*upstreamBody\s*\|\|\s*undefined/);
-assert.match(edge, /MAX_REQUEST_JSON_BYTES = 16_384/);
-assert.match(edge, /DEVICE_UNBIND_TIMEOUT_MS = 90_000/);
-assert.match(edge, /upstreamPath === "\/internal\/admin\/device\/unbind"/);
+// These constants now live in routing.mjs and are imported by the edge handler.
+assert.equal(MAX_REQUEST_JSON_BYTES, 16_384);
+assert.equal(DEVICE_UNBIND_TIMEOUT_MS, 90_000);
+assert.equal(upstreamTimeoutFor("/internal/admin/device/unbind"), DEVICE_UNBIND_TIMEOUT_MS);
+assert.match(edge, /upstreamTimeoutFor\(upstreamPath\)/);
 assert.match(edge, /MAX_JSON_BYTES = 2_000_000/);
 assert.match(edge, /Deno\.env\.get\("OTA_ADMIN_URL"\)/);
 assert.match(edge, /Deno\.env\.get\("OTA_ADMIN_TOKEN"\)/);

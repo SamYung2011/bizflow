@@ -1036,6 +1036,40 @@ Object.assign(fr, {
   simUnreachable: "Le service China Mobile est momentanément injoignable",
 });
 
+Object.assign(zh, {
+  location: "位置", noLocation: "未有心跳位置", notSatelliteFix: "非衛星定位", viewMap: "查看地圖",
+  ota: "OTA", otaNoTask: "無升級任務", otaPackage: "升級包", otaTargetVersion: "目標版本",
+  otaForced: "強制", otaNormal: "一般", otaArmedAt: "掛於", otaExpiresAt: "過期於",
+  "otaState.armed": "待領取", "otaState.delivered": "已領取", "otaState.downloading": "下載中",
+  "otaState.downloaded": "已下載，待安裝", "otaState.installed": "已安裝", "otaState.expired": "已過期", "otaState.untasked": "已撤任務",
+  otaUntask: "撤任務", otaUntaskConfirm: "撤除這台設備的待升級任務？已開始的下載或安裝不會被中止。",
+  otaDownloads: "{count} 次／{bytes} bytes", otaReceived: "領取", otaDownload: "下載", otaInstalled: "安裝",
+  otaStillPending: "版本已更新，任務仍掛著，可撤除任務。",
+  otaDetailsPending: "正在讀取升級詳情…", otaDetailsUnavailable: "暫時無法更新升級詳情，稍後自動重試。",
+});
+Object.assign(en, {
+  location: "Location", noLocation: "No heartbeat location", notSatelliteFix: "Non-satellite location", viewMap: "View map",
+  ota: "OTA", otaNoTask: "No upgrade task", otaPackage: "Package", otaTargetVersion: "Target version",
+  otaForced: "Forced", otaNormal: "Standard", otaArmedAt: "Scheduled at", otaExpiresAt: "Expires at",
+  "otaState.armed": "Awaiting pickup", "otaState.delivered": "Picked up", "otaState.downloading": "Downloading",
+  "otaState.downloaded": "Downloaded, awaiting install", "otaState.installed": "Installed", "otaState.expired": "Expired", "otaState.untasked": "Task withdrawn",
+  otaUntask: "Withdraw task", otaUntaskConfirm: "Withdraw this device’s pending upgrade task? A download or installation already in progress will continue.",
+  otaDownloads: "{count} requests / {bytes} bytes", otaReceived: "Pickup", otaDownload: "Download", otaInstalled: "Install",
+  otaStillPending: "The version has changed, but the task is still pending and can be withdrawn.",
+  otaDetailsPending: "Loading upgrade details…", otaDetailsUnavailable: "Upgrade details could not be refreshed. Retrying automatically.",
+});
+Object.assign(fr, {
+  location: "Position", noLocation: "Aucune position reçue", notSatelliteFix: "Position non satellite", viewMap: "Voir la carte",
+  ota: "OTA", otaNoTask: "Aucune mise à jour prévue", otaPackage: "Package", otaTargetVersion: "Version cible",
+  otaForced: "Forcée", otaNormal: "Standard", otaArmedAt: "Planifiée le", otaExpiresAt: "Expire le",
+  "otaState.armed": "En attente de réception", "otaState.delivered": "Reçue", "otaState.downloading": "Téléchargement en cours",
+  "otaState.downloaded": "Téléchargée, installation en attente", "otaState.installed": "Installée", "otaState.expired": "Expirée", "otaState.untasked": "Tâche retirée",
+  otaUntask: "Retirer la tâche", otaUntaskConfirm: "Retirer la mise à jour en attente de cet appareil ? Un téléchargement ou une installation déjà en cours continuera.",
+  otaDownloads: "{count} requêtes / {bytes} octets", otaReceived: "Réception", otaDownload: "Téléchargement", otaInstalled: "Installation",
+  otaStillPending: "La version a changé, mais la tâche reste en attente et peut être retirée.",
+  otaDetailsPending: "Chargement des détails…", otaDetailsUnavailable: "Actualisation des détails impossible. Nouvelle tentative automatique.",
+});
+
 export const appFeedbackCopy = { zh, en, fr };
 
 export function translateAppFeedback(lang, key, values = {}) {
