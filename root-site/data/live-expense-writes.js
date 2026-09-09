@@ -1,5 +1,6 @@
 import { getCurrentUser, getSession, getSupabaseClient } from "./auth.js";
 import { invalidateLiveTables } from "./live-snapshot-utils.js";
+import { EXPENSE_RECEIPT_BUCKET, RECEIPT_SIGN_TTL_SECONDS, receiptPathFromStored } from "../bizflow/expense-receipt-path.js";
 
 async function writeContext() {
   const [client, session, currentUser] = await Promise.all([
@@ -25,10 +26,23 @@ async function uploadReceipt(client, employeeId, file) {
     upsert: false
   });
   throwIfError(upload.error);
-  return {
-    path,
-    url: client.storage.from("expense-receipts").getPublicUrl(path).data.publicUrl
-  };
+  // Signing is a preview operation: a failure must not undo a successful upload.
+  let url = "";
+  try {
+    const signed = await client.storage.from(EXPENSE_RECEIPT_BUCKET).createSignedUrl(path, RECEIPT_SIGN_TTL_SECONDS);
+    if (!signed.error) url = signed.data?.signedUrl || "";
+  } catch { /* Keep the uploaded path; the page can sign it again later. */ }
+  return { path, url };
+}
+
+export async function signLiveExpenseReceipts(paths, ttl = RECEIPT_SIGN_TTL_SECONDS) {
+  const cleanPaths = [...new Set(paths.map(receiptPathFromStored).filter(Boolean))];
+  if (!cleanPaths.length) return new Map();
+  const { client } = await writeContext();
+  const { data, error } = await client.storage.from(EXPENSE_RECEIPT_BUCKET).createSignedUrls(cleanPaths, ttl);
+  throwIfError(error);
+  return new Map((data || []).filter((item) => !item.error && item.path && item.signedUrl)
+    .map((item) => [item.path, item.signedUrl]));
 }
 
 export async function uploadLiveExpenseReceipt(file) {
@@ -58,8 +72,8 @@ export async function createLiveExpense({ date, amount, currency, category, desc
       category,
       description: description || null,
       receipt_urls: [
-        ...receiptUrls.map((url) => String(url || "").trim()).filter(Boolean),
-        ...uploaded.map((receipt) => receipt.url)
+        ...receiptUrls.map(receiptPathFromStored).filter(Boolean),
+        ...uploaded.map((receipt) => receipt.path)
       ]
     }).select("*").single();
     throwIfError(result.error);
@@ -88,7 +102,7 @@ export async function updateLiveExpense(expenseId, {
     currency,
     category,
     description: description || null,
-    receipt_urls: receiptUrls.map((url) => String(url || "").trim()).filter(Boolean)
+    receipt_urls: receiptUrls.map(receiptPathFromStored).filter(Boolean)
   }, (query) => query
     .eq("employee_id", currentUser.employeeId)
     .eq("status", "pending"));
