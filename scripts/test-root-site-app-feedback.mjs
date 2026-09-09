@@ -2099,7 +2099,7 @@ await liveCheck("location address, coordinate fallback and missing location rend
 });
 for (const state of ["none", "armed", "delivered", "downloading", "downloaded", "installed", "expired", "untasked"]) {
   await liveCheck(`OTA ${state} renders its task and timeline`, () => {
-    const details = { state, task: state === "none" ? null : { package: "test.bin", mainver: 1, subver: 2, force: 1, armedAt: 1000, expiresAt: 2000 }, downloads: [{ status: 200, bytes: 300, at: 1500 }], versionNow: { software: "v1.2" }, versionChangedAt: state === "installed" ? 1600 : null, stillPending: state === "installed" };
+    const details = { state, task: state === "none" ? null : { package: "test.bin", mainver: 1, subver: 2, force: 1, armedAt: 1000, expiresAt: Date.now() + (state === "expired" ? -60_000 : 60_000) }, downloads: [{ status: 200, bytes: 300, at: 1500 }], versionNow: { software: "v1.2" }, versionChangedAt: state === "installed" ? 1600 : null, stillPending: state === "installed" };
     const html = renderAdapterOta({ certid: "CERT_1" }, details, liveHelpers);
     assert.match(html, new RegExp(`data-ota-state="${state}"`));
     if (state === "none") {
@@ -2110,7 +2110,7 @@ for (const state of ["none", "armed", "delivered", "downloading", "downloaded", 
       assert.match(html, /1.2/);
       assert.match(html, /1 requests \/ 300 bytes/);
       assert.equal((html.match(/<li /g) || []).length, 4);
-      if (state === "untasked") assert.doesNotMatch(html, /data-adapter-action="untask"/);
+      if (["untasked", "expired"].includes(state)) assert.doesNotMatch(html, /data-adapter-action="untask"/);
       else assert.match(html, /data-adapter-action="untask"/);
       if (state === "installed") assert.match(html, /still pending/);
     }
@@ -2134,7 +2134,7 @@ await liveCheck("list signature includes location, OTA and firmware date changes
     { location: { starnum: 0 } }, { ota: { state: "armed" } }, { ota: { updatedAt: 123 } },
     { firmware: { softwareDate: "20260909" } }, { lastStatusTime: 999 },
   ]) assert.notEqual(adapterListSignature([{ certid: "A", ...changed }], 1), before);
-  assert.match(pageSource, /if \(unchanged\) \{\s*void refreshAdapterOta/);
+  assert.match(pageSource, /if \(!unchanged\) state\.adapters\.adaptersDirty = true;\s*flushAdapterUpdates\(\);\s*void refreshAdapterOta/);
 });
 await liveCheck("OTA loader limits concurrency to three even across overlapping refresh rounds", async () => {
   let inflight = 0, peak = 0;
@@ -2170,10 +2170,11 @@ await liveCheck("OTA failures remain scoped and aborted or stale rounds cannot a
 });
 await liveCheck("OTA responses update memory but preserve an input opened while in flight", async () => {
   const source = pageSource.slice(pageSource.indexOf("async function refreshAdapterOta"), pageSource.indexOf("async function pollAdapterList"));
+  const flushSource = pageSource.slice(pageSource.indexOf("function flushAdapterUpdates"), pageSource.indexOf("function onAdapterFocusOut"));
   const target = { activeTab: "devices", adapters: { kind: "flash", request: 1, rows: [{ certid: "A", ota: { state: "armed" } }], ota: {}, otaErrors: {} } };
   let resolve, blocked = false, renders = 0;
   const loader = { load: () => new Promise((done) => { resolve = done; }) };
-  const refresh = new Function("state", "isActive", "document", "activeAdapterOtaLoader", "adapterRefreshWouldInterrupt", "rerender", `${source}; return refreshAdapterOta;`)(target, () => true, { visibilityState: "visible" }, loader, () => blocked, () => { renders++; });
+  const refresh = new Function("state", "isActive", "document", "activeAdapterOtaLoader", "adapterRefreshWouldInterrupt", "rerender", `${flushSource}; ${source}; return refreshAdapterOta;`)(target, () => true, { visibilityState: "visible" }, loader, () => blocked, () => { renders++; target.adapters.otaDirty = false; });
   const first = refresh(1, { signal: new AbortController().signal }, 1);
   blocked = true;
   resolve({ items: { A: { state: "downloaded" } }, failed: [] });
@@ -2226,6 +2227,8 @@ await liveCheck("all live-device copy is present in three languages", () => {
   for (const lang of ["zh", "en", "fr"]) for (const key of keys) assert.equal(typeof appFeedbackCopy[lang][key], "string", `${lang}:${key}`);
 });
 console.log(`DEVICE_PAGE_LIVE=${deviceLiveChecks}/${deviceLiveChecks}`);
+
+await import("./test-app-feedback-live-r2.mjs");
 
 console.log(
   "Honnmono APP root-site contracts: PASS (feedback + device unbind + OTA package card + SIM card lookup, allowlists, confirmations, escaped fields, tab-dispatched polling, i18n)",

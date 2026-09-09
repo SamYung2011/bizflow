@@ -100,6 +100,8 @@ function createAdapterDeviceState(saved = {}) {
     queryInput:
       typeof saved.adapterQuery === "string" ? saved.adapterQuery : "",
     query: typeof saved.adapterQuery === "string" ? saved.adapterQuery : "",
+    lastAdapterInputAt: null,
+    adaptersDirty: false,
     loading: false,
     error: null,
     request: 0,
@@ -790,6 +792,10 @@ function rerender({ preserveScroll = false } = {}) {
   adapterSessionDatePanel.close();
   const scrollState = preserveScroll ? captureScrollState() : null;
   page.outerHTML = render(helpers);
+  if (state?.activeTab === "devices") {
+    state.adapters.adaptersDirty = false;
+    state.adapters.otaDirty = false;
+  }
   if (scrollState) restoreScrollState(scrollState);
 }
 
@@ -1011,10 +1017,29 @@ function adapterRefreshWouldInterrupt() {
   // rerender() closes the date popover, so do not repaint while it is open.
   if (adapterSessionDatePanel.isOpen()) return true;
   const focused = document.activeElement;
+  if (focused?.matches?.("[data-adapter-query]")) {
+    return state.adapters.queryInput !== state.adapters.query ||
+      (state.adapters.lastAdapterInputAt != null && Date.now() - state.adapters.lastAdapterInputAt < 5_000);
+  }
   return Boolean(
     focused?.closest?.("[data-app-feedback-page]") &&
       focused.matches?.("input, textarea, select"),
   );
+}
+
+function flushAdapterUpdates() {
+  if (!state || state.activeTab !== "devices" || !isActive() ||
+      document.visibilityState !== "visible" || state.adapters.loading) return;
+  if ((state.adapters.adaptersDirty || state.adapters.otaDirty) && !adapterRefreshWouldInterrupt()) {
+    rerender({ preserveScroll: true });
+  }
+}
+
+function onAdapterFocusOut(event) {
+  if (event.target.matches?.("[data-adapter-query]")) {
+    // focusout fires before activeElement settles; paint after the focus move.
+    activeScope?.animationFrame(flushAdapterUpdates);
+  }
 }
 
 async function loadAdapters({ silent = false, signal } = {}) {
@@ -1045,11 +1070,6 @@ async function loadAdapters({ silent = false, signal } = {}) {
       const unchanged =
         adapterListSignature(rows, total) ===
         adapterListSignature(state.adapters.rows, state.adapters.total);
-      if (adapterRefreshWouldInterrupt()) return true;
-      if (unchanged) {
-        void refreshAdapterOta(instance, scope, request);
-        return true;
-      }
       const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
       if (state.adapters.page > lastPage) {
         // Rows vanished under this page: land on the new last page instead of
@@ -1060,7 +1080,8 @@ async function loadAdapters({ silent = false, signal } = {}) {
       state.adapters.rows = rows;
       state.adapters.total = total;
       state.adapters.error = null;
-      rerender({ preserveScroll: true });
+      if (!unchanged) state.adapters.adaptersDirty = true;
+      flushAdapterUpdates();
       void refreshAdapterOta(instance, scope, request);
       return true;
     }
@@ -1108,10 +1129,7 @@ async function refreshAdapterOta(instance, scope, request) {
   adapters.otaErrors = Object.fromEntries(result.failed.map((id) => [id, true]));
   const changed = before !== JSON.stringify([adapters.ota, adapters.otaErrors]);
   if (changed) adapters.otaDirty = true;
-  if (adapters.otaDirty && !adapterRefreshWouldInterrupt()) {
-    adapters.otaDirty = false;
-    rerender({ preserveScroll: true });
-  }
+  flushAdapterUpdates();
 }
 
 async function pollAdapterList({ signal } = {}) {
@@ -1126,6 +1144,7 @@ async function pollAdapterList({ signal } = {}) {
   ) {
     return true;
   }
+  flushAdapterUpdates();
   return loadAdapters({ silent: true, signal });
 }
 
@@ -1740,6 +1759,7 @@ function onFeedbackClick(event) {
 function onFeedbackInput(event) {
   if (event.target.matches("[data-adapter-query]")) {
     state.adapters.queryInput = event.target.value;
+    state.adapters.lastAdapterInputAt = Date.now();
     return;
   }
   if (event.target.matches("[data-adapter-action-version]")) {
@@ -2014,6 +2034,7 @@ export async function mountPage({
       void loadPageUnread({ scope, currentUser });
       scope.listen(document, "click", onFeedbackClick);
       scope.listen(document, "input", onFeedbackInput);
+      scope.listen(document, "focusout", onAdapterFocusOut);
       scope.listen(document, "change", onFeedbackChange);
       scope.listen(document, "submit", onFeedbackSubmit);
       scope.listen(document, "keydown", onFeedbackKeydown);
