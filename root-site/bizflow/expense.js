@@ -22,8 +22,10 @@ import {
   revertLiveExpenseToPending,
   unmarkLiveExpensePaid,
   updateLiveExpense,
-  uploadLiveExpenseReceipt
+  uploadLiveExpenseReceipt,
+  signLiveExpenseReceipts
 } from "../data/live-expense-writes.js";
+import { createReceiptUrlCache } from "./expense-receipt-cache.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { createDateRangePanel } from "../components/date-range-panel.js";
@@ -52,6 +54,7 @@ const copy = {
     amount: "金額",
     description: "說明",
     receipt: "收據",
+    receiptUnavailable: "收據暫無法顯示",
     status: "狀態",
     payment: "打款",
     actions: "操作",
@@ -129,6 +132,7 @@ const copy = {
     amount: "Amount",
     description: "Description",
     receipt: "Receipt",
+    receiptUnavailable: "Receipt unavailable",
     status: "Status",
     payment: "Payment",
     actions: "Actions",
@@ -206,6 +210,7 @@ const copy = {
     amount: "Montant",
     description: "Description",
     receipt: "Reçu",
+    receiptUnavailable: "Reçu indisponible",
     status: "Statut",
     payment: "Paiement",
     actions: "Actions",
@@ -290,6 +295,7 @@ let currentHelpers = null;
 let activeScope = null;
 let activeMountId = 0;
 let expenseLiveRefresh = null;
+let receiptUrlCache = null;
 const expenseDatePanel = createDateRangePanel();
 
 function isCurrentExpenseMount(mountId, scope = activeScope) {
@@ -336,7 +342,6 @@ function draftFromExpenseRow(row) {
     receipts: row.receipts.map((receipt) => ({
       ...receipt,
       status: "uploaded",
-      path: "",
       newlyUploaded: false,
       showUploadStatus: false
     }))
@@ -354,7 +359,7 @@ function expenseDraftComparable(draft) {
     description: String(draft.description || ""),
     receiptUrls: draft.receipts
       .filter((receipt) => receipt.status !== "failed" && receipt.status !== "uploading" && receipt.status !== "queued")
-      .map((receipt) => String(receipt.url || ""))
+      .map((receipt) => String(receipt.path || receipt.url || ""))
   };
 }
 
@@ -390,7 +395,7 @@ function renderReceiptCell(row, helpers) {
   const { escapeHtml, lang } = helpers;
   if (!row.receipts.length) return `<span class="expense-muted">—</span>`;
   const receipt = row.receipts[0];
-  return `<span class="expense-receipt-cell"><img src="${escapeHtml(receipt.url)}" alt="" loading="lazy"><span>${escapeHtml(t(lang, "receiptCount", { count: row.receipts.length }))}</span></span>`;
+  return `<span class="expense-receipt-cell">${receipt.url ? `<img src="${escapeHtml(receipt.url)}" alt="" loading="lazy">` : `<span class="expense-muted">${escapeHtml(t(lang, "receiptUnavailable"))}</span>`}<span>${escapeHtml(t(lang, "receiptCount", { count: row.receipts.length }))}</span></span>`;
 }
 
 function renderActions(row, helpers) {
@@ -486,7 +491,7 @@ function renderModal(helpers) {
         <div class="expense-upload">
           <label class="expense-upload__trigger">${icon("icon-nav-file", "icon")}<span><strong>${e(t(lang, "receiptHint"))}</strong><small>${e(t(lang, authenticated ? "receiptUpload" : "receiptLocal"))}</small></span><input type="file" accept="image/*" multiple data-expense-receipts data-expense-create-write${createWriteAttributes}></label>
           ${state.uploadProgress ? `<p class="expense-upload__progress" role="status">${e(t(lang, "receiptProgress", state.uploadProgress))}</p>` : ""}
-          ${draft.receipts.length ? `<div class="expense-preview-list">${draft.receipts.map((receipt, index) => `<figure data-expense-receipt-status="${e(receipt.status || "uploaded")}"><img src="${e(receipt.url)}" alt="${e(receipt.name)}"><button type="button" data-expense-receipt-remove="${index}" data-expense-create-write aria-label="${e(t(lang, "removeReceipt"))}"${createWriteAttributes}>×</button></figure>`).join("")}</div>` : ""}
+          ${draft.receipts.length ? `<div class="expense-preview-list">${draft.receipts.map((receipt, index) => `<figure data-expense-receipt-status="${e(receipt.status || "uploaded")}">${receipt.url ? `<img src="${e(receipt.url)}" alt="${e(receipt.name)}">` : `<span class="expense-muted">${e(t(lang, "receiptUnavailable"))}</span>`}<button type="button" data-expense-receipt-remove="${index}" data-expense-create-write aria-label="${e(t(lang, "removeReceipt"))}"${createWriteAttributes}>×</button></figure>`).join("")}</div>` : ""}
           ${uploadStatuses.length ? `<ul class="expense-upload__statuses" aria-live="polite">${uploadStatuses.map((receipt) => `<li data-expense-upload-result="${e(receipt.status)}"><span>${e(t(lang, receipt.status === "failed" ? "receiptStatusFailed" : receipt.status === "uploaded" ? "receiptStatusUploaded" : "receiptStatusUploading", { name: receipt.name }))}</span></li>`).join("")}</ul>` : ""}
         </div>
         ${state.error ? `<p class="expense-error" role="alert">${e(t(lang, state.error))}</p>` : ""}
@@ -498,6 +503,11 @@ function renderModal(helpers) {
 
 export function renderExpense(helpers) {
   currentHelpers = helpers;
+  if (authenticated) {
+    for (const receipt of pageReceipts()) {
+      if (receipt.path) receipt.url = receiptUrlCache?.read(receipt.path) || "";
+    }
+  }
   const { escapeHtml, icon, lang } = helpers;
   // Mirrors bizflow_samyung/src/views/Expense.jsx:223-229: non-admins can only see their own rows.
   const rows = isAdmin ? filterExpenseRows(state.rows, state.filter, ownerKey) : filterExpenseRows(state.rows, "mine", ownerKey);
@@ -547,12 +557,43 @@ function isExpenseRefreshBlocked() {
   return state.writeBusy || state.uploadBusy || Boolean(state.draft);
 }
 
+function pageReceipts() {
+  return [...state.rows.flatMap((row) => row.receipts), ...(state.draft?.receipts || [])];
+}
+
+function signExpenseReceiptsInBackground(mountId = activeMountId, scope = activeScope) {
+  void prepareExpenseReceiptUrls(mountId, scope).then((changed) => {
+    // URLs are already refreshed in memory; preserve focus in an open draft.
+    if (changed && !state.draft) rerender();
+  });
+}
+
+async function prepareExpenseReceiptUrls(mountId = activeMountId, scope = activeScope) {
+  const cache = receiptUrlCache;
+  if (!authenticated || !cache) return false;
+  const receipts = pageReceipts().filter((receipt) => receipt.path);
+  try {
+    await cache.resolve(receipts.map((receipt) => receipt.path));
+  } catch (error) {
+    console.warn("Expense receipt signing failed", error);
+  }
+  if (!isCurrentExpenseMount(mountId, scope)) return false;
+  let changed = false;
+  for (const receipt of receipts) {
+    const url = cache.read(receipt.path);
+    if (receipt.url !== url) changed = true;
+    receipt.url = url;
+  }
+  return changed;
+}
+
 async function refreshExpenseRows(mountId = activeMountId, scope = activeScope) {
   const nextSnapshot = await getExpenseData();
   if (!isCurrentExpenseMount(mountId, scope)) return false;
   snapshot = nextSnapshot;
   state.rows = normalizeExpenseRows(nextSnapshot.reimbursements);
-  return true;
+  signExpenseReceiptsInBackground(mountId, scope);
+  return isCurrentExpenseMount(mountId, scope);
 }
 
 async function closeModal() {
@@ -868,6 +909,7 @@ async function onExpenseChange(event) {
       receipt.file = null;
       receipt.url = uploaded.url;
       receipt.path = uploaded.path;
+      receiptUrlCache?.remember(uploaded.path, uploaded.url);
       receipt.newlyUploaded = true;
       receipt.status = "uploaded";
     } catch (error) {
@@ -914,7 +956,7 @@ async function onExpenseSubmit(event) {
         description: state.draft.description.trim(),
         receiptUrls: state.draft.receipts
           .filter((receipt) => !["failed", "uploading", "queued"].includes(receipt.status))
-          .map((receipt) => receipt.url)
+          .map((receipt) => receipt.path)
           .filter(Boolean)
       };
       const result = draft.editingId
@@ -1023,6 +1065,12 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
     uploadProgress: null
   };
 
+  receiptUrlCache = authenticated ? createReceiptUrlCache(signLiveExpenseReceipts) : null;
+  const mountCache = receiptUrlCache;
+  scope.onCleanup(() => mountCache?.clear());
+  signExpenseReceiptsInBackground(mountId, scope);
+  throwIfPageAborted(signal, scope);
+
   return {
     page: {
       menu: createBizflowMenu("finance"),
@@ -1037,6 +1085,11 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       scope.listen(document, "change", onExpenseChange);
       scope.listen(document, "submit", onExpenseSubmit);
       scope.listen(document, "keydown", onExpenseKeydown);
+      const receiptTimer = setInterval(() => {
+        if (!isCurrentExpenseMount(mountId, scope) || state.uploadBusy || state.writeBusy) return;
+        signExpenseReceiptsInBackground(mountId, scope);
+      }, 60 * 1000);
+      scope.onCleanup(() => clearInterval(receiptTimer));
       expenseLiveRefresh = attachLiveSnapshotRefresh({
         scope,
         snapshots: EXPENSE_LIVE_SNAPSHOTS,
@@ -1051,7 +1104,8 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
           }
           snapshot = nextSnapshot;
           state.rows = normalizeExpenseRows(nextSnapshot.reimbursements);
-          rerender();
+          signExpenseReceiptsInBackground(mountId, scope);
+          if (isCurrent()) rerender();
         }
       });
     },
@@ -1077,6 +1131,8 @@ export async function mountPage({ scope, signal, historyState = null } = {}) {
       currentHelpers = null;
       if (activeScope === scope) activeScope = null;
       expenseLiveRefresh = null;
+      mountCache?.clear();
+      if (receiptUrlCache === mountCache) receiptUrlCache = null;
       expenseDatePanel.close({ restoreFocus: false });
       state.draft = null;
     }

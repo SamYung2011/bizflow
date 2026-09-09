@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useT } from "../i18n.jsx";
 import { toastError } from "../lib/toast.js";
+import { receiptPathFromStored } from "../../root-site/bizflow/expense-receipt-path.js";
+import { useSignedReceiptUrls } from "../hooks/useSignedReceiptUrls.js";
 
 const CATEGORIES = ["餐飲", "交通", "辦公", "物料", "通訊", "其他"];
 const CURRENCIES = ["RMB", "HKD", "USD"];
@@ -36,16 +38,16 @@ function StatusChip({ status, t }) {
   );
 }
 
-function Lightbox({ url, onClose }) {
-  if (!url) return null;
+function Lightbox({ signedUrl, onClose }) {
+  if (!signedUrl) return null;
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", cursor: "zoom-out" }}>
-      <img src={url} alt="" style={{ maxWidth: "92vw", maxHeight: "92vh", objectFit: "contain", borderRadius: 6 }} />
+      <img src={signedUrl} alt="" style={{ maxWidth: "92vw", maxHeight: "92vh", objectFit: "contain", borderRadius: 6 }} />
     </div>
   );
 }
 
-function ExpenseForm({ t, supabase, currentEmployee, onClose, onSaved, editing }) {
+function ExpenseForm({ t, supabase, currentEmployee, identity, onClose, onSaved, editing }) {
   const [expenseDate, setExpenseDate] = useState(editing?.expense_date || new Date().toISOString().slice(0, 10));
   const [amount, setAmount] = useState(editing?.amount != null ? String(editing.amount) : "");
   const [currency, setCurrency] = useState(editing?.currency || "RMB");
@@ -56,6 +58,7 @@ function ExpenseForm({ t, supabase, currentEmployee, onClose, onSaved, editing }
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
   const fileRef = useRef(null);
+  const signedReceipts = useSignedReceiptUrls(receiptUrls, supabase, identity);
 
   async function handleUpload(e) {
     const files = Array.from(e.target.files || []);
@@ -72,8 +75,7 @@ function ExpenseForm({ t, supabase, currentEmployee, onClose, onSaved, editing }
           upsert: false,
         });
         if (error) throw error;
-        const { data: pub } = supabase.storage.from("expense-receipts").getPublicUrl(path);
-        uploaded.push(pub.publicUrl);
+        uploaded.push(path);
       }
       setReceiptUrls((prev) => [...prev, ...uploaded]);
     } catch (e) {
@@ -103,7 +105,7 @@ function ExpenseForm({ t, supabase, currentEmployee, onClose, onSaved, editing }
         currency,
         category,
         description: description.trim() || null,
-        receipt_urls: receiptUrls,
+        receipt_urls: receiptUrls.map(receiptPathFromStored).filter(Boolean),
       };
       if (editing?.id) {
         const { error } = await supabase.from("expense_reimbursements").update(payload).eq("id", editing.id);
@@ -166,7 +168,7 @@ function ExpenseForm({ t, supabase, currentEmployee, onClose, onSaved, editing }
               <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {receiptUrls.map((url, i) => (
                   <div key={i} style={{ position: "relative", width: 80, height: 80, border: "1px solid #e5e8ee", borderRadius: 6, overflow: "hidden" }}>
-                    <img src={url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    {signedReceipts[receiptPathFromStored(url)] ? <img src={signedReceipts[receiptPathFromStored(url)]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 12, color: "#999" }}>{t("尚無圖片")}</span>}
                     <button onClick={() => removeReceipt(i)} style={{ position: "absolute", top: 2, right: 2, background: "rgba(0,0,0,0.6)", color: "#fff", border: "none", borderRadius: "50%", width: 20, height: 20, cursor: "pointer", fontSize: 12, lineHeight: 1 }}>×</button>
                   </div>
                 ))}
@@ -192,7 +194,8 @@ export default function ExpenseView({ supabase, session, currentEmployee, employ
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingRow, setEditingRow] = useState(null);
-  const [lightboxUrl, setLightboxUrl] = useState("");
+  const [lightboxPath, setLightboxPath] = useState("");
+  const receiptIdentity = `${session?.user?.id || ""}:${currentEmployee?.id || ""}`;
   const [filter, setFilter] = useState(isAdmin ? "pending" : "mine"); // pending / approved / rejected / paid / mine / all
 
   const empMap = useMemo(() => {
@@ -227,6 +230,8 @@ export default function ExpenseView({ supabase, session, currentEmployee, employ
     if (filter === "mine") return rows.filter((r) => r.employee_id === currentEmployee?.id);
     return rows.filter((r) => r.status === filter);
   }, [rows, filter, isAdmin, currentEmployee?.id]);
+
+  const signedReceipts = useSignedReceiptUrls(visible.flatMap((row) => row.receipt_urls || []), supabase, receiptIdentity);
 
   const counts = useMemo(() => {
     const c = { pending: 0, approved: 0, rejected: 0, paid: 0, mine: 0 };
@@ -393,8 +398,8 @@ export default function ExpenseView({ supabase, session, currentEmployee, employ
                       {(r.receipt_urls || []).length === 0 ? <span style={{ color: "#bbb" }}>—</span> : (
                         <div style={{ display: "flex", gap: 4 }}>
                           {(r.receipt_urls || []).slice(0, 3).map((u, i) => (
-                            <img key={i} src={u} alt="" onClick={() => setLightboxUrl(u)}
-                              style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 5, cursor: "zoom-in", border: "1px solid #e5e8ee" }} />
+                            signedReceipts[receiptPathFromStored(u)] ? <img key={i} src={signedReceipts[receiptPathFromStored(u)]} alt="" onClick={() => setLightboxPath(receiptPathFromStored(u))}
+                              style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 5, cursor: "zoom-in", border: "1px solid #e5e8ee" }} /> : <span key={i} style={{ fontSize: 12, color: "#999" }}>{t("尚無圖片")}</span>
                           ))}
                           {(r.receipt_urls || []).length > 3 && (
                             <span style={{ fontSize: 11, color: "#999", alignSelf: "center", marginLeft: 4 }}>+{(r.receipt_urls || []).length - 3}</span>
@@ -452,13 +457,14 @@ export default function ExpenseView({ supabase, session, currentEmployee, employ
           t={t}
           supabase={supabase}
           currentEmployee={currentEmployee}
+          identity={receiptIdentity}
           editing={editingRow}
           onClose={() => { setShowForm(false); setEditingRow(null); }}
           onSaved={() => { setShowForm(false); setEditingRow(null); load(); }}
         />
       )}
 
-      <Lightbox url={lightboxUrl} onClose={() => setLightboxUrl("")} />
+      <Lightbox signedUrl={signedReceipts[lightboxPath] || ""} onClose={() => setLightboxPath("")} />
     </div>
   );
 }

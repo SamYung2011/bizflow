@@ -1,3 +1,5 @@
+import { receiptPathFromStored } from "./expense-receipt-path.js";
+
 export const expenseFilters = ["pending", "approved", "rejected", "paid", "mine", "all"];
 export const expenseCurrencies = ["RMB", "HKD", "USD"];
 export const expenseCategories = ["Food", "Transport", "Office", "Material", "Communication", "Other"];
@@ -33,7 +35,9 @@ export function normalizeExpenseRows(items) {
     category: expenseCategoryByDbValue[item.category] ?? (expenseCategories.includes(item.category) ? item.category : "Other"),
     description: String(item.description || ""),
     receipts: Array.isArray(item.receiptUrls ?? item.receipt_urls)
-      ? (item.receiptUrls ?? item.receipt_urls).map((url) => ({ url: String(url), name: "" }))
+      ? (item.receiptUrls ?? item.receipt_urls)
+        .map((stored) => ({ path: receiptPathFromStored(stored), stored, url: "", name: "" }))
+        .filter((receipt) => receipt.path)
       : [],
     status: ["pending", "approved", "rejected"].includes(item.status) ? item.status : "pending",
     paid: item.paid === true,
