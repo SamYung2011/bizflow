@@ -562,7 +562,10 @@ function pageReceipts() {
 }
 
 function signExpenseReceiptsInBackground(mountId = activeMountId, scope = activeScope) {
-  void prepareExpenseReceiptUrls(mountId, scope).then((changed) => { if (changed) rerender(); });
+  void prepareExpenseReceiptUrls(mountId, scope).then((changed) => {
+    // URLs are already refreshed in memory; preserve focus in an open draft.
+    if (changed && !state.draft) rerender();
+  });
 }
 
 async function prepareExpenseReceiptUrls(mountId = activeMountId, scope = activeScope) {

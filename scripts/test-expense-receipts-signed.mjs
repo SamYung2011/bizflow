@@ -164,6 +164,28 @@ await test("both frontends render signed receipts and persist paths without publ
   assert.match(root, /signExpenseReceiptsInBackground\(mountId, scope\)/);
   assert.equal((root.match(/receiptUnavailable:/g) || []).length, 3);
 });
+await test("background signing preserves open draft focus, including drafts opened in flight", async () => {
+  const background = root.slice(root.indexOf("function signExpenseReceiptsInBackground"), root.indexOf("async function prepareExpenseReceiptUrls"));
+  assert.match(background, /if \(changed && !state\.draft\) rerender\(\)/);
+  for (const [draftBefore, draftAfter, changed, expectedRenders] of [
+    [{}, {}, true, 0],
+    [null, {}, true, 0],
+    [null, null, true, 1],
+    [null, null, false, 0],
+  ]) {
+    const state = { draft: draftBefore };
+    let finish, renders = 0;
+    const pending = new Promise((resolve) => { finish = resolve; });
+    const sign = new Function("state", "prepareExpenseReceiptUrls", "rerender", `${background}; return signExpenseReceiptsInBackground;`)(
+      state, () => pending, () => { renders++; },
+    );
+    sign(1, {});
+    state.draft = draftAfter;
+    finish(changed);
+    await pending;
+    assert.equal(renders, expectedRenders);
+  }
+});
 await test("drafts preserve paths; local blob previews and upload cleanup remain", () => {
   const draft = root.slice(root.indexOf("function draftFromExpenseRow"), root.indexOf("function formatAmount"));
   assert.doesNotMatch(draft, /path: ""/);
