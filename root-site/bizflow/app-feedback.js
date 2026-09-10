@@ -109,6 +109,7 @@ function createAdapterDeviceState(saved = {}) {
     detailDate: kind === "flash" ? currentHongKongDate() : "",
     sessions: [],
     sessionDays: Object.create(null),
+    sessionDayRequests: Object.create(null),
     sessionTotal: 0,
     sessionPage: 1,
     sessionLoading: false,
@@ -560,11 +561,11 @@ function renderAdapterCards() {
           ${detailRow("uuid", id, { mono: true })}
           ${detailRow("deviceModel", device.model)}
           ${detailRow("boundAccount", owner || t("unboundAccount"))}
-          ${detailRow("softwareVersion", firmware.software || device.firmware)}
+          ${detailRow("softwareVersion", firmware.software || "—")}
           ${detailRow("hardwareVersion", firmware.hardware)}
           ${detailRow("lastHeartbeat", formatFeedbackTime(device.lastHeartbeatAt || device.lastStatusTime, helpers.lang))}
           ${renderAdapterLocation(device.location, { t, escapeHtml: rawE })}
-          ${detailRow("chargeCount", t("chargeCount", { count: Number(device.chargeCount) || 0 }))}
+          ${detailRow("chargeCountLabel", t("chargeCountValue", { count: Number(device.chargeCount) || 0 }))}
         </dl>
         <section class="app-feedback-adapter-live" aria-label="${rawE(t("realtimeData"))}">
           <div><strong>${e(metric(live.watts, " W"))}</strong><span>${rawE(t("power"))}</span></div>
@@ -1158,7 +1159,7 @@ async function pollActiveTab({ signal } = {}) {
   return pollFeedbackList({ signal });
 }
 
-async function loadAdapterSessions() {
+async function loadAdapterSessions({ latest = false } = {}) {
   const device = state?.adapters?.detailDevice;
   if (!device) return;
   const instance = activeInstance;
@@ -1166,7 +1167,7 @@ async function loadAdapterSessions() {
   const subPath = adapterSessionSubPath({
     kind: state.adapters.kind,
     certid: device.certid,
-    date: state.adapters.detailDate,
+    date: latest ? "latest" : state.adapters.detailDate,
     page: state.adapters.sessionPage,
   });
   if (!subPath) return;
@@ -1175,9 +1176,19 @@ async function loadAdapterSessions() {
   state.adapters.sessionError = null;
   state.adapters.downloadError = null;
   rerender();
+  let calendarMonth = "";
   try {
     const payload = await callHonnmonoAdmin(subPath, { signal: scope.signal });
     if (!isActive(instance, scope) || request !== state.adapters.sessionRequest) return;
+    if (typeof payload?.date === "string") {
+      state.adapters.detailDate = normalizeDateInput(payload.date) || (state.adapters.kind === "dc-pro" ? "" : currentHongKongDate());
+    }
+    if (payload?.days && typeof payload.days === "object" && !Array.isArray(payload.days)) {
+      calendarMonth = (state.adapters.detailDate || currentHongKongDate()).slice(0, 7);
+      (state.adapters.sessionDays[device.certid] ||= {})[calendarMonth] = {
+        certid: device.certid, month: calendarMonth, days: payload.days, latestDay: payload.latestDay,
+      };
+    }
     state.adapters.sessions = Array.isArray(payload?.items) ? payload.items : [];
     state.adapters.sessionTotal = Number(payload?.total) || 0;
     const sessionPages = Math.max(
@@ -1199,6 +1210,7 @@ async function loadAdapterSessions() {
     if (isActive(instance, scope) && request === state.adapters.sessionRequest) {
       state.adapters.sessionLoading = false;
       rerender();
+      if (calendarMonth) void prefetchPreviousSessionMonth(device.certid, calendarMonth);
     }
   }
 }
@@ -1207,20 +1219,35 @@ async function loadAdapterSessionDays(certid, month) {
   const instance = activeInstance;
   const scope = activeScope;
   const adapters = state?.adapters;
-  if (!adapters || !certid || !isActive(instance, scope)) return undefined;
-  try {
-    const payload = await callHonnmonoAdmin(
-      `/devices/${adapters.kind}/${encodeURIComponent(certid)}/sessions/days?${new URLSearchParams({ month })}`,
-      { signal: scope.signal },
-    );
-    if (!isActive(instance, scope) || state.adapters !== adapters) return undefined;
-    if (payload?.month !== month || !payload.days || typeof payload.days !== "object" || Array.isArray(payload.days)) throw new Error("Invalid session days response");
-    (adapters.sessionDays[certid] ||= {})[month] = payload;
-    return payload;
-  } catch {
-    if (isActive(instance, scope) && state.adapters === adapters) delete adapters.sessionDays[certid]?.[month];
-    return undefined;
-  }
+  const current = () => isActive(instance, scope) && state?.adapters === adapters;
+  if (!adapters || !certid || !current()) return undefined;
+  const cached = adapters.sessionDays[certid]?.[month];
+  if (cached) return cached;
+  const pending = adapters.sessionDayRequests[certid] ||= {};
+  if (pending[month]) return pending[month];
+  // Share in-flight work between month navigation and background prefetch.
+  pending[month] = Promise.resolve().then(async () => {
+    if (!current()) return undefined;
+    try {
+      const payload = await callHonnmonoAdmin(
+        `/devices/${adapters.kind}/${encodeURIComponent(certid)}/sessions/days?${new URLSearchParams({ month })}`,
+        { signal: scope.signal },
+      );
+      if (!current()) return undefined;
+      if (payload?.month !== month || !payload.days || typeof payload.days !== "object" || Array.isArray(payload.days)) return undefined;
+      // A concurrent sessions response can provide fresher counts first.
+      return (adapters.sessionDays[certid] ||= {})[month] ||= payload;
+    } catch {
+      return undefined;
+    }
+  }).finally(() => { delete pending[month]; });
+  return pending[month];
+}
+
+function prefetchPreviousSessionMonth(certid, month) {
+  const previous = new Date(`${month}-01T00:00:00Z`);
+  previous.setUTCMonth(previous.getUTCMonth() - 1);
+  return loadAdapterSessionDays(certid, previous.toISOString().slice(0, 7));
 }
 
 async function openAdapterSessions(id) {
@@ -1233,22 +1260,15 @@ async function openAdapterSessions(id) {
   state.adapters.sessionPage = 1;
   state.adapters.sessionError = null;
   state.adapters.downloadError = null;
-  const instance = activeInstance;
-  const scope = activeScope;
-  const adapters = state.adapters;
-  const request = ++adapters.sessionRequest;
-  adapters.sessionTotal = 0;
-  adapters.sessionLoading = true;
-  rerender();
-  const days = await loadAdapterSessionDays(device.certid, currentHongKongDate().slice(0, 7));
-  if (!isActive(instance, scope) || state.adapters !== adapters || adapters.sessionRequest !== request) return;
-  adapters.detailDate = normalizeDateInput(days?.latestDay) || (adapters.kind === "flash" ? currentHongKongDate() : "");
-  await loadAdapterSessions();
+  state.adapters.sessionTotal = 0;
+  state.adapters.detailDate = state.adapters.kind === "flash" ? currentHongKongDate() : "";
+  await loadAdapterSessions({ latest: true });
 }
 
 function openAdapterSessionDatePanel(anchor) {
   const adapters = state.adapters;
   const certid = adapters.detailDevice?.certid;
+  let viewedMonth = "";
   const instance = activeInstance;
   const scope = activeScope;
   adapterSessionDatePanel.open({
@@ -1258,11 +1278,21 @@ function openAdapterSessionDatePanel(anchor) {
     minDate: adapterSessionMinDate(),
     dayStatus: (date) => {
       const month = adapters.sessionDays[certid]?.[date.slice(0, 7)];
-      return month ? (month.days[date] > 0 ? "available" : "empty") : undefined;
+      return month ? (month.days[date] > 0 ? "available" : "empty") : adapters.sessionDayRequests[certid]?.[date.slice(0, 7)] ? "loading" : undefined;
     },
     onViewMonthChange: async (month) => {
-      await loadAdapterSessionDays(certid, month);
-      if (isActive(instance, scope) && state.adapters === adapters && adapters.detailDevice?.certid === certid) adapterSessionDatePanel.refresh();
+      viewedMonth = month;
+      if (adapters.sessionDays[certid]?.[month]) {
+        adapterSessionDatePanel.refresh();
+        return;
+      }
+      const loading = loadAdapterSessionDays(certid, month);
+      adapterSessionDatePanel.refresh();
+      const payload = await loading;
+      if (isActive(instance, scope) && state.adapters === adapters && adapters.detailDevice?.certid === certid && viewedMonth === month) {
+        adapterSessionDatePanel.refresh();
+        if (payload) void prefetchPreviousSessionMonth(certid, month);
+      }
     },
     language: helpers?.lang || "zh",
     t: (key) => t(key === "date" ? "sessionDate" : key),

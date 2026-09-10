@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { dateRangePanelCopy } from "../root-site/components/date-range-panel-i18n.js";
+import { translateAppFeedback } from "../root-site/bizflow/app-feedback-i18n.js";
+import { renderAdapterLocation, renderAdapterOta } from "../root-site/bizflow/app-feedback-device-live.js";
 import { createDateRangePanel } from "../root-site/components/date-range-panel.js";
 import { normalizeDateInput } from "../root-site/components/date-value.js";
-import { assertHonnmonoAdminRequest } from "../root-site/bizflow/app-feedback-api.js";
-import { adapterSessionSubPath, adapterSessionMinDate } from "../root-site/bizflow/app-feedback.js";
+import { assertHonnmonoAdminRequest, formatFeedbackTime } from "../root-site/bizflow/app-feedback-api.js";
+import { adapterSessionSubPath, adapterSessionMinDate, flashUnbindDisabled, adapterActionsForKind } from "../root-site/bizflow/app-feedback.js";
 import { legacyCalendarTrace, withCalendar } from "./helpers/date-panel-fixture.mjs";
 
 let checks = 0;
@@ -83,6 +86,38 @@ await check("empty-month refresh focuses navigation and does not replace an edit
   assert.equal(f.panel.querySelector("[data-date-range-year]"), input);
 }));
 
+await check("loading month has localized status, selectable undotted days, then refreshes to records", () => {
+  for (const language of ["zh", "en", "fr"]) withCalendar(createDateRangePanel, (f) => {
+    let loading = true;
+    f.open({ language, dayStatus: (day) => loading ? "loading" : day.endsWith("-09") ? "available" : "empty" });
+    assert.ok(f.panel.innerHTML.includes(dateRangePanelCopy[language].loadingDays));
+    assert.match(f.panel.innerHTML, /class="date-range-panel__loading" role="status"/);
+    assert.doesNotMatch(f.panel.innerHTML, /date-range-panel__dot|is-empty/);
+    assert.equal(f.panel.querySelector('[data-date-range-day="2026-09-08"]').disabled, false);
+    loading = false;
+    f.api.refresh();
+    assert.doesNotMatch(f.panel.innerHTML, /date-range-panel__loading/);
+    assert.equal(f.panel.querySelector('[data-date-range-day="2026-09-08"]').disabled, true);
+    assert.match(f.panel.innerHTML, /date-range-panel__dot/);
+  });
+});
+
+await check("year chooser updates loading status without replacing the input", () => withCalendar(createDateRangePanel, (f) => {
+  let loading = false;
+  f.open({ language: "en", dayStatus: () => loading ? "loading" : undefined, onViewMonthChange: () => {} });
+  f.click('[data-date-range-action="jump"]');
+  const input = f.panel.querySelector("[data-date-range-year]");
+  input.value = "2025";
+  loading = true;
+  f.api.refresh();
+  assert.equal(f.panel.querySelector("[data-date-range-loading]").textContent, "Loading…");
+  assert.equal(f.panel.querySelector("[data-date-range-year]"), input);
+  loading = false;
+  f.api.refresh();
+  assert.equal(f.panel.querySelector("[data-date-range-loading]"), null);
+  assert.equal(input.value, "2025");
+}));
+
 const source = await readFile(new URL("../root-site/bizflow/app-feedback.js", import.meta.url), "utf8");
 function section(start, end) {
   const from = source.indexOf(start), to = source.indexOf(end, from + start.length);
@@ -90,83 +125,166 @@ function section(start, end) {
   return source.slice(from, to);
 }
 function pageFixture(kind = "flash") {
-  const calls = [], panel = { options: null, refreshed: 0, closed: 0, open(options) { this.options = options; }, refresh() { this.refreshed++; }, close() { this.closed++; } };
+  const calls = [], paints = [], panel = { options: null, refreshed: 0, closed: 0, open(options) { this.options = options; }, refresh() { this.refreshed++; }, close() { this.closed++; } };
   let active = true, responder = async (path) => path.includes("/days?")
     ? { month: new URL(path, "https://test.invalid").searchParams.get("month"), days: { "2026-09-09": 2 }, latestDay: "2026-09-09" }
-    : { items: [], total: 0 };
+    : { date: "2026-09-09", days: { "2026-09-09": 2 }, latestDay: "2026-09-09", items: [{ id: 1 }], total: 2 };
   const scope = { signal: new AbortController().signal };
   const production = section("function createAdapterDeviceState", "function adapterPageCount") + section("async function loadAdapterSessions", "async function beginAdapterAction");
-  const make = new Function("callHonnmonoAdmin", "activeScope", "adapterSessionSubPath", "adapterSessionMinDate", "normalizeDateInput", "adapterSessionDatePanel", "isActive", "kind", `
+  const make = new Function("callHonnmonoAdmin", "activeScope", "adapterSessionSubPath", "adapterSessionMinDate", "normalizeDateInput", "adapterSessionDatePanel", "isActive", "kind", "paints", "calls", `
     const PAGE_SIZE = 20, activeInstance = 1, helpers = { lang: 'en' };
     const currentHongKongDate = () => '2026-09-10', t = (key) => key;
-    const rerender = () => {};
+    const rerender = () => paints.push({ loading: state.adapters.sessionLoading, date: state.adapters.detailDate, calls: calls.length });
     ${section("function adapterDeviceId", "function ")}
     ${production}
     const state = { adapters: createAdapterDeviceState({ adapterKind: kind }) };
     state.adapters.rows = [{ certid: 'A', uuid: 'A' }, { certid: 'B', uuid: 'B' }];
-    return { state, openAdapterSessions, closeAdapterSessions, openAdapterSessionDatePanel, loadAdapterSessionDays };
+    return { state, openAdapterSessions, closeAdapterSessions, openAdapterSessionDatePanel, loadAdapterSessionDays, loadAdapterSessions };
   `);
-  const page = make(async (path) => { assertHonnmonoAdminRequest(path); calls.push(path); return responder(path); }, scope, adapterSessionSubPath, adapterSessionMinDate, normalizeDateInput, panel, () => active, kind);
-  return { ...page, calls, panel, respond(fn) { responder = fn; }, deactivate() { active = false; } };
+  const page = make(async (path) => { assertHonnmonoAdminRequest(path); calls.push(path); return responder(path); }, scope, adapterSessionSubPath, adapterSessionMinDate, normalizeDateInput, panel, () => active, kind, paints, calls);
+  return { ...page, calls, paints, panel, respond(fn) { responder = fn; }, deactivate() { active = false; } };
 }
 
-await check("both device kinds fetch the current-month days before sessions and default to latestDay", async () => {
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+function deferred() { let resolve; const promise = new Promise((done) => { resolve = done; }); return { resolve, promise }; }
+const sessionPayload = (date = "2026-09-09") => ({ date, days: date ? { [date]: 2 } : {}, latestDay: date || null, items: [{ id: 1 }], total: 2 });
+
+await check("opening makes one latest session request; only after paint does prior-month prefetch start", async () => {
   for (const kind of ["flash", "dc-pro"]) {
-    const f = pageFixture(kind);
-    await f.openAdapterSessions("A");
-    assert.deepEqual(f.calls, [`/devices/${kind}/A/sessions/days?month=2026-09`, `/devices/${kind}/A/sessions?${new URLSearchParams({ page: "1", pageSize: "20", date: "2026-09-09" })}`]);
+    const f = pageFixture(kind), response = deferred();
+    f.respond(async (path) => path.includes("/days?") ? { month: "2026-08", days: {}, latestDay: "2026-09-09" } : response.promise);
+    const opening = f.openAdapterSessions("A");
+    assert.deepEqual(f.calls, [`/devices/${kind}/A/sessions?page=1&pageSize=20&date=latest`]);
+    assert.equal(f.state.adapters.sessionLoading, true);
+    response.resolve(sessionPayload());
+    await opening;
+    await settle();
     assert.equal(f.state.adapters.detailDate, "2026-09-09");
+    assert.deepEqual(f.state.adapters.sessions, [{ id: 1 }]);
+    assert.equal(f.state.adapters.sessionTotal, 2);
+    assert.deepEqual(f.state.adapters.sessionDays.A["2026-09"].days, { "2026-09-09": 2 });
+    assert.equal(f.calls[1], `/devices/${kind}/A/sessions/days?month=2026-08`);
+    assert.equal(f.calls.length, 2);
+    assert.deepEqual(f.paints.at(-1), { loading: false, date: "2026-09-09", calls: 1 });
   }
 });
 
-await check("no records and days failures preserve today/all fallbacks without blocking sessions", async () => {
-  for (const kind of ["flash", "dc-pro"]) {
-    for (const fails of [false, true]) {
-      const f = pageFixture(kind);
-      f.respond(async (path) => {
-        if (!path.includes("/days?")) return { items: [], total: 0 };
-        if (fails) throw new Error("offline");
-        return { month: "2026-09", days: {}, latestDay: null };
-      });
-      await f.openAdapterSessions("A");
-      assert.equal(f.state.adapters.detailDate, kind === "flash" ? "2026-09-10" : "");
-      assert.equal(f.state.adapters.sessionError, null);
-      assert.equal(f.calls.length, 2);
-    }
-  }
-});
-
-await check("calendar reads cached counts, loads a viewed month, refreshes and clears failed-month status", async () => {
+await check("cached calendar month makes zero requests and retains cache across close and other devices", async () => {
   const f = pageFixture();
-  await f.openAdapterSessions("A");
+  await f.openAdapterSessions("A"); await settle();
   f.openAdapterSessionDatePanel({});
-  const options = f.panel.options;
-  assert.equal(options.dayStatus("2026-09-09"), "available");
-  assert.equal(options.dayStatus("2026-09-08"), "empty");
-  assert.equal(options.dayStatus("2026-08-31"), undefined);
-  f.respond(async () => ({ month: "2026-08", days: { "2026-08-31": 1 }, latestDay: "2026-09-09" }));
-  await options.onViewMonthChange("2026-08");
-  assert.equal(f.calls.at(-1), "/devices/flash/A/sessions/days?month=2026-08");
-  assert.equal(f.panel.refreshed, 1);
-  assert.equal(options.dayStatus("2026-08-31"), "available");
-  f.respond(async () => { throw new Error("offline"); });
-  await options.onViewMonthChange("2026-08");
-  assert.equal(options.dayStatus("2026-08-31"), undefined);
-  assert.equal(options.dayStatus("2026-09-08"), "empty");
+  const count = f.calls.length;
+  await f.panel.options.onViewMonthChange("2026-09");
+  assert.equal(f.calls.length, count);
+  assert.equal(f.panel.options.dayStatus("2026-09-09"), "available");
+  assert.equal(f.panel.options.dayStatus("2026-09-08"), "empty");
+  const cache = f.state.adapters.sessionDays.A;
+  f.closeAdapterSessions();
+  await f.openAdapterSessions("B"); await settle();
+  assert.equal(f.state.adapters.sessionDays.A, cache);
+  assert.ok(f.state.adapters.sessionDays.B);
 });
 
-await check("closing or switching devices while days are in flight cannot reopen or overwrite the drawer", async () => {
+await check("month navigation shares pending prefetch, shows loading immediately and prefetches M-1 after M", async () => {
+  const f = pageFixture(), august = deferred();
+  f.respond(async (path) => path.includes("month=2026-08") ? august.promise : path.includes("/days?") ? { month: "2026-07", days: {}, latestDay: "2026-09-09" } : sessionPayload());
+  await f.openAdapterSessions("A"); await settle();
+  f.openAdapterSessionDatePanel({});
+  const next = f.panel.options.onViewMonthChange("2026-08");
+  assert.equal(f.panel.options.dayStatus("2026-08-31"), "loading");
+  assert.ok(f.panel.refreshed > 0);
+  await settle();
+  assert.equal(f.calls.filter((path) => path.includes("month=2026-08")).length, 1);
+  assert.equal(f.calls.some((path) => path.includes("month=2026-07")), false);
+  august.resolve({ month: "2026-08", days: { "2026-08-31": 1 }, latestDay: "2026-09-09" });
+  await next; await settle();
+  assert.equal(f.panel.options.dayStatus("2026-08-31"), "available");
+  assert.equal(f.panel.options.dayStatus("2026-08-30"), "empty");
+  assert.equal(f.calls.at(-1), "/devices/flash/A/sessions/days?month=2026-07");
+  assert.equal(f.calls.length, 3, "prefetch stops after one preceding month");
+});
+
+await check("uncached month loads once and prefetch failures are silent and leave days selectable", async () => {
   const f = pageFixture();
-  let resolveA;
-  f.respond(async (path) => path.includes("/A/sessions/days") ? new Promise((resolve) => { resolveA = resolve; }) : path.includes("/days?") ? { month: "2026-09", days: { "2026-09-02": 1 }, latestDay: "2026-09-02" } : { items: [], total: 0 });
+  f.respond(async (path) => { if (path.includes("/days?")) throw new Error("offline"); return sessionPayload(); });
+  await f.openAdapterSessions("A"); await settle();
+  assert.equal(f.state.adapters.sessionError, null);
+  assert.equal(f.state.adapters.sessionLoading, false);
+  f.openAdapterSessionDatePanel({});
+  const count = f.calls.length;
+  await f.panel.options.onViewMonthChange("2026-09");
+  assert.equal(f.calls.length, count, "cache hit never retries a failed previous-month prefetch");
+  await f.panel.options.onViewMonthChange("2026-07");
+  assert.equal(f.calls.filter((path) => path.includes("month=2026-07")).length, 1);
+  assert.equal(f.panel.options.dayStatus("2026-07-01"), undefined);
+  assert.equal(f.state.adapters.sessionError, null);
+  assert.equal(f.calls.some((path) => path.includes("month=2026-06")), false);
+});
+
+await check("selected month prefetch crosses years and concrete-date loads refresh the matching cache", async () => {
+  const f = pageFixture();
+  f.respond(async (path) => path.includes("/days?") ? { month: new URL(path, "https://test.invalid").searchParams.get("month"), days: {}, latestDay: "2026-01-09" } : sessionPayload("2026-01-09"));
+  await f.openAdapterSessions("A"); await settle();
+  assert.equal(f.calls.at(-1), "/devices/flash/A/sessions/days?month=2025-12");
+  f.state.adapters.detailDate = "2026-08-31";
+  f.respond(async (path) => path.includes("/days?") ? { month: "2026-07", days: {}, latestDay: "2026-08-31" } : sessionPayload("2026-08-31"));
+  await f.loadAdapterSessions(); await settle();
+  assert.ok(f.calls.includes("/devices/flash/A/sessions?page=1&pageSize=20&date=2026-08-31"));
+  assert.deepEqual(f.state.adapters.sessionDays.A["2026-08"].days, { "2026-08-31": 2 });
+});
+
+await check("no records preserve today/all response dates and cache the current empty month", async () => {
+  for (const kind of ["flash", "dc-pro"]) {
+    const f = pageFixture(kind), date = kind === "flash" ? "2026-09-10" : "";
+    f.respond(async (path) => path.includes("/days?") ? { month: "2026-08", days: {}, latestDay: null } : { date, days: {}, latestDay: null, items: [], total: 0 });
+    await f.openAdapterSessions("A"); await settle();
+    assert.equal(f.state.adapters.detailDate, date);
+    assert.deepEqual(f.state.adapters.sessionDays.A["2026-09"].days, {});
+    assert.equal(f.state.adapters.sessionTotal, 0);
+  }
+});
+
+await check("closing or switching devices while sessions are in flight cannot reopen or overwrite the drawer", async () => {
+  const f = pageFixture(), old = deferred();
+  f.respond(async (path) => path.includes("/A/sessions?") ? old.promise : path.includes("/days?") ? { month: "2026-08", days: {}, latestDay: "2026-09-02" } : sessionPayload("2026-09-02"));
   const opening = f.openAdapterSessions("A");
   f.closeAdapterSessions();
   await f.openAdapterSessions("B");
-  resolveA({ month: "2026-09", days: { "2026-09-09": 1 }, latestDay: "2026-09-09" });
-  await opening;
+  old.resolve(sessionPayload());
+  await opening; await settle();
   assert.equal(f.state.adapters.detailDevice.certid, "B");
   assert.equal(f.state.adapters.detailDate, "2026-09-02");
-  assert.equal(f.calls.filter((path) => path.includes("/A/sessions?")).length, 0);
+  assert.equal(f.state.adapters.sessionDays.A, undefined);
+  assert.equal(f.calls.filter((path) => path.includes("/A/sessions/days")).length, 0);
+});
+
+await check("failed session read exits loading and sends no calendar prefetch", async () => {
+  const f = pageFixture();
+  f.respond(async () => { throw new Error("offline"); });
+  await f.openAdapterSessions("A"); await settle();
+  assert.equal(f.state.adapters.sessionLoading, false);
+  assert.ok(f.state.adapters.sessionError);
+  assert.equal(f.calls.length, 1);
+});
+
+await check("cards render missing firmware as a dash and separate count labels from values in three languages", () => {
+  const renderCards = new Function("state", "helpers", "t", "renderAdapterLocation", "renderAdapterOta", "formatFeedbackTime", "flashUnbindDisabled", "adapterActionsForKind", `
+    ${section("function e(", "function pageCount")}
+    ${section("function detailRow", "function detailSection")}
+    ${section("function adapterDeviceId", "function renderAdapterActionConfirm").replaceAll("export function", "function")}
+    return renderAdapterCards();
+  `);
+  const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
+  for (const lang of ["zh", "en", "fr"]) {
+    const t = (key, values) => translateAppFeedback(lang, key, values);
+    for (const [kind, firmware, expected] of [["flash", {}, "—"], ["flash", { software: "" }, "—"], ["flash", undefined, "—"], ["flash", { software: "V900.6" }, "V900.6"], ["dc-pro", "v3.20", "v3.20"]]) {
+      const state = { adapters: { kind, rows: [{ certid: "A", firmware, chargeCount: 3 }], ota: {}, otaErrors: {} } };
+      const html = renderCards(state, { lang, escapeHtml }, t, renderAdapterLocation, renderAdapterOta, formatFeedbackTime, flashUnbindDisabled, adapterActionsForKind);
+      assert.ok(html.includes(`<dt>${escapeHtml(t("softwareVersion"))}</dt><dd>${expected}</dd>`));
+      assert.ok(html.includes(`<dt>${escapeHtml(t("chargeCountLabel"))}</dt><dd>${escapeHtml(t("chargeCountValue", { count: 3 }))}</dd>`));
+      assert.doesNotMatch(html, /\[object Object\]|\{count\}/);
+    }
+  }
 });
 
 await check("API allows only GET session-days routes for supported device kinds", () => {

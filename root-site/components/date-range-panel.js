@@ -1,4 +1,5 @@
 import { normalizeDateInput } from "./date-value.js";
+import { dateRangePanelCopy } from "./date-range-panel-i18n.js";
 
 function pad2(value) {
   return String(value).padStart(2, "0");
@@ -172,6 +173,7 @@ export function createDateRangePanel() {
   function render({ focus = "" } = {}) {
     if (!isOpen()) return;
     const today = inputFromDate(new Date());
+    const loading = dayStatus?.(inputFromDate(viewMonth)) === "loading";
     const weekdays = weekdayLabels(lang)
       .map((label) => `<span class="date-range-panel__weekday">${escapeHtml(label)}</span>`)
       .join("");
@@ -214,7 +216,7 @@ export function createDateRangePanel() {
       ${presetItems}
       ${inputs}
       <div class="date-range-panel__head">
-        <button type="button" class="date-range-panel__month-trigger" data-date-range-action="jump" aria-expanded="${jumpOpen}" aria-label="${escapeHtml(translate("chooseMonth"))}">${escapeHtml(monthTitle(viewMonth, lang))}</button>
+        <button type="button" class="date-range-panel__month-trigger" data-date-range-action="jump" aria-expanded="${jumpOpen}" aria-label="${escapeHtml(translate("chooseMonth"))}">${escapeHtml(monthTitle(viewMonth, lang))}</button>${loading ? `<small class="date-range-panel__loading" role="status" data-date-range-loading>${escapeHtml((dateRangePanelCopy[lang] || dateRangePanelCopy.zh).loadingDays)}</small>` : ""}
         <span class="date-range-panel__head-actions">
           <button type="button" class="date-range-panel__today" data-date-range-action="today">${escapeHtml(translate("today"))}</button>
           <button type="button" class="date-range-panel__nav" data-date-range-action="previous" aria-label="${escapeHtml(translate("previousMonth"))}">‹</button>
@@ -357,7 +359,22 @@ export function createDateRangePanel() {
   function refresh() {
     // The month/year chooser has no day cells. Leave its input and pending
     // pointer target intact while asynchronous day counts arrive.
-    if (!isOpen() || jumpOpen) return;
+    if (!isOpen()) return;
+    if (jumpOpen) {
+      let status = panel.querySelector("[data-date-range-loading]");
+      if (dayStatus?.(inputFromDate(viewMonth)) === "loading") {
+        if (!status) {
+          status = document.createElement("small");
+          status.className = "date-range-panel__loading";
+          status.setAttribute("role", "status");
+          status.setAttribute("data-date-range-loading", "");
+          panel.querySelector('[data-date-range-action="jump"]').after(status);
+        }
+        status.textContent = (dateRangePanelCopy[lang] || dateRangePanelCopy.zh).loadingDays;
+      } else status?.remove();
+      position();
+      return;
+    }
     const focused = panel.contains(document.activeElement) ? document.activeElement : null;
     const attribute = focused?.getAttributeNames().find((name) => name.startsWith("data-date-range-"));
     const selector = attribute ? `[${attribute}="${focused.getAttribute(attribute)}"]` : "";
