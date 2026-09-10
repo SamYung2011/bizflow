@@ -340,7 +340,8 @@ for (const language of feedbackLanguages) {
   assert.equal(typeof appFeedbackCopy[language].flashUnbindConfirmText, "string");
   assert.equal(typeof appFeedbackCopy[language].flashUnbindSuccess, "string");
   assert.equal(typeof appFeedbackCopy[language].flashUnbindChargingBlocked, "string");
-  assert.match(appFeedbackCopy[language].chargeCount, /90/);
+  assert.match(appFeedbackCopy[language].chargeCountLabel, /90/);
+  assert.match(appFeedbackCopy[language].chargeCountValue, /\{count\}/);
 }
 
 for (const language of ["zh", "en", "fr"]) {

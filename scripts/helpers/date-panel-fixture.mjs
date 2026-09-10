@@ -26,7 +26,8 @@ export function withCalendar(factory, run) {
     removeAttribute(key) { delete this.attributes[key]; }
     getBoundingClientRect() { return { left: 40, top: 30, bottom: 70 }; }
     addEventListener(type, handler) { this.listeners[type] = handler; }
-    remove() { this.isConnected = false; }
+    remove() { this.isConnected = false; if (this.parent) this.parent.nodes = this.parent.nodes.filter((node) => node !== this); }
+    after(node) { node.parent = this.parent; this.parent.nodes.splice(this.parent.nodes.indexOf(this) + 1, 0, node); }
     contains(node) { return node === this || node?.parent === this; }
     matches(selector) {
       const attr = selector.match(/\[([^=\]]+)(?:="([^"]*)")?\]/);
@@ -38,7 +39,7 @@ export function withCalendar(factory, run) {
     get innerHTML() { return this.html || ""; }
     set innerHTML(html) {
       this.html = html;
-      this.nodes = [...html.matchAll(/<(button|input)\b([^>]*)>/g)].map((match) => {
+      this.nodes = [...html.matchAll(/<(button|input|small)\b([^>]*)>/g)].map((match) => {
         const attrs = Object.fromEntries([...match[2].matchAll(/([\w-]+)(?:="([^"]*)")?/g)].map((item) => [item[1], item[2] ?? ""]));
         return new Element(attrs, this);
       });

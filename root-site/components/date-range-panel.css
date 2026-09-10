@@ -428,3 +428,11 @@
   background: var(--blue);
   pointer-events: none;
 }
+
+.date-range-panel__loading {
+  margin-left: var(--space-4);
+  margin-right: auto;
+  color: var(--gray-40);
+  font-size: var(--font-description-size);
+  white-space: nowrap;
+}
