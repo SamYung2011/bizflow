@@ -236,20 +236,17 @@ const escapeHtml = (value) => String(value).replaceAll("&", "&amp;").replaceAll(
 const helpers = { t: (key) => translateAppFeedback("en", key), escapeHtml, formatTime: (value) => formatFeedbackTime(value, "en") };
 const time = Date.now(), task = { package: "test.bin", armedAt: time - 10_000, expiresAt: time + 60_000 };
 const button = /data-adapter-action="untask"/;
-await check("no task, expired tasks and historical states without pending cannot be cancelled", () => {
-  for (const state of ["none", "armed", "installed", "expired", "untasked"]) {
-    assert.doesNotMatch(renderAdapterOta({ certid: "A", ota: { state } }, { state, task: null }, helpers), button);
-  }
-  for (const state of ["armed", "delivered", "downloading", "downloaded", "installed", "expired", "untasked"]) {
-    assert.doesNotMatch(renderAdapterOta({ certid: "A" }, { state, task: { ...task, expiresAt: time - 1 }, stillPending: true }, helpers), button);
-  }
-  for (const state of ["installed", "expired", "untasked"]) {
-    assert.doesNotMatch(renderAdapterOta({ certid: "A" }, { state, task, stillPending: false }, helpers), button);
+await check("a task or historical log without a Shenzhen pending row cannot be cancelled", () => {
+  for (const state of ["none", "armed", "delivered", "downloading", "downloaded", "installed", "expired", "untasked"]) {
+    for (const value of [null, task, { ...task, expiresAt: time - 1 }]) {
+      assert.doesNotMatch(renderAdapterOta({ certid: "A", ota: { state, pending: false } }, { state, task: value, stillPending: false }, helpers), button);
+    }
   }
 });
-await check("current unexpired tasks and installed-but-still-pending tasks can be cancelled", () => {
-  for (const state of ["armed", "delivered", "downloading", "downloaded", "installed"]) {
-    assert.match(renderAdapterOta({ certid: "A" }, { state, task, stillPending: state === "installed" }, helpers), button);
+await check("pending in either list or detail permits cancellation regardless of task expiry or detail loading", () => {
+  for (const state of ["none", "armed", "delivered", "downloading", "downloaded", "installed", "expired", "untasked"]) {
+    assert.match(renderAdapterOta({ certid: "A", ota: { state, pending: true } }, undefined, helpers), button);
+    assert.match(renderAdapterOta({ certid: "A" }, { state, task: { ...task, expiresAt: time - 1 }, stillPending: true }, helpers), button);
   }
 });
 await check("all historical state headers include updatedAt through the existing formatter", () => {
@@ -259,4 +256,42 @@ await check("all historical state headers include updatedAt through the existing
   }
   assert.match(source, /scope\.listen\(document, "focusout", onAdapterFocusOut\)/);
 });
-console.log(`DEVICE_PAGE_R2=${checks}/${checks}`);
+await check("expired pending task has a button and expiry hint before details arrive; busy disables it", () => {
+  const device = { certid: "A", ota: { state: "expired", pending: true, updatedAt: time } };
+  const html = renderAdapterOta(device, undefined, { ...helpers, actionBusy: true });
+  assert.match(html, button);
+  assert.match(html, /data-adapter-id="A" disabled/);
+  assert.ok(html.includes(translateAppFeedback("en", "otaExpiredStillPending")));
+  assert.ok(html.includes(formatFeedbackTime(time, "en")));
+  for (const lang of ["zh", "en", "fr"]) {
+    const copy = translateAppFeedback(lang, "otaExpiredStillPending");
+    assert.notEqual(copy, "otaExpiredStillPending");
+    assert.ok(copy.trim());
+  }
+});
+await check("still-pending hints distinguish installed and expired and stay absent in other states", () => {
+  for (const state of ["armed", "delivered", "downloading", "downloaded", "installed", "expired", "untasked"]) {
+    const html = renderAdapterOta({ certid: "A" }, { state, task, stillPending: true }, helpers);
+    assert.equal(html.includes(translateAppFeedback("en", "otaStillPending")), state === "installed");
+    assert.equal(html.includes(translateAppFeedback("en", "otaExpiredStillPending")), state === "expired");
+  }
+});
+await check("loading text appears only before details arrive and errors replace it", () => {
+  const device = { certid: "A", ota: { state: "armed", pending: true } };
+  const loading = translateAppFeedback("en", "otaDetailsPending"), failed = translateAppFeedback("en", "otaDetailsUnavailable");
+  assert.ok(renderAdapterOta(device, undefined, helpers).includes(loading));
+  for (const details of [null, { state: "armed", task: null }, { state: "armed", task }]) {
+    assert.ok(!renderAdapterOta(device, details, helpers).includes(loading));
+  }
+  for (const details of [undefined, { state: "armed", task: null }, { state: "armed", task }]) {
+    const html = renderAdapterOta(device, details, { ...helpers, error: true });
+    assert.ok(html.includes(failed));
+    assert.ok(!html.includes(loading));
+    assert.match(html, button);
+  }
+});
+await check("pending flag alone changes the list signature", () => {
+  const device = { certid: "A", ota: { state: "expired", pending: false, updatedAt: time } };
+  assert.notEqual(adapterListSignature([device], 1), adapterListSignature([{ ...device, ota: { ...device.ota, pending: true } }], 1));
+});
+console.log(`DEVICE_PAGE_R2_R3=${checks}/${checks}`);

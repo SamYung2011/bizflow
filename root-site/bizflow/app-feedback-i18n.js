@@ -1045,6 +1045,7 @@ Object.assign(zh, {
   otaUntask: "撤任務", otaUntaskConfirm: "撤除這台設備的待升級任務？已開始的下載或安裝不會被中止。",
   otaDownloads: "{count} 次／{bytes} bytes", otaReceived: "領取", otaDownload: "下載", otaInstalled: "安裝",
   otaStillPending: "版本已更新，任務仍掛著，可撤除任務。",
+  otaExpiredStillPending: "任務已過期，但仍掛在伺服器上，可撤除",
   otaDetailsPending: "正在讀取升級詳情…", otaDetailsUnavailable: "暫時無法更新升級詳情，稍後自動重試。",
 });
 Object.assign(en, {
@@ -1056,6 +1057,7 @@ Object.assign(en, {
   otaUntask: "Withdraw task", otaUntaskConfirm: "Withdraw this device’s pending upgrade task? A download or installation already in progress will continue.",
   otaDownloads: "{count} requests / {bytes} bytes", otaReceived: "Pickup", otaDownload: "Download", otaInstalled: "Install",
   otaStillPending: "The version has changed, but the task is still pending and can be withdrawn.",
+  otaExpiredStillPending: "The task has expired but is still pending on the server and can be withdrawn.",
   otaDetailsPending: "Loading upgrade details…", otaDetailsUnavailable: "Upgrade details could not be refreshed. Retrying automatically.",
 });
 Object.assign(fr, {
@@ -1067,6 +1069,7 @@ Object.assign(fr, {
   otaUntask: "Retirer la tâche", otaUntaskConfirm: "Retirer la mise à jour en attente de cet appareil ? Un téléchargement ou une installation déjà en cours continuera.",
   otaDownloads: "{count} requêtes / {bytes} octets", otaReceived: "Réception", otaDownload: "Téléchargement", otaInstalled: "Installation",
   otaStillPending: "La version a changé, mais la tâche reste en attente et peut être retirée.",
+  otaExpiredStillPending: "La tâche a expiré, mais reste en attente sur le serveur et peut être retirée.",
   otaDetailsPending: "Chargement des détails…", otaDetailsUnavailable: "Actualisation des détails impossible. Nouvelle tentative automatique.",
 });
 

@@ -2099,7 +2099,7 @@ await liveCheck("location address, coordinate fallback and missing location rend
 });
 for (const state of ["none", "armed", "delivered", "downloading", "downloaded", "installed", "expired", "untasked"]) {
   await liveCheck(`OTA ${state} renders its task and timeline`, () => {
-    const details = { state, task: state === "none" ? null : { package: "test.bin", mainver: 1, subver: 2, force: 1, armedAt: 1000, expiresAt: Date.now() + (state === "expired" ? -60_000 : 60_000) }, downloads: [{ status: 200, bytes: 300, at: 1500 }], versionNow: { software: "v1.2" }, versionChangedAt: state === "installed" ? 1600 : null, stillPending: state === "installed" };
+    const details = { state, task: state === "none" ? null : { package: "test.bin", mainver: 1, subver: 2, force: 1, armedAt: 1000, expiresAt: Date.now() + (state === "expired" ? -60_000 : 60_000) }, downloads: [{ status: 200, bytes: 300, at: 1500 }], versionNow: { software: "v1.2" }, versionChangedAt: state === "installed" ? 1600 : null, stillPending: !["none", "untasked"].includes(state) };
     const html = renderAdapterOta({ certid: "CERT_1" }, details, liveHelpers);
     assert.match(html, new RegExp(`data-ota-state="${state}"`));
     if (state === "none") {
@@ -2110,7 +2110,7 @@ for (const state of ["none", "armed", "delivered", "downloading", "downloaded", 
       assert.match(html, /1.2/);
       assert.match(html, /1 requests \/ 300 bytes/);
       assert.equal((html.match(/<li /g) || []).length, 4);
-      if (["untasked", "expired"].includes(state)) assert.doesNotMatch(html, /data-adapter-action="untask"/);
+      if (state === "untasked") assert.doesNotMatch(html, /data-adapter-action="untask"/);
       else assert.match(html, /data-adapter-action="untask"/);
       if (state === "installed") assert.match(html, /still pending/);
     }
@@ -2223,7 +2223,7 @@ await liveCheck("devices use 10 seconds with 120-second maximum backoff and feed
   scope.dispose();
 });
 await liveCheck("all live-device copy is present in three languages", () => {
-  const keys = ["location", "noLocation", "notSatelliteFix", "viewMap", "ota", "otaNoTask", "otaArmedAt", "otaExpiresAt", "otaUntask", "otaUntaskConfirm", "otaDownloads", "otaPackage", "otaTargetVersion", "otaForced", "otaNormal", "otaReceived", "otaDownload", "otaInstalled", "otaStillPending", "otaDetailsPending", "otaDetailsUnavailable", ...["armed", "delivered", "downloading", "downloaded", "installed", "expired", "untasked"].map((state) => `otaState.${state}`)];
+  const keys = ["location", "noLocation", "notSatelliteFix", "viewMap", "ota", "otaNoTask", "otaArmedAt", "otaExpiresAt", "otaUntask", "otaUntaskConfirm", "otaDownloads", "otaPackage", "otaTargetVersion", "otaForced", "otaNormal", "otaReceived", "otaDownload", "otaInstalled", "otaStillPending", "otaExpiredStillPending", "otaDetailsPending", "otaDetailsUnavailable", ...["armed", "delivered", "downloading", "downloaded", "installed", "expired", "untasked"].map((state) => `otaState.${state}`)];
   for (const lang of ["zh", "en", "fr"]) for (const key of keys) assert.equal(typeof appFeedbackCopy[lang][key], "string", `${lang}:${key}`);
 });
 console.log(`DEVICE_PAGE_LIVE=${deviceLiveChecks}/${deviceLiveChecks}`);

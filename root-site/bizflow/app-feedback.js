@@ -1004,6 +1004,7 @@ export function adapterListSignature(rows, total) {
       row?.location?.starnum ?? null,
       row?.ota?.state ?? null,
       row?.ota?.updatedAt ?? null,
+      row?.ota?.pending ?? null,
     ]),
   ]);
 }
