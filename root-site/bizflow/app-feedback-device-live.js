@@ -15,14 +15,15 @@ export function renderAdapterLocation(location, { t, escapeHtml: e }) {
 }
 
 export function renderAdapterOta(device, details, { t, escapeHtml: e, formatTime, actionBusy = false, error = false }) {
+  const stillPending = device?.ota?.pending === true || details?.stillPending === true;
+  const canUntask = stillPending;
+  const untaskButton = canUntask ? `<button type="button" class="app-feedback-button app-feedback-button--danger" data-adapter-action="untask" data-adapter-id="${e(device.certid)}"${actionBusy ? " disabled" : ""}>${e(t("otaUntask"))}</button>` : "";
   const summaryState = device?.ota?.state;
-  if (summaryState === "none" || (summaryState === "armed" && device.ota.updatedAt > details?.task?.armedAt)) details = null;
+  if (summaryState === "none" || (summaryState === "armed" && device.ota.updatedAt > details?.task?.armedAt)) details = undefined;
   const state = OTA_STATES.has(details?.state) ? details.state : OTA_STATES.has(summaryState) ? summaryState : "none";
-  if (state === "none") return `<section class="app-feedback-adapter-ota" data-ota-state="none"><strong>${e(t("ota"))}</strong> ${e(t("otaNoTask"))}</section>`;
+  if (state === "none") return `<section class="app-feedback-adapter-ota" data-ota-state="none"><strong>${e(t("ota"))}</strong> ${e(t("otaNoTask"))}${untaskButton}</section>`;
   const task = details?.task;
   const historical = ["installed", "expired", "untasked"].includes(state);
-  const expired = task?.expiresAt != null && task.expiresAt < Date.now();
-  const canUntask = task && !expired && (!historical || details?.stillPending === true);
   const updatedAt = device?.ota?.updatedAt || details?.updatedAt || details?.versionChangedAt;
   const downloads = Array.isArray(details?.downloads) ? details.downloads : [];
   const bytes = downloads.reduce((total, row) => total + (Number(row.bytes) || 0), 0);
@@ -41,11 +42,11 @@ export function renderAdapterOta(device, details, { t, escapeHtml: e, formatTime
       <div><dt>${e(t("otaTargetVersion"))}</dt><dd>${e(target)} · ${e(t(task.force ? "otaForced" : "otaNormal"))}</dd></div>
       <div><dt>${e(t("otaArmedAt"))}</dt><dd>${e(formatTime(task.armedAt))}</dd></div>
       <div><dt>${e(t("otaExpiresAt"))}</dt><dd>${e(formatTime(task.expiresAt))}</dd></div>
-    </dl>` : `<p>${e(t(error ? "otaDetailsUnavailable" : "otaDetailsPending"))}</p>`}
+    </dl>` : ""}
+    ${error ? `<p>${e(t("otaDetailsUnavailable"))}</p>` : details === undefined ? `<p>${e(t("otaDetailsPending"))}</p>` : ""}
     <ol class="app-feedback-ota-timeline">${steps.map(([key, done, value]) => `<li class="${done ? "is-complete" : ""}"><strong>${e(t(key))}</strong><span>${e(value)}</span></li>`).join("")}</ol>
-    ${details?.stillPending ? `<p>${e(t("otaStillPending"))}</p>` : ""}
-    ${error && task ? `<p>${e(t("otaDetailsUnavailable"))}</p>` : ""}
-    ${canUntask ? `<button type="button" class="app-feedback-button app-feedback-button--danger" data-adapter-action="untask" data-adapter-id="${e(device.certid)}"${actionBusy ? " disabled" : ""}>${e(t("otaUntask"))}</button>` : ""}
+    ${stillPending && ["installed", "expired"].includes(state) ? `<p>${e(t(state === "installed" ? "otaStillPending" : "otaExpiredStillPending"))}</p>` : ""}
+    ${untaskButton}
   </section>`;
 }
 
