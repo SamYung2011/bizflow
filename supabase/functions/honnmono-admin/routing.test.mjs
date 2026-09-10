@@ -20,6 +20,32 @@ import {
   validateOtaAdminBody,
 } from "./routing.mjs";
 
+test("session-day calendars use the same upstream as each device's sessions", () => {
+  const flash = "/devices/flash/0DB897000000000000000000/sessions/days";
+  const dcPro = "/devices/dc-pro/CERT_DC_1/sessions/days";
+  const upstream = "/internal/admin/adapter-devices/dc-pro/CERT_DC_1/sessions/days";
+  assert.equal(mapOtaAdminPath(flash, "GET"), flash);
+  assert.equal(mapHonnmonoAdminPath(flash, "GET"), "");
+  assert.equal(mapHonnmonoAdminPath(dcPro, "GET"), upstream);
+  assert.equal(mapOtaAdminPath(dcPro, "GET"), "");
+  assert.equal(isAllowedHonnmonoUpstream(new URL(`https://app-api.honnmono.top${upstream}?month=2026-09`)), true);
+  assert.equal(mapFlashAdminPath(flash, "GET"), "");
+});
+
+test("session-day calendars reject writes, extra path segments and unsupported devices", () => {
+  for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+    assert.equal(mapOtaAdminPath("/devices/flash/A/sessions/days", method), "");
+    assert.equal(mapHonnmonoAdminPath("/devices/dc-pro/A/sessions/days", method), "");
+  }
+  for (const suffix of ["/days/extra", "/days%2fextra", "/days-other"]) {
+    assert.equal(mapOtaAdminPath(`/devices/flash/A/sessions${suffix}`, "GET"), "");
+    assert.equal(mapHonnmonoAdminPath(`/devices/dc-pro/A/sessions${suffix}`, "GET"), "");
+    assert.equal(isAllowedHonnmonoUpstream(new URL(`https://app-api.honnmono.top/internal/admin/adapter-devices/dc-pro/A/sessions${suffix}`)), false);
+  }
+  assert.equal(mapHonnmonoAdminPath("/devices/unknown/A/sessions/days", "GET"), "");
+  assert.equal(mapOtaAdminPath("/devices/flash/%2e%2e/sessions/days", "GET"), "");
+});
+
 
 test("maps only the feedback and device-admin routes", () => {
   assert.equal(stripFunctionPrefix("/honnmono-admin/feedback"), "/feedback");

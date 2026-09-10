@@ -1,0 +1,64 @@
+{
+  "baseline": "48c5134",
+  "outputs": {
+    "zh-single": "09e936c18952c5c79f70c2ee7ac77cf0904d10dcb7c65c728f32ed283ff9d7de",
+    "zh-single-previous": "09da1e47dd675a6e1be50041fdb0691245a94d3232e9c2bd202b47edd20fe671",
+    "zh-single-next": "09e936c18952c5c79f70c2ee7ac77cf0904d10dcb7c65c728f32ed283ff9d7de",
+    "zh-single-jump": "12eaacbbece38efda4869aedbb2d81178964012ebd31d325b8fbedf1910e1fbd",
+    "zh-single-year-month": "ab00811beba5e18f3ced80d564e733f55ffd867ba109c42f91b5b0a7b720ca5c",
+    "zh-single-clear": "ab00811beba5e18f3ced80d564e733f55ffd867ba109c42f91b5b0a7b720ca5c",
+    "zh-range": "1c198dd3d243bdca79a4a5d8fa8ba221bef7c8176a1715d180af17c6e6d3193c",
+    "zh-range-previous": "57919dab3742873f1a3f1fcb126281154473d00411750ec83ab03fb6012555cb",
+    "zh-range-next": "1c198dd3d243bdca79a4a5d8fa8ba221bef7c8176a1715d180af17c6e6d3193c",
+    "zh-range-jump": "9b9097153cd3dc08cebdd407143ded406da60c19f77a08380f07bd4dab27478d",
+    "zh-range-year-month": "255789265ae09fec5607df965ea873410be2b65d0c730da97dc23c15c5519eeb",
+    "zh-range-clear": "ca1596af6b29f0387a20d7029d2bb0da9e77c0a75f88a6d0e331497c49eb661b",
+    "en-single": "94fb78d00b99781b9dfc1251af6f6194aa6804d6afcf7c0b9dfa7dc35791e7dc",
+    "en-single-previous": "65893b5ac04d97afb26a21b82b1e5f960f948d21e84f77dfb96736e0e1763200",
+    "en-single-next": "94fb78d00b99781b9dfc1251af6f6194aa6804d6afcf7c0b9dfa7dc35791e7dc",
+    "en-single-jump": "90e132600c5382eda72c750aedffc32bbd72d91d0c8483107fc6027d59f81838",
+    "en-single-year-month": "f578d8721dfb69c22c41cd84595fb660d51c0209ce451ba2887d551a82aabd18",
+    "en-single-clear": "f578d8721dfb69c22c41cd84595fb660d51c0209ce451ba2887d551a82aabd18",
+    "en-range": "7ee18878c4718e5a80391cb42731e5a311ad2309d5b39c887e87e273405b6542",
+    "en-range-previous": "29e33f56fd29b60cc92dd30cc342aa1f21b6a68a4d4998c381769a28dadbf371",
+    "en-range-next": "7ee18878c4718e5a80391cb42731e5a311ad2309d5b39c887e87e273405b6542",
+    "en-range-jump": "bdad7c678dd6ce9556953cc8bfd15f012de3de2a054384e480308de532a0ebde",
+    "en-range-year-month": "e7860b4a3d8c02cf4a9359b0164b217dcb4fb2db00232f82ca28a406468364f9",
+    "en-range-clear": "097e0a71a11ce546e407fc6f9c5678e29bbc194922e2fd362d907859c45d50af",
+    "fr-single": "0017b9ca79dec968ae911db624d4f8b825e3d13e5ea8669a919f6d3ab62c7cee",
+    "fr-single-previous": "eb8b4f7f05feafc23a7997b42a923a603f511f8ac599e8d670509293d978bddf",
+    "fr-single-next": "0017b9ca79dec968ae911db624d4f8b825e3d13e5ea8669a919f6d3ab62c7cee",
+    "fr-single-jump": "608fc1d726d05f67552094a5021cca44d897c23a5f95bd095dc5145c15e2fe82",
+    "fr-single-year-month": "c1cd9b079b3bc628e1ef11302c167314a88ea0f0036c1dda0636271874ead1f7",
+    "fr-single-clear": "c1cd9b079b3bc628e1ef11302c167314a88ea0f0036c1dda0636271874ead1f7",
+    "fr-range": "8c417c1fd8b23b057447d07527bba0e2405bd4e2e11956f3f99949c1edf279cc",
+    "fr-range-previous": "a118deccf62d8f1f55a50b4e7c65d2dad2ec73a8b8467c99a191e1b89a1cadc9",
+    "fr-range-next": "8c417c1fd8b23b057447d07527bba0e2405bd4e2e11956f3f99949c1edf279cc",
+    "fr-range-jump": "daffa7933ce4fe56f2e07bb22d723d5b8acb55f6d7c0b7ad5ee6295ea3ae4888",
+    "fr-range-year-month": "e07e7187ebac231bed9e0656e54e27504c0d8ee9eb296a04137258a1501bfb58",
+    "fr-range-clear": "7c6ff1a3e2ea92242c6ae36eafaf9f76e66690e8efdf9977be482e62c28300e1",
+    "range-reverse-end": "78fb53f05917b77d1efa6ed419ee73a662e17dcf8e5f54fe807800203cfa079e",
+    "range-restart": "f0897b95b5494091adc8c7f38aa5c3148220c8d259227dbe404b9d4cceac4407",
+    "range-today": "f0897b95b5494091adc8c7f38aa5c3148220c8d259227dbe404b9d4cceac4407",
+    "presets": "6ad14c8341e9463019a3e353efd7ddd7c7d71b28e26f9a9059aa533481f59a2c",
+    "blocked-no-change": "6ad14c8341e9463019a3e353efd7ddd7c7d71b28e26f9a9059aa533481f59a2c",
+    "commits": [
+      {
+        "date": ""
+      },
+      {
+        "date": ""
+      },
+      {
+        "date": ""
+      },
+      {
+        "start": "2026-09-08",
+        "end": ""
+      },
+      {
+        "date": "2026-09-09"
+      }
+    ]
+  }
+}

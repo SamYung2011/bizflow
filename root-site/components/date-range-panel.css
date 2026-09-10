@@ -410,3 +410,21 @@
     width: min(var(--date-range-panel-width), calc(100vw - var(--space-20)));
   }
 }
+
+.date-range-panel__day.is-empty span {
+  border-color: transparent;
+  background: transparent;
+  color: var(--gray-20);
+  text-decoration: none;
+}
+
+.date-range-panel__dot {
+  position: absolute;
+  z-index: 2;
+  bottom: 1px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--blue);
+  pointer-events: none;
+}

@@ -58,7 +58,7 @@ export function mapHonnmonoAdminPath(pathname, method) {
   }
   if (
     method === "GET" &&
-    /^\/devices\/dc-pro\/[A-Za-z0-9_-]{1,64}\/sessions$/.test(normalized)
+    /^\/devices\/dc-pro\/[A-Za-z0-9_-]{1,64}\/sessions(?:\/days)?$/.test(normalized)
   ) {
     return `/internal/admin/adapter-devices${normalized.slice("/devices".length)}`;
   }
@@ -99,7 +99,7 @@ export function mapOtaAdminPath(pathname, method) {
   }
   if (
     method === "GET" &&
-    /^\/devices\/flash\/[A-Za-z0-9_-]{1,64}\/sessions$/.test(normalized)
+    /^\/devices\/flash\/[A-Za-z0-9_-]{1,64}\/sessions(?:\/days)?$/.test(normalized)
   ) {
     return normalized;
   }
@@ -175,7 +175,7 @@ export function isAllowedHonnmonoUpstream(url) {
       url.pathname === "/internal/admin/device/binding" ||
       url.pathname === "/internal/admin/device/unbind" ||
       url.pathname === "/internal/admin/adapter-devices/dc-pro" ||
-      /^\/internal\/admin\/adapter-devices\/dc-pro\/[A-Za-z0-9_-]{1,64}\/sessions$/.test(url.pathname) ||
+      /^\/internal\/admin\/adapter-devices\/dc-pro\/[A-Za-z0-9_-]{1,64}\/sessions(?:\/days)?$/.test(url.pathname) ||
       url.pathname === "/internal/admin/sim/lookup" ||
       url.pathname === "/internal/admin/sim/cards" ||
       url.pathname === "/internal/admin/sim/cards/import" ||

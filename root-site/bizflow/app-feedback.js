@@ -1,6 +1,6 @@
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { createDateRangePanel } from "../components/date-range-panel.js";
-import { displayDateInput } from "../components/date-value.js";
+import { displayDateInput, normalizeDateInput } from "../components/date-value.js";
 import { getSession } from "../data/auth.js";
 import { getCurrentUser } from "../data/provider.js";
 import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
@@ -108,6 +108,7 @@ function createAdapterDeviceState(saved = {}) {
     detailDevice: null,
     detailDate: kind === "flash" ? currentHongKongDate() : "",
     sessions: [],
+    sessionDays: Object.create(null),
     sessionTotal: 0,
     sessionPage: 1,
     sessionLoading: false,
@@ -1202,7 +1203,27 @@ async function loadAdapterSessions() {
   }
 }
 
-function openAdapterSessions(id) {
+async function loadAdapterSessionDays(certid, month) {
+  const instance = activeInstance;
+  const scope = activeScope;
+  const adapters = state?.adapters;
+  if (!adapters || !certid || !isActive(instance, scope)) return undefined;
+  try {
+    const payload = await callHonnmonoAdmin(
+      `/devices/${adapters.kind}/${encodeURIComponent(certid)}/sessions/days?${new URLSearchParams({ month })}`,
+      { signal: scope.signal },
+    );
+    if (!isActive(instance, scope) || state.adapters !== adapters) return undefined;
+    if (payload?.month !== month || !payload.days || typeof payload.days !== "object" || Array.isArray(payload.days)) throw new Error("Invalid session days response");
+    (adapters.sessionDays[certid] ||= {})[month] = payload;
+    return payload;
+  } catch {
+    if (isActive(instance, scope) && state.adapters === adapters) delete adapters.sessionDays[certid]?.[month];
+    return undefined;
+  }
+}
+
+async function openAdapterSessions(id) {
   const device = state.adapters.rows.find(
     (item) => adapterDeviceId(item) === String(id),
   );
@@ -1212,15 +1233,37 @@ function openAdapterSessions(id) {
   state.adapters.sessionPage = 1;
   state.adapters.sessionError = null;
   state.adapters.downloadError = null;
-  void loadAdapterSessions();
+  const instance = activeInstance;
+  const scope = activeScope;
+  const adapters = state.adapters;
+  const request = ++adapters.sessionRequest;
+  adapters.sessionTotal = 0;
+  adapters.sessionLoading = true;
+  rerender();
+  const days = await loadAdapterSessionDays(device.certid, currentHongKongDate().slice(0, 7));
+  if (!isActive(instance, scope) || state.adapters !== adapters || adapters.sessionRequest !== request) return;
+  adapters.detailDate = normalizeDateInput(days?.latestDay) || (adapters.kind === "flash" ? currentHongKongDate() : "");
+  await loadAdapterSessions();
 }
 
 function openAdapterSessionDatePanel(anchor) {
+  const adapters = state.adapters;
+  const certid = adapters.detailDevice?.certid;
+  const instance = activeInstance;
+  const scope = activeScope;
   adapterSessionDatePanel.open({
     anchor,
     mode: "single",
     date: state.adapters.detailDate,
     minDate: adapterSessionMinDate(),
+    dayStatus: (date) => {
+      const month = adapters.sessionDays[certid]?.[date.slice(0, 7)];
+      return month ? (month.days[date] > 0 ? "available" : "empty") : undefined;
+    },
+    onViewMonthChange: async (month) => {
+      await loadAdapterSessionDays(certid, month);
+      if (isActive(instance, scope) && state.adapters === adapters && adapters.detailDevice?.certid === certid) adapterSessionDatePanel.refresh();
+    },
     language: helpers?.lang || "zh",
     t: (key) => t(key === "date" ? "sessionDate" : key),
     onCommit: ({ date }) => {
