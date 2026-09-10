@@ -2101,8 +2101,8 @@ for (const state of ["none", "armed", "delivered", "downloading", "downloaded", 
   await liveCheck(`OTA ${state} renders its task and timeline`, () => {
     const details = { state, task: state === "none" ? null : { package: "test.bin", mainver: 1, subver: 2, force: 1, armedAt: 1000, expiresAt: Date.now() + (state === "expired" ? -60_000 : 60_000) }, downloads: [{ status: 200, bytes: 300, at: 1500 }], versionNow: { software: "v1.2" }, versionChangedAt: state === "installed" ? 1600 : null, stillPending: !["none", "untasked"].includes(state) };
     const html = renderAdapterOta({ certid: "CERT_1" }, details, liveHelpers);
-    assert.match(html, new RegExp(`data-ota-state="${state}"`));
-    if (state === "none") {
+    assert.match(html, new RegExp(`data-ota-state="${state === "untasked" ? "none" : state}"`));
+    if (["none", "untasked"].includes(state)) {
       assert.match(html, /No upgrade task/);
       assert.doesNotMatch(html, /data-adapter-action/);
     } else {
@@ -2110,8 +2110,7 @@ for (const state of ["none", "armed", "delivered", "downloading", "downloaded", 
       assert.match(html, /1.2/);
       assert.match(html, /1 requests \/ 300 bytes/);
       assert.equal((html.match(/<li /g) || []).length, 4);
-      if (state === "untasked") assert.doesNotMatch(html, /data-adapter-action="untask"/);
-      else assert.match(html, /data-adapter-action="untask"/);
+      assert.match(html, /data-adapter-action="untask"/);
       if (state === "installed") assert.match(html, /still pending/);
     }
   });

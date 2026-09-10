@@ -1125,7 +1125,7 @@ async function refreshAdapterOta(instance, scope, request) {
   const before = JSON.stringify([adapters.ota, adapters.otaErrors]);
   const result = await activeAdapterOtaLoader.load(adapters.rows, { signal: scope.signal, isCurrent: current });
   if (!result || !current()) return;
-  const visible = new Set(adapters.rows.filter((row) => row.ota?.state && row.ota.state !== "none").map((row) => row.certid));
+  const visible = new Set(adapters.rows.filter((row) => row.ota?.state && !["none", "untasked"].includes(row.ota.state)).map((row) => row.certid));
   adapters.ota = Object.fromEntries(Object.entries({ ...adapters.ota, ...result.items }).filter(([id]) => visible.has(id)));
   adapters.otaErrors = Object.fromEntries(result.failed.map((id) => [id, true]));
   const changed = before !== JSON.stringify([adapters.ota, adapters.otaErrors]);

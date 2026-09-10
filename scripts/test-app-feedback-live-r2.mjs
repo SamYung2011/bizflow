@@ -249,8 +249,8 @@ await check("pending in either list or detail permits cancellation regardless of
     assert.match(renderAdapterOta({ certid: "A" }, { state, task: { ...task, expiresAt: time - 1 }, stillPending: true }, helpers), button);
   }
 });
-await check("all historical state headers include updatedAt through the existing formatter", () => {
-  for (const state of ["installed", "expired", "untasked"]) {
+await check("installed and expired history headers still include updatedAt through the existing formatter", () => {
+  for (const state of ["installed", "expired"]) {
     const html = renderAdapterOta({ certid: "A", ota: { state, updatedAt: time } }, { state, task }, helpers);
     assert.ok(html.match(/<header>.*?<\/header>/s)[0].includes(formatFeedbackTime(time, "en")));
   }
@@ -294,4 +294,53 @@ await check("pending flag alone changes the list signature", () => {
   const device = { certid: "A", ota: { state: "expired", pending: false, updatedAt: time } };
   assert.notEqual(adapterListSignature([device], 1), adapterListSignature([{ ...device, ota: { ...device.ota, pending: true } }], 1));
 });
-console.log(`DEVICE_PAGE_R2_R3=${checks}/${checks}`);
+await check("withdrawn summary or detail renders exactly the none state without history or loading copy", () => {
+  const none = renderAdapterOta({ certid: "A", ota: { state: "none", pending: false } }, undefined, helpers);
+  for (const summary of [undefined, "armed", "installed", "expired", "untasked"]) {
+    for (const details of [undefined, { state: "armed", task }, { state: "untasked", task, stillPending: false }]) {
+      if (summary !== "untasked" && details?.state !== "untasked") continue;
+      const html = renderAdapterOta({ certid: "A", ota: { state: summary, updatedAt: time, pending: false } }, details, { ...helpers, error: true });
+      assert.equal(html, none);
+      assert.doesNotMatch(html, /<header>|<ol|timeline|test\.bin|data-adapter-action/);
+      assert.ok(html.includes(translateAppFeedback("en", "otaNoTask")));
+    }
+  }
+  for (const lang of ["zh", "en", "fr"]) {
+    assert.notEqual(translateAppFeedback(lang, "otaState.untasked"), "otaState.untasked", "the legacy state key stays available");
+  }
+});
+await check("withdrawn display still honors R3 pending cancellation and busy state", () => {
+  const none = renderAdapterOta({ certid: "A", ota: { state: "none", pending: true } }, undefined, { ...helpers, actionBusy: true });
+  for (const [summaryPending, detailPending] of [[true, false], [false, true]]) {
+    const html = renderAdapterOta({ certid: "A", ota: { state: "untasked", pending: summaryPending } }, { state: "untasked", task, stillPending: detailPending }, { ...helpers, actionBusy: true });
+    assert.equal(html, none);
+    assert.match(html, button);
+    assert.match(html, /data-adapter-id="A" disabled/);
+  }
+});
+await check("loader skips none and untasked but continues fetching installed and expired history", async () => {
+  const paths = [];
+  const loader = createAdapterOtaLoader(async (path) => { paths.push(path); return { state: "installed" }; });
+  const rows = ["none", "untasked", "installed", "expired", "armed"].map((state) => ({ certid: state, ota: { state } }));
+  const result = await loader.load(rows);
+  assert.deepEqual(paths.sort(), ["armed", "expired", "installed"].map((id) => `/devices/flash/${id}/ota`));
+  assert.deepEqual(Object.keys(result.items).sort(), ["armed", "expired", "installed"]);
+  assert.deepEqual(await loader.load(rows.slice(0, 2)), { items: {}, failed: [] });
+  assert.equal(paths.length, 3);
+});
+await check("polling clears withdrawn cached detail and errors without another OTA request", () => withPage(async (f) => {
+  assert.ok(f.state.adapters.ota.CERT_1);
+  f.state.adapters.otaErrors.CERT_1 = true;
+  const withdrawn = { ...f.row(), ota: { state: "untasked", pending: false, updatedAt: time } };
+  f.setPayload({ items: [withdrawn], total: 1 });
+  let calls = f.calls.length;
+  await f.tick();
+  assert.deepEqual(f.calls.slice(calls), ["/devices/flash?page=1&pageSize=20"]);
+  assert.deepEqual(f.state.adapters.ota, {});
+  assert.deepEqual(f.state.adapters.otaErrors, {});
+  assert.equal(f.paints.at(-1).rows[0].ota.state, "untasked", "only presentation changes; server state stays intact");
+  calls = f.calls.length;
+  await f.tick();
+  assert.deepEqual(f.calls.slice(calls), ["/devices/flash?page=1&pageSize=20"]);
+}));
+console.log(`DEVICE_PAGE_R2_R3_R4=${checks}/${checks}`);

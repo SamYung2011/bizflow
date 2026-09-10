@@ -19,8 +19,9 @@ export function renderAdapterOta(device, details, { t, escapeHtml: e, formatTime
   const canUntask = stillPending;
   const untaskButton = canUntask ? `<button type="button" class="app-feedback-button app-feedback-button--danger" data-adapter-action="untask" data-adapter-id="${e(device.certid)}"${actionBusy ? " disabled" : ""}>${e(t("otaUntask"))}</button>` : "";
   const summaryState = device?.ota?.state;
+  const withdrawn = summaryState === "untasked" || details?.state === "untasked";
   if (summaryState === "none" || (summaryState === "armed" && device.ota.updatedAt > details?.task?.armedAt)) details = undefined;
-  const state = OTA_STATES.has(details?.state) ? details.state : OTA_STATES.has(summaryState) ? summaryState : "none";
+  const state = withdrawn ? "none" : OTA_STATES.has(details?.state) ? details.state : OTA_STATES.has(summaryState) ? summaryState : "none";
   if (state === "none") return `<section class="app-feedback-adapter-ota" data-ota-state="none"><strong>${e(t("ota"))}</strong> ${e(t("otaNoTask"))}${untaskButton}</section>`;
   const task = details?.task;
   const historical = ["installed", "expired", "untasked"].includes(state);
@@ -60,7 +61,7 @@ export function createAdapterOtaLoader(request) {
     load(rows, { signal, isCurrent = () => true } = {}) {
       const round = ++generation;
       const valid = () => round === generation && !signal?.aborted && isCurrent();
-      const devices = rows.filter((row) => row?.certid && row?.ota?.state && row.ota.state !== "none");
+      const devices = rows.filter((row) => row?.certid && row?.ota?.state && !["none", "untasked"].includes(row.ota.state));
       const run = async () => {
         let cursor = 0;
         const items = {};
