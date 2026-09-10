@@ -2228,6 +2228,7 @@ await liveCheck("all live-device copy is present in three languages", () => {
 console.log(`DEVICE_PAGE_LIVE=${deviceLiveChecks}/${deviceLiveChecks}`);
 
 await import("./test-app-feedback-live-r2.mjs");
+await import("./test-session-calendar-days.mjs");
 
 console.log(
   "Honnmono APP root-site contracts: PASS (feedback + device unbind + OTA package card + SIM card lookup, allowlists, confirmations, escaped fields, tab-dispatched polling, i18n)",

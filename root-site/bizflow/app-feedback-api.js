@@ -14,6 +14,7 @@ const ALLOWED_REQUESTS = [
   { method: "GET", path: /^\/devices\/(flash|dc-pro)(?:\?[^#]*)?$/ },
   { method: "GET", path: /^\/devices\/flash\/[A-Za-z0-9_-]{1,64}\/ota$/ },
   { method: "GET", path: /^\/devices\/(flash|dc-pro)\/[A-Za-z0-9_-]{1,64}\/sessions(?:\?[^#]*)?$/ },
+  { method: "GET", path: /^\/devices\/(flash|dc-pro)\/[A-Za-z0-9_-]{1,64}\/sessions\/days(?:\?[^#]*)?$/ },
   { method: "GET", path: /^\/devices\/flash\/[A-Za-z0-9_-]{1,64}\/uploads\/[1-9]\d*$/ },
   { method: "POST", path: /^\/devices\/flash\/[A-Za-z0-9_-]{1,64}\/actions$/ },
   { method: "POST", path: /^\/devices\/flash\/[A-Za-z0-9_-]{1,64}\/unbind$/ },

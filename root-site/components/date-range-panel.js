@@ -97,13 +97,15 @@ export function createDateRangePanel() {
   let presets = [];
   let minDate = "";
   let onComplete = async () => {};
+  let dayStatus;
+  let onViewMonthChange;
 
   function singleMode() {
     return mode === "single";
   }
 
   function blockedDay(value) {
-    return Boolean(minDate) && Boolean(value) && value < minDate;
+    return Boolean(minDate) && Boolean(value) && value < minDate || dayStatus?.(value) === "empty";
   }
 
   function isOpen() {
@@ -176,6 +178,7 @@ export function createDateRangePanel() {
     const days = calendarDays(viewMonth).map((day) => {
       const selected = day.value === draft.start || (!singleMode() && day.value === draft.end);
       const blocked = blockedDay(day.value);
+      const status = dayStatus?.(day.value);
       const classes = [
         "date-range-panel__day",
         day.outside ? "date-range-panel__day--outside" : "",
@@ -184,9 +187,11 @@ export function createDateRangePanel() {
         day.value === draft.end ? "date-range-panel__day--range-end" : "",
         selected ? "date-range-panel__day--selected" : "",
         day.value === today ? "date-range-panel__day--today" : "",
-        blocked ? "date-range-panel__day--blocked" : ""
+        blocked ? "date-range-panel__day--blocked" : "",
+        status === "empty" ? "is-empty" : "",
+        status === "available" ? "has-record" : ""
       ].filter(Boolean).join(" ");
-      return `<button type="button" class="${classes}" data-date-range-day="${day.value}" aria-pressed="${selected}" title="${escapeHtml(panelDate(day.value))}"${blocked ? " disabled" : ""}><span>${day.label}</span></button>`;
+      return `<button type="button" class="${classes}" data-date-range-day="${day.value}" aria-pressed="${selected}" title="${escapeHtml(panelDate(day.value))}"${blocked ? " disabled" : ""}><span>${day.label}</span>${status === "available" ? '<i class="date-range-panel__dot"></i>' : ""}</button>`;
     }).join("");
     const jump = `<div class="date-range-panel__jump" data-date-range-jump>
       <label class="date-range-panel__year"><span>${escapeHtml(translate("year"))}</span><input type="number" inputmode="numeric" min="1900" max="2200" value="${viewMonth.getFullYear()}" data-date-range-year></label>
@@ -286,6 +291,7 @@ export function createDateRangePanel() {
         return;
       }
       viewMonth = new Date(year, monthIndex, 1);
+      void notifyViewMonth();
       jumpOpen = false;
       render({ focus: '[data-date-range-action="jump"]' });
       return;
@@ -298,6 +304,7 @@ export function createDateRangePanel() {
     } else if (action === "previous" || action === "next") {
       viewMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + (action === "next" ? 1 : -1), 1);
       jumpOpen = false;
+      void notifyViewMonth();
       render({ focus: `[data-date-range-action="${action}"]` });
     } else if (action === "today") {
       const todayInput = inputFromDate(new Date());
@@ -307,6 +314,7 @@ export function createDateRangePanel() {
         return;
       }
       viewMonth = monthStart(todayInput);
+      void notifyViewMonth();
       jumpOpen = false;
       render({ focus: '[data-date-range-action="today"]' });
     } else if (action === "clear") {
@@ -325,7 +333,43 @@ export function createDateRangePanel() {
     }
   }
 
-  function open({ anchor: nextAnchor, mode: nextMode = "range", date = "", start = "", end = "", viewDate = "", minDate: nextMinDate = "", presets: nextPresets = [], language = "zh", t = (key) => key, onCommit = async () => {} } = {}) {
+  async function notifyViewMonth() {
+    try {
+      await onViewMonthChange?.(inputFromDate(viewMonth).slice(0, 7));
+    } catch (error) {
+      console.warn("[date-range-panel] month load failed", error);
+    }
+  }
+
+  function handleYearChange(event) {
+    if (!event.target.matches("[data-date-range-year]")) return;
+    const year = Number(event.target.value);
+    if (!Number.isInteger(year) || year < 1900 || year > 2200) {
+      event.target.setAttribute("aria-invalid", "true");
+      return;
+    }
+    viewMonth = new Date(year, viewMonth.getMonth(), 1);
+    event.target.removeAttribute("aria-invalid");
+    panel.querySelector('[data-date-range-action="jump"]').textContent = monthTitle(viewMonth, lang);
+    void notifyViewMonth();
+  }
+
+  function refresh() {
+    // The month/year chooser has no day cells. Leave its input and pending
+    // pointer target intact while asynchronous day counts arrive.
+    if (!isOpen() || jumpOpen) return;
+    const focused = panel.contains(document.activeElement) ? document.activeElement : null;
+    const attribute = focused?.getAttributeNames().find((name) => name.startsWith("data-date-range-"));
+    const selector = attribute ? `[${attribute}="${focused.getAttribute(attribute)}"]` : "";
+    render();
+    if (selector) {
+      const next = panel.querySelector(selector);
+      if (next && !next.disabled) next.focus();
+      else (panel.querySelector("[data-date-range-day]:not(:disabled)") || panel.querySelector('[data-date-range-action="next"]'))?.focus();
+    }
+  }
+
+  function open({ anchor: nextAnchor, mode: nextMode = "range", date = "", start = "", end = "", viewDate = "", minDate: nextMinDate = "", presets: nextPresets = [], language = "zh", t = (key) => key, onCommit = async () => {}, dayStatus: nextDayStatus, onViewMonthChange: nextOnViewMonthChange } = {}) {
     if (!(nextAnchor instanceof HTMLElement)) return false;
     close({ restoreFocus: false });
     anchor = nextAnchor;
@@ -341,6 +385,8 @@ export function createDateRangePanel() {
     viewMonth = monthStart(draft.start || draft.end || viewDate);
     jumpOpen = false;
     onComplete = onCommit;
+    dayStatus = typeof nextDayStatus === "function" ? nextDayStatus : undefined;
+    onViewMonthChange = typeof nextOnViewMonthChange === "function" ? nextOnViewMonthChange : undefined;
     panel = document.createElement("section");
     panel.className = `tp-component date-range-panel date-range-panel--${mode}`;
     panel.setAttribute("data-date-range-panel", "");
@@ -348,15 +394,17 @@ export function createDateRangePanel() {
     panel.setAttribute("aria-label", String(translate(singleMode() ? "date" : "dateRange")));
     panel.style.visibility = "hidden";
     panel.addEventListener("click", handleClick);
+    if (onViewMonthChange) panel.addEventListener("change", handleYearChange);
     document.body.append(panel);
     document.addEventListener("pointerdown", onOutsidePointerDown, true);
     document.addEventListener("keydown", onDocumentKeydown, true);
     window.addEventListener("resize", position);
     window.addEventListener("scroll", position, true);
     render();
+    void notifyViewMonth();
     requestAnimationFrame(() => panel?.querySelector(`[data-date-range-side="${activeSide}"]`)?.focus());
     return true;
   }
 
-  return Object.freeze({ close, isOpen, open });
+  return Object.freeze({ close, isOpen, open, refresh });
 }
