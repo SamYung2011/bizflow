@@ -1,6 +1,7 @@
+import { getOrderProductPickerData } from "../data/order-product-picker.js";
 // bizflow 訂單詳情桌面屏(Figma 676:92291)。列表與深層明細均由 provider 的 R8a 快照契約提供。
 
-import { getOrderCreateData, getOrderDetailData, getCurrentUser } from "../data/provider.js";
+import { getOrderDetailData, getCurrentUser } from "../data/provider.js";
 import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
@@ -325,6 +326,8 @@ let liveMode = false;
 let liveWritable = false;
 let liveReadOnly = false;
 let pickerData = { productGroups: [] };
+let editReady = false;
+let editDataPromise = null;
 let writeOptions = { invoice: null, defaultWarehouseId: null, salespeople: [] };
 let writeAttributes = "";
 
@@ -422,7 +425,7 @@ function renderLineRows(helpers) {
       <span class="orders-line-thumb" aria-hidden="true"></span>
       <span class="orders-line-name" title="${escapeHtml(itemLabel(item, lang))}">${escapeHtml(itemLabel(item, lang))}</span>
     </span>
-    ${liveWritable
+    ${liveWritable && editReady
       ? `<input class="orders-qty-box orders-line-number" type="number" min="1" step="1" data-line-quantity="${escapeHtml(item.id)}" data-orders-write value="${escapeHtml(String(item.quantity))}">
         <input class="orders-line-price orders-line-number" type="number" min="0" step="0.01" data-line-price="${escapeHtml(item.id)}" data-orders-write value="${escapeHtml(String(item.price))}">`
       : `<span class="orders-qty-box">${escapeHtml(String(item.quantity))}</span>
@@ -439,6 +442,7 @@ function renderLineRows(helpers) {
 }
 
 function renderProductModal(helpers) {
+  if (!state.productModalOpen) return "";
   const { escapeHtml, icon, lang } = helpers;
   const term = state.productSearch.trim().toLowerCase();
   const groups = pickerData.productGroups.filter((group) => !term || group.name.toLowerCase().includes(term));
@@ -477,11 +481,11 @@ function renderCheckControl(key, value, helpers) {
   const checked = state.feesEnabled[key];
   return `<div class="orders-payment-check-row">
     <label class="orders-figma-check">
-      <input type="checkbox" data-fee-toggle="${key}" data-orders-write${checked ? " checked" : ""}${writeAttributes}>
+      <input type="checkbox" data-fee-toggle="${key}" data-orders-write${checked ? " checked" : ""}${!editReady ? ' disabled aria-disabled="true"' : writeAttributes}>
       <span class="orders-figma-check__box" aria-hidden="true"></span>
       <span>${escapeHtml(pageT(lang, `orders.${key}`))}</span>
     </label>
-    ${liveWritable && checked
+    ${liveWritable && editReady && checked
       ? `<input type="number" min="0" step="0.01" class="orders-money-input" data-fee-amount="${key}" data-orders-write value="${escapeHtml(String(Math.abs(Number(value || 0)) || ""))}" placeholder="${escapeHtml(pageT(lang, "orders.valuePlaceholder"))}">`
       : `<span class="orders-money-input${checked ? "" : " orders-money-input--placeholder"}">${escapeHtml(checked ? String(value) : pageT(lang, "orders.valuePlaceholder"))}</span>`}
   </div>`;
@@ -500,7 +504,7 @@ function renderPaymentBox(helpers, subtotal, totalAmount, paid) {
     </div>
     <div class="orders-payment-line">
       <span>${escapeHtml(pageT(lang, "orders.shippingFee"))}</span>
-      ${!liveMode || liveWritable
+      ${!liveMode || (liveWritable && editReady)
         ? `<button type="button" class="orders-free-select" data-shipping-fee-trigger data-orders-write aria-haspopup="dialog" aria-expanded="${shippingFeePanel.isOpen()}">${escapeHtml(shippingFee === 0 ? pageT(lang, "orders.free") : formatMoney(shippingFee))}${icon("icon-arrow-down", "icon")}</button>`
         : `<span class="orders-free-select orders-free-select--readonly">${escapeHtml(shippingFee === 0 ? pageT(lang, "orders.free") : formatMoney(shippingFee))}</span>`}
       <strong><span>HKD$</span><output data-detail-shipping>${escapeHtml(moneyValue(shippingFee))}</output></strong>
@@ -567,7 +571,7 @@ function renderSalespersonCard(helpers) {
   const salesperson = fieldValue(detailData.detail.salesperson, lang);
   return `<section class="orders-detail-card">
     <h2 class="orders-card-title">${escapeHtml(pageT(lang, "orders.salesperson"))}</h2>
-    ${liveWritable
+    ${liveWritable && editReady
       ? `<select class="orders-select-like orders-select-control" data-salesperson-select data-orders-write>
           <option value="">${escapeHtml(pageT(lang, "orders.salesperson.none"))}</option>
           ${writeOptions.salespeople.map((person) => `<option value="${escapeHtml(person.id)}"${person.id === state.salespersonId ? " selected" : ""}>${escapeHtml(person.name)}</option>`).join("")}
@@ -740,9 +744,11 @@ function renderDetail(helpers) {
       </div>
       ${renderPaymentBox(helpers, subtotal, paymentTotal, paid)}
       <div class="orders-card-actions orders-card-actions--end">
+        ${!editReady ? `<button type="button" class="orders-primary" data-order-edit-open data-orders-write${state.busy ? ' disabled aria-disabled="true"' : writeAttributes}>${escapeHtml(pageT(lang, "orders.edit"))}</button>` : `
         <button type="button" class="orders-secondary" data-order-changes-cancel data-orders-write${state.busy ? ' disabled aria-disabled="true"' : writeAttributes}>${escapeHtml(pageT(lang, "orders.cancelChange"))}</button>
         <button type="button" class="orders-primary" data-order-changes-save data-orders-write${state.busy ? ' disabled aria-disabled="true"' : writeAttributes}>${escapeHtml(pageT(lang, state.busy === "order" ? "orders.write.saving" : "orders.saveChange"))}</button>
-        ${paid ? "" : `<button type="button" class="orders-dark" data-order-mark-paid data-orders-write${state.busy ? ' disabled aria-disabled="true"' : writeAttributes}>${escapeHtml(pageT(lang, state.busy === "payment" ? "orders.write.paying" : "orders.markPaid"))}</button>`}
+        ${paid ? "" : `<button type="button" class="orders-dark" data-order-mark-paid data-orders-write${state.busy ? ' disabled aria-disabled="true"' : writeAttributes}>${escapeHtml(pageT(lang, state.busy === "payment" ? "orders.write.paying" : "orders.markPaid"))}</button>`}`}
+
       </div>
     </section>
 
@@ -1078,6 +1084,53 @@ async function saveShipping() {
   }
 }
 
+async function ensureOrderEditData() {
+  if (editReady) return true;
+  if (editDataPromise) return editDataPromise;
+  const mountId = activeMountId;
+  const scope = activeScope;
+  const invoiceId = detailData?.order.id;
+  state.busy = "edit";
+  setNotice("");
+  rerender();
+  const request = (async () => {
+    try {
+      const [picker, options, freshDetail] = await Promise.all([
+        getOrderProductPickerData(),
+        liveWritable ? getLiveOrderWriteOptions(invoiceId)
+          : Promise.resolve({ invoice: null, defaultWarehouseId: null, salespeople: [] }),
+        liveWritable ? getOrderDetailData(invoiceId, { refresh: true }) : Promise.resolve(detailData)
+      ]);
+      if (!isCurrentOrderDetailMount(mountId, scope)) return false;
+      if (!freshDetail || (liveWritable && !options.invoice)) throw new Error("Invoice is no longer available");
+      const previous = state;
+      pickerData = picker;
+      writeOptions = options;
+      detailData = freshDetail;
+      state = initialDetailState();
+      if (previous.shippingMode !== previous.savedShippingMode || previous.trackingNumber !== previous.savedTrackingNumber) {
+        state.shippingMode = previous.shippingMode;
+        state.trackingNumber = previous.trackingNumber;
+        state.savedShippingMode = previous.savedShippingMode;
+        state.savedTrackingNumber = previous.savedTrackingNumber;
+      }
+      editReady = true;
+      return true;
+    } catch (error) {
+      if (isCurrentOrderDetailMount(mountId, scope)) setNotice(friendlyWriteError(error, "orders.write.failed"));
+      return false;
+    } finally {
+      if (isCurrentOrderDetailMount(mountId, scope)) {
+        state.busy = "";
+        editDataPromise = null;
+        rerender();
+      }
+    }
+  })();
+  editDataPromise = request;
+  return request;
+}
+
 async function onOrderDetailClick(event) {
   const printOpen = event.target.closest("[data-print-open]");
   if (printOpen) {
@@ -1086,6 +1139,10 @@ async function onOrderDetailClick(event) {
   }
   if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
   if (state.busy && event.target.closest("[data-orders-write]")) return;
+  if (event.target.closest("[data-order-edit-open]")) {
+    await ensureOrderEditData();
+    return;
+  }
   const shippingFeeTrigger = event.target.closest("[data-shipping-fee-trigger]");
   if (shippingFeeTrigger) {
     shippingFeePanel.open({
@@ -1114,7 +1171,7 @@ async function onOrderDetailClick(event) {
     return;
   }
   if (event.target.closest("[data-customer-edit-open]")) {
-    if (liveWritable) openCustomerEdit();
+    if (liveWritable && await ensureOrderEditData()) openCustomerEdit();
     return;
   }
   if (event.target.closest("[data-customer-edit-close]") || event.target.matches("[data-order-customer-overlay]")) {
@@ -1145,6 +1202,7 @@ async function onOrderDetailClick(event) {
     return;
   }
   if (event.target.closest("[data-product-modal-open]")) {
+    if (!await ensureOrderEditData()) return;
     state.productModalOpen = true;
     rerender({ focusProductSearch: true });
     return;
@@ -1293,15 +1351,10 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
   liveMode = typeof currentUser?.hasPermission === "function";
   liveWritable = liveMode && currentUser?.bizflowMainAccess === true;
   liveReadOnly = liveMode && !liveWritable;
-  const [nextPickerData, nextWriteOptions] = await Promise.all([
-    detailData ? getOrderCreateData() : Promise.resolve({ productGroups: [] }),
-    liveWritable && detailData
-      ? getLiveOrderWriteOptions(detailData.order.id)
-      : Promise.resolve({ invoice: null, defaultWarehouseId: null, salespeople: [] })
-  ]);
-  throwIfPageAborted(signal, scope);
-  pickerData = nextPickerData;
-  writeOptions = nextWriteOptions;
+  pickerData = { productGroups: [] };
+  writeOptions = { invoice: null, defaultWarehouseId: null, salespeople: [] };
+  editReady = false;
+  editDataPromise = null;
   writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
   state = initialDetailState();
   printDialog = createPrintDialog({ getLang: () => currentHelpers?.lang ?? "zh", scope });
@@ -1334,6 +1387,8 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
       detailData = null;
       currentUser = null;
       unread = null;
+      editReady = false;
+      editDataPromise = null;
       pickerData = { productGroups: [] };
       writeOptions = { invoice: null, defaultWarehouseId: null, salespeople: [] };
       currentHelpers = null;
