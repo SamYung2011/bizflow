@@ -1,5 +1,6 @@
-import { getCurrentUser, getSession, getSupabaseClient } from "./auth.js";
-import { getReadState, rememberUnreadWatermarks, setReadStateAccount } from "./read-state.js";
+import { sessionReadContext, assertReadContextCurrent } from "./live-read-scope.js";
+import { getCurrentUser, getSession, getSupabaseClient, getRememberedActiveCompanyId, getRememberedEmployeeId } from "./auth.js";
+import { getReadState, peekReadState, rememberUnreadWatermarks, setReadStateAccount } from "./read-state.js";
 import { asArray, asNumber, asText } from "./live-snapshot-utils.js";
 import { liveQueryKey, readLiveQueryCache, writeLiveQueryCache } from "./live-query-cache.js";
 
@@ -34,6 +35,7 @@ function unreadRequestKey(live, read) {
   return liveQueryKey({
     userId: live.userId,
     companyId: live.currentUser.activeCompanyId || "",
+    scopeKey: live.scopeKey, employeeId: live.currentUser.id,
     read
   });
 }
@@ -42,8 +44,7 @@ function rememberUnreadMemo(live, read, value, now = Date.now()) {
   const requestKey = unreadRequestKey(live, read);
   const promise = Promise.resolve(value);
   rememberUnreadWatermarks(value.watermarks);
-  UNREAD_REQUESTS.clear();
-  UNREAD_REQUESTS.set(requestKey, { expiresAt: now + UNREAD_MEMO_TTL_MS, promise });
+  UNREAD_REQUESTS.set(requestKey, { expiresAt: now + UNREAD_MEMO_TTL_MS, promise, live, read });
   return value;
 }
 
@@ -67,7 +68,7 @@ function unreadAfterLocalWatermarks(value, read) {
 }
 
 async function currentLiveUnreadSummary(value, suppliedRead = null) {
-  const live = await context();
+  const live = await unreadContext();
   if (!live || !value || typeof value !== "object" || Array.isArray(value)) return null;
   setReadStateAccount(live.currentUser.id || null);
   const read = suppliedRead && typeof suppliedRead === "object" ? suppliedRead : getReadState();
@@ -189,36 +190,79 @@ export async function getLiveHomeDashboard({ refresh = false } = {}) {
   }
 }
 
-export async function getLiveUnreadState() {
-  const live = await context();
+// Hints only select a speculative request. The normal reader always resolves
+// currentUser and must match user/company/employee/version before claiming it.
+async function unreadContext({ prefetch = false } = {}) {
+  let live = await sessionReadContext('unread');
+  if (!live) return null;
+  const companyId = getRememberedActiveCompanyId(live.userId);
+  const employeeId = getRememberedEmployeeId(live.userId);
+  if (prefetch && companyId && employeeId) {
+    return { ...live, currentUser: { id: employeeId, activeCompanyId: companyId } };
+  }
+  const currentUser = await getCurrentUser();
+  const verified = await sessionReadContext('unread');
+  if (!currentUser || !verified || verified.userId !== live.userId) return null;
+  return { ...verified, currentUser: { id: currentUser.id, activeCompanyId: currentUser.activeCompanyId } };
+}
+
+function canApplyReadWatermarks(before, after, value) {
+  return UNREAD_KEYS.every((key) => {
+    if ((before[key] || '') === (after[key] || '')) return true;
+    const watermark = value.watermarks[key];
+    return after[key] && watermark && (key === 'inventory' ? after[key] === watermark
+      : Date.parse(after[key]) >= Date.parse(watermark));
+  });
+}
+
+export async function getLiveUnreadState({ prefetch = false, retry = true } = {}) {
+  const live = await unreadContext({ prefetch });
   if (!live) return LIVE_HOME_QUERY_MISS;
-  setReadStateAccount(live.currentUser.id || null);
-  const read = getReadState();
+  const read = peekReadState(live.currentUser.id);
   const requestKey = unreadRequestKey(live, read);
   const now = Date.now();
-  const memo = UNREAD_REQUESTS.get(requestKey);
-  if (memo?.expiresAt > now) return memo.promise;
-
-  // The first realtime SUBSCRIBED catch-up can advance snapshot revisions while
-  // a page is mounting. Keep the resolved result briefly so that follow-up
-  // getUnread()/getUnreadWatermarks() reads do not repeat the same RPC.
-  const promise = live.client.rpc("bizflow_unread_summary", {
-    p_company_id: live.currentUser.activeCompanyId || null,
-    p_tasks_read: read.tasks || null,
-    p_orders_read: read.orders || null,
-    p_messages_read: read.messages || null,
-    p_inventory_read: read.inventory || null,
-    p_updates_read: read.updates || null
-  }).then((result) => {
-    if (result.error) throw result.error;
-    const value = mapUnreadState(result.data);
-    rememberUnreadWatermarks(value.watermarks);
-    return value;
-  }).catch((error) => {
-    if (UNREAD_REQUESTS.get(requestKey)?.promise === promise) UNREAD_REQUESTS.delete(requestKey);
+  for (const [key, entry] of UNREAD_REQUESTS) if (entry.expiresAt <= now) UNREAD_REQUESTS.delete(key);
+  try {
+    const memo = UNREAD_REQUESTS.get(requestKey);
+    if (memo) {
+      const value = await memo.promise;
+      assertReadContextCurrent(live);
+      if (!prefetch) rememberUnreadWatermarks(value.watermarks);
+      return value;
+    }
+    // Pages mark their section read after mounting. A fully-read watermark can
+    // zero that count locally; partial/backward changes still require an RPC.
+    for (const entry of UNREAD_REQUESTS.values()) {
+      if (unreadRequestKey(entry.live, read) !== requestKey) continue;
+      const value = await entry.promise;
+      assertReadContextCurrent(live);
+      if (canApplyReadWatermarks(entry.read, read, value)) {
+        return rememberUnreadMemo(live, read, unreadAfterLocalWatermarks(value, read));
+      }
+    }
+    const promise = live.client.rpc('bizflow_unread_summary', {
+      p_company_id: live.currentUser.activeCompanyId || null,
+      p_tasks_read: read.tasks || null, p_orders_read: read.orders || null,
+      p_messages_read: read.messages || null, p_inventory_read: read.inventory || null,
+      p_updates_read: read.updates || null
+    }).then((result) => {
+      if (result.error) throw result.error;
+      assertReadContextCurrent(live);
+      const value = mapUnreadState(result.data);
+      const entry = UNREAD_REQUESTS.get(requestKey);
+      if (entry?.promise === promise) entry.expiresAt = Date.now() + UNREAD_MEMO_TTL_MS;
+      if (!prefetch) rememberUnreadWatermarks(value.watermarks);
+      return value;
+    }).catch((error) => {
+      if (UNREAD_REQUESTS.get(requestKey)?.promise === promise) UNREAD_REQUESTS.delete(requestKey);
+      throw error;
+    });
+    UNREAD_REQUESTS.set(requestKey, { expiresAt: Infinity, promise, live, read });
+    return await promise;
+  } catch (error) {
+    if (error?.name === 'AbortError' && retry) return getLiveUnreadState({ prefetch, retry: false });
     throw error;
-  });
-  UNREAD_REQUESTS.clear();
-  UNREAD_REQUESTS.set(requestKey, { expiresAt: now + UNREAD_MEMO_TTL_MS, promise });
-  return promise;
+  }
 }
+
+export function prefetchLiveUnreadState() { return getLiveUnreadState({ prefetch: true }); }

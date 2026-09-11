@@ -1,3 +1,4 @@
+import { sessionReadContext, assertReadContextCurrent } from "./live-read-scope.js";
 import { getCurrentUser, RBAC_KEYS } from "./auth.js";
 import {
   buildAliasesSnapshot,
@@ -49,6 +50,8 @@ import {
 export const LIVE_SNAPSHOT_MISS = Symbol("live-snapshot-miss");
 
 const LIVE_BUILDERS = new Map();
+const SESSION_SNAPSHOTS = new Set(["expense.json", "whatsapp.json"]);
+const SESSION_SCOPES = new Map();
 const LIVE_REFRESHES = new Map();
 const LIVE_REFRESH_PENDING = new Set();
 let snapshotUserId = "";
@@ -1071,19 +1074,23 @@ function refreshLiveSnapshot(snapshot, builder, userId, companyId, cachedValue) 
   return promise;
 }
 
-async function loadLiveSnapshot(snapshot, builder, userId) {
+async function loadLiveSnapshot(snapshot, builder, userId, { strict = false, fresh = false } = {}) {
   const companyId = await snapshotCompanyId(snapshot);
-  const cached = await readLiveSnapshotCache({ userId, snapshot, companyId });
+  const cached = fresh ? null : await readLiveSnapshotCache({ userId, snapshot, companyId });
   if (cached) {
     const value = liveValue(cached.value);
+    if (cached.stale && strict) {
+      try { return (await buildAndCacheSnapshot(snapshot, builder, userId, companyId, { fresh: true })).value; }
+      catch { LIVE_REFRESH_PENDING.add(snapshot); return value; } // Keep offline fallback retryable.
+    }
     if (cached.stale) void refreshLiveSnapshot(snapshot, builder, userId, companyId, value);
     return value;
   }
-  const { value } = await buildAndCacheSnapshot(snapshot, builder, userId, companyId);
+  const { value } = await buildAndCacheSnapshot(snapshot, builder, userId, companyId, { fresh });
   return value;
 }
 
-export async function getLiveSnapshot(snapshot) {
+export async function getLiveSnapshot(snapshot, { retry = true } = {}) {
   const session = await ensureLiveSession();
   if (!session) return LIVE_SNAPSHOT_MISS;
   void ensureLiveRealtime().catch((error) => console.warn("[live-realtime] startup failed", error));
@@ -1097,15 +1104,37 @@ export async function getLiveSnapshot(snapshot) {
   // OCPP stays on its separately approved read-only snapshot line (docs/41); P0 never invents a Supabase source for it.
   const builder = builders[snapshot];
   if (!builder) return LIVE_SNAPSHOT_MISS;
+  const context = SESSION_SNAPSHOTS.has(snapshot) ? await sessionReadContext(snapshot) : null;
+  if (SESSION_SNAPSHOTS.has(snapshot) && !context) return LIVE_SNAPSHOT_MISS;
+  const previousScope = SESSION_SCOPES.get(snapshot);
+  const changed = context && previousScope && previousScope !== context.scopeKey;
+  if (changed) LIVE_BUILDERS.delete(snapshot);
+  if (context) SESSION_SCOPES.set(snapshot, context.scopeKey);
   if (LIVE_REFRESH_PENDING.delete(snapshot)) LIVE_BUILDERS.delete(snapshot);
   if (!LIVE_BUILDERS.has(snapshot)) {
-    const promise = loadLiveSnapshot(snapshot, builder, session.user.id).catch((error) => {
+    const promise = loadLiveSnapshot(snapshot, builder, session.user.id, { strict: Boolean(context), fresh: Boolean(changed) }).catch((error) => {
       if (LIVE_BUILDERS.get(snapshot) === promise) LIVE_BUILDERS.delete(snapshot);
       throw error;
     });
     LIVE_BUILDERS.set(snapshot, promise);
   }
-  return LIVE_BUILDERS.get(snapshot);
+  const promise = LIVE_BUILDERS.get(snapshot);
+  try {
+    const value = await promise;
+    if (context) assertReadContextCurrent(context);
+    return value;
+  } catch (error) {
+    if (context && error?.name === 'AbortError') {
+      if (LIVE_BUILDERS.get(snapshot) === promise) LIVE_BUILDERS.delete(snapshot);
+      if (retry) return getLiveSnapshot(snapshot, { retry: false });
+    }
+    throw error;
+  }
+}
+
+export function prefetchLiveSnapshot(snapshot) {
+  if (!SESSION_SNAPSHOTS.has(snapshot)) return Promise.resolve(LIVE_SNAPSHOT_MISS);
+  return getLiveSnapshot(snapshot);
 }
 
 export function invalidateLiveSnapshot(...snapshots) {

@@ -1,11 +1,14 @@
+import { prefetchRoute, installMenuPrefetch } from "./route-prefetch.js";
 import { createAppRouter } from "./app-router.js";
 import { mountPageModule } from "./page-lifecycle.js";
 import { routeForPath } from "./route-manifest.js";
 import * as shell from "../shell/shell.js";
 
 const url = new URL(window.location.href);
-void routeForPath(url.pathname)?.prefetch?.()?.catch?.(() => {});
+void prefetchRoute(routeForPath(url.pathname), { url, historyState: window.history.state?.tpSpa?.pageState ?? null });
 await shell.shellReady;
+const stopMenuPrefetch = installMenuPrefetch();
+window.addEventListener("pagehide", stopMenuPrefetch, { once: true });
 
 let router = null;
 let fallbackController = null;

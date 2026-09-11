@@ -1,3 +1,4 @@
+import { liveReadVersion } from "./live-read-scope.js";
 import { getLiveCustomerDetail, LIVE_CUSTOMER_DETAIL_MISS } from "./live-customer-detail.js";
 // 数据接口层(煊煊 2026-07-08 拍板:屏只认接口,不写死样板)
 // 双模式:有 Supabase session 时由 live-snapshots 按 RLS 可见范围构造同契约真数据;
@@ -331,10 +332,12 @@ async function syncReadStateAccount() {
   try {
     const session = await getSession();
     const account = session ? await getAuthCurrentUser() : null;
+    unreadUserId = String(session?.user?.id || "");
     unreadAccountId = String(account?.id || "");
     unreadCompanyId = String(account?.activeCompanyId || "");
     setReadStateAccount(account?.id || null);
   } catch {
+    unreadUserId = "";
     unreadAccountId = "";
     unreadCompanyId = "";
     setReadStateAccount(null);
@@ -345,6 +348,7 @@ let unreadStateMemoKey = "";
 let unreadStatePromise = null;
 let pendingTeamTaskPagePromise = null;
 let taskPageUnreadHandoff = null;
+let unreadUserId = "";
 let unreadAccountId = "";
 let unreadCompanyId = "";
 
@@ -356,7 +360,7 @@ let unreadCompanyId = "";
 async function buildUnreadState() {
   await syncReadStateAccount();
   const read = getReadState();
-  const memoKey = `${providerSnapshotRevision()}:${JSON.stringify(read)}`;
+  const memoKey = `${providerSnapshotRevision()}:${liveReadVersion(unreadUserId, "unread")}:${unreadAccountId}:${unreadCompanyId}:${JSON.stringify(read)}`;
   if (unreadStatePromise && unreadStateMemoKey === memoKey) return unreadStatePromise;
   unreadStateMemoKey = memoKey;
   const promise = computeUnreadState(read).catch((error) => {
@@ -2177,6 +2181,9 @@ const OCPP_SNAPSHOT_URL = rootSiteUrl("data/snapshots/ocpp.json");
 
 function loadR11Snapshot(url, cacheKey) {
   const snapshot = url.pathname.split("/").pop() || cacheKey;
+  // These session-prefetched builders own their versioned memo. An outer memo
+  // would bypass identity/company checks on the next page mount.
+  if (["expense.json", "whatsapp.json"].includes(snapshot)) return fetchSnapshot(url, snapshot, "empty dataset");
   return loadProviderSnapshot(snapshot, () => fetchSnapshot(url, snapshot, "empty dataset"));
 }
 

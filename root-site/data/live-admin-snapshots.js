@@ -105,9 +105,8 @@ const SAFE_WHATSAPP_SETTINGS = [
 
 export async function buildWhatsappSnapshot() {
   const client = await getSupabaseClient();
-  const settingsResult = await client.from("wa_settings").select(SAFE_WHATSAPP_SETTINGS.join(",")).limit(1).maybeSingle();
-  if (settingsResult.error) throw settingsResult.error;
-  const [whitelist, clients, heartbeatRows, messages, replies, unresolved, reports, logs] = await Promise.all([
+  const [settingsResult, whitelist, clients, heartbeatRows, messages, replies, unresolved, reports, logs] = await Promise.all([
+    client.from("wa_settings").select(SAFE_WHATSAPP_SETTINGS.join(",")).limit(1).maybeSingle(),
     allRows("wa_whitelist", "created_at"),
     allRows("wa_clients", "last_seen", false, null),
     allRows("wa_heartbeat", "last_heartbeat_at", false),
@@ -117,6 +116,7 @@ export async function buildWhatsappSnapshot() {
     allRows("wa_daily_reports", "report_date", false),
     allRows("wa_logs", "created_at", false)
   ]);
+  if (settingsResult.error) throw settingsResult.error;
   const settings = settingsResult.data ?? {};
   const heartbeat = heartbeatRows[0] ?? {};
   return {

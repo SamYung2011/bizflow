@@ -1,10 +1,9 @@
-import { getSession, getSupabaseClient, TRANSIENT_AUTH_RESET_EVENT } from "./auth.js";
+import { sessionReadContext, assertReadContextCurrent, readScopedQueryCache, writeScopedQueryCache } from "./live-read-scope.js";
+import { TRANSIENT_AUTH_RESET_EVENT } from "./auth.js";
 import { asArray, asNumber, asText } from "./live-snapshot-utils.js";
 import {
   liveQueryKey,
-  markLiveQueryCacheStale,
-  readLiveQueryCache,
-  writeLiveQueryCache
+  markLiveQueryCacheStale
 } from "./live-query-cache.js";
 import { LIVE_SNAPSHOT_INVALIDATED_EVENT } from "./live-snapshot-dependencies.js";
 
@@ -216,14 +215,6 @@ function mapWarrantyPayload(payload, query) {
   };
 }
 
-async function liveContext() {
-  const [client, session] = await Promise.all([getSupabaseClient(), getSession()]);
-  if (!client || !session?.user?.id) return null;
-  if (activeUserId && activeUserId !== session.user.id) queryGeneration += 1;
-  activeUserId = session.user.id;
-  return { client, userId: session.user.id };
-}
-
 function dispatchUpdate(eventName, query, value, source) {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(eventName, {
@@ -233,13 +224,14 @@ function dispatchUpdate(eventName, query, value, source) {
 
 async function fetchPage({ context, namespace, rpc, params, query, mapPayload }) {
   const generation = queryGeneration;
-  const requestKey = `${namespace}:${context.userId}:${generation}:${liveQueryKey(query)}`;
+  const requestKey = `${namespace}:${context.userId}:${generation}:${context.scopeKey}:${liveQueryKey(query)}`;
   if (NETWORK_REQUESTS.has(requestKey)) return NETWORK_REQUESTS.get(requestKey);
   const promise = context.client.rpc(rpc, params).then((result) => {
     if (result.error) throw result.error;
     if (generation !== queryGeneration) throw new DOMException("Customer query superseded", "AbortError");
+    assertReadContextCurrent(context);
     const value = mapPayload(result.data, query);
-    writeLiveQueryCache({ userId: context.userId, namespace, query, value });
+    writeScopedQueryCache(context, query, value);
     return value;
   }).finally(() => NETWORK_REQUESTS.delete(requestKey));
   NETWORK_REQUESTS.set(requestKey, promise);
@@ -292,28 +284,30 @@ function backgroundRefresh({ fetcher, context, query, eventName, source }) {
     });
 }
 
-async function readPage({ query, refresh, namespace, fetcher, eventName }) {
-  const context = await liveContext();
+async function readPage({ query, refresh, namespace, fetcher, eventName, retry = true }) {
+  const context = await sessionReadContext(namespace);
   if (!context) return LIVE_CUSTOMER_QUERY_MISS;
-  const cached = readLiveQueryCache({ userId: context.userId, namespace, query });
+  activeUserId = context.userId;
+  const cached = readScopedQueryCache(context, query);
   if (cached && !refresh) {
-    backgroundRefresh({
-      fetcher, context, query, eventName,
-      source: cached.stale ? "stale-cache" : "cache-revalidate"
-    });
+    if (cached.stale) backgroundRefresh({ fetcher, context, query, eventName, source: "stale-cache" });
     return { ...cached.value, cached: true, stale: cached.stale };
   }
   try {
     return await fetcher(context, query);
   } catch (error) {
+    if (error?.name === "AbortError") {
+      if (retry) return readPage({ query, refresh, namespace, fetcher, eventName, retry: false });
+      throw error;
+    }
     if (cached) return { ...cached.value, cached: true, stale: true, offline: true };
     throw error;
   }
 }
 
-export async function getLiveCustomersPage(query = {}, { refresh = false } = {}) {
+export async function getLiveCustomersPage(query = {}, { refresh = false, prefetch = false } = {}) {
   const normalized = normalizeCustomerQuery(query);
-  activeCustomerQuery = normalized;
+  if (!prefetch) activeCustomerQuery = normalized;
   return readPage({
     query: normalized,
     refresh,
@@ -323,9 +317,9 @@ export async function getLiveCustomersPage(query = {}, { refresh = false } = {})
   });
 }
 
-export async function getLiveWarrantyPage(query = {}, { refresh = false } = {}) {
+export async function getLiveWarrantyPage(query = {}, { refresh = false, prefetch = false } = {}) {
   const normalized = normalizeWarrantyQuery(query);
-  activeWarrantyQuery = normalized;
+  if (!prefetch) activeWarrantyQuery = normalized;
   return readPage({
     query: normalized,
     refresh,
@@ -337,7 +331,7 @@ export async function getLiveWarrantyPage(query = {}, { refresh = false } = {}) 
 
 export async function refreshCurrentCustomerQuery({ soft = true, source = "realtime", notify = true } = {}) {
   if (!activeCustomerQuery || !activeUserId) return null;
-  const context = await liveContext();
+  const context = await sessionReadContext(CUSTOMER_NAMESPACE);
   if (!context || context.userId !== activeUserId) return null;
   if (soft) markLiveQueryCacheStale({ userId: context.userId, namespace: CUSTOMER_NAMESPACE, query: activeCustomerQuery });
   const value = await fetchCustomerPage(context, activeCustomerQuery);
@@ -347,10 +341,13 @@ export async function refreshCurrentCustomerQuery({ soft = true, source = "realt
 
 export async function refreshCurrentWarrantyQuery({ soft = true, source = "realtime", notify = true } = {}) {
   if (!activeWarrantyQuery || !activeUserId) return null;
-  const context = await liveContext();
+  const context = await sessionReadContext(WARRANTY_NAMESPACE);
   if (!context || context.userId !== activeUserId) return null;
   if (soft) markLiveQueryCacheStale({ userId: context.userId, namespace: WARRANTY_NAMESPACE, query: activeWarrantyQuery });
   const value = await fetchWarrantyPage(context, activeWarrantyQuery);
   if (notify) dispatchUpdate(WARRANTY_QUERY_UPDATED_EVENT, activeWarrantyQuery, value, source);
   return value;
 }
+
+export function prefetchCustomersPage(query = {}) { return getLiveCustomersPage(query, { prefetch: true }); }
+export function prefetchWarrantyPage(query = {}) { return getLiveWarrantyPage(query, { prefetch: true }); }

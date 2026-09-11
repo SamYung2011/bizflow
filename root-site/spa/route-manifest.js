@@ -41,12 +41,14 @@ function route(path, section, entry, styles, load = null, prefetch = null) {
   });
 }
 
+const prefetchPage = (page) => (options) => import("../data/page-prefetch.js").then((module) => module.prefetchPageData(page, options));
+
 const routes = [
   route("/bizflow/home.html", "bizflow", "../bizflow/home.js", ["../bizflow/home.css"], () => import("../bizflow/home.js")),
   route("/bizflow/orders.html", "bizflow", "../bizflow/orders.js", [
     "../components/segment.css", "../components/date-range-panel.css", "../components/management-list.css",
     "../bizflow/orders.css", "../bizflow/orders-domain.css"
-  ], () => import("../bizflow/orders.js")),
+  ], () => import("../bizflow/orders.js"), prefetchPage("orders")),
   route("/bizflow/orders-create.html", "bizflow", "../bizflow/orders-create.js", [
     "../components/segment.css",
     "../bizflow/customers.css", "../bizflow/orders.css"
@@ -58,7 +60,7 @@ const routes = [
   route("/bizflow/customers.html", "bizflow", "../bizflow/customers.js", [
     "../components/segment.css", "../components/date-range-panel.css", "../components/management-list.css",
     "../bizflow/customers.css", "../bizflow/customers-warranty.css"
-  ], () => import("../bizflow/customers.js")),
+  ], () => import("../bizflow/customers.js"), prefetchPage("customers")),
   route("/bizflow/customer-detail.html", "bizflow", "../bizflow/customer-detail.js", [
     "../components/management-list.css", "../bizflow/customers.css", "../bizflow/orders.css"
   ], () => import("../bizflow/customer-detail.js")),
@@ -71,10 +73,10 @@ const routes = [
   ], () => import("../bizflow/inventory-detail.js")),
   route("/bizflow/expense.html", "bizflow", "../bizflow/expense.js", [
     "../components/segment.css", "../components/date-range-panel.css", "../bizflow/expense.css"
-  ], () => import("../bizflow/expense.js")),
+  ], () => import("../bizflow/expense.js"), prefetchPage("expense")),
   route("/bizflow/whatsapp.html", "bizflow", "../bizflow/whatsapp.js", [
     "../components/segment.css", "../components/date-range-panel.css", "../bizflow/whatsapp.css"
-  ], () => import("../bizflow/whatsapp.js")),
+  ], () => import("../bizflow/whatsapp.js"), prefetchPage("whatsapp")),
   route("/bizflow/ocpp-monitor.html", "bizflow", "../bizflow/ocpp-monitor.js", [
     "../components/segment.css", "../components/date-range-panel.css", "../bizflow/ocpp.css"
   ], () => import("../bizflow/ocpp-monitor.js")),

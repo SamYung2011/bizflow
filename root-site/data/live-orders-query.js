@@ -1,3 +1,4 @@
+import { sessionReadContext, assertReadContextCurrent, readScopedQueryCache, writeScopedQueryCache } from "./live-read-scope.js";
 import { getSession, getSupabaseClient, TRANSIENT_AUTH_RESET_EVENT } from "./auth.js";
 import { asArray, asNumber, asText, formatDate, formatDateTime, formatTime } from "./live-snapshot-utils.js";
 import {
@@ -178,7 +179,7 @@ async function liveContext() {
 
 async function fetchOrderPage(context, query) {
   const generation = orderQueryGeneration;
-  const requestKey = `${context.userId}:${generation}:${liveQueryKey(query)}`;
+  const requestKey = `${context.userId}:${generation}:${context.scopeKey || ""}:${liveQueryKey(query)}`;
   if (NETWORK_REQUESTS.has(requestKey)) return NETWORK_REQUESTS.get(requestKey);
   const promise = context.client.rpc("bizflow_order_page", {
     p_search: query.search || null,
@@ -192,8 +193,9 @@ async function fetchOrderPage(context, query) {
   }).then((result) => {
     if (result.error) throw result.error;
     if (generation !== orderQueryGeneration) throw new DOMException("Order query superseded", "AbortError");
+    assertReadContextCurrent(context);
     const value = mapPagePayload(result.data, query);
-    writeLiveQueryCache({ userId: context.userId, namespace: ORDER_NAMESPACE, query, value });
+    writeScopedQueryCache(context, query, value);
     return value;
   }).finally(() => {
     NETWORK_REQUESTS.delete(requestKey);
@@ -210,29 +212,36 @@ function backgroundRefresh(context, query, source) {
     });
 }
 
-export async function getLiveOrdersPage(query = {}, { refresh = false } = {}) {
-  const context = await liveContext();
+export async function getLiveOrdersPage(query = {}, { refresh = false, prefetch = false, retry = true } = {}) {
+  const context = await sessionReadContext(ORDER_NAMESPACE);
   if (!context) return LIVE_ORDER_QUERY_MISS;
   if (activeUserId && activeUserId !== context.userId) orderQueryGeneration += 1;
   const normalized = normalizeOrderQuery(query);
-  activeQuery = normalized;
-  activeUserId = context.userId;
-  const cached = readLiveQueryCache({ userId: context.userId, namespace: ORDER_NAMESPACE, query: normalized });
+  if (!prefetch) { activeQuery = normalized; activeUserId = context.userId; }
+  const cached = readScopedQueryCache(context, normalized);
   if (cached && !refresh) {
-    backgroundRefresh(context, normalized, cached.stale ? "stale-cache" : "cache-revalidate");
+    if (cached.stale) backgroundRefresh(context, normalized, "stale-cache");
     return { ...cached.value, cached: true, stale: cached.stale };
   }
   try {
     return await fetchOrderPage(context, normalized);
   } catch (error) {
+    if (error?.name === "AbortError") {
+      if (retry) return getLiveOrdersPage(normalized, { refresh, prefetch, retry: false });
+      throw error;
+    }
     if (cached) return { ...cached.value, cached: true, stale: true, offline: true };
     throw error;
   }
 }
 
+export function prefetchOrdersPage(query = {}) {
+  return getLiveOrdersPage(query, { prefetch: true });
+}
+
 export async function refreshCurrentOrderQuery({ soft = true, source = "realtime", notify = true } = {}) {
   if (!activeQuery || !activeUserId) return null;
-  const context = await liveContext();
+  const context = await sessionReadContext(ORDER_NAMESPACE);
   if (!context || context.userId !== activeUserId) return null;
   if (soft) markLiveQueryCacheStale({ userId: context.userId, namespace: ORDER_NAMESPACE, query: activeQuery });
   const value = await fetchOrderPage(context, activeQuery);
@@ -319,7 +328,7 @@ function patchListRow(order, invoice) {
 }
 
 export async function invalidateOrderQueriesAfterWrite(invoice = null) {
-  const context = await liveContext();
+  const context = await sessionReadContext(ORDER_NAMESPACE);
   if (!context) return;
   orderQueryGeneration += 1;
   let preserve = null;

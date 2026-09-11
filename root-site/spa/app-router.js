@@ -1,3 +1,4 @@
+import { prefetchRoute } from "./route-prefetch.js";
 import { mountPageModule } from "./page-lifecycle.js";
 import {
   routeManifest,
@@ -372,6 +373,7 @@ export function createAppRouter({
         else windowRef.history.pushState(nextState, "", url.href);
         historyState = nextState;
       }
+      void prefetchRoute(route, { url, historyState: historyDetails(historyState)?.pageState ?? null });
       await commitLoadingFrame({
         route,
         url,

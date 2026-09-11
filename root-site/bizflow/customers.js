@@ -1,3 +1,4 @@
+import { customerPageState, customerPageQuery } from "../data/page-query-state.js";
 // bizflow 站客戶管理桌面屏(Figma 619:60662「客户管理」)。
 // 结构/交互实测来源:get_design_context 逐区拉值 + use_figma 只读 reactions(见 commit 说明)。
 //   - 新增客户按钮(637:61301)ON_CLICK → NAVIGATE 637:61638(客户管理-新增客户弹窗,内嵌 509:21612 表单)
@@ -24,7 +25,6 @@ import { createLiveOrderCustomer } from "../data/live-orders-writes.js";
 import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
 import {
   CUSTOMER_QUERY_UPDATED_EVENT,
-  normalizeCustomerQuery,
   refreshCurrentCustomerQuery,
   refreshCurrentWarrantyQuery,
   WARRANTY_QUERY_UPDATED_EVENT
@@ -286,17 +286,7 @@ export function customerMatchesSearch(customer, query) {
 }
 
 function currentCustomerQuery() {
-  const range = dateFilter?.captureState?.() ?? {};
-  return normalizeCustomerQuery({
-    page: state.page,
-    pageSize: managementPageSize(),
-    search: state.search,
-    source: state.source,
-    imei: state.imei,
-    from: range.from,
-    to: range.to,
-    sort: state.sort
-  });
+  return customerPageQuery(state, dateFilter?.captureState?.());
 }
 
 function currentCustomerDataMatchesQuery() {
@@ -923,14 +913,8 @@ function onCustomersResize() {
 }
 
 function restoredState(value = null, presetTab = null) {
-  const next = value && typeof value === "object" ? value : {};
   return {
-    tab: customerTabs.includes(next.tab) ? next.tab : presetTab === "warranty" ? "warranty" : "list",
-    sort: customerSortKeys.includes(next.sort) ? next.sort : "createdDesc",
-    source: ["all", "shopify", "framer", "other"].includes(next.source) ? next.source : "all",
-    imei: ["all", "has", "none"].includes(next.imei) ? next.imei : "all",
-    search: typeof next.search === "string" ? next.search : "",
-    page: Number.isInteger(next.page) && next.page > 0 ? next.page : 1,
+    ...customerPageState(value, presetTab),
     modalOpen: false,
     customerDraft: {},
     writeBusy: false,

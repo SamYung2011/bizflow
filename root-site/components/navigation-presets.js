@@ -1,4 +1,4 @@
-import { consumeSessionValue, setSessionValue } from "../data/session-state.js";
+import { consumeSessionValue, getSessionValue, setSessionValue } from "../data/session-state.js";
 
 export const navigationPresetKeys = Object.freeze({
   ordersTab: "task-platform.orders.initialTab",
@@ -21,4 +21,9 @@ export function setNavigationPreset(key, value) {
 export function consumeNavigationPreset(key) {
   if (!allowedPresetKeys.has(key)) return null;
   return consumeSessionValue(key);
+}
+
+// Peeking never consumes the preset that mountPage will apply.
+export function peekNavigationPreset(key) {
+  return allowedPresetKeys.has(key) ? getSessionValue(key) : null;
 }
