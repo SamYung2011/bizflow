@@ -2,6 +2,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync,
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { injectApiPreconnect, readApiOrigin } from "./root-site-preconnect.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const defaultSourceRoot = join(repoRoot, "root-site");
@@ -64,7 +65,7 @@ function replacePreloadBlock(html, bundleUrl, htmlPath) {
   return html.replace(pattern, `\n${replacement}`);
 }
 
-function rewriteBusinessHtml(outputRoot, spaUrl) {
+function rewriteBusinessHtml(outputRoot, spaUrl, apiOrigin) {
   const pages = [];
   for (const directory of ["bizflow", "team"]) {
     const absolute = join(outputRoot, directory);
@@ -75,6 +76,7 @@ function rewriteBusinessHtml(outputRoot, spaUrl) {
       if (!/src=["']\.\.\/spa\/entry\.js["']/.test(source)) continue;
       let html = source.replace(/src=["']\.\.\/spa\/entry\.js["']/, `src="${spaUrl}"`);
       html = replacePreloadBlock(html, spaUrl, relative(outputRoot, htmlPath));
+      html = injectApiPreconnect(html, apiOrigin);
       if (/\.\.\/spa\/entry\.js|\.\.\/(?:bizflow|team|vendor)\/[^"']+\.js/.test(html)) {
         throw new Error(`${relative(outputRoot, htmlPath)} retained a source module reference`);
       }
@@ -87,12 +89,12 @@ function rewriteBusinessHtml(outputRoot, spaUrl) {
   return pages;
 }
 
-function rewriteLoginHtml(outputRoot, loginUrl) {
+function rewriteLoginHtml(outputRoot, loginUrl, apiOrigin) {
   const htmlPath = join(outputRoot, "login", "index.html");
   const source = readFileSync(htmlPath, "utf8");
   const html = source.replace(/src=["']\.\/login\.js["']/, `src="${loginUrl}"`);
   if (html === source || /src=["']\.\/login\.js["']/.test(html)) throw new Error("Login HTML did not adopt its hashed bundle");
-  writeFileSync(htmlPath, html);
+  writeFileSync(htmlPath, injectApiPreconnect(html, apiOrigin));
 }
 
 export async function buildRootSite({ sourceRoot = defaultSourceRoot, outputRoot = join(repoRoot, "dist") } = {}) {
@@ -129,8 +131,9 @@ export async function buildRootSite({ sourceRoot = defaultSourceRoot, outputRoot
   });
 
   const urls = entryUrls(result.metafile, sourceRoot, outputRoot);
-  const pages = rewriteBusinessHtml(outputRoot, urls.spa);
-  rewriteLoginHtml(outputRoot, urls.login);
+  const apiOrigin = await readApiOrigin(sourceRoot);
+  const pages = rewriteBusinessHtml(outputRoot, urls.spa, apiOrigin);
+  rewriteLoginHtml(outputRoot, urls.login, apiOrigin);
   const bundles = Object.fromEntries(Object.entries(urls).map(([name, url]) => [name, {
     url,
     bytes: statSync(join(outputRoot, url.slice(1))).size

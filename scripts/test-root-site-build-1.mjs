@@ -6,11 +6,13 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 import { buildRootSite } from "./build-root-site.mjs";
+import { readApiOrigin } from "./root-site-preconnect.mjs";
 import { spaRouteAllowlist } from "../root-site/spa/route-manifest.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sourceRoot = path.join(repoRoot, "root-site");
 const businessPages = [...spaRouteAllowlist].map((route) => route.replace(/^\//, "")).sort();
+const apiOrigin = await readApiOrigin(sourceRoot);
 
 function attributes(tag) {
   return Object.fromEntries([...tag.matchAll(/([\w-]+)=["']([^"']*)["']/g)].map((match) => [match[1], match[2]]));
@@ -53,6 +55,15 @@ async function assertProductionOutput(outputRoot, result) {
   const login = await moduleReferences(path.join(outputRoot, "login/index.html"));
   assert.deepEqual(login.scripts, [result.bundles.login.url], "login must load its current fingerprint only");
   assert.doesNotMatch(login.html, /src=["']\.\/login\.js["']/);
+
+  for (const page of [...businessPages, "login/index.html"]) {
+    const html = await readFile(path.join(outputRoot, page), "utf8");
+    const tags = [...html.matchAll(/<(?:link|script)\b[^>]*>/gi)].map((match) => attributes(match[0]));
+    const hints = tags.filter((tag) => tag.rel === "preconnect");
+    assert.equal(hints.length, apiOrigin ? 1 : 0, `${page}: exactly one configured hint`);
+    if (apiOrigin) assert.deepEqual(tags[0], { rel: "preconnect", href: apiOrigin, crossorigin: "anonymous" },
+      `${page}: anonymous API preconnect precedes every stylesheet and script`);
+  }
 
   const spaBundle = (await assetBytes(outputRoot, result.bundles.spa.url)).toString("utf8");
   assert.doesNotMatch(spaBundle, /\bimport\s*\(/,
