@@ -1115,7 +1115,7 @@ export async function getLiveSnapshot(snapshot, { retry = true } = {}) {
   if (context) SESSION_SCOPES.set(snapshot, context.scopeKey);
   if (LIVE_REFRESH_PENDING.delete(snapshot)) LIVE_BUILDERS.delete(snapshot);
   if (!LIVE_BUILDERS.has(snapshot)) {
-    const promise = loadLiveSnapshot(snapshot, builder, session.user.id, { strict: Boolean(context), fresh: Boolean(changed), ignoreCache: Boolean(identityChanged) }).catch((error) => {
+    const promise = loadLiveSnapshot(snapshot, builder, session.user.id, { strict: Boolean(context), fresh: Boolean(changed || identityChanged), ignoreCache: Boolean(identityChanged) }).catch((error) => {
       if (LIVE_BUILDERS.get(snapshot) === promise) LIVE_BUILDERS.delete(snapshot);
       throw error;
     });

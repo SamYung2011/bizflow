@@ -115,6 +115,12 @@ await test('failed speculative RPC permits normal mount retry; TTL-stale offline
   auth.__setRpcError('bizflow_order_page',new Error('offline'));
   assert.equal((await orders.getLiveOrdersPage({}, {refresh:true})).offline,true);
 });
+await test('a failing refresh after auth invalidation cannot return its old cached payload',async()=>{
+  await orders.getLiveOrdersPage();auth.__holdNextRpc('bizflow_order_page');
+  const pending=orders.getLiveOrdersPage({}, {refresh:true});await wait(()=>names().length===2);
+  await cache.invalidateLiveAuthCache();auth.__setRpcError('bizflow_order_page',new Error('offline'));auth.__releaseRpc();
+  await assert.rejects(pending);assert.equal(names().length,3);
+});
 await test('unread inflight and fully-read watermark reuse; partial watermark and company require new request',async()=>{
   auth.__setRpcData('bizflow_unread_summary',{unread:{orders:3},watermarks:{orders:'2026-09-11T00:00:00Z'}});
   auth.__holdNextRpc('bizflow_unread_summary'); const warm=home.prefetchLiveUnreadState(); await wait(()=>names().length===1);

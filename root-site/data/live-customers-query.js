@@ -1,4 +1,4 @@
-import { sessionReadContext, assertReadContextCurrent, readScopedQueryCache, writeScopedQueryCache } from "./live-read-scope.js";
+import { sessionReadContext, assertReadContextCurrent, isReadContextCurrent, readScopedQueryCache, writeScopedQueryCache } from "./live-read-scope.js";
 import { TRANSIENT_AUTH_RESET_EVENT } from "./auth.js";
 import { asArray, asNumber, asText } from "./live-snapshot-utils.js";
 import {
@@ -296,7 +296,7 @@ async function readPage({ query, refresh, namespace, fetcher, eventName, retry =
   try {
     return await fetcher(context, query);
   } catch (error) {
-    if (error?.name === "AbortError") {
+    if (error?.name === "AbortError" || !isReadContextCurrent(context)) {
       if (retry) return readPage({ query, refresh, namespace, fetcher, eventName, retry: false });
       throw error;
     }

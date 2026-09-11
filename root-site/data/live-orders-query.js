@@ -1,4 +1,4 @@
-import { sessionReadContext, assertReadContextCurrent, readScopedQueryCache, writeScopedQueryCache } from "./live-read-scope.js";
+import { sessionReadContext, assertReadContextCurrent, isReadContextCurrent, readScopedQueryCache, writeScopedQueryCache } from "./live-read-scope.js";
 import { getSession, getSupabaseClient, TRANSIENT_AUTH_RESET_EVENT } from "./auth.js";
 import { asArray, asNumber, asText, formatDate, formatDateTime, formatTime } from "./live-snapshot-utils.js";
 import {
@@ -226,7 +226,7 @@ export async function getLiveOrdersPage(query = {}, { refresh = false, prefetch 
   try {
     return await fetchOrderPage(context, normalized);
   } catch (error) {
-    if (error?.name === "AbortError") {
+    if (error?.name === "AbortError" || !isReadContextCurrent(context)) {
       if (retry) return getLiveOrdersPage(normalized, { refresh, prefetch, retry: false });
       throw error;
     }
