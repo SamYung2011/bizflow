@@ -164,7 +164,7 @@ await test('menu pointer/focus once, same-origin business only; entry + navigate
   send('focusin','https://outside.test/bizflow/customers.html');send('focusin','https://fixture.test/bizflow/ocpp-monitor.html');
   await wait(()=>names().includes('bizflow_order_page'));await tick();stop();
   assert.equal(names().filter(n=>n==='bizflow_order_page').length,1);
-  assert.ok(!routes.routeForPath('/bizflow/ocpp-monitor.html').prefetch);assert.ok(!routes.routeForPath('/bizflow/app-feedback.html').prefetch);
+  assert.ok(routes.routeForPath('/bizflow/ocpp-monitor.html').prefetch);assert.ok(!routes.routeForPath('/bizflow/app-feedback.html').prefetch);
   const entry=await readFile(new URL('../root-site/spa/entry.js',import.meta.url),'utf8');
   const router=await readFile(new URL('../root-site/spa/app-router.js',import.meta.url),'utf8');
   assert.ok(entry.indexOf('void prefetchRoute')<entry.indexOf('await shell.shellReady'));

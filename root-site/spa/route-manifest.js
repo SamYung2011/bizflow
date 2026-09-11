@@ -79,16 +79,16 @@ const routes = [
   ], () => import("../bizflow/whatsapp.js"), prefetchPage("whatsapp")),
   route("/bizflow/ocpp-monitor.html", "bizflow", "../bizflow/ocpp-monitor.js", [
     "../components/segment.css", "../components/date-range-panel.css", "../bizflow/ocpp.css"
-  ], () => import("../bizflow/ocpp-monitor.js")),
+  ], () => import("../bizflow/ocpp-monitor.js"), prefetchPage("ocpp-monitor")),
   route("/bizflow/ocpp-charging.html", "bizflow", "../bizflow/ocpp-charging.js", [
     "../components/segment.css", "../components/date-range-panel.css", "../bizflow/ocpp.css"
-  ], () => import("../bizflow/ocpp-charging.js")),
+  ], () => import("../bizflow/ocpp-charging.js"), prefetchPage("ocpp-charging")),
   route("/bizflow/ocpp-users.html", "bizflow", "../bizflow/ocpp-users.js", [
     "../components/segment.css", "../bizflow/ocpp.css"
-  ], () => import("../bizflow/ocpp-users.js")),
+  ], () => import("../bizflow/ocpp-users.js"), prefetchPage("ocpp-users")),
   route("/bizflow/ocpp-finance.html", "bizflow", "../bizflow/ocpp-finance.js", [
     "../components/segment.css", "../bizflow/ocpp.css"
-  ], () => import("../bizflow/ocpp-finance.js")),
+  ], () => import("../bizflow/ocpp-finance.js"), prefetchPage("ocpp-finance")),
   route("/bizflow/app-feedback.html", "bizflow", "../bizflow/app-feedback.js", [
     "../components/date-range-panel.css",
     "../bizflow/app-feedback.css"

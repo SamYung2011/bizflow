@@ -10,7 +10,8 @@
     "test:quick": "node scripts/test-data-phase1.mjs && node scripts/test-data-phase1-runtime.mjs && node scripts/test-team-task-prefetch.mjs && node scripts/test-auth-context-timeout.mjs && node scripts/test-task-write-context-timeout.mjs && node scripts/test-expense-receipts-signed.mjs && npm run check:shell && node scripts/test-bounded-reads.mjs",
     "test:pg": "node scripts/test-data-phase1-pg.mjs && node scripts/test-team-task-page-pg.mjs && node scripts/test-wa-replies-rls-pg.mjs && node scripts/test-scalar-rpc-volatile-pg.mjs && node scripts/test-pre-request-claims-pg.mjs && node scripts/test-task-scope-rls-pg.mjs && node scripts/test-expense-receipts-storage-pg.mjs && node scripts/test-bounded-reads.mjs --pg",
     "build": "npm run build:shell && node scripts/build-front-door.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:prefetch-6c": "node scripts/test-ocpp-prefetch.mjs && node scripts/test-ocpp-monitor-mount.mjs && node scripts/test-auth-inflight.mjs && node scripts/test-session-snapshot-swr.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.101.1",

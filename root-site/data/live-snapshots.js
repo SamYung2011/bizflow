@@ -1,4 +1,4 @@
-import { sessionReadContext, assertReadContextCurrent } from "./live-read-scope.js";
+import { sessionReadContext, assertReadContextCurrent, isReadContextCurrent, canAdoptReadScope } from "./live-read-scope.js";
 import { getCurrentUser, RBAC_KEYS } from "./auth.js";
 import {
   buildAliasesSnapshot,
@@ -1024,21 +1024,28 @@ async function snapshotCompanyId(snapshot) {
   return String((await getCurrentUser())?.activeCompanyId || "");
 }
 
-async function buildAndCacheSnapshot(snapshot, builder, userId, companyId, { fresh = false } = {}) {
+async function buildAndCacheSnapshot(snapshot, builder, userId, companyId, { fresh = false, context = null } = {}) {
+  if (context) assertReadContextCurrent(context);
   const version = liveSnapshotCacheVersion(snapshot);
   const value = liveValue(await (fresh ? withFreshLiveTableReads(builder) : builder()));
-  const stored = await writeLiveSnapshotCache({ userId, snapshot, companyId, value, version });
+  if (context) assertReadContextCurrent(context);
+  const stored = await writeLiveSnapshotCache({ userId, snapshot, companyId, value, version,
+    scopeKey: context?.scopeKey, isCurrent: () => !context || isReadContextCurrent(context) });
+  if (context) {
+    assertReadContextCurrent(context);
+  }
   return { value, stored };
 }
 
-function refreshLiveSnapshot(snapshot, builder, userId, companyId, cachedValue) {
+function refreshLiveSnapshot(snapshot, builder, userId, companyId, cachedValue, context = null) {
   if (LIVE_REFRESHES.has(snapshot)) return LIVE_REFRESHES.get(snapshot);
   LIVE_REFRESH_PENDING.delete(snapshot);
+  const ownsScope = () => !context || isReadContextCurrent(context);
   let promise;
   promise = retryLiveSnapshotRefresh(
-    () => buildAndCacheSnapshot(snapshot, builder, userId, companyId, { fresh: true }),
+    () => buildAndCacheSnapshot(snapshot, builder, userId, companyId, { fresh: true, context }),
     {
-      shouldRetry: () => LIVE_REFRESHES.get(snapshot) === promise && userId === snapshotUserId,
+      shouldRetry: () => LIVE_REFRESHES.get(snapshot) === promise && userId === snapshotUserId && ownsScope(),
       onRetry: ({ attempt, delay, error }) => console.warn(
         `[live-snapshot-cache] ${snapshot} refresh attempt ${attempt} failed; retrying in ${delay}ms`,
         error
@@ -1046,7 +1053,7 @@ function refreshLiveSnapshot(snapshot, builder, userId, companyId, cachedValue) 
     }
   )
     .then(({ value, stored }) => {
-      if (!stored || userId !== snapshotUserId) return value;
+      if ((!stored && !context) || userId !== snapshotUserId || LIVE_REFRESHES.get(snapshot) !== promise || !ownsScope()) return value;
       LIVE_REFRESH_PENDING.delete(snapshot);
       LIVE_BUILDERS.set(snapshot, Promise.resolve(value));
       updateProviderSnapshotMemo(snapshot, value);
@@ -1056,7 +1063,7 @@ function refreshLiveSnapshot(snapshot, builder, userId, companyId, cachedValue) 
       return value;
     })
     .catch((error) => {
-      if (LIVE_REFRESHES.get(snapshot) !== promise || userId !== snapshotUserId) return undefined;
+      if (LIVE_REFRESHES.get(snapshot) !== promise || userId !== snapshotUserId || !ownsScope()) return undefined;
       LIVE_REFRESH_PENDING.add(snapshot);
       LIVE_BUILDERS.delete(snapshot);
       invalidateProviderSnapshotMemo(snapshot);
@@ -1074,19 +1081,36 @@ function refreshLiveSnapshot(snapshot, builder, userId, companyId, cachedValue) 
   return promise;
 }
 
-async function loadLiveSnapshot(snapshot, builder, userId, { strict = false, fresh = false, ignoreCache = false } = {}) {
+async function loadLiveSnapshot(snapshot, builder, userId, { strict = false, fresh = false, ignoreCache = false, context = null } = {}) {
   const companyId = await snapshotCompanyId(snapshot);
-  const cached = ignoreCache ? null : await readLiveSnapshotCache({ userId, snapshot, companyId });
+  let cached = ignoreCache ? null : await readLiveSnapshotCache({ userId, snapshot, companyId });
+  if (context) {
+    assertReadContextCurrent(context);
+    if (cached?.scopeKey && !canAdoptReadScope(context, cached.scopeKey)) {
+      let sameIdentity = false;
+      try {
+        sameIdentity = JSON.stringify(JSON.parse(cached.scopeKey).slice(0, 4)) === JSON.stringify(JSON.parse(context.scopeKey).slice(0, 4));
+      } catch { /* Malformed persisted metadata requires a fresh read. */ }
+      if (!sameIdentity) cached = null;
+      fresh = true;
+    }
+  }
   if (cached) {
     const value = liveValue(cached.value);
-    if (strict && (cached.stale || fresh)) {
-      try { return (await buildAndCacheSnapshot(snapshot, builder, userId, companyId, { fresh: true })).value; }
-      catch { LIVE_REFRESH_PENDING.add(snapshot); return value; } // Keep offline fallback retryable.
+    // TTL expiry may paint immediately. Version/identity changes still wait for
+    // a fresh build; background results must own this exact scope to publish.
+    if (strict && fresh) {
+      try { return (await buildAndCacheSnapshot(snapshot, builder, userId, companyId, { fresh: true, context })).value; }
+      catch (error) {
+        if (context) assertReadContextCurrent(context);
+        if (error?.name === "AbortError") throw error;
+        LIVE_REFRESH_PENDING.add(snapshot); return value;
+      } // Keep offline fallback retryable.
     }
-    if (cached.stale) void refreshLiveSnapshot(snapshot, builder, userId, companyId, value);
+    if (cached.stale) void refreshLiveSnapshot(snapshot, builder, userId, companyId, value, context);
     return value;
   }
-  const { value } = await buildAndCacheSnapshot(snapshot, builder, userId, companyId, { fresh });
+  const { value } = await buildAndCacheSnapshot(snapshot, builder, userId, companyId, { fresh, context });
   return value;
 }
 
@@ -1111,11 +1135,11 @@ export async function getLiveSnapshot(snapshot, { retry = true } = {}) {
   const identityChanged = context && (previousScope
     ? JSON.stringify(JSON.parse(previousScope).slice(0, 4)) !== JSON.stringify(JSON.parse(context.scopeKey).slice(0, 4))
     : JSON.parse(context.scopeKey)[3] !== "0:0");
-  if (changed) LIVE_BUILDERS.delete(snapshot);
+  if (changed) { LIVE_BUILDERS.delete(snapshot); LIVE_REFRESHES.delete(snapshot); }
   if (context) SESSION_SCOPES.set(snapshot, context.scopeKey);
   if (LIVE_REFRESH_PENDING.delete(snapshot)) LIVE_BUILDERS.delete(snapshot);
   if (!LIVE_BUILDERS.has(snapshot)) {
-    const promise = loadLiveSnapshot(snapshot, builder, session.user.id, { strict: Boolean(context), fresh: Boolean(changed || identityChanged), ignoreCache: Boolean(identityChanged) }).catch((error) => {
+    const promise = loadLiveSnapshot(snapshot, builder, session.user.id, { strict: Boolean(context), fresh: Boolean(changed || identityChanged), ignoreCache: Boolean(identityChanged), context }).catch((error) => {
       if (LIVE_BUILDERS.get(snapshot) === promise) LIVE_BUILDERS.delete(snapshot);
       throw error;
     });

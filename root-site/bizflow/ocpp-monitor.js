@@ -598,10 +598,9 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
   const currentUser = await getCurrentUser();
   throwIfPageAborted(signal, scope);
   requireOcppRouteAccess(currentUser, { url, navigation });
-  const [initialData, commandOverview] = await Promise.all([
-    getOcppMonitorData(),
-    loadCommandOverview(false),
-  ]);
+  const commandOverviewPromise = loadCommandOverview(false);
+  const initialData = await getOcppMonitorData();
+  const commandOverview = { authenticated: false, status: [], schedules: [], statusError: "", scheduleError: "" };
   throwIfPageAborted(signal, scope);
   const { unread } = cachedPageUnread(currentUser);
   const instance = ++instanceSequence;
@@ -633,6 +632,11 @@ export async function mountPage({ scope, signal, url, navigation, historyState }
   return {
     page: createOcppPage({ activeKey: "ocpp-monitor", currentUser, unread, render, title: "OCPP 監控" }),
     activate() {
+      void commandOverviewPromise.then((overview) => {
+        if (activeInstance !== instance || activeScope !== scope || signal?.aborted || !scope.isCurrent() || !state) return;
+        applyCommandOverview(overview);
+        rerender();
+      });
       void loadPageUnread({ scope, currentUser });
       scope.listen(document, "click", onMonitorClick);
       scope.listen(document, "input", onMonitorInput);
