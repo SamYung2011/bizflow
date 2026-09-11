@@ -115,6 +115,10 @@ await test('failed speculative RPC permits normal mount retry; TTL-stale offline
   auth.__setRpcError('bizflow_order_page',new Error('offline'));
   assert.equal((await orders.getLiveOrdersPage({}, {refresh:true})).offline,true);
 });
+await test('warranty invalidation also rejects an inflight customer page, matching its existing stale signal',async()=>{
+  auth.__holdNextRpc('bizflow_customer_page');const pending=customers.prefetchCustomersPage();await wait(()=>names().length===1);
+  await cache.invalidateLiveSnapshotCache('warranty.json');auth.__releaseRpc();await pending;assert.equal(names().length,2);
+});
 await test('a failing refresh after auth invalidation cannot return its old cached payload',async()=>{
   await orders.getLiveOrdersPage();auth.__holdNextRpc('bizflow_order_page');
   const pending=orders.getLiveOrdersPage({}, {refresh:true});await wait(()=>names().length===2);
