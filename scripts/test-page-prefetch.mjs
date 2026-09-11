@@ -142,6 +142,11 @@ await test('snapshot first catch-up and later write during build force versioned
   await utils.invalidateLiveTableData(['expense_reimbursements','employees']); release(); await warm; assert.equal(calls,4);
   await utils.invalidateLiveTableData(['expense_reimbursements']); await snapshots.getLiveSnapshot('expense.json'); assert.equal(calls,6);
 });
+await test('snapshot TTL/catch-up stale cache remains an offline fallback and retries on recovery',async()=>{
+  await provider.getExpenseData(); await utils.invalidateLiveTableData(['expense_reimbursements','employees']);
+  auth.__setTableError(new Error('offline')); assert.deepEqual((await provider.getExpenseData()).reimbursements,[]);
+  auth.__setTableError(null); await provider.getExpenseData(); assert.equal(auth.__tableCalls().length,4);
+});
 await test('menu pointer/focus once, same-origin business only; entry + navigate run prefetch before mounting',async()=>{
   const target=new EventTarget();const stop=hooks.installMenuPrefetch({documentRef:target,windowRef:window,delay:1});
   const send=(type,href)=>{const event=new Event(type);Object.defineProperty(event,'target',{value:{closest:()=>({href,hasAttribute:()=>false,target:''})}});target.dispatchEvent(event);};

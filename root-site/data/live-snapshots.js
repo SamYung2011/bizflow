@@ -1074,12 +1074,12 @@ function refreshLiveSnapshot(snapshot, builder, userId, companyId, cachedValue) 
   return promise;
 }
 
-async function loadLiveSnapshot(snapshot, builder, userId, { strict = false, fresh = false } = {}) {
+async function loadLiveSnapshot(snapshot, builder, userId, { strict = false, fresh = false, ignoreCache = false } = {}) {
   const companyId = await snapshotCompanyId(snapshot);
-  const cached = fresh ? null : await readLiveSnapshotCache({ userId, snapshot, companyId });
+  const cached = ignoreCache ? null : await readLiveSnapshotCache({ userId, snapshot, companyId });
   if (cached) {
     const value = liveValue(cached.value);
-    if (cached.stale && strict) {
+    if (strict && (cached.stale || fresh)) {
       try { return (await buildAndCacheSnapshot(snapshot, builder, userId, companyId, { fresh: true })).value; }
       catch { LIVE_REFRESH_PENDING.add(snapshot); return value; } // Keep offline fallback retryable.
     }
@@ -1108,11 +1108,14 @@ export async function getLiveSnapshot(snapshot, { retry = true } = {}) {
   if (SESSION_SNAPSHOTS.has(snapshot) && !context) return LIVE_SNAPSHOT_MISS;
   const previousScope = SESSION_SCOPES.get(snapshot);
   const changed = context && previousScope && previousScope !== context.scopeKey;
+  const identityChanged = context && (previousScope
+    ? JSON.stringify(JSON.parse(previousScope).slice(0, 4)) !== JSON.stringify(JSON.parse(context.scopeKey).slice(0, 4))
+    : JSON.parse(context.scopeKey)[3] !== "0:0");
   if (changed) LIVE_BUILDERS.delete(snapshot);
   if (context) SESSION_SCOPES.set(snapshot, context.scopeKey);
   if (LIVE_REFRESH_PENDING.delete(snapshot)) LIVE_BUILDERS.delete(snapshot);
   if (!LIVE_BUILDERS.has(snapshot)) {
-    const promise = loadLiveSnapshot(snapshot, builder, session.user.id, { strict: Boolean(context), fresh: Boolean(changed) }).catch((error) => {
+    const promise = loadLiveSnapshot(snapshot, builder, session.user.id, { strict: Boolean(context), fresh: Boolean(changed), ignoreCache: Boolean(identityChanged) }).catch((error) => {
       if (LIVE_BUILDERS.get(snapshot) === promise) LIVE_BUILDERS.delete(snapshot);
       throw error;
     });
