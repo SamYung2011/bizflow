@@ -181,24 +181,36 @@ function customerPayload(values) {
   };
 }
 
+async function orderSalespeople(client) {
+  const rows = [];
+  for (let offset = 0; ; offset += 1000) {
+    const result = await client.from("employees").select("id,name,email")
+      .eq("role", "銷售").or("active.is.null,active.eq.true")
+      .order("created_at", { ascending: true }).order("id", { ascending: true })
+      .range(offset, offset + 999);
+    throwIfError(result.error);
+    rows.push(...(result.data ?? []));
+    if ((result.data ?? []).length < 1000) return rows.map((person) => ({
+      id: person.id, name: person.name || person.email || "—"
+    }));
+  }
+}
+
 export async function getLiveOrderWriteOptions(invoiceId = "") {
   const { client } = await writeContext();
-  const [employees, warehouses] = await Promise.all([
-    allRows("employees", "created_at"),
-    allRows("warehouses", "sort_order")
+  const [salespeople, warehouseResult, invoiceResult] = await Promise.all([
+    orderSalespeople(client),
+    client.from("warehouses").select("id").order("sort_order", { ascending: true })
+      .order("id", { ascending: true }).limit(1),
+    invoiceId ? client.from("invoices").select("*").eq("id", invoiceId).maybeSingle()
+      : Promise.resolve({ data: null, error: null })
   ]);
-  let invoice = null;
-  if (invoiceId) {
-    const result = await client.from("invoices").select("*").eq("id", invoiceId).maybeSingle();
-    throwIfError(result.error);
-    invoice = result.data ?? null;
-  }
+  throwIfError(warehouseResult.error);
+  throwIfError(invoiceResult.error);
   return {
-    invoice,
-    defaultWarehouseId: warehouses[0]?.id ?? null,
-    salespeople: employees
-      .filter((employee) => employee.role === "銷售" && employee.active !== false)
-      .map((employee) => ({ id: employee.id, name: employee.name || employee.email || "—" }))
+    invoice: invoiceResult.data ?? null,
+    defaultWarehouseId: warehouseResult.data?.[0]?.id ?? null,
+    salespeople
   };
 }
 

@@ -1,6 +1,9 @@
+import { getOrderProductPickerData } from "../data/order-product-picker.js";
+import { searchOrderCustomers } from "../data/live-order-customer-search.js";
+import { createDebouncedTask } from "../components/debounced-task.js";
 // bizflow 建立訂單桌面屏(Figma 676:93247 / 676:93440 / 676:93614)。未登录演示态保持本地草稿；登录态接生产写入。
 
-import { getOrderCreateData, getCurrentUser } from "../data/provider.js";
+import { getCurrentUser } from "../data/provider.js";
 import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
@@ -58,6 +61,11 @@ const dict = {
     "orders.chooseSalesperson": "選擇銷售人員",
     "orders.selectCustomer": "選擇顧客",
     "orders.searchCustomer": "搜尋姓名、電話或電郵",
+    "orders.customerSearchHint": "輸入至少一個字搜尋",
+    "orders.customerSearching": "正在搜尋…",
+    "orders.customerSearchFailed": "搜尋失敗，請重試",
+    "orders.customerMore": "載入更多",
+    "orders.customerPrimary": "分組主記錄",
     "orders.customerNoResults": "沒有符合的顧客",
     "orders.addCustomer": "新增顧客",
     "orders.carModel": "車型",
@@ -145,6 +153,11 @@ const dict = {
     "orders.chooseSalesperson": "Choose salesperson",
     "orders.selectCustomer": "Select customer",
     "orders.searchCustomer": "Search name, phone or email",
+    "orders.customerSearchHint": "Type at least one character",
+    "orders.customerSearching": "Searching…",
+    "orders.customerSearchFailed": "Search failed. Please retry.",
+    "orders.customerMore": "Load more",
+    "orders.customerPrimary": "Group primary",
     "orders.customerNoResults": "No matching customers",
     "orders.addCustomer": "Add customer",
     "orders.carModel": "Vehicle model",
@@ -232,6 +245,11 @@ const dict = {
     "orders.chooseSalesperson": "Choisir commercial",
     "orders.selectCustomer": "Choisir client",
     "orders.searchCustomer": "Rechercher nom, téléphone ou e-mail",
+    "orders.customerSearchHint": "Saisissez au moins un caractère",
+    "orders.customerSearching": "Recherche…",
+    "orders.customerSearchFailed": "Échec de la recherche. Réessayez.",
+    "orders.customerMore": "Charger plus",
+    "orders.customerPrimary": "Fiche principale",
     "orders.customerNoResults": "Aucun client correspondant",
     "orders.addCustomer": "Ajouter client",
     "orders.carModel": "Modèle",
@@ -287,7 +305,6 @@ let liveReadOnly = false;
 let writeOptions = { defaultWarehouseId: null, salespeople: [] };
 let writeAttributes = "";
 let draftCreatedAt = new Date();
-const CUSTOMER_RESULTS_LIMIT = 20; // 联想下拉只渲染前 20 条匹配,避免 4198 行 DOM。
 
 let state = initialState();
 
@@ -296,6 +313,9 @@ let activeNavigation = null;
 let activeScope = null;
 let activeMountId = 0;
 let submissionComplete = false;
+let customerSearchTask = null;
+let customerSearchController = null;
+let customerSearchVersion = 0;
 const shippingFeePanel = createShippingFeePanel();
 
 function isCurrentOrderCreateMount(mountId, scope = activeScope) {
@@ -310,6 +330,10 @@ function initialState() {
     lineItems: [],
     customerMenuOpen: false,
     customerSearch: "",
+    customerResults: [],
+    customerHasMore: false,
+    customerLoading: false,
+    customerSearchError: false,
     selectedCustomerId: "",
     customerModalOpen: false,
     customerDraft: {},
@@ -343,12 +367,52 @@ function formatDraftTime(value) {
 }
 
 function matchingCustomers() {
-  const term = state.customerSearch.trim().toLocaleLowerCase();
-  return data.customers.filter((customer) => !term || [
-    customer.name,
-    customer.phone,
-    customer.detail?.email
-  ].some((value) => String(value || "").toLocaleLowerCase().includes(term))).slice(0, CUSTOMER_RESULTS_LIMIT);
+  return state.customerResults;
+}
+
+function resetCustomerSearch() {
+  customerSearchVersion += 1;
+  customerSearchTask?.cancel();
+  customerSearchController?.abort();
+  customerSearchController = null;
+  state.customerResults = [];
+  state.customerHasMore = false;
+  state.customerLoading = false;
+  state.customerSearchError = false;
+}
+
+async function loadCustomerCandidates(append = false) {
+  const term = state.customerSearch.trim();
+  const scope = activeScope;
+  if (!term || !state.customerMenuOpen || !scope?.isCurrent()) return;
+  const version = ++customerSearchVersion;
+  customerSearchController?.abort();
+  const controller = new AbortController();
+  customerSearchController = controller;
+  const onAbort = () => controller.abort();
+  scope.signal.addEventListener("abort", onAbort, { once: true });
+  state.customerLoading = true;
+  state.customerSearchError = false;
+  rerender({ focusCustomerSearch: document.activeElement?.matches("[data-customer-search]") === true });
+  try {
+    const result = await searchOrderCustomers(term, {
+      offset: append ? state.customerResults.length : 0, signal: controller.signal
+    });
+    if (controller.signal.aborted || version !== customerSearchVersion || !scope.isCurrent()) return;
+    const selected = selectedCustomer();
+    state.customerResults = append ? [...state.customerResults, ...result.rows] : result.rows;
+    data.customers = [...new Map([selected, ...state.customerResults].filter(Boolean).map((row) => [row.id, row])).values()];
+    state.customerHasMore = result.hasMore;
+  } catch (error) {
+    if (controller.signal.aborted || version !== customerSearchVersion || !scope.isCurrent()) return;
+    state.customerSearchError = true;
+  } finally {
+    scope.signal.removeEventListener("abort", onAbort);
+    if (version === customerSearchVersion && scope.isCurrent()) {
+      state.customerLoading = false;
+      rerender({ focusCustomerSearch: document.activeElement?.matches("[data-customer-search]") === true });
+    }
+  }
 }
 
 function subtotal() {
@@ -419,7 +483,7 @@ function renderCustomerSelect(helpers) {
   const { escapeHtml, icon, lang } = helpers;
   const customer = selectedCustomer();
   const options = matchingCustomers().map((item) => `<button type="button" role="option" aria-selected="${item.id === state.selectedCustomerId}" class="dropdown-item${item.id === state.selectedCustomerId ? " dropdown-item--selected" : ""}" data-customer-option="${escapeHtml(item.id)}" data-orders-write title="${escapeHtml([item.name, item.phone].filter(Boolean).join(" · "))}"${writeAttributes}>
-    <span class="tp-line">${escapeHtml([item.name, item.phone].filter(Boolean).join(" · "))}</span>
+    <span class="tp-line">${escapeHtml([item.name, item.phone].filter(Boolean).join(" · "))}${item.isGroupPrimary ? ` · ${escapeHtml(pageT(lang, "orders.customerPrimary"))}` : ""}</span>
   </button>`).join("");
   return `<div class="orders-select menu-anchor">
     <button type="button" class="orders-select__trigger" data-customer-trigger data-orders-write aria-expanded="${state.customerMenuOpen}" title="${escapeHtml(customer?.name ?? pageT(lang, "orders.selectCustomer"))}"${writeAttributes}>
@@ -432,7 +496,9 @@ function renderCustomerSelect(helpers) {
         <input type="search" data-customer-search data-orders-write value="${escapeHtml(state.customerSearch)}" placeholder="${escapeHtml(pageT(lang, "orders.searchCustomer"))}" aria-label="${escapeHtml(pageT(lang, "orders.searchCustomer"))}"${writeAttributes}>
       </label>
       <div class="orders-customer-results" role="listbox">
-        ${options || `<span class="orders-customer-empty">${escapeHtml(pageT(lang, "orders.customerNoResults"))}</span>`}
+        ${options}
+        ${!options || state.customerLoading || state.customerSearchError ? `<span class="orders-customer-empty">${escapeHtml(pageT(lang, !state.customerSearch.trim() ? "orders.customerSearchHint" : state.customerLoading ? "orders.customerSearching" : state.customerSearchError ? "orders.customerSearchFailed" : "orders.customerNoResults"))}</span>` : ""}
+        ${state.customerHasMore && !state.customerLoading ? `<button type="button" class="dropdown-item" data-customer-more>${escapeHtml(pageT(lang, "orders.customerMore"))}</button>` : ""}
       </div>
     </div>
   </div>`;
@@ -931,7 +997,12 @@ async function onOrderCreateClick(event) {
   if (event.target.closest("[data-customer-trigger]")) {
     state.customerMenuOpen = !state.customerMenuOpen;
     state.customerSearch = "";
+    resetCustomerSearch();
     rerender({ focusCustomerSearch: state.customerMenuOpen });
+    return;
+  }
+  if (event.target.closest("[data-customer-more]")) {
+    if (!state.customerLoading) await loadCustomerCandidates(true);
     return;
   }
   const customerOption = event.target.closest("[data-customer-option]");
@@ -939,6 +1010,7 @@ async function onOrderCreateClick(event) {
     state.selectedCustomerId = customerOption.getAttribute("data-customer-option");
     state.customerMenuOpen = false;
     state.customerSearch = "";
+    resetCustomerSearch();
     rerender();
     return;
   }
@@ -978,6 +1050,7 @@ async function onOrderCreateClick(event) {
   if (!event.target.closest("[data-customer-menu]") && state.customerMenuOpen) {
     state.customerMenuOpen = false;
     state.customerSearch = "";
+    resetCustomerSearch();
     rerender();
   }
 }
@@ -1049,6 +1122,8 @@ function onOrderCreateInput(event) {
   const customerSearch = event.target.closest("[data-customer-search]");
   if (!customerSearch) return;
   state.customerSearch = customerSearch.value;
+  resetCustomerSearch();
+  if (state.customerSearch.trim()) customerSearchTask?.schedule();
   rerender({ focusCustomerSearch: true });
 }
 
@@ -1059,6 +1134,7 @@ function onOrderCreateKeydown(event) {
   else if (state.customerMenuOpen) {
     state.customerMenuOpen = false;
     state.customerSearch = "";
+    resetCustomerSearch();
     rerender();
   }
 }
@@ -1090,7 +1166,14 @@ export async function mountPage({ scope, signal, navigation = null } = {}) {
   submissionComplete = false;
   state = initialState();
   draftCreatedAt = new Date();
-  const [nextData, nextCurrentUser] = await Promise.all([getOrderCreateData(), getCurrentUser()]);
+  const userPromise = getCurrentUser();
+  const optionsPromise = userPromise.then((user) =>
+    typeof user?.hasPermission === "function" && user.bizflowMainAccess === true
+      ? getLiveOrderWriteOptions() : { defaultWarehouseId: null, salespeople: [] });
+  const [picker, nextCurrentUser, nextWriteOptions] = await Promise.all([
+    getOrderProductPickerData(), userPromise, optionsPromise
+  ]);
+  const nextData = { ...picker, customers: [] };
   throwIfPageAborted(signal, scope);
   data = nextData;
   currentUser = nextCurrentUser;
@@ -1098,10 +1181,6 @@ export async function mountPage({ scope, signal, navigation = null } = {}) {
   liveMode = typeof currentUser?.hasPermission === "function";
   liveWritable = liveMode && currentUser?.bizflowMainAccess === true;
   liveReadOnly = liveMode && !liveWritable;
-  const nextWriteOptions = liveWritable
-    ? await getLiveOrderWriteOptions()
-    : { defaultWarehouseId: null, salespeople: [] };
-  throwIfPageAborted(signal, scope);
   writeOptions = nextWriteOptions;
   writeAttributes = liveReadOnly ? ' disabled aria-disabled="true"' : "";
 
@@ -1113,6 +1192,8 @@ export async function mountPage({ scope, signal, navigation = null } = {}) {
       title: "Honnmono · Create order"
     },
     activate() {
+      customerSearchTask = createDebouncedTask(() => { void loadCustomerCandidates(); }, { delay: 200 });
+      scope.onCleanup(resetCustomerSearch);
       void loadPageUnread({ scope, currentUser, onUpdate: (next) => { unread = next.unread; } });
       scope.listen(document, "click", onOrderCreateClick);
       scope.listen(document, "change", onOrderCreateChange);
@@ -1126,6 +1207,8 @@ export async function mountPage({ scope, signal, navigation = null } = {}) {
     },
     captureState: () => null,
     dispose() {
+      resetCustomerSearch();
+      customerSearchTask = null;
       if (activeMountId === mountId) activeMountId += 1;
       shippingFeePanel.dispose();
       data = null;
