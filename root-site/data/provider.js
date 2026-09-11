@@ -1891,8 +1891,8 @@ function cloneOrderDetail(detail) {
   return cloned;
 }
 
-export async function getOrderDetailData(id) {
-  const live = await getLiveOrderDetail(id);
+export async function getOrderDetailData(id, options = {}) {
+  const live = await getLiveOrderDetail(id, options);
   if (live !== LIVE_ORDER_QUERY_MISS) return live;
   const ordersPage = {
     orders: withOrderIds(ordersPageMock.orders)

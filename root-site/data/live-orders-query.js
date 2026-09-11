@@ -396,35 +396,19 @@ export async function getLiveOrderDetail(id, { refresh = false } = {}) {
   const query = { id: String(id || "") };
   const generation = orderQueryGeneration;
   const cached = readLiveQueryCache({ userId: context.userId, namespace: ORDER_DETAIL_NAMESPACE, query });
-  if (cached && !refresh) return cached.value;
-  const invoiceResult = await context.client.from("invoices")
-    .select("id,invoice_number,customer_id,salesperson_id,date,created_at,items,total,status,notes,carrier,tracking_number,shipping_status,shipped_at,delivered_at")
-    .eq("id", query.id)
-    .maybeSingle();
-  if (invoiceResult.error) {
-    if (cached) return cached.value;
-    throw invoiceResult.error;
+  if (cached && !cached.stale && !refresh) return cached.value;
+  const result = await context.client.rpc("bizflow_order_detail", { p_invoice_id: query.id });
+  if (generation !== orderQueryGeneration) throw new DOMException("Order detail superseded", "AbortError");
+  if (result.error) {
+    if (cached && !refresh) return cached.value;
+    throw result.error;
   }
-  if (!invoiceResult.data) return null;
-  const invoice = invoiceResult.data;
-  const [customerResult, salespersonResult, eventsResult, devicesResult] = await Promise.all([
-    invoice.customer_id
-      ? context.client.from("customers").select("id,name,phone,email,address,car_make,car_model").eq("id", invoice.customer_id).maybeSingle()
-      : Promise.resolve({ data: null, error: null }),
-    invoice.salesperson_id
-      ? context.client.from("employees").select("id,name").eq("id", invoice.salesperson_id).maybeSingle()
-      : Promise.resolve({ data: null, error: null }),
-    context.client.from("shipment_events").select("event_at,description").eq("invoice_id", invoice.id).order("event_at", { ascending: false }).limit(6),
-    invoice.customer_id
-      ? context.client.from("customer_devices").select("id,imei,device_type,created_at").eq("customer_id", invoice.customer_id).order("created_at", { ascending: false })
-      : Promise.resolve({ data: [], error: null })
-  ]);
-  const error = customerResult.error || salespersonResult.error || eventsResult.error || devicesResult.error;
-  if (error) {
-    if (cached) return cached.value;
-    throw error;
+  const payload = result.data;
+  if (!payload) return null;
+  if (!payload.invoice?.id || !Array.isArray(payload.events) || !Array.isArray(payload.devices)) {
+    throw new Error("Invalid order detail payload");
   }
-  const value = mapDetail(invoice, customerResult.data, salespersonResult.data, eventsResult.data, devicesResult.data);
+  const value = mapDetail(payload.invoice, payload.customer, payload.salesperson, payload.events, payload.devices);
   if (generation !== orderQueryGeneration) throw new DOMException("Order detail superseded", "AbortError");
   writeLiveQueryCache({ userId: context.userId, namespace: ORDER_DETAIL_NAMESPACE, query, value });
   return value;

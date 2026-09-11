@@ -181,8 +181,12 @@ assert.match(home,
   "Home must omit the whole sales-chart card when revenue access is denied");
 assert.match(revenue, /getOrderRevenueData\(range, \{ refresh \}\)/);
 assert.doesNotMatch(orders, /getLegacyOrdersPageData/);
-assert.match(orderQuery, /from\("invoices"\)[\s\S]*select\("id,invoice_number[\s\S]*from\("shipment_events"\)[\s\S]*limit\(6\)/,
-  "order detail must lazy-load one invoice and at most six tracking events");
+assert.match(orderQuery, /rpc\("bizflow_order_detail", \{ p_invoice_id: query.id \}\)/,
+  "order detail must load its bounded invoice bundle in one RPC");
+const detailMigration = await readFile(new URL("../migrations/121_bizflow_order_detail.sql", import.meta.url), "utf8");
+assert.match(detailMigration, /WHERE source.id::text = p_invoice_id/);
+assert.match(detailMigration, /WHERE invoice_id = invoice.id ORDER BY event_at DESC LIMIT 6/,
+  "order detail must retain the existing six-event bound");
 assert.match(orders, /createDebouncedTask\(\(\) => void loadCurrentOrderPage\(\)\)/,
   "one debounced callback must own backend search");
 assert.match(orders, /ordersLoading = true[\s\S]*getOrdersPageData\(currentOrderQuery\(\)[\s\S]*ordersLoading = false/);
