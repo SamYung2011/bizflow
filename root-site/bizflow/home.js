@@ -130,6 +130,9 @@ import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { availableQuickCreateActions } from "../components/quick-create.js";
 import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
+import { storageImageCorsAttrs, thumbImageAttrs, thumbUrl } from "../components/storage-image.js";
+
+const HOME_STOCK_IMAGE_WIDTH = 80; // 40px home-thumb slot at 2x density.
 
 let data = null;
 let revenueMetrics = null;
@@ -188,9 +191,16 @@ function applyHomeViewState(next) {
 function preloadHomeStockImages() {
   (data?.stock ?? []).map((item) => item.image).filter(Boolean).forEach((src) => {
     const image = new Image();
+    if (storageImageCorsAttrs(src)) image.crossOrigin = "anonymous";
+    image.referrerPolicy = "no-referrer";
     image.decoding = "sync";
     image.loading = "eager";
-    image.src = src;
+    const thumbnail = thumbUrl(src, HOME_STOCK_IMAGE_WIDTH);
+    if (thumbnail !== src) image.onerror = () => {
+      image.onerror = null;
+      image.src = src;
+    };
+    image.src = thumbnail;
   });
 }
 
@@ -305,7 +315,7 @@ export function renderHome({ icon, escapeHtml, lang }) {
 
   const stockRow = (item) => { const { product, itemsId, count } = item; return `
     <div class="home-line-row">
-      <span class="home-thumb" aria-hidden="true">${item.image ? `<img src="${e(item.image)}" alt="" loading="eager" decoding="sync" fetchpriority="high" referrerpolicy="no-referrer">` : ""}</span>
+      <span class="home-thumb" aria-hidden="true">${item.image ? `<img ${thumbImageAttrs(item.image, HOME_STOCK_IMAGE_WIDTH, e)} alt="" loading="eager" decoding="sync" fetchpriority="high" referrerpolicy="no-referrer">` : ""}</span>
       <div class="home-line-row__body">
         <span class="home-line-row__tag-line"><span class="home-chip" title="${e(product)}">${e(product)}</span></span>
         <span class="home-line-row__sub">${e(itemsId)}</span>
