@@ -2363,8 +2363,8 @@ async function loadOcppSnapshot() {
 }
 
 // R12 OCPP admin data is read-only. Authentication tokens never enter this snapshot contract.
-export async function getOcppMonitorData() {
-  const live = await getLiveOcppMonitorData();
+export async function getOcppMonitorData(options = {}) {
+  const live = await getLiveOcppMonitorData(options);
   if (live !== LIVE_OCPP_MISS) return live;
   const snapshot = await loadOcppSnapshot();
   if (Object.keys(snapshot).length && typeof snapshot.generated_at !== "string") warnProviderFallback("ocpp.json:generated_at", "empty generatedAt");
@@ -2393,8 +2393,8 @@ export async function getOcppMonitorLogsData() {
   };
 }
 
-export async function getOcppChargingData() {
-  const live = await getLiveOcppChargingData();
+export async function getOcppChargingData(options = {}) {
+  const live = await getLiveOcppChargingData(options);
   if (live !== LIVE_OCPP_MISS) return live;
   const snapshot = await loadOcppSnapshot();
   return {
@@ -2426,8 +2426,8 @@ export async function getOcppUsersData() {
   };
 }
 
-export async function getOcppFinanceData() {
-  const live = await getLiveOcppFinanceData();
+export async function getOcppFinanceData(options = {}) {
+  const live = await getLiveOcppFinanceData(options);
   if (live !== LIVE_OCPP_MISS) return live;
   const snapshot = await loadOcppSnapshot();
   const data = {

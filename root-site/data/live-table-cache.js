@@ -455,6 +455,7 @@ export async function readLiveSnapshotCache({ userId, snapshot, companyId = "" }
     const age = Date.now() - payload.cachedAt;
     return {
       value: payload.value,
+      scopeKey: payload.scopeKey,
       // Age never turns a usable snapshot into a blank screen. Entries beyond the
       // retention window remain stale and are replaced after a successful SWR refresh.
       stale: versionState === "stale" || age >= LIVE_SNAPSHOT_CACHE_TTL_MS || age >= LIVE_SNAPSHOT_CACHE_MAX_AGE_MS,
@@ -489,19 +490,22 @@ export async function readLiveSnapshotCache({ userId, snapshot, companyId = "" }
   }
 }
 
-export async function writeLiveSnapshotCache({ userId, snapshot, companyId = "", value, version }) {
+export async function writeLiveSnapshotCache({ userId, snapshot, companyId = "", value, version, scopeKey, isCurrent = () => true }) {
   const normalizedUserId = String(userId || "");
   const normalizedSnapshot = String(snapshot || "");
   const normalizedCompanyId = String(companyId || "");
+  if (!isCurrent()) return false;
   if (!normalizedUserId || !normalizedSnapshot || !value || typeof value !== "object" || Array.isArray(value)) return false;
   if (version !== undefined && version !== liveSnapshotCacheVersion(normalizedSnapshot)) return false;
   await activateLiveTableCacheUser(normalizedUserId);
   if (version !== undefined && version !== liveSnapshotCacheVersion(normalizedSnapshot)) return false;
+  if (!isCurrent()) return false;
   const key = snapshotCacheKey(normalizedUserId, normalizedSnapshot, normalizedCompanyId);
   const payload = {
     key,
     userId: normalizedUserId,
     kind: "snapshot",
+    ...(scopeKey ? { scopeKey } : {}),
     table: "",
     snapshot: normalizedSnapshot,
     companyId: normalizedCompanyId,
@@ -516,8 +520,9 @@ export async function writeLiveSnapshotCache({ userId, snapshot, companyId = "",
       await removeIndexedValue(key);
       return false;
     }
-    return true;
+    return isCurrent();
   }
+  if (!isCurrent()) return false;
   const serialized = JSON.stringify(payload);
   if (serializedBytes(serialized) > LIVE_TABLE_CACHE_MAX_BYTES || payload.version !== liveSnapshotCacheVersion(normalizedSnapshot)) {
     removeFallbackValue(key);

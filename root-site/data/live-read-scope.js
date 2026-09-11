@@ -17,9 +17,9 @@ let epoch = 0;
 let activeUserId = '';
 if (typeof window !== 'undefined') window.addEventListener(TRANSIENT_AUTH_RESET_EVENT, () => { epoch += 1; activeUserId = ''; });
 
-export function liveReadVersion(userId, namespace, companyId = getRememberedActiveCompanyId(userId)) {
+export function liveReadVersion(userId, namespace, companyId = namespace.startsWith("ocpp-") ? "" : getRememberedActiveCompanyId(userId)) {
   return JSON.stringify([userId, companyId, epoch, liveAuthCacheVersion(),
-    (dependencies[namespace] ?? (namespace.endsWith(".json") ? [namespace] : [])).map((name) => [liveSnapshotCacheVersion(name), dirty.get(name) || 0]), pageId]);
+    (dependencies[namespace] ?? ((namespace.endsWith(".json") || namespace.startsWith("ocpp-")) ? [namespace] : [])).map((name) => [liveSnapshotCacheVersion(name), dirty.get(name) || 0]), pageId]);
 }
 
 export async function sessionReadContext(namespace) {
@@ -30,7 +30,7 @@ export async function sessionReadContext(namespace) {
   const userId = session.user.id;
   if (activeUserId && activeUserId !== userId) epoch += 1;
   activeUserId = userId;
-  return { client, userId, namespace, scopeKey: liveReadVersion(userId, namespace) };
+  return { client, session, userId, namespace, scopeKey: liveReadVersion(userId, namespace) };
 }
 
 export function isReadContextCurrent(context) {
@@ -43,18 +43,22 @@ export function assertReadContextCurrent(context) {
 
 export function readScopedQueryCache(context, query) {
   const entry = readLiveQueryCache({ userId: context.userId, namespace: context.namespace, query });
-  if (entry?.scopeKey === context.scopeKey) return entry;
+  return canAdoptReadScope(context, entry?.scopeKey) ? entry : null;
+}
+
+export function canAdoptReadScope(context, scopeKey) {
+  if (scopeKey === context.scopeKey) return true;
   // Runtime invalidation counters restart on document reload. Adopt persisted
   // data only before this document has any auth/snapshot invalidation, and only
   // for the same identity/company and snapshot schema generations.
   try {
-    const before = JSON.parse(entry?.scopeKey);
+    const before = JSON.parse(scopeKey);
     const now = JSON.parse(context.scopeKey);
     const clean = now[2] === 0 && now[3] === '0:0' && now[4].every(([v, dirty]) => v.split(':')[0] === '0' && v.split(':')[2] === '0' && dirty === 0);
     const contracts = now[4].every(([v], i) => v.split(':')[1] === before[4]?.[i]?.[0]?.split(':')[1]);
-    if (before[5] && before[5] !== pageId && before[0] === now[0] && before[1] === now[1] && clean && contracts) return entry;
+    if (before[5] && before[5] !== pageId && before[0] === now[0] && before[1] === now[1] && clean && contracts && JSON.stringify(before.slice(6)) === JSON.stringify(now.slice(6))) return true;
   } catch { /* Old or malformed entries need one fresh read. */ }
-  return null;
+  return false;
 }
 
 export function writeScopedQueryCache(context, query, value) {

@@ -46,6 +46,19 @@ let clientPromise = null;
 let currentUserPromise = null;
 let currentUserPromiseVersion = "";
 const tableFetchPromises = new Map();
+const authContextFlights = new Map();
+let authFlightGeneration = 0;
+let authFlightSession = "";
+
+function sessionIdentity(session) {
+  return JSON.stringify([session?.user?.id || "", session?.access_token || ""]);
+}
+
+function invalidateAuthFlights() {
+  authFlightGeneration += 1;
+  authContextFlights.clear();
+  authFlightSession = "";
+}
 
 function clearCurrentUserMemory() {
   currentUserPromise = null;
@@ -54,6 +67,7 @@ function clearCurrentUserMemory() {
 
 export function resetCurrentUserMemory() {
   clearCurrentUserMemory();
+  invalidateAuthFlights();
 }
 
 function notifyTransientAuthReset() {
@@ -68,7 +82,14 @@ function handleAuthCacheEvent(event, session) {
   clearCurrentUserMemory();
   // The SDK also emits SIGNED_IN on same-user page bootstrap; keep the TTL cache.
   if (event === "SIGNED_IN" && session?.user?.id
-      && session.user.id === safeLocalStorageGet(LAST_USER_STORAGE_KEY)) return;
+      && session.user.id === safeLocalStorageGet(LAST_USER_STORAGE_KEY)) {
+    if (authFlightSession && authFlightSession !== sessionIdentity(session)) {
+      invalidateAuthFlights();
+      notifyTransientAuthReset();
+    }
+    return;
+  }
+  invalidateAuthFlights();
   if (event === "SIGNED_OUT") {
     // Only explicit signOut() owns persistent cache removal; SDK refresh races can emit transient SIGNED_OUT.
     notifyTransientAuthReset();
@@ -189,7 +210,7 @@ export async function getSession({ timeoutMs = AUTH_CONTEXT_TIMEOUT_MS } = {}) {
   try {
     return await withTimeout(loadSession(), timeoutMs, "getSession");
   } catch (error) {
-    clearCurrentUserMemory();
+    resetCurrentUserMemory();
     if (error instanceof AuthContextTimeoutError) {
       console.warn("auth getSession timeout");
     }
@@ -234,13 +255,13 @@ export async function signUp({ email, password, name, companyName, note }) {
 export async function signOut() {
   const client = await getSupabaseClient();
   if (!client) {
-    clearCurrentUserMemory();
+    resetCurrentUserMemory();
     await Promise.all([clearLiveTableCache(), clearLiveQueryCache()]);
     return;
   }
   const { error } = await client.auth.signOut();
   if (error) throw error;
-  clearCurrentUserMemory();
+  resetCurrentUserMemory();
   await Promise.all([clearLiveTableCache(), clearLiveQueryCache()]);
 }
 
@@ -397,27 +418,64 @@ export function deriveAuthContext({ session, employee, bindings, companies, role
 }
 
 async function loadCurrentUser({ timeoutMs = AUTH_CONTEXT_TIMEOUT_MS } = {}) {
+  const startedGeneration = authFlightGeneration;
   const session = await getSession({ timeoutMs });
+  if (startedGeneration !== authFlightGeneration) throw new DOMException("Auth read reset", "AbortError");
   if (!session) return null;
+  await activateLiveTableCacheUser(session.user.id);
+  if (startedGeneration !== authFlightGeneration) throw new DOMException("Auth read reset", "AbortError");
+  const identity = sessionIdentity(session);
+  if (authFlightSession && authFlightSession !== identity) invalidateAuthFlights();
+  authFlightSession = identity;
+  const generation = authFlightGeneration;
+  const version = liveAuthCacheVersion();
+  const key = JSON.stringify([identity, generation, version]);
+  if (authContextFlights.has(key)) return authContextFlights.get(key);
+  const assertCurrent = () => {
+    if (generation !== authFlightGeneration || identity !== authFlightSession || version !== liveAuthCacheVersion()) {
+      throw new DOMException("Auth read superseded", "AbortError");
+    }
+  };
+  const promise = buildCurrentUser(session, assertCurrent, key).finally(() => {
+    if (authContextFlights.get(key) === promise) authContextFlights.delete(key);
+  });
+  authContextFlights.set(key, promise);
+  return promise;
+}
+
+async function buildCurrentUser(session, assertCurrent, flightKey) {
   const client = requireClient(await getSupabaseClient());
+  assertCurrent();
   const userId = session.user.id;
   const cached = await readLiveAuthCache(userId);
-  const fetchAuthRows = async () => {
-    const version = liveAuthCacheVersion();
-    const employeeResult = await client.from("employees").select("*").eq("user_id", userId).maybeSingle();
-    if (employeeResult.error) throw employeeResult.error;
-    if (!employeeResult.data) return null;
-    const pendingResult = await client.from("company_join_pending")
-      .select("company_id")
-      .eq("employee_id", employeeResult.data.id)
-      .is("approved", null);
-    if (pendingResult.error) throw pendingResult.error;
-    const authRows = {
-      employee: employeeResult.data,
-      pendingCompanyIds: (pendingResult.data ?? []).map((row) => row.company_id)
-    };
-    await writeLiveAuthCache({ userId, ...authRows, version });
-    return authRows;
+  assertCurrent();
+  const fetchAuthRows = () => {
+    const rowsKey = `rows:${flightKey}`;
+    if (authContextFlights.has(rowsKey)) return authContextFlights.get(rowsKey);
+    const request = (async () => {
+      const version = liveAuthCacheVersion();
+      const employeeResult = await client.from("employees").select("*").eq("user_id", userId).maybeSingle();
+      assertCurrent();
+      if (employeeResult.error) throw employeeResult.error;
+      if (!employeeResult.data) return null;
+      const pendingResult = await client.from("company_join_pending")
+        .select("company_id")
+        .eq("employee_id", employeeResult.data.id)
+        .is("approved", null);
+      if (pendingResult.error) throw pendingResult.error;
+      const authRows = {
+        employee: employeeResult.data,
+        pendingCompanyIds: (pendingResult.data ?? []).map((row) => row.company_id)
+      };
+      assertCurrent();
+      await writeLiveAuthCache({ userId, ...authRows, version });
+      assertCurrent();
+      return authRows;
+    })().finally(() => {
+      if (authContextFlights.get(rowsKey) === request) authContextFlights.delete(rowsKey);
+    });
+    authContextFlights.set(rowsKey, request);
+    return request;
   };
   const refreshAuthTables = !cached;
   const authRowsPromise = cached
@@ -435,6 +493,7 @@ async function loadCurrentUser({ timeoutMs = AUTH_CONTEXT_TIMEOUT_MS } = {}) {
     fetchAllTable("companies", "name", true, "id", { refresh: refreshAuthTables }),
     fetchAllTable("roles", "name", true, "id", { refresh: refreshAuthTables })
   ]);
+  assertCurrent();
   if (!authRows) return null;
   return deriveAuthContext({
     session,
@@ -459,7 +518,7 @@ export async function getCurrentUser({
       "getCurrentUser"
     )
       .catch((error) => {
-        if (currentUserPromise === promise) clearCurrentUserMemory();
+        if (currentUserPromise === promise) resetCurrentUserMemory();
         throw error;
       });
     currentUserPromise = promise;

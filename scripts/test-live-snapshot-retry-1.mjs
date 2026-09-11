@@ -96,6 +96,10 @@ const entryPath = fileURLToPath(new URL("../root-site/data/live-snapshots.js", i
 const stubSources = new Map([
   ["auth.js", `
     export const RBAC_KEYS = [];
+    export const TRANSIENT_AUTH_RESET_EVENT = "tp:auth-transient-reset";
+    export const getSession = async () => ({ user: { id: "test-user" } });
+    export const getSupabaseClient = async () => ({});
+    export const getRememberedActiveCompanyId = () => "";
     export async function getCurrentUser() { return { activeCompanyId: "" }; }
   `],
   ["live-admin-snapshots.js", `
@@ -109,7 +113,8 @@ const stubSources = new Map([
   ["live-inventory-snapshot.js", `export const buildInventorySnapshot = async () => ({});`],
   ["live-table-cache.js", `
     export const invalidateLiveSnapshotCache = async () => {};
-    export const liveSnapshotCacheVersion = () => 1;
+    export const liveSnapshotCacheVersion = () => "0:0:0";
+    export const liveAuthCacheVersion = () => "0:0";
     export const readLiveSnapshotCache = (...args) => globalThis.__liveSnapshotRetryHarness.readLiveSnapshotCache(...args);
     export const writeLiveSnapshotCache = async () => true;
   `],

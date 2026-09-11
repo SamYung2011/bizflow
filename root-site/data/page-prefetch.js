@@ -18,6 +18,8 @@ export function prefetchPageData(page, { historyState = null } = {}) {
       const warranty = historyState?.warranty ?? { search: !historyState ? peek(keys.warrantySearch) ?? '' : '' };
       reads.push(prefetchWarrantyPage(warrantyPageQuery(warranty)));
     }
+  } else if (['ocpp-monitor', 'ocpp-charging', 'ocpp-users', 'ocpp-finance'].includes(page)) {
+    reads.push(import('./live-ocpp.js').then(({ prefetchOcppPage }) => prefetchOcppPage(page)));
   } else if (['expense', 'whatsapp', 'inventory'].includes(page)) {
     reads.push(import('./live-snapshots.js').then(({ prefetchLiveSnapshot }) => prefetchLiveSnapshot(`${page}.json`)));
   }
