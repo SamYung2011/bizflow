@@ -4,7 +4,7 @@ import { readLiveQueryCache, writeLiveQueryCache } from './live-query-cache.js';
 
 const dependencies = {
   'orders-page': ['orders.json'], 'order-revenue': ['orders.json'],
-  'customers-page': ['customers.json'], 'warranty-page': ['warranty.json'],
+  'customers-page': ['customers.json', 'warranty.json'], 'warranty-page': ['warranty.json'],
   'home-dashboard': ['home.json'],
   unread: ['tasks.json','orders.json','whatsapp.json','inventory.json','team-update-logs.json']
 };
