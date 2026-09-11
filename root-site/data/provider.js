@@ -1973,8 +1973,8 @@ const isInventoryProduct = (x) => x && typeof x.id === "string" && typeof x.name
 
 const INVENTORY_SNAPSHOT_URL = rootSiteUrl("data/snapshots/inventory.json");
 function loadInventorySnapshot() {
-  return loadProviderSnapshot("inventory.json", () =>
-    fetchSnapshot(INVENTORY_SNAPSHOT_URL, "inventory.json", "inventory mock/empty metrics"));
+  // getLiveSnapshot owns the single versioned inventory builder/memo.
+  return fetchSnapshot(INVENTORY_SNAPSHOT_URL, "inventory.json", "inventory mock/empty metrics");
 }
 
 function isInventoryDetail(detail) {

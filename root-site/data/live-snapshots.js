@@ -50,7 +50,7 @@ import {
 export const LIVE_SNAPSHOT_MISS = Symbol("live-snapshot-miss");
 
 const LIVE_BUILDERS = new Map();
-const SESSION_SNAPSHOTS = new Set(["expense.json", "whatsapp.json"]);
+const SESSION_SNAPSHOTS = new Set(["expense.json", "whatsapp.json", "inventory.json"]);
 const SESSION_SCOPES = new Map();
 const LIVE_REFRESHES = new Map();
 const LIVE_REFRESH_PENDING = new Set();

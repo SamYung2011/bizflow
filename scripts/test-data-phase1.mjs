@@ -253,8 +253,8 @@ delete globalThis.window;
 assert.match(home, /getHomeDashboardData\(\{ refresh \}\)/);
 assert.match(home, /loadHomeViewState\(\{ refresh: true \}\)/,
   "Home realtime must force a fresh RPC instead of replaying a cached dashboard");
-assert.match(liveHome, /writeLiveQueryCache\([\s\S]*cached && !refresh[\s\S]*backgroundHomeRefresh/,
-  "Home mounts must reuse an account/company-scoped cached dashboard while revalidating it");
+assert.match(liveHome, /writeScopedQueryCache\([\s\S]*cached && !refresh[\s\S]*if \(cached.stale\) void fetchHomeDashboard/,
+  "Home mounts reuse fresh scoped packages; only stale entries revalidate (batch2-6)");
 assert.match(provider, /Home unread RPC failed; falling back to the legacy data path/,
   "an unread-summary failure must not bypass the dashboard fallback and blank Home");
 for (const oldDownload of ["getHomeOrderMetricRows()", "getInventoryMetricProducts()", "getWarrantyData()", "getCustomersPageData()"] ) {

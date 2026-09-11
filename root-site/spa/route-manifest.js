@@ -44,7 +44,7 @@ function route(path, section, entry, styles, load = null, prefetch = null) {
 const prefetchPage = (page) => (options) => import("../data/page-prefetch.js").then((module) => module.prefetchPageData(page, options));
 
 const routes = [
-  route("/bizflow/home.html", "bizflow", "../bizflow/home.js", ["../bizflow/home.css"], () => import("../bizflow/home.js")),
+  route("/bizflow/home.html", "bizflow", "../bizflow/home.js", ["../bizflow/home.css"], () => import("../bizflow/home.js"), prefetchPage("home")),
   route("/bizflow/orders.html", "bizflow", "../bizflow/orders.js", [
     "../components/segment.css", "../components/date-range-panel.css", "../components/management-list.css",
     "../bizflow/orders.css", "../bizflow/orders-domain.css"
@@ -67,7 +67,7 @@ const routes = [
   route("/bizflow/inventory.html", "bizflow", "../bizflow/inventory.js", [
     "../components/segment.css", "../components/management-list.css",
     "../bizflow/inventory.css", "../bizflow/inventory-domain.css"
-  ], () => import("../bizflow/inventory.js")),
+  ], () => import("../bizflow/inventory.js"), prefetchPage("inventory")),
   route("/bizflow/inventory-detail.html", "bizflow", "../bizflow/inventory-detail.js", [
     "../bizflow/customers.css", "../bizflow/inventory.css"
   ], () => import("../bizflow/inventory-detail.js")),
