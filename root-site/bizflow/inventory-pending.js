@@ -173,6 +173,7 @@ const state = {
 let rerender = () => {};
 let liveReadOnly = false;
 let dataLoadVersion = 0;
+let pendingDataRequest = null;
 
 function t(lang, key, values = {}) {
   const template = copy[lang]?.[key] ?? copy.zh[key] ?? key;
@@ -182,10 +183,15 @@ function t(lang, key, values = {}) {
 export async function ensurePendingDeductionData({ scope = null, signal = scope?.signal } = {}) {
   if (state.loaded) return;
   const version = dataLoadVersion;
-  const pending = await getPendingDeductionData();
-  if (version !== dataLoadVersion || signal?.aborted || (scope && !scope.isCurrent())) return;
-  state.invoices = pending.invoices;
-  state.loaded = true;
+  const request = pendingDataRequest ??= getPendingDeductionData();
+  try {
+    const pending = await request;
+    if (version !== dataLoadVersion || signal?.aborted || (scope && !scope.isCurrent())) return;
+    state.invoices = pending.invoices;
+    state.loaded = true;
+  } finally {
+    if (pendingDataRequest === request) pendingDataRequest = null;
+  }
 }
 
 export async function ensurePendingOrderLinks({ scope = null, signal = scope?.signal } = {}) {
@@ -368,6 +374,7 @@ export function attachPendingDeductionBehaviors({ rerender: nextRerender, scope 
 
 export function disposePendingDeductionState() {
   dataLoadVersion += 1;
+  pendingDataRequest = null;
   state.loaded = false;
   state.orderLinksLoaded = false;
   state.invoices = [];
