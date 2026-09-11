@@ -15,6 +15,7 @@ const auth=await import('../root-site/data/auth.js');
 const cache=await import('../root-site/data/live-table-cache.js');
 const queryCache=await import('../root-site/data/live-query-cache.js');
 const live=await import('../root-site/data/live-ocpp.js');
+const provider=await import('../root-site/data/provider.js');
 const page=await import('../root-site/data/page-prefetch.js');
 const home=await import('../root-site/data/live-home-query.js');
 const scope=await import('../root-site/data/live-read-scope.js');
@@ -58,6 +59,32 @@ for(const [name,read] of Object.entries(readers)) await test(`${name}: page and 
   assert.equal(calls.length,expected);assert.equal(auth.__calls().filter(c=>c.name==='bizflow_unread_summary').length,1);
   now+=44_000;await read();assert.equal(calls.length,expected);
 });
+for (const [name, read] of [['monitor', provider.getOcppMonitorData], ['charging', provider.getOcppChargingData], ['finance', provider.getOcppFinanceData]]) {
+  await test(`${name}: explicit refresh at 30/60/90 seconds sends a real summary; later mount reuses newest result`, async()=>{
+    await live.prefetchOcppPage(`ocpp-${name}`);await read();assert.equal(calls.length,1);
+    for (let hop=1;hop<=3;hop++) {
+      now+=30_000;await read({refresh:true});
+      assert.equal(calls.filter(c=>c.path===`/summary/${name}`).length,hop+1);
+      await read();assert.equal(calls.length,hop+1,'first mount still adopts refreshed data');
+    }
+  });
+}
+await test('explicit refresh supersedes older held prefetch and prevents stale overwrite',async()=>{
+  const hold=deferred();handler=async p=>{const old=calls.length===1;if(old)await hold.promise;return new Response(JSON.stringify(body(p,old?'obsolete':'fresh')));};
+  const warm=live.prefetchOcppPage('ocpp-monitor');await until(()=>calls.length===1);
+  const result=await Promise.race([provider.getOcppMonitorData({refresh:true}),new Promise((_,reject)=>setTimeout(()=>reject(Error('refresh joined old prefetch')),100))]);
+  assert.equal(result.piles[0].pileNo,'fresh');hold.resolve();await warm;
+  assert.equal((await provider.getOcppMonitorData()).piles[0].pileNo,'fresh');assert.equal(calls.length,2);
+  assert.equal((await cache.readLiveSnapshotCache({userId:'test-user',snapshot:live.OCPP_CACHE_SNAPSHOTS.monitor})).value.piles[0].pileNo,'fresh');
+  assert.equal(updates.length,0);
+});
+await test('explicit refresh surfaces network failure instead of stale success; retry and other-page memo survive',async()=>{
+  await live.prefetchOcppPage('ocpp-monitor');await live.prefetchOcppPage('ocpp-finance');
+  handler=async()=>new Response('offline',{status:503});await assert.rejects(provider.getOcppMonitorData({refresh:true}),e=>e.status===503);
+  await provider.getOcppFinanceData();assert.equal(calls.length,3);
+  handler=async p=>new Response(JSON.stringify(body(p,'recovered')));assert.equal((await provider.getOcppMonitorData({refresh:true})).piles[0].pileNo,'recovered');
+  await provider.getOcppMonitorData();assert.equal(calls.length,4);
+});
 await test('OCPP company-neutral package survives auth deriving a previously unknown company',async()=>{
   storage.delete('team-active-company-test-user');await live.prefetchOcppPage('ocpp-monitor');
   storage.set('team-active-company-test-user','verified-company');await live.getLiveOcppMonitorData();assert.equal(calls.length,1);
@@ -83,7 +110,8 @@ await test('non-admin 403 is silent and session-wide memo prevents route/menu/mo
   const warnings=[];const warn=console.warn;console.warn=(...args)=>warnings.push(args);
   try {handler=async()=>new Response('{"error":"Forbidden"}',{status:403});
     await live.prefetchOcppPage('ocpp-monitor');await live.prefetchOcppPage('ocpp-monitor');await live.prefetchOcppPage('ocpp-finance');
-    await assert.rejects(live.getLiveOcppMonitorData(),e=>e.status===403);assert.equal(calls.length,1);assert.deepEqual(warnings,[]);assert.deepEqual(updates,[]);
+    await assert.rejects(live.getLiveOcppMonitorData(),e=>e.status===403);
+    await assert.rejects(provider.getOcppMonitorData({refresh:true}),e=>e.status===403);assert.equal(calls.length,1);assert.deepEqual(warnings,[]);assert.deepEqual(updates,[]);
     auth.__setToken('new-permissions-token');await live.prefetchOcppPage('ocpp-monitor');assert.equal(calls.length,2);
   } finally {console.warn=warn;}
 });

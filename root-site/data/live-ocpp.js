@@ -1,6 +1,7 @@
-import { sessionReadContext, assertReadContextCurrent, isReadContextCurrent, canAdoptReadScope } from "./live-read-scope.js";
+import { sessionReadContext, assertReadContextCurrent, isReadContextCurrent, canAdoptReadScope, liveReadVersion } from "./live-read-scope.js";
 import {
   liveSnapshotCacheVersion,
+  markLiveSnapshotCacheStale,
   readLiveSnapshotCache,
   writeLiveSnapshotCache,
 } from "./live-table-cache.js";
@@ -76,7 +77,7 @@ function resetCacheForUser(userId, token) {
   deniedScopes.clear();
 }
 
-async function edgeContext(snapshot = OCPP_CACHE_SNAPSHOTS.logs) {
+async function edgeContext(snapshot = OCPP_CACHE_SNAPSHOTS.logs, { refresh = false } = {}) {
   const scope = await sessionReadContext(snapshot);
   if (!scope) return null;
   const { session, client } = scope;
@@ -84,8 +85,19 @@ async function edgeContext(snapshot = OCPP_CACHE_SNAPSHOTS.logs) {
     throw new Error("Supabase OCPP reader is not configured");
   }
   resetCacheForUser(session.user.id, session.access_token);
+  if (refresh) {
+    assertContext({ ...scope, accessToken: session.access_token });
+    // An explicit read owns a new generation; older prefetch/SWR cannot win
+    // the race or satisfy this request through either in-flight cache.
+    markLiveSnapshotCacheStale(snapshot);
+    scope.scopeKey = liveReadVersion(scope.userId, snapshot);
+  }
+  for (const cache of [responseCache, settledSnapshots]) {
+    for (const [key, value] of cache) if (value.expiresAt <= Date.now()) cache.delete(key);
+  }
   return {
     ...scope,
+    refresh,
     accessToken: session.access_token,
     anonKey: client.supabaseKey,
     baseUrl: String(client.supabaseUrl).replace(/\/$/, ""),
@@ -114,7 +126,7 @@ function denialKey(context) {
   return JSON.stringify([context.userId, context.accessToken.slice(-24), JSON.parse(context.scopeKey).slice(0, 4)]);
 }
 
-async function callOcppAdmin(subPath, context, { ttlMs = CACHE_TTL_MS } = {}) {
+async function callOcppAdmin(subPath, context, { ttlMs = context.refresh ? 0 : CACHE_TTL_MS } = {}) {
   assertReadOnlyPath(subPath);
   assertContext(context);
   const denied = deniedScopes.get(denialKey(context));
@@ -217,6 +229,7 @@ function refreshPersistentSnapshot(snapshot, context, loader) {
 
 async function cachedSnapshot(snapshot, context, loader) {
   assertContext(context);
+  if (context.refresh) return buildSnapshot(snapshot, context, loader);
   const memo = settledSnapshots.get(cacheKey(snapshot, context));
   if (memo?.expiresAt > Date.now()) return memo.value;
   const cached = await readLiveSnapshotCache({ userId: context.userId, snapshot });
@@ -228,8 +241,8 @@ async function cachedSnapshot(snapshot, context, loader) {
   return buildSnapshot(snapshot, context, loader);
 }
 
-async function liveContextOrMiss(snapshot) {
-  const context = await edgeContext(snapshot);
+async function liveContextOrMiss(snapshot, options) {
+  const context = await edgeContext(snapshot, options);
   return context ?? LIVE_OCPP_MISS;
 }
 
@@ -267,8 +280,8 @@ async function loadMonitor(context) {
   };
 }
 
-export async function getLiveOcppMonitorData() {
-  const context = await liveContextOrMiss(OCPP_CACHE_SNAPSHOTS.monitor);
+export async function getLiveOcppMonitorData(options = {}) {
+  const context = await liveContextOrMiss(OCPP_CACHE_SNAPSHOTS.monitor, options);
   if (context === LIVE_OCPP_MISS) return LIVE_OCPP_MISS;
   return await cachedSnapshot(OCPP_CACHE_SNAPSHOTS.monitor, context, () => loadMonitor(context));
 }
@@ -339,8 +352,8 @@ async function loadCharging(context) {
   };
 }
 
-export async function getLiveOcppChargingData() {
-  const context = await liveContextOrMiss(OCPP_CACHE_SNAPSHOTS.charging);
+export async function getLiveOcppChargingData(options = {}) {
+  const context = await liveContextOrMiss(OCPP_CACHE_SNAPSHOTS.charging, options);
   if (context === LIVE_OCPP_MISS) return LIVE_OCPP_MISS;
   return await cachedSnapshot(OCPP_CACHE_SNAPSHOTS.charging, context, () => loadCharging(context));
 }
@@ -394,8 +407,8 @@ async function loadFinance(context) {
   return { ...data, financePages, financeTotals };
 }
 
-export async function getLiveOcppFinanceData() {
-  const context = await liveContextOrMiss(OCPP_CACHE_SNAPSHOTS.finance);
+export async function getLiveOcppFinanceData(options = {}) {
+  const context = await liveContextOrMiss(OCPP_CACHE_SNAPSHOTS.finance, options);
   if (context === LIVE_OCPP_MISS) return LIVE_OCPP_MISS;
   return await cachedSnapshot(OCPP_CACHE_SNAPSHOTS.finance, context, () => loadFinance(context));
 }

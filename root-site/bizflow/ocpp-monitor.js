@@ -293,7 +293,7 @@ async function refreshMonitorData() {
   monitorRefreshBusy = true;
   try {
     const [result, commandOverview] = await Promise.all([
-      getOcppMonitorData(),
+      getOcppMonitorData({ refresh: true }),
       loadCommandOverview(state.commandAuthenticated),
     ]);
     if (instance !== activeInstance || !scope?.isCurrent() || !state) return;
