@@ -5,7 +5,9 @@ import { routeForPath } from "./route-manifest.js";
 import * as shell from "../shell/shell.js";
 
 const url = new URL(window.location.href);
-void prefetchRoute(routeForPath(url.pathname), { url, historyState: window.history.state?.tpSpa?.pageState ?? null });
+// start() and the document fallback mount default state; popstate supplies
+// saved filters from navigate() instead. Prefetch must mirror that distinction.
+void prefetchRoute(routeForPath(url.pathname), { url });
 await shell.shellReady;
 const stopMenuPrefetch = installMenuPrefetch();
 window.addEventListener("pagehide", stopMenuPrefetch, { once: true });

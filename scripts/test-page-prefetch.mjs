@@ -164,6 +164,7 @@ await test('menu pointer/focus once, same-origin business only; entry + navigate
   const entry=await readFile(new URL('../root-site/spa/entry.js',import.meta.url),'utf8');
   const router=await readFile(new URL('../root-site/spa/app-router.js',import.meta.url),'utf8');
   assert.ok(entry.indexOf('void prefetchRoute')<entry.indexOf('await shell.shellReady'));
+  assert.doesNotMatch(entry, /historyState: window.history.state/, 'cold startup must match the existing default-state mount');
   assert.ok(router.indexOf('void prefetchRoute')<router.indexOf('await commitLoadingFrame({',router.indexOf('async function navigate(')));
   const source=await readFile(new URL('../root-site/data/page-prefetch.js',import.meta.url),'utf8');assert.doesNotMatch(source,/mountPage\s*\(/);
 });
