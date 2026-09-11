@@ -9,7 +9,7 @@ import { renderSegment as renderSharedSegment } from "../components/segment.js";
 import { consumeNavigationPreset, navigationPresetKeys } from "../components/navigation-presets.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
-import { thumbImageAttrs } from "../components/storage-image.js";
+import { storageImageCorsAttrs, thumbImageAttrs } from "../components/storage-image.js";
 import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import {
   cleanupLiveInventoryImage,
@@ -426,7 +426,7 @@ function renderAddImageUpload(helpers) {
   const disabled = !authenticated || liveReadOnly || state.writeBusy || state.addImageBusy;
   const disabledAttributes = disabled ? ' disabled aria-disabled="true"' : "";
   const preview = imageUrl
-    ? `<img class="inventory-image-upload__preview" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(pageT(lang, "inventory.addModal.image"))}">`
+    ? `<img class="inventory-image-upload__preview" ${storageImageCorsAttrs(imageUrl)}src="${escapeHtml(imageUrl)}" alt="${escapeHtml(pageT(lang, "inventory.addModal.image"))}">`
     : `<span class="inventory-image-upload__empty" aria-hidden="true">${icon("icon-nav-inventory", "icon")}</span>`;
   const chooseLabel = imageUrl ? pageT(lang, "inventory.image.replace") : pageT(lang, "inventory.image.choose");
   return `<div class="inventory-image-upload" data-inventory-image-upload aria-label="${escapeHtml(pageT(lang, "inventory.addModal.image"))}">

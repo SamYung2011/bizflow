@@ -4,6 +4,12 @@ const storageOrigin = String(SUPABASE_URL || "").trim().replace(/\/+$/, "");
 const publicObjectPrefix = `${storageOrigin}/storage/v1/object/public/`;
 const publicRenderPath = "/storage/v1/render/image/public/";
 
+export function storageImageCorsAttrs(url) {
+  const source = String(url || "").trim();
+  return storageOrigin && (source.startsWith(publicObjectPrefix) || source.startsWith(`${storageOrigin}${publicRenderPath}`))
+    ? 'crossorigin="anonymous" ' : "";
+}
+
 export function thumbUrl(url, width) {
   const source = String(url || "").trim();
   const targetWidth = Math.round(Number(width));
@@ -27,5 +33,5 @@ export function thumbImageAttrs(url, width, escapeHtml) {
   const fallback = thumbnail !== original
     ? ` data-original-src="${escapeHtml(original)}" onerror="this.onerror=null;this.src=this.dataset.originalSrc"`
     : "";
-  return `src="${escapeHtml(thumbnail)}"${fallback}`;
+  return `${storageImageCorsAttrs(thumbnail)}src="${escapeHtml(thumbnail)}"${fallback}`;
 }
