@@ -1,3 +1,4 @@
+import { getLiveCustomerDetail, LIVE_CUSTOMER_DETAIL_MISS } from "./live-customer-detail.js";
 // 数据接口层(煊煊 2026-07-08 拍板:屏只认接口,不写死样板)
 // 双模式:有 Supabase session 时由 live-snapshots 按 RLS 可见范围构造同契约真数据;
 // 无 session 时保持 snapshots + field mock 演示路径。真库读取失败不得静默混回快照。
@@ -1638,7 +1639,9 @@ function cloneCustomerDetail(detail) {
   };
 }
 
-export async function getCustomerDetailData(id) {
+export async function getCustomerDetailData(id, options = {}) {
+  const live = await getLiveCustomerDetail(id, options);
+  if (live !== LIVE_CUSTOMER_DETAIL_MISS) return live;
   const page = await getCustomersPageData();
   const customer = page.customers.find((row) => row.id === id);
   if (!customer) return null;

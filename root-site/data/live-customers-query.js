@@ -110,7 +110,7 @@ function customerOrder(value) {
   };
 }
 
-function customerRow(row) {
+export function customerRow(row) {
   const detail = row?.detail && typeof row.detail === "object" ? row.detail : {};
   const orders = asArray(detail.orders).map(customerOrder).filter(Boolean);
   return {

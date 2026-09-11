@@ -781,6 +781,15 @@ async function saveCustomerEdit() {
     const result = await updateLiveOrderCustomer(detailData.customer.id, values, { preserveCarModel });
     if (!isCurrentCustomerDetailMount(mountId, scope)) return;
     applyUpdatedCustomer(result, values);
+    try {
+      const refreshed = await getCustomerDetailData(detailData.customer.id, { refresh: true });
+      if (!isCurrentCustomerDetailMount(mountId, scope)) return;
+      if (refreshed) detailData = refreshed;
+    } catch (error) {
+      // The write already succeeded; keep its optimistic fields if the read is offline.
+      console.warn("[customer-detail] post-write detail refresh failed", error);
+    }
+    if (!isCurrentCustomerDetailMount(mountId, scope)) return;
     state.editModalOpen = false;
     state.editDraft = {};
     state.editModelFallback = false;
