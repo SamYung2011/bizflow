@@ -1,6 +1,7 @@
 // bizflow 站商品庫存桌面屏(Figma 676:99455 / 676:99512)。
 // 列表数据走 provider;R9 真图有 URL 才显示,空 URL 保留灰底占位。
 
+import { createDebouncedTask } from "../components/debounced-task.js";
 import { getInventoryPageData, getCurrentUser } from "../data/provider.js";
 import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import { markRead } from "../data/read-state.js";
@@ -351,7 +352,7 @@ function renderSegment(helpers) {
     items: tabs.map((tab) => ({
       key: tab,
       label: pageT(lang, tabKey(tab)),
-      badge: tab === "pending" && pendingCount > 0 ? pendingCount : null
+      badge: tab === "pending" ? (pendingCount === null ? "…" : pendingCount > 0 ? pendingCount : null) : null
     })),
     active: state.tab,
     ariaLabel: pageT(lang, "inventory.title"),
@@ -976,12 +977,27 @@ export async function mountPage({ scope, signal, historyState = null, navigation
       attachShopifyBehaviors({ rerender: rerenderInventoryPage, scope });
       attachSupplierBehaviors({ rerender: rerenderInventoryPage, scope });
       attachPendingDeductionBehaviors({ rerender: rerenderInventoryPage, scope });
-      // Warm the expensive pending snapshot only after the visible product list has painted.
-      scope.animationFrame(() => scope.timeout(() => {
+      // Only deliberate hover warms the full pending snapshot; initial paint does not.
+      const pendingHover = createDebouncedTask(() => {
+        if (!isCurrentInventoryScope(scope) || pendingDeductionCount() !== null) return;
         ensurePendingDeductionData({ scope })
           .then(() => { if (isCurrentInventoryScope(scope)) rerenderInventoryPage(); })
           .catch((error) => console.warn("[inventory] pending deduction preload failed", error));
-      }, 0));
+      }, { delay: 150, scheduleTimeout: (callback, delay) => scope.timeout(callback, delay) });
+      const pendingTab = (target) => target?.closest?.('[data-inventory-tab="pending"]');
+      scope.listen(document, "pointerover", (event) => {
+        if (event.pointerType !== "mouse") return;
+        const tab = pendingTab(event.target);
+        if (tab && !tab.contains(event.relatedTarget)) pendingHover.schedule();
+      });
+      scope.listen(document, "pointerout", (event) => {
+        const tab = pendingTab(event.target);
+        if (tab && !tab.contains(event.relatedTarget)) pendingHover.cancel();
+      });
+      scope.listen(document, "click", (event) => {
+        if (pendingTab(event.target)) pendingHover.cancel();
+      });
+      scope.onCleanup(pendingHover.cancel);
     },
     hasUnsavedChanges: hasInventoryUnsavedChanges,
     async canLeave() {
