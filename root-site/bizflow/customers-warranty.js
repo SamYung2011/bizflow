@@ -1,10 +1,10 @@
+import { warrantyPageQuery } from "../data/page-query-state.js";
 import { getWarrantyData } from "../data/provider.js";
 import { managementPageSize, renderManagementList, renderManagementPager } from "../components/management-list.js";
 import { createDateRangePanel } from "../components/date-range-panel.js";
 import { clearPhoneCopyNotice, phoneCopyLabel } from "../components/phone-copy.js";
 import { matchesSearchValues } from "../components/search-match.js";
 import { renewLiveWarranty } from "../data/live-warranty-writes.js";
-import { normalizeWarrantyQuery } from "../data/live-customers-query.js";
 import { liveQueryKey } from "../data/live-query-cache.js";
 
 const copy = {
@@ -251,14 +251,7 @@ export function warrantyBucket(expiry, today = new Date()) {
 }
 
 function currentWarrantyQuery() {
-  return normalizeWarrantyQuery({
-    page: state.page,
-    pageSize: managementPageSize(),
-    search: state.search,
-    bucket: state.bucket,
-    from: state.dateFrom,
-    to: state.dateTo
-  });
+  return warrantyPageQuery(state);
 }
 
 export function isCurrentWarrantyQueryKey(queryKey) {

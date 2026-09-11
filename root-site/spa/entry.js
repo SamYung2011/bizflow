@@ -1,11 +1,16 @@
+import { prefetchRoute, installMenuPrefetch } from "./route-prefetch.js";
 import { createAppRouter } from "./app-router.js";
 import { mountPageModule } from "./page-lifecycle.js";
 import { routeForPath } from "./route-manifest.js";
 import * as shell from "../shell/shell.js";
 
 const url = new URL(window.location.href);
-void routeForPath(url.pathname)?.prefetch?.()?.catch?.(() => {});
+// start() and the document fallback mount default state; popstate supplies
+// saved filters from navigate() instead. Prefetch must mirror that distinction.
+void prefetchRoute(routeForPath(url.pathname), { url });
 await shell.shellReady;
+const stopMenuPrefetch = installMenuPrefetch();
+window.addEventListener("pagehide", stopMenuPrefetch, { once: true });
 
 let router = null;
 let fallbackController = null;

@@ -99,15 +99,16 @@ export function readLiveQueryCache({ userId, namespace, query, now = Date.now() 
   if (!entry) return null;
   return {
     value: entry.value,
+    ...(entry.scopeKey ? { scopeKey: entry.scopeKey } : {}),
     cachedAt: Number(entry.cachedAt || 0),
     stale: entry.stale === true || now - Number(entry.cachedAt || 0) > FRESH_MS
   };
 }
 
-export function writeLiveQueryCache({ userId, namespace, query, value, stale = false, now = Date.now() }) {
+export function writeLiveQueryCache({ userId, namespace, query, value, stale = false, scopeKey = null, now = Date.now() }) {
   if (!userId || !namespace || value == null) return false;
   const key = cacheKey(userId, namespace, query);
-  writeRaw(key, JSON.stringify({ version: CACHE_VERSION, cachedAt: now, stale: stale === true, value }));
+  writeRaw(key, JSON.stringify({ version: CACHE_VERSION, cachedAt: now, stale: stale === true, value, ...(scopeKey ? { scopeKey } : {}) }));
   trimScope(userId, namespace);
   return true;
 }

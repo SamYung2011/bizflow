@@ -1,5 +1,6 @@
 import { createDateRangePanel } from "./date-range-panel.js";
 import { normalizeDateInput } from "./date-value.js";
+import { restoredQueryRange } from "./date-range-state.js";
 
 export { latestDateInput, normalizeDateInput } from "./date-value.js";
 
@@ -173,9 +174,8 @@ export function createDateRangeFilter({
 
   function restoreState(value) {
     if (!value || typeof value !== "object") return false;
-    const start = normalizeDateInput(value.start ?? value.from);
-    const rawEnd = normalizeDateInput(value.end ?? value.to);
-    state = normalizeRange(start, value.endDateEnabled === false && start ? start : rawEnd);
+    const range = restoredQueryRange(value);
+    state = { start: range.from, end: range.to };
     close();
     return true;
   }

@@ -1,3 +1,4 @@
+import { orderPageState, orderPageQuery } from "../data/page-query-state.js";
 // bizflow 訂單域：既有订单列表 + R11 港車北上、充電樁意向、營收分析子页。
 // 各子页按需载入自己的快照，避免列表页和 Home 承担无关数据请求。
 
@@ -19,7 +20,6 @@ import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import { attachLiveSnapshotRefresh } from "../data/live-snapshot-listener.js";
 import { liveQueryKey } from "../data/live-query-cache.js";
 import {
-  normalizeOrderQuery,
   ORDER_QUERY_UPDATED_EVENT,
   refreshCurrentOrderQuery
 } from "../data/live-orders-query.js";
@@ -444,16 +444,7 @@ function rerenderOrderSearchResults() {
 }
 
 function currentOrderQuery() {
-  const range = dateFilter?.captureState?.() ?? {};
-  return normalizeOrderQuery({
-    page: state.page,
-    search: state.search,
-    source: state.source,
-    shipping: state.shipping,
-    sort: state.sort,
-    from: range.from,
-    to: range.to
-  });
+  return orderPageQuery(state, dateFilter?.captureState?.());
 }
 
 function createOrdersDateFilter(initialDate = "") {
@@ -656,16 +647,7 @@ function navigateTo(relative) {
 }
 
 function restoredState(value, presets) {
-  const next = value && typeof value === "object" ? value : {};
-  const tab = domainTabs.includes(next.tab) ? next.tab : domainTabs.includes(presets.tab) ? presets.tab : "list";
-  return {
-    tab,
-    source: typeof next.source === "string" ? next.source : "all",
-    shipping: shippingFilters.includes(next.shipping) ? next.shipping : shippingFilters.includes(presets.shipping) ? presets.shipping : "all",
-    search: typeof next.search === "string" ? next.search : presets.search,
-    sort: ["newest", "oldest", "amount_desc", "amount_asc"].includes(next.sort) ? next.sort : "newest",
-    page: Number.isInteger(next.page) && next.page > 0 ? next.page : 1
-  };
+  return orderPageState(value, presets, domainTabs);
 }
 
 async function ensureActiveDomainData(signal) {
