@@ -36,6 +36,14 @@ export function stripFunctionPrefix(pathname) {
   return pathname.replace(/^\/honnmono-admin(?=\/|$)/, "") || "/";
 }
 
+// Only these exact method/path pairs are available to main-site employees.
+export function isMainAccessRoute(subPath, method) {
+  return (
+    (method === "GET" && subPath === "/device/binding") ||
+    (method === "POST" && subPath === "/device/unbind")
+  );
+}
+
 export function mapHonnmonoAdminPath(pathname, method) {
   const normalized = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
   if (method === "GET" && normalized === "/feedback") {

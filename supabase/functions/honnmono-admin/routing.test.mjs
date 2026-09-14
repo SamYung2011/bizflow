@@ -11,6 +11,7 @@ import {
   isAllowedHonnmonoApiBase,
   isAllowedHonnmonoUpstream,
   isAllowedOtaAdminBase,
+  isMainAccessRoute,
   mapHonnmonoAdminPath,
   mapFlashAdminPath,
   mapOtaAdminPath,
@@ -321,4 +322,21 @@ test("pins the flash admin service to the HK Docker bridge", () => {
   assert.equal(isAllowedFlashAdminBase("http://user:pass@172.18.0.1:8090"), false);
   assert.equal(isAllowedFlashAdminBase("http://172.18.0.1:8090/base"), false);
   assert.equal(isAllowedFlashAdminBase("http://172.18.0.1:8090?next=evil"), false);
+});
+
+
+test("main-site employees can use only the exact binding GET and unbind POST", () => {
+  assert.equal(isMainAccessRoute("/device/binding", "GET"), true);
+  assert.equal(isMainAccessRoute("/device/unbind", "POST"), true);
+  for (const [path, method] of [
+    ["/device/binding", "POST"], ["/device/unbind", "GET"],
+    ["/device/unbind/extra", "POST"], ["/device/unbind/", "POST"],
+    ["/device/binding/", "GET"], ["/device/unbind%2fextra", "POST"],
+    ["/feedback", "GET"], ["/feedback/1", "GET"], ["/feedback/1/log-link", "POST"],
+    ["/devices/dc-pro", "GET"], ["/devices/flash", "GET"],
+    ["/devices/flash/A/unbind", "POST"], ["/devices/flash/A/actions", "POST"],
+    ["/sim/lookup", "GET"], ["/sim/cards", "GET"], ["/sim/refresh", "POST"],
+    ["/ota/package", "GET"], ["/ota/package", "POST"],
+    ["/ota/legacy-packages", "GET"], ["/ota/legacy-packages/150001", "POST"],
+  ]) assert.equal(isMainAccessRoute(path, method), false, `${method} ${path}`);
 });

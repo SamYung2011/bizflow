@@ -378,7 +378,6 @@ assert.deepEqual(registryItems[financeIndex + 1], {
   labelKey: "nav.honnmonoApp",
   icon: "icon-nav-messenger",
   canonicalHref: "/bizflow/app-feedback.html",
-  adminOnly: true,
 });
 
 const feedbackRoute = routeManifest["/bizflow/app-feedback.html"];
@@ -386,7 +385,7 @@ assert.ok(feedbackRoute, "the live SPA manifest must include app feedback");
 assert.equal(spaRouteAllowlist.includes(feedbackRoute.path), true);
 assert.equal(feedbackRoute.menuKey, "app-feedback");
 assert.equal(feedbackRoute.section, "bizflow");
-assert.equal(feedbackRoute.frame.access, "bf-admin");
+assert.equal(feedbackRoute.frame.access, "default");
 assert.deepEqual(feedbackRoute.frame, createRouteFrame(feedbackRoute.path));
 assert.equal(feedbackRoute.frame.title, "Honnmono APP · 用戶反饋");
 assert.equal(feedbackRoute.entry.endsWith("/bizflow/app-feedback.js"), true);
@@ -2234,3 +2233,5 @@ await import("./test-session-calendar-days.mjs");
 console.log(
   "Honnmono APP root-site contracts: PASS (feedback + device unbind + OTA package card + SIM card lookup, allowlists, confirmations, escaped fields, tab-dispatched polling, i18n)",
 );
+
+await import("./test-app-feedback-unbind-access.mjs");

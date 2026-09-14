@@ -517,6 +517,14 @@
   margin-left: auto;
 }
 
+.app-feedback-device-binding__head--unbound {
+  display: grid;
+}
+
+.app-feedback-device-binding__head--unbound .app-feedback-device-warning {
+  margin: 0;
+}
+
 .app-feedback-device-status {
   display: inline-flex;
   min-height: var(--space-20);

@@ -138,6 +138,7 @@ export function createDeviceUnbindController({
     const imei = deviceState.queriedImei;
     if (
       !isValidDeviceImei(imei) ||
+      deviceState.binding?.unbound === true ||
       expectedUserid == null ||
       deviceState.unbindLoading
     ) {
@@ -221,12 +222,13 @@ export function renderDeviceUnbind({
     const owner = bindingOwner(binding, t);
     const isUnbound = binding.unbound === true;
     return `<section class="app-feedback-device-binding" aria-labelledby="app-feedback-device-binding-title">
-      <div class="app-feedback-device-binding__head">
+      <div class="app-feedback-device-binding__head${isUnbound ? " app-feedback-device-binding__head--unbound" : ""}">
         <div>
           <h2 id="app-feedback-device-binding-title">${rawE(t("deviceBindingDetails"))}</h2>
           <span class="app-feedback-device-status app-feedback-device-status--${isUnbound ? "unbound" : "bound"}">${rawE(t(isUnbound ? "deviceUnbound" : "deviceBound"))}</span>
         </div>
-        <button type="button" class="app-feedback-button app-feedback-button--danger" data-device-unbind${isUnbound || deviceState.unbindLoading ? " disabled" : ""}>${rawE(t(deviceState.unbindLoading ? "unbinding" : "unbindDevice"))}</button>
+        ${isUnbound ? `<p class="app-feedback-device-warning" role="status">${rawE(t("deviceUnboundNotice"))}</p>` : ""}
+        <button type="button" class="app-feedback-button app-feedback-button--danger" data-device-unbind${isUnbound ? ` title="${rawE(t("unbindDisabledUnbound"))}"` : ""}${isUnbound || deviceState.unbindLoading ? " disabled" : ""}>${rawE(t(deviceState.unbindLoading ? "unbinding" : "unbindDevice"))}</button>
       </div>
       <dl class="app-feedback-device-details">
         ${detailRow("uuid", binding?.dev_cloud?.uuid, { mono: true })}

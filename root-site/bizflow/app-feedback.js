@@ -182,11 +182,11 @@ export function adapterOtaPackages(packageInfo) {
     .map((item) => ({ ...item }));
 }
 
-function canAccessFeedback(currentUser, session) {
+export function canUseDeviceUnbind(currentUser, session) {
   return Boolean(
     session?.user &&
       typeof currentUser?.hasPermission === "function" &&
-      currentUser.isBfAdmin === true,
+      (currentUser.isBfAdmin === true || currentUser.bizflowMainAccess === true),
   );
 }
 
@@ -195,9 +195,9 @@ function requireFeedbackRouteAccess(
   session,
   { url, navigation },
 ) {
-  if (canAccessFeedback(currentUser, session)) return;
+  if (canUseDeviceUnbind(currentUser, session)) return;
   navigation.hardNavigate(new URL("./home.html", url), { replace: true });
-  throw new DOMException("Honnmono APP admin access required", "AbortError");
+  throw new DOMException("Honnmono APP main-site access required", "AbortError");
 }
 
 function errorCopy(error) {
@@ -542,6 +542,11 @@ function renderAdapterCards() {
         kind === "flash"
           ? flashUnbindDisabled(device)
           : !/^\d{15}$/.test(imei) || !bindingUserId || bindingUserId === "0";
+      const unbindTitleKey = kind === "flash" && device.charging
+        ? "flashUnbindChargingBlocked"
+        : !bindingUserId || bindingUserId === "0"
+          ? "unbindDisabledUnbound"
+          : "";
       const unbindLabelKey =
         kind === "flash" ? "flashUnbindDevice" : "unbindDevice";
       const availableActions = adapterActionsForKind(kind);
@@ -576,7 +581,7 @@ function renderAdapterCards() {
         ${kind === "flash" ? renderAdapterOta(device, state.adapters.ota[id], { t, escapeHtml: rawE, formatTime: (value) => formatFeedbackTime(value, helpers.lang), actionBusy, error: state.adapters.otaErrors[id] }) : ""}
         <div class="app-feedback-adapter-actions">
           <button type="button" class="app-feedback-button" data-adapter-detail="${rawE(id)}"${!device.certid || actionBusy ? " disabled" : ""}>${rawE(t("viewSessions"))}</button>
-          ${availableActions.includes("unbind") ? `<button type="button" class="app-feedback-button app-feedback-button--danger" data-adapter-action="unbind" data-adapter-id="${rawE(id)}"${kind === "flash" && device.charging ? ` title="${rawE(t("flashUnbindChargingBlocked"))}"` : ""}${unbindDisabled || actionBusy ? " disabled" : ""}>${rawE(t(unbindLabelKey))}</button>` : ""}
+          ${availableActions.includes("unbind") ? `<button type="button" class="app-feedback-button app-feedback-button--danger" data-adapter-action="unbind" data-adapter-id="${rawE(id)}"${unbindTitleKey ? ` title="${rawE(t(unbindTitleKey))}"` : ""}${unbindDisabled || actionBusy ? " disabled" : ""}>${rawE(t(unbindLabelKey))}</button>` : ""}
           ${availableActions.includes("force_ota") ? `<button type="button" class="app-feedback-button" data-adapter-action="force_ota" data-adapter-id="${rawE(id)}"${actionBusy ? " disabled" : ""}>${rawE(t("forceOta"))}</button>
           <button type="button" class="app-feedback-button" data-adapter-action="lock" data-adapter-id="${rawE(id)}"${actionBusy ? " disabled" : ""}>${rawE(t("lockDevice"))}</button>
           <button type="button" class="app-feedback-button" data-adapter-action="unlock" data-adapter-id="${rawE(id)}"${actionBusy ? " disabled" : ""}>${rawE(t("unlockDevice"))}</button>` : ""}
@@ -712,6 +717,7 @@ function renderAdapterPanel() {
 }
 
 function renderTabs() {
+  if (!state.isAdmin) return "";
   return `<nav class="app-feedback-tabs" aria-label="${rawE(t("honnmonoAppTitle"))}">
     <button type="button" class="app-feedback-tab${state.activeTab === "feedback" ? " is-active" : ""}" data-app-feedback-tab="feedback" aria-selected="${state.activeTab === "feedback"}">${rawE(t("feedbackTab"))}</button>
     <button type="button" class="app-feedback-tab${state.activeTab === "device" ? " is-active" : ""}" data-app-feedback-tab="device" aria-selected="${state.activeTab === "device"}">${rawE(t("deviceUnbindTab"))}</button>
@@ -757,13 +763,13 @@ function render(nextHelpers) {
               formatTime: (value) => formatFeedbackTime(value, helpers.lang),
               errorCopy: deviceErrorCopy,
             })}
-            ${renderOtaPackage({
+            ${state.isAdmin ? renderOtaPackage({
               otaState: state.ota,
               t,
               escapeHtml: helpers.escapeHtml,
               formatTime: (value) => formatFeedbackTime(value, helpers.lang),
               errorCopy: otaErrorCopy,
-            })}
+            }) : ""}
           </div>`
     }
   </section>`;
@@ -1585,7 +1591,7 @@ async function downloadLog(id) {
 }
 
 function switchAppTab(nextTab) {
-  if (!state || !["feedback", "device", "devices", "sim"].includes(nextTab)) {
+  if (!state || !(state.isAdmin ? ["feedback", "device", "devices", "sim"] : ["device"]).includes(nextTab)) {
     return;
   }
   if (state.activeTab === nextTab) return;
@@ -1600,7 +1606,7 @@ function switchAppTab(nextTab) {
     // Single-device unbind is a one-shot lookup form, nothing to poll.
     activePoller?.pause();
     rerender();
-    if (!state.ota.loaded) void activeOtaController?.load();
+    if (state.isAdmin && !state.ota.loaded) void activeOtaController?.load();
     activeScope?.animationFrame(() =>
       document.querySelector("[data-device-imei]")?.focus(),
     );
@@ -1980,13 +1986,17 @@ function onFeedbackKeydown(event) {
   if (event.key === "Escape" && state?.selectedId != null) closeDetail();
 }
 
-function createState(historyState) {
+function createState(historyState, currentUser) {
   const saved =
     historyState && typeof historyState === "object" ? historyState : {};
+  const isAdmin = currentUser.isBfAdmin === true;
   return {
-    activeTab: ["device", "devices", "sim"].includes(saved.activeTab)
-      ? saved.activeTab
-      : "feedback",
+    isAdmin,
+    activeTab: !isAdmin
+      ? "device"
+      : ["device", "devices", "sim"].includes(saved.activeTab)
+        ? saved.activeTab
+        : "feedback",
     device: createDeviceUnbindState(saved),
     sim: createSimCardState(saved),
     ota: createOtaPackageState(),
@@ -2046,7 +2056,7 @@ export async function mountPage({
   ]);
   throwIfPageAborted(signal, scope);
   requireFeedbackRouteAccess(currentUser, session, { url, navigation });
-  const nextState = createState(historyState);
+  const nextState = createState(historyState, currentUser);
   const initialList =
     nextState.activeTab === "feedback"
       ? callHonnmonoAdmin(listSubPath(nextState), { signal }).then(
@@ -2112,6 +2122,7 @@ export async function mountPage({
       scope.listen(document, "change", onFeedbackChange);
       scope.listen(document, "submit", onFeedbackSubmit);
       scope.listen(document, "keydown", onFeedbackKeydown);
+      if (!nextState.isAdmin) return;
       poller = createFeedbackPoller({
         scope,
         documentRef: document,
