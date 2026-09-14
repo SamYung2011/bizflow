@@ -18,6 +18,7 @@ const homeSalesGateMigrationPath = join(repoRoot, "migrations/107_bizflow_home_s
 const customerPageMigrationPath = join(repoRoot, "migrations/108_bizflow_customer_page.sql");
 const waOriginalPolicyMigrationPath = join(repoRoot, "migrations/013_wa_admin_rls.sql");
 const waAdminMigrationPath = join(repoRoot, "migrations/109_wa_admin_rls_alignment.sql");
+const orderDateSortMigrationPath = join(repoRoot, "migrations/122_bizflow_order_page_sort_by_order_date.sql");
 
 function executable(name) {
   for (const candidate of [`/opt/homebrew/bin/${name}`, `/usr/local/bin/${name}`, name]) {
@@ -163,6 +164,54 @@ function expectAuthenticatedTimeout(statement) {
 
 function customerId(index) {
   return `00000000-0000-0000-0000-${String(index).padStart(12, "0")}`;
+}
+
+function testOrderPageDateSort() {
+  // Imported invoices: order dates and import timestamps deliberately disagree.
+  sql(`
+    INSERT INTO public.invoices(id,date,created_at,total,notes,items) VALUES
+      ('sort-122-a','2024-06-01','2026-04-06 13:00:00+00',200,'Order sort 122','[]'),
+      ('sort-122-b','2024-06-15','2026-04-06 12:00:00+00',300,'Order sort 122','[]'),
+      ('sort-122-c','2024-06-30','2026-04-06 11:00:00+00',100,'Order sort 122','[]');
+  `);
+  const readPage = (sort, offset = 0, limit = 50) => JSON.parse(asAuthenticated(
+    `SELECT public.bizflow_order_page('Order sort 122',NULL,NULL,'2024-06-01','2024-06-30','${sort}',${offset},${limit})::text;`
+  ));
+  const ids = (page) => page.rows.map((row) => row.id);
+  const ascending = ['sort-122-a', 'sort-122-b', 'sort-122-c'];
+  const descending = ascending.slice().reverse();
+  assert.deepEqual(ids(readPage('oldest')), descending, 'before 122, oldest follows import time');
+  assert.deepEqual(ids(readPage('newest')), ascending, 'before 122, newest follows import time');
+  const amountsBefore = new Map(['amount_asc', 'amount_desc'].map((sort) => [sort, readPage(sort)]));
+
+  run(psql, psqlArgs(['-f', orderDateSortMigrationPath]), { quiet: true });
+  run(psql, psqlArgs(['-f', orderDateSortMigrationPath]), { quiet: true });
+  for (const [sort, expected] of [['oldest', ascending], ['newest', descending]]) {
+    const page = readPage(sort);
+    assert.equal(page.total_count, 3);
+    assert.deepEqual(ids(page), expected, `${sort} JSON output must follow order_date`);
+    assert.deepEqual(page.rows.map((row) => row.order_date), sort === 'oldest'
+      ? ['2024-06-01', '2024-06-15', '2024-06-30']
+      : ['2024-06-30', '2024-06-15', '2024-06-01']);
+    assert.deepEqual(ids(readPage(sort, 0, 2)), expected.slice(0, 2), `${sort} first-page selection and output agree`);
+    assert.deepEqual(ids(readPage(sort, 1, 2)), expected.slice(1), `${sort} offset-page selection and output agree`);
+  }
+  for (const [sort, before] of amountsBefore) {
+    assert.deepEqual(readPage(sort), before, `${sort} payload must remain unchanged`);
+  }
+  assert.deepEqual(ids(readPage('amount_asc')), ['sort-122-c', 'sort-122-a', 'sort-122-b']);
+  assert.deepEqual(ids(readPage('amount_desc')), ['sort-122-b', 'sort-122-a', 'sort-122-c']);
+  sql("UPDATE public.invoices SET date='2024-06-15' WHERE notes='Order sort 122';");
+  assert.deepEqual(ids(readPage('oldest')), descending, 'same order_date uses created_at ascending');
+  assert.deepEqual(ids(readPage('newest')), ascending, 'same order_date uses created_at descending');
+  sql("UPDATE public.invoices SET created_at='2026-04-06 12:00:00+00' WHERE notes='Order sort 122';");
+  assert.deepEqual(ids(readPage('oldest')), ascending, 'same dates/timestamps use id ascending');
+  assert.deepEqual(ids(readPage('newest')), descending, 'same dates/timestamps use id descending');
+  const signature = 'public.bizflow_order_page(text,text,text,date,date,text,integer,integer)';
+  assert.equal(sql(`SELECT provolatile::text || ':' || prosecdef::text FROM pg_proc WHERE oid='${signature}'::regprocedure;`), 's:false');
+  assert.equal(sql(`SELECT has_function_privilege('anon','${signature}','EXECUTE');`), 'f');
+  assert.equal(sql(`SELECT has_function_privilege('authenticated','${signature}','EXECUTE');`), 't');
+  console.log('ORDER_PAGE_DATE_SORT: PASS (3 reverse-import invoices; oldest/newest dates, both page windows, amount asc/desc unchanged, created_at/id ties, idempotent STABLE INVOKER + grants)');
 }
 
 const ECMASCRIPT_TRIM_CHARS = [
@@ -1383,6 +1432,8 @@ ANALYZE public.customers, public.invoices, public.products, public.warranty_rene
     "the paged warranty rows must match the reviewed 34-case oracle row-for-row"
   );
 
+
+  testOrderPageDateSort();
 
   console.log(`DATA-phase1 PG: PASS (dirty JSON string/object/null=empty; post-ANALYZE authenticated order first/later ${orderPage.elapsedMs.toFixed(1)}/${laterPage.elapsedMs.toFixed(1)}ms, search ${orderSearch.elapsedMs.toFixed(1)}ms, unread ${unread.elapsedMs.toFixed(1)}ms, Home ${home.elapsedMs.toFixed(1)}ms, customer page ${customerPageMeasurement.elapsedMs.toFixed(1)}ms, ${orderPayloadBytes}B from ${(rawInvoiceItemBytes / 1048576).toFixed(1)}MiB raw; EXPLAIN JSON loops first/search ${firstPageExpansionLoops}/${searchExpansionLoops}<=50; mutations M-A/M-A2 red at loops ${preLimitMutationLoops}/${revertedR5Loops}; flat ${group.elapsedMs.toFixed(1)}ms, dirty ${dirty.elapsedMs.toFixed(1)}ms, clusters ${largeClusters.elapsedMs.toFixed(1)}ms, revenue ${revenue.elapsedMs.toFixed(1)}ms + allow/deny gate, warranty scope ${cleanHome.counts.warranty}=${orphanHome.counts.warranty}=${secondUserWarranty}, warranty differential/page 34/34, customer oracle ${oldGroups.length}=${sqlGroups} exact, scale ${scale.map(({ size, elapsedMs }) => `${size}:${elapsedMs.toFixed(1)}ms`).join("/")})`);
 } finally {
