@@ -76,7 +76,7 @@ function fixture() {
     const adapterSessionDatePanel = datePanel;
     const captureScrollState = () => ({}), restoreScrollState = () => {};
     const pollFeedbackList = async () => true;
-    const state = { activeTab: 'feedback', adapters: createAdapterDeviceState(), ota: { loaded: true } };
+    const state = { isAdmin: true, activeTab: 'feedback', adapters: createAdapterDeviceState(), ota: { loaded: true } };
     const render = () => JSON.stringify({ rows: state.adapters.rows, input: state.adapters.queryInput });
     const activeAdapterOtaLoader = createAdapterOtaLoader(callHonnmonoAdmin);
     ${production}

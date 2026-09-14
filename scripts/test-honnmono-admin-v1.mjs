@@ -186,3 +186,5 @@ for (const key of [
 console.log(
   `[honnmono-admin-v1] ${usedKeys.size} i18n keys + nav/auth/route/override contracts passed`,
 );
+
+await import("./test-honnmono-admin-access.mjs");

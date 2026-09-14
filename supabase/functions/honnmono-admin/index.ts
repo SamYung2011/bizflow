@@ -1,4 +1,6 @@
-// honnmono-admin: admin-only JSON bridge from BizFlow to the Shenzhen App API.
+// honnmono-admin: authenticated JSON bridge from BizFlow to the Shenzhen App API.
+// Binding lookup and unbind also admit active main-site employees; all other
+// routes remain admin-only.
 //
 // Routes:
 //   GET  /honnmono-admin/feedback
@@ -37,6 +39,7 @@ import {
   isAllowedHonnmonoApiBase,
   isAllowedHonnmonoUpstream,
   isAllowedOtaAdminBase,
+  isMainAccessRoute,
   mapHonnmonoAdminPath,
   mapFlashAdminPath,
   mapOtaAdminPath,
@@ -74,7 +77,7 @@ const CORS_HEADERS = {
 };
 
 type GuardResult =
-  | { ok: true; operatorEmail: string }
+  | { ok: true; operatorEmail: string; isAdmin: boolean; mainAccess: boolean }
   | { ok: false; status: number; error: string };
 
 function json(body: unknown, status = 200) {
@@ -104,8 +107,8 @@ function requireEnv() {
   );
 }
 
-// verifyAdmin is copied from the deployed ocpp-proxy guard so its
-// Supabase JWT -> employees.is_admin and 401/403 semantics remain identical.
+// Resolve the operator from verified Auth and employee records. Main-site
+// employees are further restricted to two device routes in the handler below.
 async function verifyAdmin(req: Request): Promise<GuardResult> {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
     return { ok: false, status: 500, error: "Server misconfigured" };
@@ -143,11 +146,11 @@ async function verifyAdmin(req: Request): Promise<GuardResult> {
     return { ok: false, status: 500, error: "Auth lookup failed" };
   }
 
-  // 2) Look up employees.is_admin via service_role PostgREST query.
+  // 2) Look up admin and main-site access via service_role PostgREST query.
   //    user_id is a UUID, so URL-encode is fine; using eq.<uuid> form.
   try {
     const r = await fetch(
-      `${SUPABASE_URL}/rest/v1/employees?user_id=eq.${encodeURIComponent(userId)}&select=is_admin&limit=1`,
+      `${SUPABASE_URL}/rest/v1/employees?user_id=eq.${encodeURIComponent(userId)}&select=is_admin,bizflow_main_access,active,kind&limit=1`,
       {
         headers: {
           "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
@@ -159,8 +162,12 @@ async function verifyAdmin(req: Request): Promise<GuardResult> {
     if (r.status !== 200) return { ok: false, status: 500, error: "Admin lookup failed" };
     const rows = await r.json();
     if (!Array.isArray(rows) || rows.length === 0) return { ok: false, status: 403, error: "Not authorized" };
-    if (rows[0]?.is_admin !== true) return { ok: false, status: 403, error: "Not authorized" };
-    return { ok: true, operatorEmail };
+    const employee = rows[0];
+    const isAdmin = employee?.is_admin === true;
+    const mainAccess = employee?.bizflow_main_access === true &&
+      employee?.active === true && employee?.kind === "employee";
+    if (!isAdmin && !mainAccess) return { ok: false, status: 403, error: "Not authorized" };
+    return { ok: true, operatorEmail, isAdmin, mainAccess };
   } catch (_) {
     return { ok: false, status: 500, error: "Admin lookup failed" };
   }
@@ -194,6 +201,9 @@ Deno.serve(async (req) => {
 
   const guard: GuardResult = await verifyAdmin(req);
   if (!guard.ok) return json({ error: guard.error }, guard.status);
+  if (!guard.isAdmin && !(guard.mainAccess && isMainAccessRoute(subPath, req.method))) {
+    return json({ error: "Not authorized" }, 403);
+  }
 
   if (isFlashAdminRequest) {
     const flashPath = mapFlashAdminPath(subPath, req.method);
