@@ -30,7 +30,7 @@ export function AppProvider({ children }) {
   // 登入後才加載數據 — 用 user.id 作為依賴
   const userId = session?.user?.id
   // 全 App 共享：當前 tab。部分高頻/重資料 query 只在對應 tab 啟動，避免首頁被無關輪詢拖慢。
-  const [tab, setTab] = useState('dashboard')
+  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('view') === 'appSupport' ? 'appSupport' : 'dashboard')
   const isWhatsappTab = tab === 'whatsapp'
   const isProductsTab = tab === 'products'
   const isCustomersTab = tab === 'customers'

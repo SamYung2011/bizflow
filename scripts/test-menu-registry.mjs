@@ -21,7 +21,8 @@ const expectedRegistry = {
     { id: "ocpp-charging", labelKey: "nav.ocppCharging", icon: "icon-nav-cloud", canonicalHref: "/bizflow/ocpp-charging.html", adminOnly: true },
     { id: "ocpp-users", labelKey: "nav.ocppUsers", icon: "icon-nav-user", canonicalHref: "/bizflow/ocpp-users.html", adminOnly: true },
     { id: "ocpp-finance", labelKey: "nav.ocppFinance", icon: "icon-nav-sales", canonicalHref: "/bizflow/ocpp-finance.html", adminOnly: true },
-    { id: "app-feedback", labelKey: "nav.honnmonoApp", icon: "icon-nav-messenger", canonicalHref: "/bizflow/app-feedback.html", adminOnly: true }
+    { id: "app-feedback", labelKey: "nav.honnmonoApp", icon: "icon-nav-messenger", canonicalHref: "/bizflow/app-feedback.html" },
+    { id: "app-support", labelKey: "nav.appSupport", icon: "icon-nav-messenger", canonicalHref: "/task-platform/?view=appSupport", adminOnly: true }
   ],
   team: [
     { id: "tasks", labelKey: "nav.tasks", icon: "icon-nav-task", canonicalHref: "/team/index.html", unreadKey: "tasks" },
@@ -66,9 +67,9 @@ assert.deepEqual(
   "all four OCPP destinations must retain the administrator gate"
 );
 assert.equal(
-  SECTION_MENU_ITEMS.bizflow.find((item) => item.id === "app-feedback")?.adminOnly,
+  SECTION_MENU_ITEMS.bizflow.find((item) => item.id === "app-support")?.adminOnly,
   true,
-  "Honnmono APP feedback must retain the administrator gate"
+  "APP support must retain the administrator gate"
 );
 assert.equal(SECTION_MENU_ITEMS.bizflow.find((item) => item.id === "orders")?.unreadKey, "orders");
 assert.equal(SECTION_MENU_ITEMS.bizflow.find((item) => item.id === "inventory")?.unreadKey, "inventory");
