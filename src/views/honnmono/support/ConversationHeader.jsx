@@ -3,7 +3,7 @@ import { useT } from '../../../i18n.jsx';
 import { SUPPORT_CATEGORIES, conversationState, staffName } from '../../../lib/supportConfig.js';
 import SupportIcon from './SupportIcon.jsx';
 
-export default function ConversationHeader({ conversation, employees, operatorEmail, onChange, onBack }) {
+export default function ConversationHeader({ conversation, employees, onChange, onBack }) {
   const { t } = useT();
   const [busy, setBusy] = useState(false), [error, setError] = useState(false);
   const state = conversationState(conversation);
@@ -20,11 +20,8 @@ export default function ConversationHeader({ conversation, employees, operatorEm
         <i />{t(state === 'closed' ? '已結束' : state === 'waiting' ? '待回覆' : '處理中')}</span></div>
         <p>{conversation.userPhone || '—'}<span> · </span>{conversation.userEmail || '—'}</p></div>
       <div className="support-header-actions">
-        {conversation.status !== 'closed' && <>
-          <button className="support-button" disabled={busy} onClick={() => change({ assigneeEmail: conversation.assigneeEmail === operatorEmail ? '' : operatorEmail })}>
-            <SupportIcon name="person" size={16} />{t(conversation.assigneeEmail === operatorEmail ? '釋放會話' : '認領')}</button>
-          <button className="support-button" disabled={busy} onClick={() => change('close')}><SupportIcon name="check" size={16} />{t('結束會話')}</button>
-        </>}
+        {conversation.status !== 'closed' && <button className="support-button" disabled={busy} onClick={() => change('close')}>
+          <SupportIcon name="check" size={16} />{t('結束會話')}</button>}
       </div>
     </div>
     <div className="support-header-details"><label>{t('問題類型')}

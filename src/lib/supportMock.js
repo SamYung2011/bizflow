@@ -124,12 +124,16 @@ export async function sendMessage(id, body, options = {}) {
   if (settings.failNext || body.content.includes('/fail') && !attempts.has(body.clientMsgId)) {
     settings.failNext = false; attempts.add(body.clientMsgId); throw new Error('Demo connection interrupted');
   }
-  if (conversations.find(item => item.id === id).status === 'closed') throw new Error('Conversation closed');
-  return append(id, message(id, 'staff', body.content, { ...body, senderName: options.operatorEmail || 'mia@example.test', createdAt: Date.now() }));
+  const conversation = conversations.find(item => item.id === id);
+  if (conversation.status === 'closed') throw new Error('Conversation closed');
+  const saved = append(id, message(id, 'staff', body.content, { ...body, senderName: options.operatorEmail || 'mia@example.test', createdAt: Date.now() }));
+  conversation.assigneeEmail = saved.senderName;
+  return saved;
 }
-export async function updateConversation(id, body) {
+export async function updateConversation(id, { category } = {}) {
   await wait(); const conversation = conversations.find(item => item.id === id);
-  Object.assign(conversation, body); return clone(conversation);
+  if (category !== undefined) conversation.category = category;
+  return clone(conversation);
 }
 export async function closeConversation(id) {
   await wait(); const conversation = conversations.find(item => item.id === id);

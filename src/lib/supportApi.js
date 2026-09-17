@@ -27,8 +27,8 @@ export const sendMessage = (id, body, options = {}) =>
   request('sendMessage', `/conversations/${id}/messages`, options, [id, body], body);
 export const closeConversation = (id, options = {}) =>
   request('closeConversation', `/conversations/${id}/close`, options, [id], {});
-export const updateConversation = (id, body, options = {}) =>
-  request('updateConversation', `/conversations/${id}/update`, options, [id, body], body);
+export const updateConversation = (id, { category } = {}, options = {}) =>
+  request('updateConversation', `/conversations/${id}/update`, options, [id, { category }], { category });
 
 // Protected bytes become a local URL; callers revoke it when no longer displayed.
 export async function fileUrl(attachment, options = {}) {

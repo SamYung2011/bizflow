@@ -45,18 +45,37 @@ check('reading messages moves the read pointer and clears unread', () => {
 });
 const body = { clientMsgId: 'retry-id', msgType: 'text', content: '/fail Check the station', attachments: [] };
 await rejects('first demo send fails', mock.sendMessage(4, body));
+const afterFailure = await mock.getConversation(4);
+check('failed reply leaves the conversation unassigned', () => assert.equal(afterFailure.assigneeEmail, ''));
 const sent = await mock.sendMessage(4, body, { operatorEmail: 'test@example.test' });
 const repeated = await mock.sendMessage(4, body);
 const newMessages = await mock.listMessages(4, { afterId: sent.id - 1 });
 check('retry is idempotent and incremental polling returns the appended message', () => {
   assert.equal(sent.id, repeated.id); assert.equal(newMessages.length, 1); assert.equal(sent.senderName, 'test@example.test');
 });
-const updated = await mock.updateConversation(4, { assigneeEmail: 'test@example.test', category: config.SUPPORT_CATEGORIES[1] });
-check('claim and category updates preserve unrelated fields', () => {
-  assert.equal(updated.assigneeEmail, 'test@example.test'); assert.equal(updated.userNickname, 'Emma Lam');
+const assigned = await mock.getConversation(4);
+check('successful reply assigns the conversation to its sender', () => assert.equal(assigned.assigneeEmail, 'test@example.test'));
+await mock.sendMessage(4, { ...body, clientMsgId: 'handover-id', content: 'I will take over.' }, { operatorEmail: 'next@example.test' });
+const handedOver = await mock.getConversation(4), handoverList = await mock.listConversations();
+check('a later staff reply takes over in both detail and list', () => {
+  assert.equal(handedOver.assigneeEmail, 'next@example.test');
+  assert.equal(handoverList.find(item => item.id === 4).assigneeEmail, 'next@example.test');
 });
-await mock.updateConversation(4, { assigneeEmail: '' });
-assert.equal((await mock.getConversation(4)).assigneeEmail, '');
+await mock.sendMessage(4, body, { operatorEmail: 'test@example.test' });
+const afterOldRetry = await mock.getConversation(4);
+check('retrying an older saved message does not reclaim the conversation', () => assert.equal(afterOldRetry.assigneeEmail, 'next@example.test'));
+mock.configureMock({ failNext: true });
+await rejects('a failed takeover is rejected', mock.sendMessage(4, { ...body, clientMsgId: 'failed-takeover', content: 'Another reply' }, { operatorEmail: 'test@example.test' }));
+mock.receiveMockMessage(4);
+const stillAssigned = await mock.getConversation(4);
+check('failed takeover and incoming user messages preserve the responsible staff', () => assert.equal(stillAssigned.assigneeEmail, 'next@example.test'));
+const updated = await mock.updateConversation(4, { assigneeEmail: '', category: config.SUPPORT_CATEGORIES[1], status: 'closed' });
+check('category updates cannot claim, release or close a conversation', () => {
+  assert.equal(updated.category, config.SUPPORT_CATEGORIES[1]); assert.equal(updated.assigneeEmail, 'next@example.test');
+  assert.equal(updated.status, 'open'); assert.equal(updated.userNickname, 'Emma Lam');
+});
+await mock.updateConversation(4, {});
+assert.equal((await mock.getConversation(4)).category, config.SUPPORT_CATEGORIES[1]);
 await mock.closeConversation(4); await mock.closeConversation(4);
 const closedMessages = await mock.listMessages(4);
 check('closing is idempotent and creates one system record', () => assert.equal(closedMessages.filter(item => item.msgType === 'system').length, 1));
@@ -81,10 +100,12 @@ check('B2 and B3 stay conversation-scoped', () => {
   assert(calls.at(-2).url.endsWith('/conversations/1'));
   assert(calls.at(-1).url.endsWith('/conversations/1/messages?afterId=12&beforeId=20&limit=30'));
 });
-await api.sendMessage(1, body, options); await api.closeConversation(1, options); await api.updateConversation(1, { category: 'other' }, options);
+await api.sendMessage(1, body, options); await api.closeConversation(1, options);
+await api.updateConversation(1, { category: 'other', assigneeEmail: 'test@example.test', status: 'closed' }, options);
 check('B4-B6 send JSON bodies with POST through the existing helper', () => {
   assert.equal(calls.at(-3).options.method, 'POST'); assert.deepEqual(JSON.parse(calls.at(-3).options.body), body);
   assert(calls.at(-2).url.endsWith('/close')); assert(calls.at(-1).url.endsWith('/update'));
+  assert.deepEqual(JSON.parse(calls.at(-1).options.body), { category: 'other' });
   assert.equal(calls.at(-3).options.headers['Content-Type'], 'application/json');
 });
 response = { code: 100001, des: 'Denied' };

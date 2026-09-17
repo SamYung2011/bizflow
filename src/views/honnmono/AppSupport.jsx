@@ -27,7 +27,7 @@ function Workspace({ session, employees }) {
       </div> : data.detail.isPending ? <SupportSkeleton /> : data.detail.isError ? <div className="support-error" role="alert">
         {t('載入失敗，請重試')} <button onClick={() => data.detail.refetch()}>{t('重試')}</button><button onClick={() => setSelectedId(null)}>{t('返回會話列表')}</button>
       </div> : <>
-        <ConversationHeader key={selectedId} conversation={conversation} employees={employees} operatorEmail={session.user.email} onChange={data.change} onBack={() => setSelectedId(null)} />
+        <ConversationHeader key={selectedId} conversation={conversation} employees={employees} onChange={data.change} onBack={() => setSelectedId(null)} />
         <MessageThread key={`thread-${selectedId}`} conversation={conversation} data={data} employees={employees} options={options} />
         <Composer key={`composer-${selectedId}`} closed={conversation.status === 'closed'} limits={conversation.limits || SUPPORT_LIMITS} onSend={data.send} />
       </>}
