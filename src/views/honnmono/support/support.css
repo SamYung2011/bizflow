@@ -146,5 +146,6 @@
 }
 @container (max-width: 720px) {
   .support-workspace { display: block; min-height: 420px; height: calc(100dvh - 100px); }.support-list { height: 100%; border: 0; }.support-main { display: none; height: 100%; }.support-workspace.has-conversation .support-list { display: none; }.support-workspace.has-conversation .support-main { display: flex; }.support-back { display: grid; }.support-header-main { flex-wrap: wrap; gap: 8px; }.support-header-main > .support-avatar { width: 35px; height: 35px; font-size: 15px; }.support-header-actions { max-width: none; margin-left: auto; }.support-contact { flex: 1; }.support-contact > div { gap: 7px; }.support-contact h2 { font-size: 14px; }.support-contact p { font-size: 10px; }.support-header-details { gap: 8px; margin-top: 10px; }.support-source-label { display: none; }.support-summary p { max-height: 80px; overflow-y: auto; }.support-bubble { max-width: 92%; }.support-image-grid { width: 265px; }.support-composer-hint span:last-child { display: none; }
+  .support-header-actions:not(:empty) { flex: 0 0 100%; }
 }
 @media (prefers-reduced-motion: reduce) { .support-skeleton i, .support-spinner { animation: none; } }
