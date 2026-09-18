@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import vm from 'node:vm';
 import { createRequire } from 'node:module';
-import { build } from 'esbuild';
+import { build, transform } from 'esbuild';
 
 let checks = 0;
 function check(label, test) { test(); checks++; console.log(`PASS ${label}`); }
@@ -196,5 +196,38 @@ check('missing session and missing operator email render only the access guard',
     const html = compiled.exports.deny(props);
     assert(html.includes('role="alert"')); assert(!html.includes('support-workspace'));
   }
+});
+
+// Render the real App.jsx embed branch through the employee query/hydration sequence.
+const appSource = await readFile('src/App.jsx', 'utf8');
+const embedStart = appSource.indexOf('  if (tab === "appSupport" && new URLSearchParams');
+assert(embedStart !== -1);
+const embedBranch = appSource.slice(embedStart, appSource.indexOf('\n\n  return (', embedStart));
+const embedCode = await transform(`
+  return ({ qEmployees, currentEmployee, isBizflowMainAllowed = false }) => {
+    const tab = 'appSupport', window = { location: { search: '?embed=1' } };
+    const userId = 'staff-id', employees = qEmployees.data || [], session = {}, t = text => text;
+    ${embedBranch}
+  };
+`, { loader: 'jsx' });
+const require = createRequire(import.meta.url), React = require('react');
+const { renderToStaticMarkup } = require('react-dom/server');
+const embed = new Function('React', 'Suspense', 'AppSupportView', embedCode.code)(
+  React, React.Suspense, () => React.createElement('div', null, 'support-ready'));
+const renderEmbed = props => renderToStaticMarkup(embed(props));
+const employee = { user_id: 'staff-id', bizflow_main_access: true };
+check('embed shows the same loading fallback during employee fetch and effect hydration', () => {
+  for (const qEmployees of [{ isPending: true }, { isSuccess: true, data: [employee] }]) {
+    assert.equal(renderEmbed({ qEmployees }), '<div>載入客服會話…</div>');
+  }
+});
+check('embed mounts support after the employee and main access are resolved', () => {
+  assert(renderEmbed({ qEmployees: { isSuccess: true, data: [employee] }, currentEmployee: employee, isBizflowMainAllowed: true }).includes('support-ready'));
+});
+check('embed denies access only after the employee lookup confirms no main access', () => {
+  assert.equal(renderEmbed({ qEmployees: { isSuccess: true, data: [] } }), '<div role="alert">未登入或沒有主站權限</div>');
+});
+check('employee query failure is a load error instead of an access denial', () => {
+  assert.equal(renderEmbed({ qEmployees: { isError: true } }), '<div role="alert">資料載入失敗</div>');
 });
 console.log(`SUPPORT_SELF_CHECK=${checks}/${checks}`);

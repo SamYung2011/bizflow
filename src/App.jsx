@@ -1770,7 +1770,13 @@ export default function App() {
   }
 
   if (tab === "appSupport" && new URLSearchParams(window.location.search).get("embed") === "1") {
-    return isBizflowMainAllowed ? <Suspense fallback={<div>{t("載入客服會話…")}</div>}>
+    const supportFallback = <div>{t("載入客服會話…")}</div>;
+    if (!currentEmployee) {
+      // 查询完成后，AppContext 还需一次 effect 才把员工资料同步到 currentEmployee。
+      if (qEmployees.isPending || qEmployees.data?.some(employee => employee.user_id === userId)) return supportFallback;
+      if (qEmployees.isError) return <div role="alert">{t("資料載入失敗")}</div>;
+    }
+    return isBizflowMainAllowed ? <Suspense fallback={supportFallback}>
       <AppSupportView session={session} employees={employees} embedded />
     </Suspense> : <div role="alert">{t("未登入或沒有主站權限")}</div>;
   }
