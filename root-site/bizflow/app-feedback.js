@@ -717,19 +717,18 @@ function renderAdapterPanel() {
 }
 
 function renderTabs() {
-  if (!state.isAdmin) return "";
+  const tabs = state.isAdmin
+    ? [["feedback", "feedbackTab"], ["support", "supportTab"], ["device", "deviceUnbindTab"], ["devices", "deviceListTab"], ["sim", "simCardTab"]]
+    : [["support", "supportTab"], ["device", "deviceUnbindTab"]];
   return `<nav class="app-feedback-tabs" aria-label="${rawE(t("honnmonoAppTitle"))}">
-    <button type="button" class="app-feedback-tab${state.activeTab === "feedback" ? " is-active" : ""}" data-app-feedback-tab="feedback" aria-selected="${state.activeTab === "feedback"}">${rawE(t("feedbackTab"))}</button>
-    <button type="button" class="app-feedback-tab${state.activeTab === "device" ? " is-active" : ""}" data-app-feedback-tab="device" aria-selected="${state.activeTab === "device"}">${rawE(t("deviceUnbindTab"))}</button>
-    <button type="button" class="app-feedback-tab${state.activeTab === "devices" ? " is-active" : ""}" data-app-feedback-tab="devices" aria-selected="${state.activeTab === "devices"}">${rawE(t("deviceListTab"))}</button>
-    <button type="button" class="app-feedback-tab${state.activeTab === "sim" ? " is-active" : ""}" data-app-feedback-tab="sim" aria-selected="${state.activeTab === "sim"}">${rawE(t("simCardTab"))}</button>
+    ${tabs.map(([id, label]) => `<button type="button" class="app-feedback-tab${state.activeTab === id ? " is-active" : ""}" data-app-feedback-tab="${id}" aria-selected="${state.activeTab === id}">${rawE(t(label))}</button>`).join("")}
   </nav>`;
 }
 
 function render(nextHelpers) {
   helpers = nextHelpers;
   const isFeedback = state.activeTab === "feedback";
-  const subtitleKey = isFeedback
+  const subtitleKey = state.activeTab === "support" ? "supportSubtitle" : isFeedback
     ? "subtitle"
     : state.activeTab === "devices"
       ? "deviceListSubtitle"
@@ -743,8 +742,9 @@ function render(nextHelpers) {
     </header>
     ${renderTabs()}
     ${
-      isFeedback
-        ? renderFeedbackPanel()
+      state.activeTab === "support"
+        ? `<iframe class="app-support-frame" title="${rawE(t("supportTab"))}" src="/task-platform/?view=appSupport&embed=1&lang=${helpers.lang}" data-support-frame></iframe>`
+        : isFeedback ? renderFeedbackPanel()
         : state.activeTab === "devices"
           ? renderAdapterPanel()
           : state.activeTab === "sim"
@@ -1591,7 +1591,7 @@ async function downloadLog(id) {
 }
 
 function switchAppTab(nextTab) {
-  if (!state || !(state.isAdmin ? ["feedback", "device", "devices", "sim"] : ["device"]).includes(nextTab)) {
+  if (!state || !(state.isAdmin ? ["feedback", "support", "device", "devices", "sim"] : ["support", "device"]).includes(nextTab)) {
     return;
   }
   if (state.activeTab === nextTab) return;
@@ -1602,6 +1602,11 @@ function switchAppTab(nextTab) {
   state.detail = null;
   state.detailError = null;
   state.downloadError = null;
+  if (nextTab === "support") {
+    activePoller?.pause();
+    rerender();
+    return;
+  }
   if (nextTab === "device") {
     // Single-device unbind is a one-shot lookup form, nothing to poll.
     activePoller?.pause();
@@ -1993,8 +1998,8 @@ function createState(historyState, currentUser) {
   return {
     isAdmin,
     activeTab: !isAdmin
-      ? "device"
-      : ["device", "devices", "sim"].includes(saved.activeTab)
+      ? "support"
+      : ["support", "device", "devices", "sim"].includes(saved.activeTab)
         ? saved.activeTab
         : "feedback",
     device: createDeviceUnbindState(saved),
@@ -2129,7 +2134,7 @@ export async function mountPage({
         poll: pollActiveTab,
       });
       activePoller = poller;
-      if (!["device", "sim"].includes(state.activeTab)) poller.start(state.activeTab === "devices" ? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS);
+      if (!["support", "device", "sim"].includes(state.activeTab)) poller.start(state.activeTab === "devices" ? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS);
       if (["device", "devices"].includes(state.activeTab)) void otaController.load();
       if (state.activeTab === "devices") void loadAdapters();
       if (state.activeTab === "sim") void simController.loadCards();

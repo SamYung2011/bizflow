@@ -1253,3 +1253,5 @@
     transition-duration: var(--feedback-reduced) !important;
   }
 }
+
+.app-support-frame { width: 100%; height: calc(100dvh - 250px); min-height: 460px; border: 0; display: block; flex: 1; border-radius: 16px; }

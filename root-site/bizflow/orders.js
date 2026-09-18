@@ -667,7 +667,7 @@ export async function mountPage({ scope, signal, historyState = null, navigation
   const presets = {
     tab: consumeNavigationPreset(navigationPresetKeys.ordersTab),
     shipping: consumeNavigationPreset(navigationPresetKeys.ordersShipping),
-    search: consumeNavigationPreset(navigationPresetKeys.ordersSearch) ?? ""
+    search: new URLSearchParams(window.location.search).get("q") ?? consumeNavigationPreset(navigationPresetKeys.ordersSearch) ?? ""
   };
   const nextCurrentUser = await getCurrentUser();
   throwIfPageAborted(signal, scope);

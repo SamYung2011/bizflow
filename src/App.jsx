@@ -7,6 +7,7 @@ const OcppMonitorView = lazy(() => import("./views/ocpp/OcppMonitor.jsx"));
 const OcppChargingView = lazy(() => import("./views/ocpp/OcppCharging.jsx"));
 const OcppUsersView = lazy(() => import("./views/ocpp/OcppUsers.jsx"));
 const OcppFinanceView = lazy(() => import("./views/ocpp/finance/OcppFinance.jsx"));
+const AppSupportView = lazy(() => import("./views/honnmono/AppSupport.jsx"));
 const AppFeedbackView = lazy(() => import("./views/honnmono/AppFeedback.jsx"));
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase, fetchAllTable } from "./lib/supabaseClient.js";
@@ -1017,6 +1018,7 @@ export default function App() {
 
   // nav 分组结构：4 业务组 + 单项混合（2026-05-21 整合）
   // type='single': 直接 tab；type='group': 折叠组，children 为子 tab
+  const isBizflowMainAllowed = isBfAdmin || (currentEmployee && currentEmployee.bizflow_main_access === true);
   const navItems = [
     { type: "single", id: "dashboard", label: t("首頁"), icon: "dashboard" },
     { type: "group", id: "g_products", label: t("產品庫存"), icon: "product", children: [
@@ -1045,8 +1047,9 @@ export default function App() {
       { id: "ocppUsers", label: t("OCPP 用戶"), icon: "charger" },
       { id: "ocppFinance", label: t("OCPP 財務"), icon: "charger" },
     ]}] : []),
-    ...(isBfAdmin ? [{ type: "group", id: "g_honnmono", label: t("Honnmono APP"), icon: "chat", children: [
-      { id: "appFeedback", label: t("用戶反饋"), icon: "chat" },
+    ...(isBizflowMainAllowed ? [{ type: "group", id: "g_honnmono", label: t("Honnmono APP"), icon: "chat", children: [
+      ...(isBfAdmin ? [{ id: "appFeedback", label: t("用戶反饋"), icon: "chat" }] : []),
+      { id: "appSupport", label: t("APP 客服"), icon: "chat" },
     ]}] : []),
     { type: "single", id: "gototeam", label: t("團隊管理"), icon: "external", external: "https://team.honnmono.top" },
   ];
@@ -1672,7 +1675,7 @@ export default function App() {
 
   // bizflow 主站白名单卡：非白名单 → 自动 signOut + 跳 team.honnmono.top
   // hook 必须在所有 early return 之前调用（authLoading / !session / loading / loadError 都会提前 return）
-  const isBizflowMainAllowed = isBfAdmin || (currentEmployee && currentEmployee.bizflow_main_access === true);
+
   const shouldBlock = currentEmployee && !isBizflowMainAllowed;
   useEffect(() => {
     if (shouldBlock) {
@@ -1764,6 +1767,12 @@ export default function App() {
   // 非白名单 → 空屏等 redirect（useEffect 已在文件上方触发 signOut + 跳走）
   if (shouldBlock) {
     return <div style={{ height: "100vh", background: "#f7f8fc" }} />;
+  }
+
+  if (tab === "appSupport" && new URLSearchParams(window.location.search).get("embed") === "1") {
+    return isBizflowMainAllowed ? <Suspense fallback={<div>{t("載入客服會話…")}</div>}>
+      <AppSupportView session={session} employees={employees} embedded />
+    </Suspense> : <div role="alert">{t("未登入或沒有主站權限")}</div>;
   }
 
   return (
@@ -2030,6 +2039,12 @@ export default function App() {
               session={session}
               isAdmin={isBfAdmin}
             />
+          </Suspense>
+        )}
+
+        {tab === "appSupport" && isBizflowMainAllowed && (
+          <Suspense fallback={<div>{t("載入客服會話…")}</div>}>
+            <AppSupportView session={session} employees={employees} />
           </Suspense>
         )}
 

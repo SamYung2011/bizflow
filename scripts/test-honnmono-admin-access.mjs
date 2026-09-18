@@ -23,7 +23,7 @@ const env = {
 };
 runInNewContext(bundle.outputFiles[0].text, {
   Deno: { env: { get: key => env[key] }, serve: fn => { handler = fn; } },
-  URL, Request, Response, AbortSignal, TextEncoder,
+  URL, Request, Response, AbortSignal, TextEncoder, TextDecoder, Uint8Array,
   fetch: async (input, options) => {
     const url = new URL(input);
     calls.push(url.pathname);
@@ -61,15 +61,15 @@ const adminRoutes = [
   ['/sim/cards', 'POST'], ['/sim/cards/import', 'POST'], ['/sim/refresh', 'POST'],
 ];
 await check('whitelisted employee binding GET and unbind POST preserve operator audit and body', async () => {
-  for (const [path, method] of [['/device/binding?imei=000000000000001', 'GET'], ['/device/unbind', 'POST']]) {
+  for (const [path, method] of [['/device/binding?imei=000000000000001', 'GET'], ['/device/unbind', 'POST'], ['/support/conversations', 'GET'], ['/support/conversations/1/messages', 'POST']]) {
     assert.equal((await request(path, method)).status, 200);
     assert.equal(upstream.length, 1);
     const call = upstream[0];
     assert.equal(call.options.headers['X-Operator-Email'], 'claude_test@honnmono.local');
     assert.equal(call.options.headers['X-Internal-Token'], env.HONNMONO_ADMIN_INTERNAL_TOKEN);
     assert.equal(call.options.method, method);
-    if (method === 'POST') assert.deepEqual(JSON.parse(call.options.body), { imei: '000000000000001', expected_userid: 42 });
-    else assert.equal(call.url.searchParams.get('imei'), '000000000000001');
+    if (method === 'POST') assert.deepEqual(JSON.parse(typeof call.options.body === 'string' ? call.options.body : new TextDecoder().decode(call.options.body)), { imei: '000000000000001', expected_userid: 42 });
+    else if (path.startsWith('/device/')) assert.equal(call.url.searchParams.get('imei'), '000000000000001');
   }
 });
 await check('employee cannot reach any of 22 admin route/method pairs', async () => {
@@ -90,7 +90,7 @@ await check('missing employee, team, inactive, absent/false/string main access f
     [{ ...employee, bizflow_main_access: false }], [{ ...employee, bizflow_main_access: null }],
     [{ ...employee, bizflow_main_access: 'true' }], [{ is_admin: 'true' }]]) {
     rows = invalidRows;
-    for (const [path, method] of [['/device/binding', 'GET'], ['/device/unbind', 'POST']]) {
+    for (const [path, method] of [['/device/binding', 'GET'], ['/device/unbind', 'POST'], ['/support/conversations', 'GET'], ['/support/upload/abc', 'POST']]) {
       assert.equal((await request(path, method)).status, 403, JSON.stringify(rows));
       assert.equal(upstream.length, 0);
     }

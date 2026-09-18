@@ -340,3 +340,20 @@ test("main-site employees can use only the exact binding GET and unbind POST", (
     ["/ota/legacy-packages", "GET"], ["/ota/legacy-packages/150001", "POST"],
   ]) assert.equal(isMainAccessRoute(path, method), false, `${method} ${path}`);
 });
+
+
+test("support maps JSON, file and upload routes and admits main-site employees", () => {
+  for (const method of ["GET", "POST", "DELETE"]) {
+    assert.equal(isMainAccessRoute("/support/conversations", method), true);
+    assert.equal(mapHonnmonoAdminPath("/support/conversations", method), "/internal/admin/support/conversations");
+  }
+  assert.equal(mapHonnmonoAdminPath("/support/upload/cf-one", "POST"), "/internal/cloud-storage/upload/cf-one");
+  assert.equal(mapHonnmonoAdminPath("/support/files/cf-one/photo.png", "GET"), "/internal/admin/support/files/cf-one/photo.png");
+  assert.equal(mapHonnmonoAdminPath("/support/upload/cf-one", "GET"), "");
+  for (const path of ["/support/../feedback", "/support/%2e%2e/feedback", "/support/files/%2f/one", "/support//feedback"])
+    assert.equal(mapHonnmonoAdminPath(path, "GET"), "");
+  for (const path of ["/internal/admin/support/conversations", "/internal/admin/support/files/id/image.png", "/internal/cloud-storage/upload/cf-one"])
+    assert.equal(isAllowedHonnmonoUpstream(new URL(`https://app-api.honnmono.top${path}`)), true);
+  assert.equal(isAllowedHonnmonoUpstream(new URL("https://app-api.honnmono.top/internal/cloud-storage/file/cf-one/name")), false);
+  assert.equal(isAllowedHonnmonoUpstream(new URL("https://evil.test/internal/admin/support/conversations")), false);
+});
