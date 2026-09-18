@@ -21,15 +21,17 @@ export default function Attachment({ attachment, type, options, onImage }) {
     if (!visible || type === 'file') return;
     const controller = new AbortController(); let objectUrl;
     setError(false);
-    const thumbnail = type === 'image' && attachment.thumbUrl;
-    const promise = thumbnail ? Promise.resolve(thumbnail) : fileUrl(attachment, { ...options, signal: controller.signal });
+    const thumbnail = type === 'image' && !attachment.thumbCfid && attachment.thumbUrl;
+    const source = type === 'image' && attachment.thumbCfid
+      ? { ...attachment, cfid: attachment.thumbCfid, name: 'thumbnail.jpg' } : attachment;
+    const promise = thumbnail ? Promise.resolve(thumbnail) : fileUrl(source, { ...options, signal: controller.signal });
     promise.then(value => {
       if (!thumbnail) objectUrl = value;
       if (!controller.signal.aborted) setUrl(value);
       else if (objectUrl) URL.revokeObjectURL(objectUrl);
     }).catch(error => { if (error.name !== 'AbortError') setError(true); });
     return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [visible, attachment.cfid, attachment.thumbUrl, options.accessToken, type, attempt]);
+  }, [visible, attachment.cfid, attachment.thumbCfid, attachment.thumbUrl, options.accessToken, type, attempt]);
   async function open() {
     setBusy(true); setError(false);
     try {

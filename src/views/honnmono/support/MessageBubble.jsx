@@ -5,14 +5,16 @@ import { formatTime, fileSize } from './format.js';
 import Attachment from './Attachment.jsx';
 import SupportIcon from './SupportIcon.jsx';
 
+const systemKeys = { '已转人工客服': '已轉人工客服', '客服已结束本次服务': '客服已結束本次服務', '使用者已结束本次服务': '使用者已結束本次服務' };
+
 export default function MessageBubble({ message, employees, options, onRetry, onImage }) {
   const { t, lang } = useT();
   const staff = message.senderRole === 'staff';
-  if (message.senderRole === 'system' || message.msgType === 'system') return <div className="support-system">{t(message.content)}</div>;
+  if (message.senderRole === 'system' || message.msgType === 'system') return <div className="support-system">{t(systemKeys[message.content] || message.content)}</div>;
   return <div className={`support-message-row ${staff ? 'is-staff' : ''}`} data-message-id={message.id}>
     <div className={`support-bubble ${message.senderRole === 'ai' ? 'is-ai' : ''} ${message.state === 'failed' ? 'is-failed' : ''}`}>
       {message.senderRole === 'ai' && <span className="support-ai-name">{t('AI 助手')}</span>}
-      {message.msgType === 'order' ? <a className="support-order" href={`/bizflow/orders.html?q=${encodeURIComponent(message.content)}`} target="_blank" rel="noreferrer">
+      {message.msgType === 'order' ? <a className="support-order" href={`/bizflow/orders.html?q=${encodeURIComponent(systemKeys[message.content] || message.content)}`} target="_blank" rel="noreferrer">
         <SupportIcon name="file" /><span><small>{t('關聯訂單')}</small><strong>{message.content} ↗</strong></span></a>
         : message.content && <div className="support-message-text">{message.content}</div>}
       {!!message.attachments?.length && !message.files && <div className={message.msgType === 'image' ? 'support-image-grid' : 'support-attachments'}>

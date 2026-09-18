@@ -7,12 +7,13 @@ import { build } from 'esbuild';
 let checks = 0;
 function check(label, test) { test(); checks++; console.log(`PASS ${label}`); }
 async function rejects(label, promise) { await assert.rejects(promise); checks++; console.log(`PASS ${label}`); }
-async function moduleFor(entry, mock = '0') {
+async function moduleFor(entry, mock) {
   const result = await build({ entryPoints: [entry], bundle: true, format: 'esm', platform: 'node', write: false,
     define: { 'import.meta.env': JSON.stringify({ VITE_SUPPORT_MOCK: mock, VITE_SUPABASE_URL: 'https://bridge.example.test', VITE_SUPABASE_ANON_KEY: 'public-test' }) } });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
 const api = await moduleFor('src/lib/supportApi.js');
+check('unset VITE_SUPPORT_MOCK selects the real bridge', () => assert.equal(api.SUPPORT_MOCK, false));
 const mock = await moduleFor('src/lib/supportMock.js');
 const config = await moduleFor('src/lib/supportConfig.js');
 mock.configureMock({ delay: 0, sendDelay: 0 });
@@ -128,6 +129,18 @@ check('upload signature is scoped; file bytes go directly to cloud storage', () 
   assert.equal(calls.at(-1).options.body, file); assert.equal(calls.at(-1).options.headers.Authorization, undefined);
   assert.equal(attachment.cfid, 'upload-1'); assert.equal(attachment.name, 'receipt.txt');
 });
+globalThis.fetch = async (url, init) => {
+  calls.push({ url, options: init });
+  return Response.json(url.endsWith('/support/upload')
+    ? { code: 0, result: { filelist: [{ cfid: 'upload-2', cfinfo: { url: '/functions/v1/honnmono-admin/support/upload/upload-2' } }] } }
+    : { code: 0, result: {} });
+};
+await api.uploadAttachment(2, file, options);
+check('bridge byte upload carries JWT without exposing it to other origins', () => {
+  assert.equal(calls.at(-1).url, 'https://bridge.example.test/functions/v1/honnmono-admin/support/upload/upload-2');
+  assert.equal(calls.at(-1).options.headers.Authorization, `Bearer ${options.accessToken}`);
+  assert.equal(calls.at(-1).options.headers.apikey, 'public-test');
+});
 await rejects('configured attachment limit is enforced before upload', api.uploadAttachment(2, file, { ...options, limits: { attachmentMaxMb: 0 } }));
 globalThis.fetch = nativeFetch;
 const localeSource = await readFile('src/i18n.jsx', 'utf8');
@@ -163,8 +176,8 @@ const rendered = await build({ stdin: { contents: `
   loader: { '.css': 'empty' }, define: { 'import.meta.env': '{"VITE_SUPPORT_MOCK":"0"}' } });
 const compiled = { exports: {} };
 new Function('module', 'exports', 'require', rendered.outputFiles[0].text)(compiled, compiled.exports, createRequire(import.meta.url));
-check('non-admin, missing session and missing operator email render only the access guard', () => {
-  for (const props of [{}, { isAdmin: false, session: { access_token: 'x', user: { email: 'a@test' } } },
+check('missing session and missing operator email render only the access guard', () => {
+  for (const props of [{},
     { isAdmin: true, session: { user: { email: 'a@test' } } }, { isAdmin: true, session: { access_token: 'x', user: {} } }]) {
     const html = compiled.exports.deny(props);
     assert(html.includes('role="alert"')); assert(!html.includes('support-workspace'));

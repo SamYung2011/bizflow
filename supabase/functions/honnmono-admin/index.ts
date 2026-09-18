@@ -1,5 +1,5 @@
 // honnmono-admin: authenticated JSON bridge from BizFlow to the Shenzhen App API.
-// Binding lookup and unbind also admit active main-site employees; all other
+// Support, binding lookup and unbind admit active main-site employees; other
 // routes remain admin-only.
 //
 // Routes:
@@ -31,6 +31,8 @@
 // Log bytes are intentionally outside this allowlist. The link-issuance route
 // returns a short-lived, one-time Shenzhen URL that the browser downloads
 // directly, so files up to 200 MB never traverse the HK Edge Function.
+
+import { forwardSupport } from "./support-proxy.mjs";
 
 import {
   MAX_REQUEST_JSON_BYTES,
@@ -73,7 +75,7 @@ const MAX_OTA_REQUEST_JSON_BYTES = 2_800_000;
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
 };
 
 type GuardResult =
@@ -108,7 +110,7 @@ function requireEnv() {
 }
 
 // Resolve the operator from verified Auth and employee records. Main-site
-// employees are further restricted to two device routes in the handler below.
+// employees are restricted to support and two device routes below.
 async function verifyAdmin(req: Request): Promise<GuardResult> {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
     return { ok: false, status: 500, error: "Server misconfigured" };
@@ -408,6 +410,12 @@ Deno.serve(async (req) => {
   }
   if (!isAllowedHonnmonoUpstream(upstreamUrl)) {
     return json({ error: "Server misconfigured" }, 500);
+  }
+
+  if (subPath.startsWith("/support/")) {
+    return forwardSupport(req, upstreamUrl, {
+      token: HONNMONO_ADMIN_INTERNAL_TOKEN, operatorEmail: guard.operatorEmail, cors: CORS_HEADERS,
+    });
   }
 
   let upstreamBody: string | undefined;

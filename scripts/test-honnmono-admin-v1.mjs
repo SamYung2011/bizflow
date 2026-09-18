@@ -28,8 +28,8 @@ const [app, view, helper, i18n, edge, override] = await Promise.all([
 
 assert.match(
   app,
-  /\.\.\.\(isBfAdmin \? \[\{ type: "group", id: "g_honnmono"/,
-  "Honnmono nav group must remain admin-only",
+  /\.\.\.\(isBizflowMainAllowed \? \[\{ type: "group", id: "g_honnmono"/,
+  "Honnmono group admits main-site users while feedback remains admin-only",
 );
 assert.match(app, /id: "appFeedback", label: t\("用戶反饋"\)/);
 assert.match(app, /tab === "appFeedback" && isBfAdmin/);

@@ -35,8 +35,8 @@ function Workspace({ session, employees }) {
   </div>;
 }
 
-export default function AppSupport({ session, isAdmin, employees = [] }) {
+export default function AppSupport({ session, employees = [], embedded = false }) {
   const { t } = useT();
-  if (!isAdmin || !session?.access_token || !session?.user?.email) return <div role="alert">{t('未登入或沒有管理員權限')}</div>;
-  return <div className="support-container"><Workspace key={session.user.id || session.user.email} session={session} employees={employees} /></div>;
+  if (!session?.access_token || !session?.user?.email) return <div role="alert">{t('請先登入客服工作台')}</div>;
+  return <div className={`support-container${embedded ? ' support-embedded' : ''}`}><Workspace key={session.user.id || session.user.email} session={session} employees={employees} /></div>;
 }

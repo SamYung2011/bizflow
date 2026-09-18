@@ -149,3 +149,5 @@
   .support-header-actions:not(:empty) { flex: 0 0 100%; }
 }
 @media (prefers-reduced-motion: reduce) { .support-skeleton i, .support-spinner { animation: none; } }
+
+.support-embedded .support-workspace { height: 100dvh; min-height: 0; max-height: none; box-shadow: none; }

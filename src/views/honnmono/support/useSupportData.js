@@ -39,7 +39,7 @@ export function useSupportThread(id, options) {
       const current = client.getQueryData(messageKey) || [];
       let afterId = Math.max(0, ...current.map(message => message.id)), incoming = [], batch;
       do {
-        batch = await api.listMessages(id, { afterId, limit: SUPPORT_PAGE_SIZE }, { ...options, signal });
+        batch = await api.listMessages(id, { ...(afterId ? { afterId } : {}), limit: SUPPORT_PAGE_SIZE }, { ...options, signal });
         incoming = mergeMessages(incoming, batch);
         if (!afterId) {
           if (activeId.current === id) setHasOlder(batch.length === SUPPORT_PAGE_SIZE);

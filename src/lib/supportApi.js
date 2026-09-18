@@ -48,9 +48,13 @@ export async function uploadAttachment(id, file, options = {}) {
   });
   const signed = signature.filelist[0];
   // Existing cloud-storage upload consumes raw bytes (not a multipart envelope).
-  const uploaded = await fetch(signed.cfinfo.url, {
+  const apiBase = import.meta.env.VITE_SUPABASE_URL;
+  const uploadUrl = new URL(signed.cfinfo.url, apiBase);
+  const isBridge = uploadUrl.origin === new URL(apiBase).origin && uploadUrl.pathname.startsWith('/functions/v1/honnmono-admin/support/upload/');
+  const uploaded = await fetch(uploadUrl.href, {
     method: signed.cfinfo.method || 'POST', body: file,
-    headers: { 'Content-Type': file.type || 'application/octet-stream' }, signal: options.signal,
+    headers: { 'Content-Type': file.type || 'application/octet-stream',
+      ...(isBridge ? { Authorization: `Bearer ${options.accessToken}`, apikey: import.meta.env.VITE_SUPABASE_ANON_KEY } : {}) }, signal: options.signal,
   });
   if (!uploaded.ok) throw new Error(`Upload HTTP ${uploaded.status}`);
   const result = await uploaded.json();

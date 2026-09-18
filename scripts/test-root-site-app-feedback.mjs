@@ -448,9 +448,9 @@ assert.match(apiSource, /body:\s*serializedBody/);
 assert.match(apiSource, /allowedBackendCodes\.has\(backendCode\)/);
 assert.match(pageSource, /error\.code === "imei_ambiguous"/);
 assert.match(pageSource, /error\.code === "device_charging"/);
-assert.match(pageSource, /data-app-feedback-tab="feedback"/);
-assert.match(pageSource, /data-app-feedback-tab="device"/);
-assert.match(pageSource, /data-app-feedback-tab="devices"/);
+assert.match(pageSource, /\["feedback", "feedbackTab"\]/);
+assert.match(pageSource, /\["device", "deviceUnbindTab"\]/);
+assert.match(pageSource, /\["devices", "deviceListTab"\]/);
 assert.match(pageSource, /data-adapter-kind="flash"/);
 assert.match(pageSource, /data-adapter-kind="dc-pro"/);
 assert.match(pageSource, /data-adapter-action="force_ota"/);
@@ -1341,7 +1341,7 @@ tabScope.dispose();
 assert.match(pageSource, /poll:\s*pollActiveTab/);
 assert.match(
   pageSource,
-  /if \(!\["device", "sim"\]\.includes\(state\.activeTab\)\) poller\.start\(state\.activeTab === "devices" \? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS\)/,
+  /if \(!\["support", "device", "sim"\]\.includes\(state\.activeTab\)\) poller\.start\(state\.activeTab === "devices" \? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS\)/,
   "the SIM tab is a one-shot lookup form, so it must not start the poller",
 );
 assert.match(pageSource, /return pollAdapterList\(\{ signal \}\)/);
@@ -1975,7 +1975,7 @@ assert.doesNotMatch(simSource, /\bsetInterval\s*\(/);
 assert.doesNotMatch(simSource, /\bsetTimeout\s*\(/);
 assert.doesNotMatch(simSource, /window\.confirm/);
 assert.match(simSource, /escapeHtml/);
-assert.match(pageSource, /data-app-feedback-tab="sim"/);
+assert.match(pageSource, /\["sim", "simCardTab"\]/);
 assert.match(pageSource, /if \(nextTab === "sim"\)/);
 assert.match(pageSource, /isSimTab: \(\) => state\?\.activeTab === "sim"/);
 // 413 is what the bridge answers when a paste outruns the import cap.

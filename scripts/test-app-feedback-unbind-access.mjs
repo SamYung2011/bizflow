@@ -61,7 +61,7 @@ async function mount(isAdmin, saved = {}, lang = 'zh') {
   return { calls, timers, controller, html: () => element.outerHTML,
     respond(fn) { responder = fn; }, event,
     async tab(tab) { event('click', '[data-app-feedback-tab]', tab); await tick(); },
-    async lookup() { event('input', '[data-device-imei]', '000000000000001'); event('submit', '[data-device-search]'); await tick(); },
+    async lookup() { await this.tab('device'); event('input', '[data-device-imei]', '000000000000001'); event('submit', '[data-device-search]'); await tick(); },
     dispose() { controller.dispose(); base.dispose(); } };
 }
 try {
@@ -87,27 +87,29 @@ try {
       assert.equal(routeManifest[`/bizflow/${id}.html`].frame.access, 'bf-admin');
     }
   });
-  await check('employee restores every saved tab into device only, ignores forbidden tab events, makes no loads or poll timers', async () => {
+  await check('employee starts on support with two tabs, ignores forbidden tabs, makes no admin loads', async () => {
     for (const activeTab of [undefined, 'feedback', 'device', 'devices', 'sim']) {
       const f = await mount(false, { activeTab });
       try {
-        assert.equal(f.controller.captureState().activeTab, 'device');
-        assert.match(f.html(), /data-device-search/);
-        assert.doesNotMatch(f.html(), /data-app-feedback-tab|data-ota-|data-sim-|data-adapter-/);
+        assert.equal(f.controller.captureState().activeTab, 'support');
+        assert.match(f.html(), /data-support-frame/);
+        assert.deepEqual([...f.html().matchAll(/data-app-feedback-tab="([^"]+)"/g)].map(m => m[1]), ['support', 'device']);
+        assert.doesNotMatch(f.html(), /data-ota-|data-sim-|data-adapter-/);
         for (const tab of ['feedback', 'devices', 'sim']) await f.tab(tab);
-        assert.equal(f.controller.captureState().activeTab, 'device');
+        assert.equal(f.controller.captureState().activeTab, 'support');
         document.dispatchEvent(new Event('visibilitychange')); await tick();
         assert.equal(f.calls.length, 0); assert.equal(f.timers.length, 0);
       } finally { f.dispose(); }
     }
   });
-  await check('admin retains four tabs, initial feedback and polling, device OTA, list and SIM loads', async () => {
+  await check('admin retains five tabs, initial feedback and polling, device OTA, list and SIM loads', async () => {
     const f = await mount(true);
     try {
-      assert.deepEqual([...f.html().matchAll(/data-app-feedback-tab="([^"]+)"/g)].map(m => m[1]), ['feedback', 'device', 'devices', 'sim']);
+      assert.deepEqual([...f.html().matchAll(/data-app-feedback-tab="([^"]+)"/g)].map(m => m[1]), ['feedback', 'support', 'device', 'devices', 'sim']);
       assert.ok(f.calls.some(x => x.path.startsWith('/feedback?')));
       assert.ok(f.timers.some(x => x.ms === 30_000));
-      await f.tab('device'); assert.match(f.html(), /data-ota-/);
+      await f.tab('support'); assert.match(f.html(), /view=appSupport&embed=1/);
+      await f.tab('device'); assert.doesNotMatch(f.html(), /data-support-frame/); assert.match(f.html(), /data-ota-/);
       assert.ok(f.calls.some(x => x.path === '/ota/package'));
       await f.tab('devices'); assert.ok(f.calls.some(x => x.path.startsWith('/devices/flash?')));
       await f.tab('sim'); assert.ok(f.calls.some(x => x.path.startsWith('/sim/cards?')));

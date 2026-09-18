@@ -5,6 +5,11 @@ import { createContext, useContext, useState, useEffect } from "react";
 const STORAGE_KEY = "bizflow-lang";
 
 const DICT_EN = {
+  "使用者已结束本次服务": "The user has ended this conversation",
+  "使用者已結束本次服務": "The user has ended this conversation",
+
+  "未登入或沒有主站權限": "Sign in with main-site access",
+  "請先登入客服工作台": "Please sign in to the support workspace",
   "已转人工客服": "Connected to human support",
   "客服已结束本次服务": "Support closed this conversation",
   // APP support workspace
@@ -1936,6 +1941,11 @@ const DICT_EN = {
 };
 
 const DICT_FR = {
+  "使用者已结束本次服务": "L’utilisateur a clôturé cette conversation",
+  "使用者已結束本次服務": "L’utilisateur a clôturé cette conversation",
+
+  "未登入或沒有主站權限": "Connectez-vous avec un accès au site principal",
+  "請先登入客服工作台": "Connectez-vous à l’espace d’assistance",
   "已转人工客服": "Transfert à un conseiller",
   "客服已结束本次服务": "L’assistance a terminé cette conversation",
   // APP support workspace
@@ -3870,6 +3880,8 @@ const I18nContext = createContext({ lang: "zh", setLang: () => {}, t: (s) => s }
 
 export function I18nProvider({ children }) {
   const [lang, setLangState] = useState(() => {
+    const query = typeof window === "undefined" ? null : new URLSearchParams(window.location.search);
+    if (query?.get("embed") === "1" && ["zh", "en", "fr"].includes(query.get("lang"))) return query.get("lang");
     try { return localStorage.getItem(STORAGE_KEY) || "zh"; } catch { return "zh"; }
   });
   useEffect(() => {

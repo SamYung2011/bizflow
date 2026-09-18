@@ -1,4 +1,6 @@
 const zh = {
+  supportTab: "APP 客服",
+  supportSubtitle: "回覆 Honnmono APP 使用者的客服訊息",
   honnmonoAppTitle: "Honnmono APP",
   title: "用戶反饋",
   subtitle: "查看 Honnmono APP 用戶提交的反饋及診斷日誌",
@@ -155,6 +157,8 @@ const zh = {
 };
 
 const en = {
+  supportTab: "APP Support",
+  supportSubtitle: "Reply to Honnmono APP users",
   honnmonoAppTitle: "Honnmono APP",
   title: "User feedback",
   subtitle: "Review feedback and diagnostic logs submitted by Honnmono App users",
@@ -311,6 +315,8 @@ const en = {
 };
 
 const fr = {
+  supportTab: "Assistance APP",
+  supportSubtitle: "Répondre aux utilisateurs de Honnmono APP",
   honnmonoAppTitle: "Honnmono APP",
   title: "Commentaires utilisateurs",
   subtitle: "Consulter les commentaires et journaux de diagnostic envoyés depuis l’application Honnmono",
