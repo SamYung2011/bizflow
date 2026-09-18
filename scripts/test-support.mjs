@@ -26,7 +26,13 @@ check('five fixtures cover manual, AI, claimed, closed and unread states', () =>
   assert(conversations.some(item => item.status === 'closed'));
 });
 const waiting = await mock.listConversations({ status: 'open', filter: 'waiting_staff' });
-check('waiting filter follows the backend last-sender contract', () => assert(waiting.every(item => item.status === 'open' && item.lastSenderRole === 'user')));
+check('waiting filter follows the backend last-sender contract', () => assert(waiting.every(item => item.status === 'open' && item.lastSenderRole !== 'staff')));
+check('unanswered manual and AI handoff conversations wait; closed always wins', () => {
+  for (const lastSenderRole of ['user', 'ai', 'system', 'staff']) {
+    assert.equal(config.conversationState({ status: 'open', lastSenderRole }), lastSenderRole === 'staff' ? 'active' : 'waiting');
+    assert.equal(config.conversationState({ status: 'closed', lastSenderRole }), 'closed');
+  }
+});
 const searched = await mock.listConversations({ q: '66001002' });
 check('phone search scopes the results', () => assert.deepEqual(searched.map(item => item.id), [2]));
 const latest = await mock.listMessages(3, { limit: 30 });
@@ -55,7 +61,11 @@ check('retry is idempotent and incremental polling returns the appended message'
   assert.equal(sent.id, repeated.id); assert.equal(newMessages.length, 1); assert.equal(sent.senderName, 'test@example.test');
 });
 const assigned = await mock.getConversation(4);
-check('successful reply assigns the conversation to its sender', () => assert.equal(assigned.assigneeEmail, 'test@example.test'));
+check('successful reply assigns the conversation to its sender', () => {
+  assert.equal(assigned.assigneeEmail, 'test@example.test');
+  assert.equal(config.conversationState(assigned), 'active');
+});
+assert(!(await mock.listConversations({ filter: 'waiting_staff' })).some(item => item.id === 4));
 await mock.sendMessage(4, { ...body, clientMsgId: 'handover-id', content: 'I will take over.' }, { operatorEmail: 'next@example.test' });
 const handedOver = await mock.getConversation(4), handoverList = await mock.listConversations();
 check('a later staff reply takes over in both detail and list', () => {
@@ -69,7 +79,11 @@ mock.configureMock({ failNext: true });
 await rejects('a failed takeover is rejected', mock.sendMessage(4, { ...body, clientMsgId: 'failed-takeover', content: 'Another reply' }, { operatorEmail: 'test@example.test' }));
 mock.receiveMockMessage(4);
 const stillAssigned = await mock.getConversation(4);
-check('failed takeover and incoming user messages preserve the responsible staff', () => assert.equal(stillAssigned.assigneeEmail, 'next@example.test'));
+check('failed takeover and incoming user messages preserve the responsible staff', () => {
+  assert.equal(stillAssigned.assigneeEmail, 'next@example.test');
+  assert.equal(config.conversationState(stillAssigned), 'waiting');
+});
+assert((await mock.listConversations({ filter: 'waiting_staff' })).some(item => item.id === 4));
 const updated = await mock.updateConversation(4, { assigneeEmail: '', category: config.SUPPORT_CATEGORIES[1], status: 'closed' });
 check('category updates cannot claim, release or close a conversation', () => {
   assert.equal(updated.category, config.SUPPORT_CATEGORIES[1]); assert.equal(updated.assigneeEmail, 'next@example.test');

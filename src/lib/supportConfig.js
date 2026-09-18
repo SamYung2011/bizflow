@@ -17,7 +17,7 @@ export function mergeMessages(current = [], incoming = []) {
 
 export function conversationState(conversation) {
   return conversation.status === 'closed' ? 'closed'
-    : conversation.lastSenderRole === 'user' ? 'waiting' : 'active';
+    : conversation.lastSenderRole !== 'staff' ? 'waiting' : 'active';
 }
 
 export function staffName(email, employees) {

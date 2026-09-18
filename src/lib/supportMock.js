@@ -1,4 +1,4 @@
-import { SUPPORT_CATEGORIES, SUPPORT_LIMITS } from './supportConfig.js';
+import { SUPPORT_CATEGORIES, SUPPORT_LIMITS, conversationState } from './supportConfig.js';
 
 const baseTime = new Date('2026-09-17T09:42:00+08:00').getTime();
 let nextId = 1000;
@@ -94,7 +94,7 @@ export function configureMock(options) { settings = { ...settings, ...options };
 export async function listConversations({ status = 'all', filter, page = 1, size = 30, q = '' } = {}) {
   await wait();
   return clone(conversations.filter(item => (status === 'all' || item.status === status)
-    && (filter !== 'waiting_staff' || item.status === 'open' && item.lastSenderRole === 'user')
+    && (filter !== 'waiting_staff' || conversationState(item) === 'waiting')
     && `${item.userNickname} ${item.userPhone}`.toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => b.lastMessageAt - a.lastMessageAt).slice((page - 1) * size, page * size));
 }
