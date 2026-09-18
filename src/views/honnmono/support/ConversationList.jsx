@@ -1,6 +1,6 @@
 import React from 'react';
 import { useT } from '../../../i18n.jsx';
-import { SUPPORT_CATEGORIES, conversationState } from '../../../lib/supportConfig.js';
+import { SUPPORT_CATEGORIES, conversationState, systemMessageKey } from '../../../lib/supportConfig.js';
 import SupportIcon from './SupportIcon.jsx';
 import SupportSkeleton from './SupportSkeleton.jsx';
 import { formatTime } from './format.js';
@@ -33,7 +33,7 @@ export default function ConversationList({ query, selectedId, onSelect, filters,
         <span className={`support-avatar tone-${item.id % 5}`}>{item.userNickname?.slice(0, 1).toUpperCase()}</span>
         <span className="support-conversation-copy"><span className="support-conversation-title"><strong>{item.userNickname}</strong>
           {item.category && <span className="support-category">{t(item.category)}</span>}</span>
-          <span className="support-preview">{item.lastMessagePreview === '[attachment]' ? t('附件') : item.lastSenderRole === 'system' ? t(item.lastMessagePreview) : item.lastMessagePreview}</span>
+          <span className="support-preview">{item.lastMessagePreview === '[attachment]' ? t('附件') : item.lastSenderRole === 'system' ? t(systemMessageKey(item.lastMessagePreview)) : item.lastMessagePreview}</span>
           <span className="support-conversation-source">{t(item.source === 'ai_handoff' ? 'AI 轉人工' : '使用者發起')}
             {item.assigneeEmail && <span> · {t('已認領')}</span>}</span>
         </span>

@@ -6,6 +6,9 @@ export const SUPPORT_CATEGORIES = [
 ];
 export const SUPPORT_PAGE_SIZE = 30;
 
+const systemKeys = { '已转人工客服': '已轉人工客服', '客服已结束本次服务': '客服已結束本次服務', '使用者已结束本次服务': '使用者已結束本次服務' };
+export const systemMessageKey = content => systemKeys[content] || content;
+
 export function mergeMessages(current = [], incoming = []) {
   const entries = new Map(current.map(message => [message.clientMsgId || message.id, message]));
   incoming.forEach(message => entries.set(message.clientMsgId || message.id, message));
