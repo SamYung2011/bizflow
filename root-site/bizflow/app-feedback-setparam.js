@@ -9,9 +9,11 @@ const PROTOCOL_KEYS = {
 
 export function createFlashSetparamState() {
   return {
-    param: "rated_current",
+    param: "max_voltage",
     valueInput: "",
     certidInput: "",
+    passwordInput: "",
+    passwordError: "",
     devices: [],
     records: [],
     loading: false,
@@ -68,8 +70,34 @@ export function setparamStatusText(record, t) {
   return t("setparamFailed", { reason });
 }
 
-function errorText(error, t) {
-  return error?.backendMessage || t("setparamRequestFailed", { message: t(error?.code || "networkError") });
+export function setparamErrorText(error, t) {
+  const detail = error?.backendDetail;
+  const code = detail?.error;
+  if (code === "param_out_of_range") {
+    if (detail.param === "rated_current") {
+      return t("setparamCurrentOutOfRange", { max: formatSetparamValue(detail.param, detail.max) });
+    }
+    if (detail.param === "max_voltage") {
+      return t("setparamVoltageOutOfRange", {
+        min: formatSetparamValue(detail.param, detail.min),
+        max: formatSetparamValue(detail.param, detail.max),
+      });
+    }
+    return t("setparamModeOutOfRange", { min: detail.min, max: detail.max });
+  }
+  if (code === "param_not_integer") {
+    return t("setparamNotInteger", { param: t(`setparam.${detail.param}`) });
+  }
+  if (code === "unknown_param") return t("setparamUnknownParam", { param: detail.param });
+  const keys = {
+    invalid_params: "setparamInvalidParams",
+    invalid_target: "setparamInvalidTarget",
+    invalid_certids: "setparamInvalidCertids",
+    password_required: "setparamPasswordRequired",
+    password_incorrect: "setparamPasswordIncorrect",
+    password_check_failed: "setparamPasswordCheckFailed",
+  };
+  return t(keys[code] || "setparamServiceError");
 }
 
 function details(record, t) {
@@ -116,11 +144,13 @@ export function renderFlashSetparam(view, { t, escape: e, lang }) {
       ${view.records.length ? `<div class="app-feedback-setparam__table-wrap"><table class="app-feedback-setparam__table"><thead><tr><th>${e(t("createdAt"))}</th><th>${e(t("setparamDeviceId"))}</th><th>${e(t("setparamChange"))}</th><th>${e(t("status"))}</th><th>${e(t("setparamOperator"))}</th></tr></thead><tbody>${view.records.map((record) => `<tr><td>${e(formatFeedbackTime(record.createdAt, lang))}</td><td title="${e(record.certid)}">${e(String(record.certid).slice(0, 6))}</td><td>${e(details(record, t))}</td><td>${e(setparamStatusText(record, t))}</td><td>${e(record.operator || "—")}</td></tr>`).join("")}</tbody></table></div>` : `<p>${e(t("setparamNoHistory"))}</p>`}
     </section>
     ${confirm ? `<div class="app-feedback-overlay app-feedback-device-confirm-overlay" data-setparam-overlay><section class="app-feedback-device-confirm" role="alertdialog" aria-modal="true" aria-labelledby="setparam-confirm-title">
-      <h2 id="setparam-confirm-title">${e(t("setparamConfirmTitle"))}</h2>
-      <p>${e(t("setparamConfirmIntro", { count: confirm.lines.length }))}</p>
+      <h2 id="setparam-confirm-title">${e(t(confirm.kind === "single" ? "setparamPasswordTitle" : "setparamConfirmTitle"))}</h2>
+      ${confirm.kind === "single" ? `<p>${e(t("setparamPasswordPrompt"))}</p>` : `<p>${e(t("setparamConfirmIntro", { count: confirm.lines.length }))}</p>
       <ul class="app-feedback-setparam__confirm-list">${confirm.lines.map((line) => `<li title="${e(line.certid)}">${e(line.certid)}: ${e(line.before)} → ${e(line.after)}</li>`).join("")}</ul>
-      <p>${e(t("setparamSkippedCount", { count: unsupported }))}</p>
-      <div class="app-feedback-device-confirm__actions"><button type="button" class="app-feedback-button" data-setparam-cancel>${e(t("cancel"))}</button><button type="button" class="app-feedback-button app-feedback-button--danger" data-setparam-confirm${view.sending ? " disabled" : ""}>${e(t("setparamConfirmSend"))}</button></div>
+      <p>${e(t("setparamSkippedCount", { count: unsupported }))}</p>`}
+      ${confirm.param === "rated_current" ? `<label class="app-feedback-setparam__password"><span>${e(t("setparamPasswordLabel"))}</span><input class="app-feedback-control" type="password" autocomplete="current-password" data-setparam-password value="${e(view.passwordInput)}"${view.sending ? " disabled" : ""}></label>${view.passwordError ? `<div class="app-feedback-alert" role="alert">${e(view.passwordError)}</div>` : ""}` : ""}
+      ${view.error ? `<div class="app-feedback-alert" role="alert">${e(view.error)}</div>` : ""}
+      <div class="app-feedback-device-confirm__actions"><button type="button" class="app-feedback-button" data-setparam-cancel${view.sending ? " disabled" : ""}>${e(t("cancel"))}</button><button type="button" class="app-feedback-button app-feedback-button--danger" data-setparam-confirm${view.sending ? " disabled" : ""}>${e(t(view.sending ? "refreshing" : "setparamConfirmSend"))}</button></div>
     </section></div>` : ""}
   </div>`;
 }
@@ -164,7 +194,7 @@ export function createFlashSetparamController({ view, call, signal, isActive, re
       return true;
     } catch (error) {
       if (visible() && current === request) {
-        view.error = errorText(error, t);
+        view.error = setparamErrorText(error, t);
         rerender();
       }
       return false;
@@ -175,24 +205,35 @@ export function createFlashSetparamController({ view, call, signal, isActive, re
       }
     }
   }
-  async function send(all, certid, converted) {
+  async function send(all, certid, converted, param) {
     view.sending = true;
     view.error = "";
+    view.passwordError = "";
+    const password = view.passwordInput;
+    view.passwordInput = "";
     rerender();
     try {
       const result = await call("/devices/flash-setparam", {
         method: "POST", signal,
-        body: { params: { [view.param]: converted }, ...(all ? { all: true } : { certids: [certid] }) },
+        body: {
+          params: { [param]: converted },
+          ...(all ? { all: true } : { certids: [certid] }),
+          ...(param === "rated_current" ? { password } : {}),
+        },
       });
-      if (!isActive()) return;
       view.lastBatch = result;
       view.confirm = null;
-      await read({ quiet: true });
+      if (isActive()) await read({ quiet: true });
     } catch (error) {
-      if (isActive()) view.error = errorText(error, t);
+      const message = setparamErrorText(error, t);
+      if (["password_required", "password_incorrect"].includes(error?.backendDetail?.error)) {
+        view.passwordError = message;
+      } else {
+        view.error = message;
+      }
     } finally {
+      view.sending = false;
       if (isActive()) {
-        view.sending = false;
         rerender();
       }
     }
@@ -200,6 +241,10 @@ export function createFlashSetparamController({ view, call, signal, isActive, re
   function onInput(target) {
     if (target.matches("[data-setparam-value]")) view.valueInput = target.value;
     else if (target.matches("[data-setparam-certid]")) view.certidInput = target.value;
+    else if (target.matches("[data-setparam-password]")) {
+      view.passwordInput = target.value;
+      view.passwordError = "";
+    }
     else return false;
     view.error = "";
     return true;
@@ -214,7 +259,10 @@ export function createFlashSetparamController({ view, call, signal, isActive, re
       return true;
     }
     if (target.closest?.("[data-setparam-cancel]") || target.matches?.("[data-setparam-overlay]")) {
+      if (view.sending) return true;
       view.confirm = null;
+      view.passwordInput = "";
+      view.passwordError = "";
       rerender();
       return true;
     }
@@ -227,18 +275,30 @@ export function createFlashSetparamController({ view, call, signal, isActive, re
         rerender();
         return true;
       }
-      void send(false, match.certid, converted);
+      if (view.param === "rated_current") {
+        view.confirm = { kind: "single", certid: match.certid, value: converted, param: view.param };
+        view.passwordError = "";
+        view.error = "";
+        rerender();
+      } else {
+        void send(false, match.certid, converted, view.param);
+      }
       return true;
     }
     if (target.closest?.("[data-setparam-all]")) {
       const converted = value();
       if (converted === null) return true;
-      view.confirm = { value: converted, lines: setparamConfirmationLines(view.devices, view.param, converted) };
+      view.confirm = { kind: "all", param: view.param, value: converted, lines: setparamConfirmationLines(view.devices, view.param, converted) };
+      view.passwordError = "";
+      view.error = "";
       rerender();
       return true;
     }
     if (target.closest?.("[data-setparam-confirm]")) {
-      if (view.confirm && !view.sending) void send(true, null, view.confirm.value);
+      if (view.confirm && !view.sending) {
+        const confirm = view.confirm;
+        void send(confirm.kind === "all", confirm.certid, confirm.value, confirm.param);
+      }
       return true;
     }
     return false;
@@ -249,6 +309,12 @@ export function createFlashSetparamController({ view, call, signal, isActive, re
     onInput,
     onClick,
     hasPending: pending,
-    cancel() { view.confirm = null; rerender(); },
+    cancel() {
+      if (view.sending) return;
+      view.confirm = null;
+      view.passwordInput = "";
+      view.passwordError = "";
+      rerender();
+    },
   };
 }

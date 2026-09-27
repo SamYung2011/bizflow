@@ -1307,3 +1307,9 @@
   overflow-y: auto;
   overflow-wrap: anywhere;
 }
+
+.app-feedback-setparam__password {
+  display: grid;
+  gap: var(--space-10);
+  margin: var(--space-20) 0;
+}

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { prepareSetparamBody } from "./setparam-password.mjs";
 
 import {
   DEVICE_UNBIND_TIMEOUT_MS,
@@ -34,6 +36,50 @@ test("routes only flash parameter writes and recent reads to ota-admin", () => {
   assert.equal(mapOtaAdminPath("/devices/flash/A/unbind", "POST"), "");
   const body = JSON.stringify({ params: { rated_current: 4000 }, all: true });
   assert.equal(validateOtaAdminBody(body), body);
+});
+
+test("current changes require the operator password and strip it before forwarding", async () => {
+  const common = { operatorEmail: "operator@example.com", supabaseUrl: "https://example.supabase.co", anonKey: "anon" };
+  const current = { params: { rated_current: 4000 }, all: true };
+  const noPassword = await prepareSetparamBody(JSON.stringify(current), { ...common, fetchImpl: () => { throw new Error("must not fetch"); } });
+  assert.deepEqual(noPassword, { error: "password_required", status: 403 });
+
+  const authCalls = [];
+  const wrong = await prepareSetparamBody(JSON.stringify({ ...current, password: "incorrect-test-value" }), {
+    ...common,
+    fetchImpl: async (url, options) => {
+      authCalls.push({ url, options });
+      return { status: 400 };
+    },
+  });
+  assert.deepEqual(wrong, { error: "password_incorrect", status: 403 });
+  assert.equal(authCalls.length, 1);
+  assert.match(authCalls[0].url, /\/auth\/v1\/token\?grant_type=password$/);
+  assert.equal(JSON.parse(authCalls[0].options.body).email, common.operatorEmail);
+
+  const validCalls = [];
+  const valid = await prepareSetparamBody(JSON.stringify({ ...current, password: "correct-test-value" }), {
+    ...common,
+    fetchImpl: async (url, options) => {
+      validCalls.push({ url, options });
+      return url.includes("/token?")
+        ? { status: 200, json: async () => ({ access_token: "new-temp-token" }) }
+        : { status: 204 };
+    },
+  });
+  assert.deepEqual(JSON.parse(valid.body), current);
+  assert.equal(validCalls.length, 2);
+  assert.match(validCalls[1].url, /\/auth\/v1\/logout\?scope=local$/);
+  assert.equal(validCalls[1].options.headers.Authorization, "Bearer new-temp-token");
+
+  const voltage = { params: { max_voltage: 6000 }, all: true, password: "unused-test-value" };
+  const withoutCurrent = await prepareSetparamBody(JSON.stringify(voltage), {
+    ...common, fetchImpl: () => { throw new Error("voltage must not reauthenticate"); },
+  });
+  assert.deepEqual(JSON.parse(withoutCurrent.body), { params: voltage.params, all: true });
+  const source = await readFile(new URL("./index.ts", import.meta.url), "utf8");
+  assert.match(source, /prepareSetparamBody\(otaBody,/);
+  assert.match(source, /otaBody = prepared\.body/);
 });
 
 test("session-day calendars use the same upstream as each device's sessions", () => {

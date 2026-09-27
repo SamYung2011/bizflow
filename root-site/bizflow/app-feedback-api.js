@@ -120,7 +120,7 @@ export async function callHonnmonoAdmin(
       response.status,
     );
     if (subPath.startsWith("/devices/flash-setparam") && typeof parsed?.error === "string") {
-      error.backendMessage = parsed.error;
+      error.backendDetail = parsed;
     }
     throw error;
   }
