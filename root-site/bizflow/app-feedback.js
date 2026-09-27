@@ -28,6 +28,7 @@ import {
   renderSimCards,
 } from "./app-feedback-sim.js";
 import { translateAppFeedback } from "./app-feedback-i18n.js";
+import { createFlashSetparamController, createFlashSetparamState, renderFlashSetparam } from "./app-feedback-setparam.js";
 import { createAdapterOtaLoader, renderAdapterLocation, renderAdapterOta } from "./app-feedback-device-live.js";
 import {
   DEVICES_POLL_INTERVAL_MS,
@@ -48,6 +49,7 @@ let activePoller = null;
 let activeDeviceController = null;
 let activeOtaController = null;
 let activeSimController = null;
+let activeSetparamController = null;
 let activeAdapterOtaLoader = null;
 let instanceSequence = 0;
 let activeInstance = 0;
@@ -88,7 +90,7 @@ export function adapterSessionMinDate(today = currentHongKongDate()) {
 }
 
 function createAdapterDeviceState(saved = {}) {
-  const kind = saved.adapterKind === "dc-pro" ? "dc-pro" : "flash";
+  const kind = ["dc-pro", "setparam"].includes(saved.adapterKind) ? saved.adapterKind : "flash";
   return {
     kind,
     rows: [],
@@ -687,12 +689,17 @@ function renderAdapterSessions() {
 function renderAdapterPanel() {
   const adapters = state.adapters;
   const pages = adapterPageCount();
+  const tabs = `<nav class="app-feedback-tabs app-feedback-adapter-tabs" aria-label="${rawE(t("deviceListTab"))}">
+    <button type="button" class="app-feedback-tab${adapters.kind === "flash" ? " is-active" : ""}" data-adapter-kind="flash">${rawE(t("flashAdapterTab"))}</button>
+    <button type="button" class="app-feedback-tab${adapters.kind === "dc-pro" ? " is-active" : ""}" data-adapter-kind="dc-pro">${rawE(t("dcProAdapterTab"))}</button>
+    <button type="button" class="app-feedback-tab${adapters.kind === "setparam" ? " is-active" : ""}" data-adapter-kind="setparam">${rawE(t("setparamAdapterTab"))}</button>
+  </nav>`;
+  if (adapters.kind === "setparam") {
+    return `<div class="app-feedback-device-panel">${tabs}${renderFlashSetparam(state.setparam, { t, escape: rawE, lang: helpers.lang })}</div>`;
+  }
   return `<div class="app-feedback-device-panel">
     <div class="app-feedback-card">
-      <nav class="app-feedback-tabs app-feedback-adapter-tabs" aria-label="${rawE(t("deviceListTab"))}">
-        <button type="button" class="app-feedback-tab${adapters.kind === "flash" ? " is-active" : ""}" data-adapter-kind="flash">${rawE(t("flashAdapterTab"))}</button>
-        <button type="button" class="app-feedback-tab${adapters.kind === "dc-pro" ? " is-active" : ""}" data-adapter-kind="dc-pro">${rawE(t("dcProAdapterTab"))}</button>
-      </nav>
+      ${tabs}
       <div class="app-feedback-toolbar app-feedback-adapter-toolbar">
         <form class="app-feedback-search" data-adapter-search>
           <input class="app-feedback-control" data-adapter-query value="${rawE(adapters.queryInput)}" placeholder="${rawE(t("deviceSearchPlaceholder"))}" aria-label="${rawE(t("deviceSearchAria"))}">
@@ -1161,6 +1168,9 @@ async function pollAdapterList({ signal } = {}) {
 // use their own interval, and only one of them is on screen at a time.
 async function pollActiveTab({ signal } = {}) {
   if (!state) return true;
+  if (state.activeTab === "devices" && state.adapters.kind === "setparam") {
+    return activeSetparamController?.poll({ signal }) ?? true;
+  }
   if (state.activeTab === "devices") return pollAdapterList({ signal });
   return pollFeedbackList({ signal });
 }
@@ -1629,10 +1639,12 @@ function switchAppTab(nextTab) {
   }
   if (nextTab === "devices") {
     // The adapter list is live data (online/charging), so it keeps polling.
-    activePoller?.resume(DEVICES_POLL_INTERVAL_MS);
+    if (state.adapters.kind === "setparam") activePoller?.pause();
+    else activePoller?.resume(DEVICES_POLL_INTERVAL_MS);
     rerender();
-    if (!state.ota.loaded) void activeOtaController?.load();
-    void loadAdapters();
+    if (state.adapters.kind !== "setparam" && !state.ota.loaded) void activeOtaController?.load();
+    if (state.adapters.kind === "setparam") void activeSetparamController?.read();
+    else void loadAdapters();
     activeScope?.animationFrame(() =>
       document.querySelector("[data-adapter-query]")?.focus(),
     );
@@ -1681,7 +1693,7 @@ function onFeedbackClick(event) {
   const adapterKind = event.target.closest?.("[data-adapter-kind]");
   if (adapterKind) {
     const kind = adapterKind.getAttribute("data-adapter-kind");
-    if (["flash", "dc-pro"].includes(kind) && kind !== state.adapters.kind) {
+    if (["flash", "dc-pro", "setparam"].includes(kind) && kind !== state.adapters.kind) {
       state.adapters.kind = kind;
       state.adapters.detailDate =
         kind === "flash" ? currentHongKongDate() : "";
@@ -1690,10 +1702,18 @@ function onFeedbackClick(event) {
       state.adapters.total = 0;
       state.adapters.actionResult = null;
       closeAdapterSessions();
-      void loadAdapters();
+      if (kind === "setparam") {
+        activePoller?.pause();
+        void activeSetparamController?.read();
+      } else {
+        activePoller?.resume(DEVICES_POLL_INTERVAL_MS);
+        if (!state.ota.loaded) void activeOtaController?.load();
+        void loadAdapters();
+      }
     }
     return;
   }
+  if (state.activeTab === "devices" && state.adapters.kind === "setparam" && activeSetparamController?.onClick(event.target)) return;
   const adapterDetail = event.target.closest?.("[data-adapter-detail]");
   if (adapterDetail) {
     openAdapterSessions(adapterDetail.getAttribute("data-adapter-detail"));
@@ -1842,6 +1862,7 @@ function onFeedbackClick(event) {
 }
 
 function onFeedbackInput(event) {
+  if (state?.activeTab === "devices" && state.adapters.kind === "setparam" && activeSetparamController?.onInput(event.target)) return;
   if (event.target.matches("[data-adapter-query]")) {
     state.adapters.queryInput = event.target.value;
     state.adapters.lastAdapterInputAt = Date.now();
@@ -1968,6 +1989,10 @@ function onFeedbackSubmit(event) {
 }
 
 function onFeedbackKeydown(event) {
+  if (event.key === "Escape" && state?.setparam?.confirm) {
+    activeSetparamController?.cancel();
+    return;
+  }
   if (event.key === "Escape" && state?.adapters?.actionConfirm) {
     closeAdapterAction();
     return;
@@ -2006,6 +2031,7 @@ function createState(historyState, currentUser) {
     sim: createSimCardState(saved),
     ota: createOtaPackageState(),
     adapters: createAdapterDeviceState(saved),
+    setparam: createFlashSetparamState(),
     rows: [],
     total: 0,
     facets: {
@@ -2115,6 +2141,19 @@ export async function mountPage({
       scope.animationFrame(() => document.querySelector(selector)?.focus()),
   });
   activeSimController = simController;
+  const setparamController = createFlashSetparamController({
+    view: nextState.setparam,
+    call: callHonnmonoAdmin,
+    signal: scope.signal,
+    isActive: () => isActive(instance, scope) && state?.activeTab === "devices" && state.adapters.kind === "setparam",
+    rerender,
+    t,
+    setPolling: (hasPending) => {
+      if (hasPending) activePoller?.resume(DEVICES_POLL_INTERVAL_MS);
+      else activePoller?.pause();
+    },
+  });
+  activeSetparamController = setparamController;
   let poller = null;
 
   return {
@@ -2127,6 +2166,11 @@ export async function mountPage({
       scope.listen(document, "change", onFeedbackChange);
       scope.listen(document, "submit", onFeedbackSubmit);
       scope.listen(document, "keydown", onFeedbackKeydown);
+      scope.listen(document, "visibilitychange", () => {
+        if (document.visibilityState === "visible" && state?.activeTab === "devices" && state.adapters.kind === "setparam" && !setparamController.hasPending()) {
+          void setparamController.read({ quiet: true });
+        }
+      });
       if (!nextState.isAdmin) return;
       poller = createFeedbackPoller({
         scope,
@@ -2134,9 +2178,12 @@ export async function mountPage({
         poll: pollActiveTab,
       });
       activePoller = poller;
-      if (!["support", "device", "sim"].includes(state.activeTab)) poller.start(state.activeTab === "devices" ? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS);
-      if (["device", "devices"].includes(state.activeTab)) void otaController.load();
-      if (state.activeTab === "devices") void loadAdapters();
+      if (!["support", "device", "sim"].includes(state.activeTab) && !(state.activeTab === "devices" && state.adapters.kind === "setparam")) poller.start(state.activeTab === "devices" ? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS);
+      if (state.activeTab === "device" || (state.activeTab === "devices" && state.adapters.kind !== "setparam")) void otaController.load();
+      if (state.activeTab === "devices") {
+        if (state.adapters.kind === "setparam") void setparamController.read();
+        else void loadAdapters();
+      }
       if (state.activeTab === "sim") void simController.loadCards();
     },
     captureState: () => ({
@@ -2166,6 +2213,7 @@ export async function mountPage({
       }
       if (activeOtaController === otaController) activeOtaController = null;
       if (activeSimController === simController) activeSimController = null;
+      if (activeSetparamController === setparamController) activeSetparamController = null;
       if (activeInstance === instance) activeInstance = 0;
       if (activeScope === scope) activeScope = null;
       state = null;

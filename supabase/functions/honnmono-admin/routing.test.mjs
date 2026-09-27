@@ -21,6 +21,21 @@ import {
   validateOtaAdminBody,
 } from "./routing.mjs";
 
+test("routes only flash parameter writes and recent reads to ota-admin", () => {
+  const write = "/devices/flash-setparam";
+  const recent = "/devices/flash-setparam/recent";
+  assert.equal(mapOtaAdminPath(write, "POST"), write);
+  assert.equal(mapOtaAdminPath(recent, "GET"), recent);
+  assert.equal(mapOtaAdminPath(write, "GET"), "");
+  assert.equal(mapOtaAdminPath(recent, "POST"), "");
+  assert.equal(mapOtaAdminPath(`${recent}/extra`, "GET"), "");
+  assert.equal(mapFlashAdminPath(write, "POST"), "");
+  assert.equal(mapHonnmonoAdminPath(write, "POST"), "");
+  assert.equal(mapOtaAdminPath("/devices/flash/A/unbind", "POST"), "");
+  const body = JSON.stringify({ params: { rated_current: 4000 }, all: true });
+  assert.equal(validateOtaAdminBody(body), body);
+});
+
 test("session-day calendars use the same upstream as each device's sessions", () => {
   const flash = "/devices/flash/0DB897000000000000000000/sessions/days";
   const dcPro = "/devices/dc-pro/CERT_DC_1/sessions/days";

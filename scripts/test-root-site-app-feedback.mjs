@@ -78,6 +78,16 @@ import {
   feedbackPollDelay,
 } from "../root-site/bizflow/app-feedback-poller.js";
 import { createAdapterOtaLoader, renderAdapterLocation, renderAdapterOta } from "../root-site/bizflow/app-feedback-device-live.js";
+import {
+  createFlashSetparamController,
+  createFlashSetparamState,
+  formatSetparamValue,
+  matchFlashCertid,
+  renderFlashSetparam,
+  setparamConfirmationLines,
+  setparamStatusText,
+  toSetparamProtocolValue,
+} from "../root-site/bizflow/app-feedback-setparam.js";
 import { wgs84ToGcj02 } from "../root-site/bizflow/geo-coords.js";
 import { SECTION_MENU_ITEMS } from "../root-site/components/navigation-registry.js";
 import { dictionaries } from "../root-site/shell/shell-i18n.js";
@@ -1341,7 +1351,7 @@ tabScope.dispose();
 assert.match(pageSource, /poll:\s*pollActiveTab/);
 assert.match(
   pageSource,
-  /if \(!\["support", "device", "sim"\]\.includes\(state\.activeTab\)\) poller\.start\(state\.activeTab === "devices" \? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS\)/,
+  /if \(!\["support", "device", "sim"\]\.includes\(state\.activeTab\) && !\(state\.activeTab === "devices" && state\.adapters\.kind === "setparam"\)\) poller\.start\(state\.activeTab === "devices" \? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS\)/,
   "the SIM tab is a one-shot lookup form, so it must not start the poller",
 );
 assert.match(pageSource, /return pollAdapterList\(\{ signal \}\)/);
@@ -2235,3 +2245,81 @@ console.log(
 );
 
 await import("./test-app-feedback-unbind-access.mjs");
+
+const setparamDevices = [
+  { certid: "0D8C97034096400000EC7477", online: true, params: { maxVoltage: 5000, ratedCurrent: 4000, workMode: 1 } },
+  { certid: "0D8C98034096400000EC7477", online: false, params: null },
+  { certid: "0DB897034096400000EC7477", online: true, params: { maxVoltage: 3505, ratedCurrent: 3000, workMode: 2 } },
+];
+assert.match(pageSource, /data-adapter-kind="setparam"/);
+assert.match(pageSource, /adapterKind: state\.adapters\.kind/);
+assert.equal(toSetparamProtocolValue("rated_current", "400"), 4000);
+assert.equal(toSetparamProtocolValue("max_voltage", "350.5"), 3505);
+assert.equal(toSetparamProtocolValue("work_mode", "2"), 2);
+assert.equal(matchFlashCertid(setparamDevices, "0DB897").certid, setparamDevices[2].certid);
+assert.equal(matchFlashCertid(setparamDevices, "0D8C97").certid, setparamDevices[0].certid);
+assert.equal(matchFlashCertid(setparamDevices, "0D8C9").error, "setparamIdShort");
+assert.equal(matchFlashCertid(setparamDevices, "0D8C9X").error, "setparamIdMissing");
+assert.equal(matchFlashCertid(setparamDevices, "0D8C9X034096").error, "setparamIdMissing");
+assert.equal(matchFlashCertid([...setparamDevices, { certid: "0D8C970000000000000000", params: null }], "0D8C97").error, "setparamIdAmbiguous");
+assert.equal(formatSetparamValue("rated_current", 4000), "400 A");
+assert.equal(formatSetparamValue("max_voltage", 3505), "350.5 V");
+assert.deepEqual(setparamConfirmationLines(setparamDevices, "rated_current", 4500).map((line) => line.certid), [setparamDevices[0].certid, setparamDevices[2].certid]);
+const setparamView = createFlashSetparamState();
+setparamView.devices = setparamDevices;
+setparamView.valueInput = "450";
+setparamView.confirm = { value: 4500, lines: setparamConfirmationLines(setparamDevices, "rated_current", 4500) };
+const setparamT = (key, values) => translateAppFeedback("zh", key, values);
+const html = renderFlashSetparam(setparamView, { t: setparamT, escape: (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;"), lang: "zh" });
+assert.match(html, /0D8C97034096400000EC7477: 400 A → 450 A/);
+assert.match(html, /0DB897034096400000EC7477: 300 A → 450 A/);
+assert.match(html, /跳過 1 台（固件不支持）/);
+const baseRecord = { params: { rated_current: 4000 }, values: { ratedCurrent: 4000 }, result: null };
+for (const [status, expected] of [["queued", "排隊中"], ["waiting", "等回覆"], ["no_reply", "沒回覆"], ["success", "成功"], ["failed", "失敗"]]) {
+  const record = { ...baseRecord, status, result: status === "failed" ? -3 : 0 };
+  assert.match(setparamStatusText(record, setparamT), new RegExp(expected));
+}
+for (const lang of ["zh", "en", "fr"]) {
+  for (const key of ["setparamAdapterTab", "setparamCurrentHint", "setparamConfirmTitle", "setparamQueued", "setparamNoReply", "setparamResultCharging"]) {
+    assert.equal(typeof appFeedbackCopy[lang][key], "string");
+  }
+}
+const priorDocument = globalThis.document;
+globalThis.document = { visibilityState: "visible" };
+try {
+  const sent = [];
+  const controllerView = createFlashSetparamState();
+  const controller = createFlashSetparamController({
+    view: controllerView,
+    call: async (path, options) => {
+      if (path === "/devices/flash?page=1&pageSize=20") return { items: setparamDevices, total: setparamDevices.length };
+      if (path === "/devices/flash-setparam/recent?limit=50") return { items: [] };
+      if (path === "/devices/flash-setparam") {
+        sent.push(options.body);
+        return { items: [{ certid: setparamDevices[0].certid, reqid: `test-${sent.length}` }], skipped: [] };
+      }
+      throw new Error(`Unexpected setparam path: ${path}`);
+    },
+    signal: new AbortController().signal,
+    isActive: () => true,
+    rerender: () => {},
+    t: setparamT,
+    setPolling: () => {},
+  });
+  const click = (selector) => ({ closest: (candidate) => candidate === selector ? {} : null, matches: () => false });
+  await controller.read();
+  controller.onInput({ matches: (selector) => selector === "[data-setparam-value]", value: "400" });
+  controller.onInput({ matches: (selector) => selector === "[data-setparam-certid]", value: "0D8C97" });
+  controller.onClick(click("[data-setparam-send]"));
+  await new Promise(setImmediate);
+  assert.deepEqual(sent[0], { params: { rated_current: 4000 }, certids: [setparamDevices[0].certid] });
+  controller.onClick(click("[data-setparam-all]"));
+  assert.equal(sent.length, 1, "set all waits for confirmation");
+  assert.equal(controllerView.confirm.lines.length, 2);
+  controller.onClick(click("[data-setparam-confirm]"));
+  await new Promise(setImmediate);
+  assert.deepEqual(sent[1], { params: { rated_current: 4000 }, all: true });
+} finally {
+  globalThis.document = priorDocument;
+}
+console.log("FLASH_SETPARAM=PASS");

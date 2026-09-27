@@ -1255,3 +1255,55 @@
 }
 
 .app-support-frame { width: 100%; height: calc(100dvh - 250px); min-height: 460px; border: 0; display: block; flex: 1; border-radius: 16px; }
+
+.app-feedback-setparam {
+  display: grid;
+  gap: var(--space-20);
+}
+
+.app-feedback-setparam__choices,
+.app-feedback-setparam__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-10);
+  margin: var(--space-20) 0;
+}
+
+.app-feedback-setparam__form {
+  display: grid;
+  gap: var(--space-10);
+  max-width: 720px;
+}
+
+.app-feedback-setparam__form label {
+  display: grid;
+  gap: var(--space-10);
+}
+
+.app-feedback-setparam__form .app-feedback-ota-muted {
+  margin: 0;
+}
+
+.app-feedback-setparam__table-wrap {
+  overflow-x: auto;
+}
+
+.app-feedback-setparam__table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.app-feedback-setparam__table th,
+.app-feedback-setparam__table td {
+  padding: var(--space-10);
+  border-bottom: 1px solid var(--gray-10);
+  white-space: nowrap;
+}
+
+.app-feedback-setparam__confirm-list {
+  max-height: min(45vh, 320px);
+  margin: var(--space-20) 0;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}

@@ -12,6 +12,8 @@ const ALLOWED_REQUESTS = [
   { method: "GET", path: /^\/ota\/legacy-packages$/ },
   { method: "POST", path: /^\/ota\/legacy-packages\/(150001|150002|150003|150004)$/ },
   { method: "GET", path: /^\/devices\/(flash|dc-pro)(?:\?[^#]*)?$/ },
+  { method: "POST", path: /^\/devices\/flash-setparam$/ },
+  { method: "GET", path: /^\/devices\/flash-setparam\/recent(?:\?limit=\d+)?$/ },
   { method: "GET", path: /^\/devices\/flash\/[A-Za-z0-9_-]{1,64}\/ota$/ },
   { method: "GET", path: /^\/devices\/(flash|dc-pro)\/[A-Za-z0-9_-]{1,64}\/sessions(?:\?[^#]*)?$/ },
   { method: "GET", path: /^\/devices\/(flash|dc-pro)\/[A-Za-z0-9_-]{1,64}\/sessions\/days(?:\?[^#]*)?$/ },
@@ -113,10 +115,14 @@ export async function callHonnmonoAdmin(
       "device_charging",
       "device_not_found",
     ]);
-    throw new HonnmonoAdminError(
+    const error = new HonnmonoAdminError(
       allowedBackendCodes.has(backendCode) ? backendCode : "upstreamError",
       response.status,
     );
+    if (subPath.startsWith("/devices/flash-setparam") && typeof parsed?.error === "string") {
+      error.backendMessage = parsed.error;
+    }
+    throw error;
   }
   if (parsed == null || typeof parsed !== "object") {
     throw new HonnmonoAdminError("responseError", response.status);

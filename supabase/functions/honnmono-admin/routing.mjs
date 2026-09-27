@@ -106,6 +106,12 @@ export function mapOtaAdminPath(pathname, method) {
   if (method === "GET" && normalized === "/devices/flash") {
     return "/devices/flash";
   }
+  if (method === "POST" && normalized === "/devices/flash-setparam") {
+    return normalized;
+  }
+  if (method === "GET" && normalized === "/devices/flash-setparam/recent") {
+    return normalized;
+  }
   if (method === "GET" && /^\/devices\/flash\/[A-Za-z0-9_-]{1,64}\/ota$/.test(normalized)) {
     return normalized;
   }
