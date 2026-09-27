@@ -149,7 +149,7 @@ export function createOtaPackageController({
   const isCurrent = (sequence) =>
     isActive() && sequence === otaState.requestSequence;
 
-  async function load() {
+  async function load({ includeLegacy = true } = {}) {
     if (otaState.loading || otaState.uploadLoading) return;
     const sequence = ++otaState.requestSequence;
     otaState.loading = true;
@@ -158,7 +158,7 @@ export function createOtaPackageController({
     rerender();
     const [packageResult, legacyResult] = await Promise.allSettled([
       request("/ota/package", { signal: scope.signal }),
-      request("/ota/legacy-packages", { signal: scope.signal }),
+      includeLegacy ? request("/ota/legacy-packages", { signal: scope.signal }) : Promise.resolve(null),
     ]);
     if (isCurrent(sequence)) {
       if (packageResult.status === "fulfilled") {
@@ -168,10 +168,10 @@ export function createOtaPackageController({
       } else {
         otaState.loadError = packageResult.reason;
       }
-      if (legacyResult.status === "fulfilled") {
+      if (includeLegacy && legacyResult.status === "fulfilled") {
         otaState.legacyPackages = normalizeLegacyPackages(legacyResult.value);
         otaState.legacyLoaded = true;
-      } else {
+      } else if (includeLegacy) {
         otaState.legacyLoadError = legacyResult.reason;
       }
     }

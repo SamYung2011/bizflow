@@ -268,6 +268,8 @@ assert.deepEqual(adapterActionsForKind("flash"), [
   "untask",
 ]);
 assert.deepEqual(adapterActionsForKind("dc-pro"), ["unbind"]);
+assert.deepEqual(adapterActionsForKind("flash", false), ["force_ota", "lock", "unlock", "untask"]);
+assert.deepEqual(adapterActionsForKind("dc-pro", false), ["unbind"]);
 assert.deepEqual(adapterActionsForKind("unknown"), []);
 const boundIdleFlash = {
   certid: "0D99170909940000102020D3",
@@ -2204,10 +2206,10 @@ await liveCheck("OTA responses update memory but preserve an input opened while 
 });
 await liveCheck("untask submit uses the existing actions POST and reloads", async () => {
   const source = pageSource.slice(pageSource.indexOf("async function submitAdapterAction"), pageSource.indexOf("async function downloadAdapterReport"));
-  const target = { adapters: { actionConfirm: { action: "untask", device: { certid: "CERT_1" } }, actionLoading: false, ota: { CERT_1: { state: "armed" } } } };
+  const target = { isAdmin: true, adapters: { kind: "flash", actionConfirm: { action: "untask", device: { certid: "CERT_1" } }, actionLoading: false, ota: { CERT_1: { state: "armed" } } } };
   const calls = [];
   let reloads = 0;
-  const submit = new Function("state", "activeInstance", "activeScope", "callHonnmonoAdmin", "isActive", "loadAdapters", "rerender", `${source}; return submitAdapterAction;`)(target, 1, {}, async (path, options) => { calls.push({ path, method: options.method, body: options.body }); return { ok: true }; }, () => true, () => { reloads++; }, () => {});
+  const submit = new Function("state", "activeInstance", "activeScope", "callHonnmonoAdmin", "isActive", "loadAdapters", "rerender", "adapterActionsForKind", `${source}; return submitAdapterAction;`)(target, 1, {}, async (path, options) => { calls.push({ path, method: options.method, body: options.body }); return { ok: true }; }, () => true, () => { reloads++; }, () => {}, adapterActionsForKind);
   await submit();
   assert.deepEqual(calls, [{ path: "/devices/flash/CERT_1/actions", method: "POST", body: { action: "untask" } }]);
   assert.equal(reloads, 1);

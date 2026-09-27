@@ -89,8 +89,8 @@ export function adapterSessionMinDate(today = currentHongKongDate()) {
   return date.toISOString().slice(0, 10);
 }
 
-function createAdapterDeviceState(saved = {}) {
-  const kind = ["dc-pro", "setparam"].includes(saved.adapterKind) ? saved.adapterKind : "flash";
+function createAdapterDeviceState(saved = {}, isAdmin = true) {
+  const kind = ["dc-pro", ...(isAdmin ? ["setparam"] : [])].includes(saved.adapterKind) ? saved.adapterKind : "flash";
   return {
     kind,
     rows: [],
@@ -134,9 +134,9 @@ function adapterPageCount() {
   return Math.max(1, Math.ceil((state?.adapters?.total || 0) / PAGE_SIZE));
 }
 
-export function adapterActionsForKind(kind) {
+export function adapterActionsForKind(kind, isAdmin = true) {
   return kind === "flash"
-    ? ["unbind", "force_ota", "lock", "unlock", "untask"]
+    ? [...(isAdmin ? ["unbind"] : []), "force_ota", "lock", "unlock", "untask"]
     : kind === "dc-pro"
       ? ["unbind"]
       : [];
@@ -551,7 +551,7 @@ function renderAdapterCards() {
           : "";
       const unbindLabelKey =
         kind === "flash" ? "flashUnbindDevice" : "unbindDevice";
-      const availableActions = adapterActionsForKind(kind);
+      const availableActions = adapterActionsForKind(kind, state.isAdmin);
       const actionBusy =
         state.adapters.actionLoading || state.adapters.actionLookupId === id;
       return `<article class="app-feedback-device-binding app-feedback-adapter-card">
@@ -692,7 +692,7 @@ function renderAdapterPanel() {
   const tabs = `<nav class="app-feedback-tabs app-feedback-adapter-tabs" aria-label="${rawE(t("deviceListTab"))}">
     <button type="button" class="app-feedback-tab${adapters.kind === "flash" ? " is-active" : ""}" data-adapter-kind="flash">${rawE(t("flashAdapterTab"))}</button>
     <button type="button" class="app-feedback-tab${adapters.kind === "dc-pro" ? " is-active" : ""}" data-adapter-kind="dc-pro">${rawE(t("dcProAdapterTab"))}</button>
-    <button type="button" class="app-feedback-tab${adapters.kind === "setparam" ? " is-active" : ""}" data-adapter-kind="setparam">${rawE(t("setparamAdapterTab"))}</button>
+    ${state.isAdmin ? `<button type="button" class="app-feedback-tab${adapters.kind === "setparam" ? " is-active" : ""}" data-adapter-kind="setparam">${rawE(t("setparamAdapterTab"))}</button>` : ""}
   </nav>`;
   if (adapters.kind === "setparam") {
     return `<div class="app-feedback-device-panel">${tabs}${renderFlashSetparam(state.setparam, { t, escape: rawE, lang: helpers.lang })}</div>`;
@@ -726,7 +726,7 @@ function renderAdapterPanel() {
 function renderTabs() {
   const tabs = state.isAdmin
     ? [["feedback", "feedbackTab"], ["support", "supportTab"], ["device", "deviceUnbindTab"], ["devices", "deviceListTab"], ["sim", "simCardTab"]]
-    : [["support", "supportTab"], ["device", "deviceUnbindTab"]];
+    : [["support", "supportTab"], ["device", "deviceUnbindTab"], ["devices", "deviceListTab"]];
   return `<nav class="app-feedback-tabs" aria-label="${rawE(t("honnmonoAppTitle"))}">
     ${tabs.map(([id, label]) => `<button type="button" class="app-feedback-tab${state.activeTab === id ? " is-active" : ""}" data-app-feedback-tab="${id}" aria-selected="${state.activeTab === id}">${rawE(t(label))}</button>`).join("")}
   </nav>`;
@@ -1340,7 +1340,7 @@ async function beginAdapterAction(action, id) {
   if (!device || !["unbind", "force_ota", "lock", "unlock", "untask"].includes(action)) {
     return;
   }
-  if (!adapterActionsForKind(state.adapters.kind).includes(action)) return;
+  if (!adapterActionsForKind(state.adapters.kind, state.isAdmin).includes(action)) return;
   state.adapters.actionError = null;
   state.adapters.actionResult = null;
   if (action === "unbind") {
@@ -1396,7 +1396,7 @@ function closeAdapterAction() {
 
 async function submitAdapterAction() {
   const confirm = state.adapters.actionConfirm;
-  if (!confirm || state.adapters.actionLoading) return;
+  if (!confirm || state.adapters.actionLoading || !adapterActionsForKind(state.adapters.kind, state.isAdmin).includes(confirm.action)) return;
   const instance = activeInstance;
   const scope = activeScope;
   let path;
@@ -1601,7 +1601,7 @@ async function downloadLog(id) {
 }
 
 function switchAppTab(nextTab) {
-  if (!state || !(state.isAdmin ? ["feedback", "support", "device", "devices", "sim"] : ["support", "device"]).includes(nextTab)) {
+  if (!state || !(state.isAdmin ? ["feedback", "support", "device", "devices", "sim"] : ["support", "device", "devices"]).includes(nextTab)) {
     return;
   }
   if (state.activeTab === nextTab) return;
@@ -1642,7 +1642,7 @@ function switchAppTab(nextTab) {
     if (state.adapters.kind === "setparam") activePoller?.pause();
     else activePoller?.resume(DEVICES_POLL_INTERVAL_MS);
     rerender();
-    if (state.adapters.kind !== "setparam" && !state.ota.loaded) void activeOtaController?.load();
+    if (state.adapters.kind !== "setparam" && !state.ota.loaded) void activeOtaController?.load({ includeLegacy: state.isAdmin });
     if (state.adapters.kind === "setparam") void activeSetparamController?.read();
     else void loadAdapters();
     activeScope?.animationFrame(() =>
@@ -1693,7 +1693,7 @@ function onFeedbackClick(event) {
   const adapterKind = event.target.closest?.("[data-adapter-kind]");
   if (adapterKind) {
     const kind = adapterKind.getAttribute("data-adapter-kind");
-    if (["flash", "dc-pro", "setparam"].includes(kind) && kind !== state.adapters.kind) {
+    if (["flash", "dc-pro", ...(state.isAdmin ? ["setparam"] : [])].includes(kind) && kind !== state.adapters.kind) {
       state.adapters.kind = kind;
       state.adapters.detailDate =
         kind === "flash" ? currentHongKongDate() : "";
@@ -1707,7 +1707,7 @@ function onFeedbackClick(event) {
         void activeSetparamController?.read();
       } else {
         activePoller?.resume(DEVICES_POLL_INTERVAL_MS);
-        if (!state.ota.loaded) void activeOtaController?.load();
+        if (!state.ota.loaded) void activeOtaController?.load({ includeLegacy: state.isAdmin });
         void loadAdapters();
       }
     }
@@ -1793,7 +1793,7 @@ function onFeedbackClick(event) {
     return;
   }
   if (event.target.closest?.("[data-ota-retry]")) {
-    void activeOtaController?.load();
+    void activeOtaController?.load({ includeLegacy: state.isAdmin });
     return;
   }
   if (event.target.closest?.("[data-ota-replace]")) {
@@ -2023,14 +2023,14 @@ function createState(historyState, currentUser) {
   return {
     isAdmin,
     activeTab: !isAdmin
-      ? "support"
+      ? saved.activeTab === "devices" ? "devices" : "support"
       : ["support", "device", "devices", "sim"].includes(saved.activeTab)
         ? saved.activeTab
         : "feedback",
     device: createDeviceUnbindState(saved),
     sim: createSimCardState(saved),
     ota: createOtaPackageState(),
-    adapters: createAdapterDeviceState(saved),
+    adapters: createAdapterDeviceState(saved, isAdmin),
     setparam: createFlashSetparamState(),
     rows: [],
     total: 0,
@@ -2171,7 +2171,6 @@ export async function mountPage({
           void setparamController.read({ quiet: true });
         }
       });
-      if (!nextState.isAdmin) return;
       poller = createFeedbackPoller({
         scope,
         documentRef: document,
@@ -2179,7 +2178,7 @@ export async function mountPage({
       });
       activePoller = poller;
       if (!["support", "device", "sim"].includes(state.activeTab) && !(state.activeTab === "devices" && state.adapters.kind === "setparam")) poller.start(state.activeTab === "devices" ? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS);
-      if (state.activeTab === "device" || (state.activeTab === "devices" && state.adapters.kind !== "setparam")) void otaController.load();
+      if ((state.isAdmin && state.activeTab === "device") || (state.activeTab === "devices" && state.adapters.kind !== "setparam")) void otaController.load({ includeLegacy: state.isAdmin });
       if (state.activeTab === "devices") {
         if (state.adapters.kind === "setparam") void setparamController.read();
         else void loadAdapters();

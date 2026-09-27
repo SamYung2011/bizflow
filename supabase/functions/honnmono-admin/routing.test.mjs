@@ -386,18 +386,32 @@ test("pins the flash admin service to the HK Docker bridge", () => {
 });
 
 
-test("main-site employees can use only the exact binding GET and unbind POST", () => {
-  assert.equal(isMainAccessRoute("/device/binding", "GET"), true);
-  assert.equal(isMainAccessRoute("/device/unbind", "POST"), true);
+test("main-site employees can read device lists and details, and queue flash actions", () => {
+  for (const [path, method] of [
+    ["/device/binding", "GET"], ["/device/unbind", "POST"],
+    ["/devices/flash?page=2&limit=20", "GET"], ["/devices/dc-pro?query=A", "GET"],
+    ["/devices/flash/A_1/ota", "GET"],
+    ["/devices/flash/A_1/sessions?page=2", "GET"],
+    ["/devices/flash/A_1/sessions/days?month=2026-09", "GET"],
+    ["/devices/dc-pro/A_1/sessions?page=2", "GET"],
+    ["/devices/dc-pro/A_1/sessions/days?month=2026-09", "GET"],
+    ["/devices/flash/A_1/uploads/42", "GET"],
+    ["/ota/package", "GET"], ["/devices/flash/A_1/actions", "POST"],
+  ]) assert.equal(isMainAccessRoute(path, method), true, `${method} ${path}`);
+});
+
+test("main-site employees cannot change packages, parameters, bindings or admin-only data", () => {
   for (const [path, method] of [
     ["/device/binding", "POST"], ["/device/unbind", "GET"],
     ["/device/unbind/extra", "POST"], ["/device/unbind/", "POST"],
     ["/device/binding/", "GET"], ["/device/unbind%2fextra", "POST"],
     ["/feedback", "GET"], ["/feedback/1", "GET"], ["/feedback/1/log-link", "POST"],
-    ["/devices/dc-pro", "GET"], ["/devices/flash", "GET"],
-    ["/devices/flash/A/unbind", "POST"], ["/devices/flash/A/actions", "POST"],
+    ["/devices/flash-setparam", "POST"], ["/devices/flash-setparam/recent", "GET"],
+    ["/devices/flash/A/unbind", "POST"], ["/devices/flash/A/actions", "GET"],
+    ["/devices/flash/A/uploads/0", "GET"], ["/devices/dc-pro/A/ota", "GET"],
+    ["/devices/flash/A/ota/extra", "GET"], ["/devices/flash/%2f/actions", "POST"],
     ["/sim/lookup", "GET"], ["/sim/cards", "GET"], ["/sim/refresh", "POST"],
-    ["/ota/package", "GET"], ["/ota/package", "POST"],
+    ["/ota/package", "POST"],
     ["/ota/legacy-packages", "GET"], ["/ota/legacy-packages/150001", "POST"],
   ]) assert.equal(isMainAccessRoute(path, method), false, `${method} ${path}`);
 });

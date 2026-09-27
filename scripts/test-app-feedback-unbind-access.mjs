@@ -49,11 +49,11 @@ async function mount(isAdmin, saved = {}, lang = 'zh') {
   const scope = { ...base, timeout(fn, ms) { timers.push({ fn, ms }); return 0; }, animationFrame(fn) { fn(); } };
   const controller = await pageModule.mountPage({ scope, signal: scope.signal, historyState: saved,
     url: new URL('https://fixture.invalid/bizflow/app-feedback.html'), navigation: { hardNavigate() { assert.fail('authorized user redirected'); } } });
-  element.outerHTML = controller.page.render({ lang, escapeHtml });
+  element.outerHTML = controller.page.render({ lang, escapeHtml, icon: () => '' });
   controller.activate(); await tick();
   function event(type, selector, value = '') {
-    const target = { value, disabled: false, matches: s => s === selector,
-      closest: s => s === selector ? target : null, getAttribute: () => value };
+    const target = { value: typeof value === 'object' ? '' : value, disabled: false, matches: s => s === selector,
+      closest: s => s === selector ? target : null, getAttribute: name => typeof value === 'object' ? value[name] : value };
     const ev = new Event(type, { cancelable: true });
     Object.defineProperty(ev, 'target', { value: target });
     document.dispatchEvent(ev);
@@ -87,20 +87,103 @@ try {
       assert.equal(routeManifest[`/bizflow/${id}.html`].frame.access, 'bf-admin');
     }
   });
-  await check('employee starts on support with two tabs, ignores forbidden tabs, makes no admin loads', async () => {
-    for (const activeTab of [undefined, 'feedback', 'device', 'devices', 'sim']) {
+  await check('employee starts on support with three tabs, ignores admin tabs and makes no background loads', async () => {
+    for (const activeTab of [undefined, 'feedback', 'device', 'sim']) {
       const f = await mount(false, { activeTab });
       try {
         assert.equal(f.controller.captureState().activeTab, 'support');
         assert.match(f.html(), /data-support-frame/);
-        assert.deepEqual([...f.html().matchAll(/data-app-feedback-tab="([^"]+)"/g)].map(m => m[1]), ['support', 'device']);
+        assert.deepEqual([...f.html().matchAll(/data-app-feedback-tab="([^"]+)"/g)].map(m => m[1]), ['support', 'device', 'devices']);
         assert.doesNotMatch(f.html(), /data-ota-|data-sim-|data-adapter-/);
-        for (const tab of ['feedback', 'devices', 'sim']) await f.tab(tab);
+        for (const tab of ['feedback', 'sim']) await f.tab(tab);
         assert.equal(f.controller.captureState().activeTab, 'support');
         document.dispatchEvent(new Event('visibilitychange')); await tick();
         assert.equal(f.calls.length, 0); assert.equal(f.timers.length, 0);
       } finally { f.dispose(); }
     }
+  });
+  await check('employee device list loads flash, DC pro and current package, polls every 10 seconds, keeps admin controls hidden', async () => {
+    for (const activeTab of ['devices', 'support']) {
+      const f = await mount(false, { activeTab, adapterKind: 'setparam' });
+      try {
+        f.respond(url => Response.json(url.pathname.endsWith('/ota/package')
+          ? { current: { filename: 'fixture.bin' }, backups: [] }
+          : url.pathname.endsWith('/devices/flash') || url.pathname.endsWith('/devices/dc-pro')
+            ? { total: 1, items: [{ certid: 'A', imei: '000000000000001', binding: { userId: 42 }, ota: { state: 'none' } }] }
+            : {}));
+        if (activeTab === 'devices') {
+          assert.equal(f.controller.captureState().activeTab, 'devices');
+          await f.tab('support');
+        }
+        await f.tab('devices');
+        await tick();
+        assert.equal(f.controller.captureState().activeTab, 'devices');
+        assert.equal(f.controller.captureState().adapterKind, 'flash');
+        assert.ok(f.calls.some(x => x.path.startsWith('/devices/flash?')));
+        assert.ok(f.calls.some(x => x.path === '/ota/package'));
+        assert.ok(f.timers.some(x => x.ms === 10_000));
+        assert.doesNotMatch(f.html(), /data-adapter-kind="setparam"|data-ota-replace|data-adapter-action="unbind"/);
+        assert.match(f.html(), /data-adapter-action="lock"/);
+        assert.match(f.html(), /data-adapter-action="force_ota"/);
+        assert.equal(f.calls.some(x => /\/ota\/legacy-packages|\/feedback|\/sim\//.test(x.path)), false);
+        f.event('click', '[data-adapter-kind]', 'dc-pro'); await tick();
+        assert.ok(f.calls.some(x => x.path.startsWith('/devices/dc-pro?')));
+        assert.doesNotMatch(f.html(), /data-adapter-kind="setparam"/);
+        f.event('click', '[data-adapter-kind]', 'setparam'); await tick();
+        assert.equal(f.controller.captureState().adapterKind, 'dc-pro');
+        await f.tab('support');
+        const timersBefore = f.timers.length;
+        document.dispatchEvent(new Event('visibilitychange')); await tick();
+        assert.equal(f.timers.length, timersBefore);
+      } finally { f.dispose(); }
+    }
+  });
+  await check('employee flash actions all require in-page confirmation; only confirmed lock sends', async () => {
+    const f = await mount(false);
+    try {
+      f.respond(url => Response.json(url.pathname.endsWith('/devices/flash')
+        ? { total: 1, items: [{ certid: 'A', imei: '000000000000001', binding: { userId: 42 }, ota: { state: 'armed', pending: true } }] }
+        : url.pathname.endsWith('/ota/package') ? { current: { filename: 'fixture.bin' } } : {}));
+      await f.tab('devices'); await tick();
+      const before = f.calls.length;
+      f.event('click', '[data-adapter-action]', { 'data-adapter-action': 'unbind', 'data-adapter-id': 'A' }); await tick();
+      assert.doesNotMatch(f.html(), /data-adapter-confirm-submit/);
+      assert.match(f.html(), /data-adapter-action="untask"/);
+      for (const action of ['lock', 'unlock', 'force_ota', 'untask']) {
+        f.event('click', '[data-adapter-action]', { 'data-adapter-action': action, 'data-adapter-id': 'A' }); await tick();
+        assert.match(f.html(), /data-adapter-confirm-submit/);
+        if (action === 'force_ota') assert.match(f.html(), /value="fixture.bin"/);
+        assert.equal(f.calls.length, before);
+        f.event('click', '[data-adapter-confirm-cancel]'); await tick();
+      }
+      f.event('click', '[data-adapter-action]', { 'data-adapter-action': 'lock', 'data-adapter-id': 'A' }); await tick();
+      assert.equal(f.calls.length, before);
+      f.event('click', '[data-adapter-confirm-submit]'); await tick();
+      const posts = f.calls.filter(x => x.options.method === 'POST');
+      assert.equal(posts.length, 1);
+      assert.equal(posts[0].path, '/devices/flash/A/actions');
+      assert.deepEqual(JSON.parse(posts[0].options.body), { action: 'lock' });
+    } finally { f.dispose(); }
+  });
+  await check('employee opens flash and DC pro charging sessions from the list', async () => {
+    const f = await mount(false);
+    try {
+      f.respond(url => Response.json(url.pathname.endsWith('/devices/flash') || url.pathname.endsWith('/devices/dc-pro')
+        ? { total: 1, items: [{ certid: 'A', imei: '000000000000001', ota: { state: 'none' } }] }
+        : url.pathname.includes('/sessions')
+          ? { total: 1, items: [{ startTime: 1, upload: { id: 7, filename: 'report.BIN' } }] }
+          : {}));
+      await f.tab('devices'); await tick();
+      f.event('click', '[data-adapter-detail]', 'A'); await tick();
+      assert.ok(f.calls.some(x => x.path.startsWith('/devices/flash/A/sessions?')));
+      assert.match(f.html(), /data-adapter-report="7"/);
+      f.event('click', '[data-adapter-report]', '7'); await tick();
+      assert.ok(f.calls.some(x => x.path === '/devices/flash/A/uploads/7'));
+      f.event('click', '[data-adapter-drawer-close]'); await tick();
+      f.event('click', '[data-adapter-kind]', 'dc-pro'); await tick();
+      f.event('click', '[data-adapter-detail]', 'A'); await tick();
+      assert.ok(f.calls.some(x => x.path.startsWith('/devices/dc-pro/A/sessions?')));
+    } finally { f.dispose(); }
   });
   await check('admin retains five tabs, initial feedback and polling, device OTA, list and SIM loads', async () => {
     const f = await mount(true);
