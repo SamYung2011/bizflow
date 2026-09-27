@@ -14,6 +14,8 @@
 //   GET  /honnmono-admin/devices/{kind}/{certid}/sessions
 //   GET  /honnmono-admin/devices/flash/{certid}/uploads/{id}
 //   POST /honnmono-admin/devices/flash/{certid}/actions
+//   POST /honnmono-admin/devices/flash-setparam
+//   GET  /honnmono-admin/devices/flash-setparam/recent
 //   POST /honnmono-admin/devices/flash/{certid}/unbind
 //   GET  /honnmono-admin/ota/legacy-packages
 //   POST /honnmono-admin/ota/legacy-packages/{slot}
@@ -33,6 +35,7 @@
 // directly, so files up to 200 MB never traverse the HK Edge Function.
 
 import { forwardSupport } from "./support-proxy.mjs";
+import { prepareSetparamBody } from "./setparam-password.mjs";
 
 import {
   MAX_REQUEST_JSON_BYTES,
@@ -303,6 +306,15 @@ Deno.serve(async (req) => {
         otaBody = validateOtaAdminBody(otaBody);
       } catch (_) {
         return json({ error: "Invalid JSON body" }, 400);
+      }
+      if (otaPath === "/devices/flash-setparam") {
+        const prepared = await prepareSetparamBody(otaBody, {
+          operatorEmail: guard.operatorEmail,
+          supabaseUrl: SUPABASE_URL,
+          anonKey: SUPABASE_ANON_KEY,
+        });
+        if (prepared.error) return json({ error: prepared.error }, prepared.status);
+        otaBody = prepared.body;
       }
     }
 

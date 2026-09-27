@@ -38,12 +38,25 @@ export function stripFunctionPrefix(pathname) {
   return pathname.replace(/^\/honnmono-admin(?=\/|$)/, "") || "/";
 }
 
-// Support plus the two device method/path pairs are available to main-site employees.
+// Only these method/path pairs are available to main-site employees.
 export function isMainAccessRoute(subPath, method) {
+  const path = subPath.split("?", 1)[0];
+  const certid = "[A-Za-z0-9_-]{1,64}";
   return (
-    subPath.startsWith("/support/") ||
-    (method === "GET" && subPath === "/device/binding") ||
-    (method === "POST" && subPath === "/device/unbind")
+    path.startsWith("/support/") ||
+    (method === "GET" && (
+      path === "/device/binding" ||
+      path === "/devices/flash" ||
+      path === "/devices/dc-pro" ||
+      path === "/ota/package" ||
+      new RegExp(`^/devices/flash/${certid}/ota$`).test(path) ||
+      new RegExp(`^/devices/(?:flash|dc-pro)/${certid}/sessions(?:/days)?$`).test(path) ||
+      new RegExp(`^/devices/flash/${certid}/uploads/[1-9]\\d*$`).test(path)
+    )) ||
+    (method === "POST" && (
+      path === "/device/unbind" ||
+      new RegExp(`^/devices/flash/${certid}/actions$`).test(path)
+    ))
   );
 }
 
@@ -105,6 +118,12 @@ export function mapOtaAdminPath(pathname, method) {
   }
   if (method === "GET" && normalized === "/devices/flash") {
     return "/devices/flash";
+  }
+  if (method === "POST" && normalized === "/devices/flash-setparam") {
+    return normalized;
+  }
+  if (method === "GET" && normalized === "/devices/flash-setparam/recent") {
+    return normalized;
   }
   if (method === "GET" && /^\/devices\/flash\/[A-Za-z0-9_-]{1,64}\/ota$/.test(normalized)) {
     return normalized;

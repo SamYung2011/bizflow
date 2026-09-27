@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { prepareSetparamBody } from "./setparam-password.mjs";
 
 import {
   DEVICE_UNBIND_TIMEOUT_MS,
@@ -20,6 +22,65 @@ import {
   upstreamTimeoutFor,
   validateOtaAdminBody,
 } from "./routing.mjs";
+
+test("routes only flash parameter writes and recent reads to ota-admin", () => {
+  const write = "/devices/flash-setparam";
+  const recent = "/devices/flash-setparam/recent";
+  assert.equal(mapOtaAdminPath(write, "POST"), write);
+  assert.equal(mapOtaAdminPath(recent, "GET"), recent);
+  assert.equal(mapOtaAdminPath(write, "GET"), "");
+  assert.equal(mapOtaAdminPath(recent, "POST"), "");
+  assert.equal(mapOtaAdminPath(`${recent}/extra`, "GET"), "");
+  assert.equal(mapFlashAdminPath(write, "POST"), "");
+  assert.equal(mapHonnmonoAdminPath(write, "POST"), "");
+  assert.equal(mapOtaAdminPath("/devices/flash/A/unbind", "POST"), "");
+  const body = JSON.stringify({ params: { rated_current: 4000 }, all: true });
+  assert.equal(validateOtaAdminBody(body), body);
+});
+
+test("current changes require the operator password and strip it before forwarding", async () => {
+  const common = { operatorEmail: "operator@example.com", supabaseUrl: "https://example.supabase.co", anonKey: "anon" };
+  const current = { params: { rated_current: 4000 }, all: true };
+  const noPassword = await prepareSetparamBody(JSON.stringify(current), { ...common, fetchImpl: () => { throw new Error("must not fetch"); } });
+  assert.deepEqual(noPassword, { error: "password_required", status: 403 });
+
+  const authCalls = [];
+  const wrong = await prepareSetparamBody(JSON.stringify({ ...current, password: "incorrect-test-value" }), {
+    ...common,
+    fetchImpl: async (url, options) => {
+      authCalls.push({ url, options });
+      return { status: 400 };
+    },
+  });
+  assert.deepEqual(wrong, { error: "password_incorrect", status: 403 });
+  assert.equal(authCalls.length, 1);
+  assert.match(authCalls[0].url, /\/auth\/v1\/token\?grant_type=password$/);
+  assert.equal(JSON.parse(authCalls[0].options.body).email, common.operatorEmail);
+
+  const validCalls = [];
+  const valid = await prepareSetparamBody(JSON.stringify({ ...current, password: "correct-test-value" }), {
+    ...common,
+    fetchImpl: async (url, options) => {
+      validCalls.push({ url, options });
+      return url.includes("/token?")
+        ? { status: 200, json: async () => ({ access_token: "new-temp-token" }) }
+        : { status: 204 };
+    },
+  });
+  assert.deepEqual(JSON.parse(valid.body), current);
+  assert.equal(validCalls.length, 2);
+  assert.match(validCalls[1].url, /\/auth\/v1\/logout\?scope=local$/);
+  assert.equal(validCalls[1].options.headers.Authorization, "Bearer new-temp-token");
+
+  const voltage = { params: { max_voltage: 6000 }, all: true, password: "unused-test-value" };
+  const withoutCurrent = await prepareSetparamBody(JSON.stringify(voltage), {
+    ...common, fetchImpl: () => { throw new Error("voltage must not reauthenticate"); },
+  });
+  assert.deepEqual(JSON.parse(withoutCurrent.body), { params: voltage.params, all: true });
+  const source = await readFile(new URL("./index.ts", import.meta.url), "utf8");
+  assert.match(source, /prepareSetparamBody\(otaBody,/);
+  assert.match(source, /otaBody = prepared\.body/);
+});
 
 test("session-day calendars use the same upstream as each device's sessions", () => {
   const flash = "/devices/flash/0DB897000000000000000000/sessions/days";
@@ -325,18 +386,32 @@ test("pins the flash admin service to the HK Docker bridge", () => {
 });
 
 
-test("main-site employees can use only the exact binding GET and unbind POST", () => {
-  assert.equal(isMainAccessRoute("/device/binding", "GET"), true);
-  assert.equal(isMainAccessRoute("/device/unbind", "POST"), true);
+test("main-site employees can read device lists and details, and queue flash actions", () => {
+  for (const [path, method] of [
+    ["/device/binding", "GET"], ["/device/unbind", "POST"],
+    ["/devices/flash?page=2&limit=20", "GET"], ["/devices/dc-pro?query=A", "GET"],
+    ["/devices/flash/A_1/ota", "GET"],
+    ["/devices/flash/A_1/sessions?page=2", "GET"],
+    ["/devices/flash/A_1/sessions/days?month=2026-09", "GET"],
+    ["/devices/dc-pro/A_1/sessions?page=2", "GET"],
+    ["/devices/dc-pro/A_1/sessions/days?month=2026-09", "GET"],
+    ["/devices/flash/A_1/uploads/42", "GET"],
+    ["/ota/package", "GET"], ["/devices/flash/A_1/actions", "POST"],
+  ]) assert.equal(isMainAccessRoute(path, method), true, `${method} ${path}`);
+});
+
+test("main-site employees cannot change packages, parameters, bindings or admin-only data", () => {
   for (const [path, method] of [
     ["/device/binding", "POST"], ["/device/unbind", "GET"],
     ["/device/unbind/extra", "POST"], ["/device/unbind/", "POST"],
     ["/device/binding/", "GET"], ["/device/unbind%2fextra", "POST"],
     ["/feedback", "GET"], ["/feedback/1", "GET"], ["/feedback/1/log-link", "POST"],
-    ["/devices/dc-pro", "GET"], ["/devices/flash", "GET"],
-    ["/devices/flash/A/unbind", "POST"], ["/devices/flash/A/actions", "POST"],
+    ["/devices/flash-setparam", "POST"], ["/devices/flash-setparam/recent", "GET"],
+    ["/devices/flash/A/unbind", "POST"], ["/devices/flash/A/actions", "GET"],
+    ["/devices/flash/A/uploads/0", "GET"], ["/devices/dc-pro/A/ota", "GET"],
+    ["/devices/flash/A/ota/extra", "GET"], ["/devices/flash/%2f/actions", "POST"],
     ["/sim/lookup", "GET"], ["/sim/cards", "GET"], ["/sim/refresh", "POST"],
-    ["/ota/package", "GET"], ["/ota/package", "POST"],
+    ["/ota/package", "POST"],
     ["/ota/legacy-packages", "GET"], ["/ota/legacy-packages/150001", "POST"],
   ]) assert.equal(isMainAccessRoute(path, method), false, `${method} ${path}`);
 });
