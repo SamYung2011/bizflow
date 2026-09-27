@@ -2278,28 +2278,50 @@ const setparamT = (key, values) => translateAppFeedback("zh", key, values);
 const html = renderFlashSetparam(setparamView, { t: setparamT, escape: (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;"), lang: "zh" });
 assert.match(html, /0D8C97034096400000EC7477: 400 A → 450 A/);
 assert.match(html, /0DB897034096400000EC7477: 300 A → 450 A/);
-assert.match(html, /跳過 1 台（固件不支持）/);
+assert.match(html, /1 台固件太舊，這次不改/);
 assert.match(html, /type="password" autocomplete="current-password"/);
-assert.match(html, /不推薦改/);
+assert.match(html, /一般不要動/);
 const voltageView = createFlashSetparamState();
 voltageView.confirm = { kind: "all", param: "max_voltage", value: 6000, lines: [] };
-assert.doesNotMatch(renderFlashSetparam(voltageView, { t: setparamT, escape: String, lang: "zh" }), /type="password"/);
-assert.equal(setparamErrorText({ backendDetail: { error: "param_out_of_range", param: "rated_current", min: 1, max: 20000 } }, setparamT), "電流超出範圍（最大 2000 A）");
-assert.match(setparamErrorText({ backendDetail: { error: "param_out_of_range", param: "max_voltage", min: 2000, max: 10000 } }, setparamT), /200 V–1000 V/);
+const voltageHtml = renderFlashSetparam(voltageView, { t: setparamT, escape: String, lang: "zh" });
+assert.doesNotMatch(voltageHtml, /type="password"/);
+assert.match(voltageHtml, /data-setparam-voltage="500"[^>]*>大部分車 500V<\/button>/);
+assert.match(voltageHtml, /data-setparam-voltage="1000"[^>]*>800V 平台 1000V<\/button>/);
+for (const param of ["rated_current", "work_mode"]) {
+  const otherView = { ...voltageView, param };
+  assert.doesNotMatch(renderFlashSetparam(otherView, { t: setparamT, escape: String, lang: "zh" }), /data-setparam-voltage=/);
+}
+assert.equal(setparamErrorText({ backendDetail: { error: "param_out_of_range", param: "rated_current", min: 1, max: 20000 } }, setparamT), "最大充電電流不能超過 2000 A");
+assert.equal(setparamErrorText({ backendDetail: { error: "param_out_of_range", param: "max_voltage", min: 2000, max: 10000 } }, setparamT), "最高充電電壓只能填 200 V–1000 V");
 assert.equal(setparamErrorText({ backendDetail: { error: "password_incorrect" } }, setparamT), "密碼不對，請重新輸入");
 assert.equal(setparamErrorText({ backendDetail: { error: "password_required" } }, setparamT), "請輸入登入密碼");
-assert.equal(setparamErrorText({ backendDetail: { error: "unmapped_server_sentence" } }, setparamT), "參數下發失敗，請稍後再試");
+assert.equal(setparamErrorText({ backendDetail: { error: "unmapped_server_sentence" } }, setparamT), "沒改成，請稍後再試");
 assert.equal(setparamErrorText({ backendDetail: { error: "password_incorrect" } }, (key, values) => translateAppFeedback("fr", key, values)), "Mot de passe incorrect. Réessayez.");
 const baseRecord = { params: { rated_current: 4000 }, values: { ratedCurrent: 4000 }, result: null };
-for (const [status, expected] of [["queued", "排隊中"], ["waiting", "等回覆"], ["no_reply", "沒回覆"], ["success", "成功"], ["failed", "失敗"]]) {
+for (const [status, expected] of [["queued", "等設備上線"], ["waiting", "等設備回話"], ["no_reply", "設備沒回話"], ["success", "改好了"], ["failed", "沒改成"]]) {
   const record = { ...baseRecord, status, result: status === "failed" ? -3 : 0 };
   assert.match(setparamStatusText(record, setparamT), new RegExp(expected));
 }
+const setparamCopyKeys = [
+  "setparamChoose", "setparam.max_voltage", "setparam.rated_current", "setparam.work_mode",
+  "setparamValue", "setparamVoltageHint", "setparamCurrentHint", "setparamModeHint",
+  "setparamPreset500", "setparamPreset1000", "setparamDevicePlaceholder",
+  "setparamSend", "setparamAll", "setparamCurrentValues", "setparamUnsupported",
+  "setparamHistory", "setparamNoHistory", "setparamConfirmTitle", "setparamConfirmIntro",
+  "setparamSkippedCount", "setparamConfirmSend", "setparamQueuedCount", "setparamQueued",
+  "setparamWaiting", "setparamNoReply", "setparamSuccess", "setparamFailed",
+  "setparamResultRange", "setparamResultCharging", "setparamResultMissing",
+  "setparamResultCondition", "setparamResultOther", "setparamVoltageOutOfRange",
+  "setparamCurrentOutOfRange", "setparamModeOutOfRange", "setparamInvalidTarget",
+  "setparamServiceError",
+];
 for (const lang of ["zh", "en", "fr"]) {
-  for (const key of ["setparamAdapterTab", "setparamCurrentHint", "setparamConfirmTitle", "setparamQueued", "setparamNoReply", "setparamResultCharging", "setparamPasswordIncorrect", "setparamCurrentOutOfRange"]) {
-    assert.equal(typeof appFeedbackCopy[lang][key], "string");
+  for (const key of setparamCopyKeys) {
+    assert.equal(typeof appFeedbackCopy[lang][key], "string", `${lang}:${key}`);
+    assert.ok(appFeedbackCopy[lang][key].trim(), `${lang}:${key}`);
   }
 }
+assert.doesNotMatch(setparamCopyKeys.map((key) => appFeedbackCopy.zh[key]).join(" "), /下發|統一設置|固件不支持/);
 const priorDocument = globalThis.document;
 globalThis.document = { visibilityState: "visible" };
 try {
@@ -2334,12 +2356,22 @@ try {
   });
   const click = (selector, node = {}) => ({ closest: (candidate) => candidate === selector ? node : null, matches: () => false });
   await controller.read();
+  controller.onClick(click("[data-setparam-voltage]", { dataset: { setparamVoltage: "500" } }));
+  assert.equal(controllerView.valueInput, "500");
+  assert.equal(toSetparamProtocolValue(controllerView.param, controllerView.valueInput), 5000);
+  assert.equal(sent.length, 0, "a preset only fills the input");
+  controller.onClick(click("[data-setparam-voltage]", { dataset: { setparamVoltage: "1000" } }));
+  assert.equal(controllerView.valueInput, "1000");
+  assert.equal(toSetparamProtocolValue(controllerView.param, controllerView.valueInput), 10000);
+  assert.equal(sent.length, 0, "the second preset also does not send");
   controller.onInput({ matches: (selector) => selector === "[data-setparam-value]", value: "400" });
   controller.onInput({ matches: (selector) => selector === "[data-setparam-certid]", value: "0D8C97" });
   controller.onClick(click("[data-setparam-send]"));
   await new Promise(setImmediate);
   assert.deepEqual(sent[0], { params: { max_voltage: 4000 }, certids: [setparamDevices[0].certid] });
   controller.onClick(click("[data-setparam-param]", { dataset: { setparamParam: "rated_current" } }));
+  controller.onClick(click("[data-setparam-voltage]", { dataset: { setparamVoltage: "500" } }));
+  assert.equal(controllerView.valueInput, "", "a voltage preset cannot fill the current field");
   controller.onInput({ matches: (selector) => selector === "[data-setparam-value]", value: "400" });
   controller.onClick(click("[data-setparam-send]"));
   assert.equal(sent.length, 1, "a single current change waits for the password dialog");

@@ -1280,6 +1280,16 @@
   gap: var(--space-10);
 }
 
+.app-feedback-setparam__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-10);
+}
+
+.app-feedback-setparam__presets .app-feedback-button {
+  min-height: 32px;
+}
+
 .app-feedback-setparam__form .app-feedback-ota-muted {
   margin: 0;
 }

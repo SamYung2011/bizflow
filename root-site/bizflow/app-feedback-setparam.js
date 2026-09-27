@@ -1,6 +1,10 @@
 import { formatFeedbackTime } from "./app-feedback-api.js";
 
 const PARAMS = ["rated_current", "max_voltage", "work_mode"];
+const VOLTAGE_PRESETS = [
+  { value: "500", label: "setparamPreset500" },
+  { value: "1000", label: "setparamPreset1000" },
+];
 const PROTOCOL_KEYS = {
   rated_current: "ratedCurrent",
   max_voltage: "maxVoltage",
@@ -121,6 +125,9 @@ export function renderFlashSetparam(view, { t, escape: e, lang }) {
       </div>
       <div class="app-feedback-setparam__form">
         <label><span>${e(t("setparamValue"))}</span><input class="app-feedback-control" type="number" step="${view.param === "work_mode" ? "1" : "0.1"}" data-setparam-value value="${e(view.valueInput)}"${disabled ? " disabled" : ""}></label>
+        ${view.param === "max_voltage" ? `<div class="app-feedback-setparam__presets" role="group" aria-label="${e(t("setparam.max_voltage"))}">
+          ${VOLTAGE_PRESETS.map(({ value, label }) => `<button type="button" class="app-feedback-button" data-setparam-voltage="${value}"${disabled ? " disabled" : ""}>${e(t(label))}</button>`).join("")}
+        </div>` : ""}
         <p class="app-feedback-ota-muted">${e(t(inputHint))}</p>
         <label><span>${e(t("setparamDeviceId"))}</span><input class="app-feedback-control" type="text" data-setparam-certid value="${e(view.certidInput)}" placeholder="${e(t("setparamDevicePlaceholder"))}"${disabled ? " disabled" : ""}></label>
         <div class="app-feedback-setparam__actions">
@@ -256,6 +263,16 @@ export function createFlashSetparamController({ view, call, signal, isActive, re
       view.valueInput = "";
       view.error = "";
       rerender();
+      return true;
+    }
+    const preset = target.closest?.("[data-setparam-voltage]");
+    if (preset) {
+      const selected = preset.dataset.setparamVoltage;
+      if (view.param === "max_voltage" && !view.loading && !view.sending && VOLTAGE_PRESETS.some(({ value }) => value === selected)) {
+        view.valueInput = selected;
+        view.error = "";
+        rerender();
+      }
       return true;
     }
     if (target.closest?.("[data-setparam-cancel]") || target.matches?.("[data-setparam-overlay]")) {
