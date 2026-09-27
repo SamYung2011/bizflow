@@ -153,6 +153,14 @@ export function flashUnbindDisabled(device) {
   );
 }
 
+export function flashLockSourceKeys(device) {
+  const sources = Array.isArray(device?.lockSources) ? device.lockSources : [];
+  return [
+    ...(sources.includes("admin") ? ["adminLockSource"] : []),
+    ...(sources.includes("app_lost") ? ["userLostModeSource"] : []),
+  ];
+}
+
 export function flashUnbindRequest(device) {
   if (device?.charging === true) {
     throw new HonnmonoAdminError("device_charging", 409);
@@ -540,6 +548,7 @@ function renderAdapterCards() {
           ? device.firmware
           : { software: device?.firmware };
       const bindingUserId = String(device?.binding?.userId ?? "").trim();
+      const lockSourceKeys = kind === "flash" ? flashLockSourceKeys(device) : [];
       const unbindDisabled =
         kind === "flash"
           ? flashUnbindDisabled(device)
@@ -568,6 +577,7 @@ function renderAdapterCards() {
           ${detailRow("uuid", id, { mono: true })}
           ${detailRow("deviceModel", device.model)}
           ${detailRow("boundAccount", owner || t("unboundAccount"))}
+          ${lockSourceKeys.length ? detailRow("lockSource", lockSourceKeys.map((key) => t(key)).join(helpers.lang === "zh" ? "、" : ", ")) : ""}
           ${detailRow("softwareVersion", firmware.software || "—")}
           ${detailRow("hardwareVersion", firmware.hardware)}
           ${detailRow("lastHeartbeat", formatFeedbackTime(device.lastHeartbeatAt || device.lastStatusTime, helpers.lang))}
