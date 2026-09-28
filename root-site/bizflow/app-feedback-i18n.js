@@ -1090,7 +1090,7 @@ Object.assign(fr, {
 
 Object.assign(zh, {
   setparamAdapterTab: "閃充參數設置", setparamTitle: "閃充參數設置", setparamChoose: "要改哪一項",
-  "setparam.rated_current": "最大充電電流", "setparam.max_voltage": "最高充電電壓", "setparam.work_mode": "工作模式（廠家調試用）",
+  "setparam.rated_current": "最大充電電流", "setparam.max_voltage": "最高充電電壓", "setparam.work_mode": "工作模式",
   setparamValue: "改成多少", setparamCurrentHint: "轉插最多讓多大電流通過，跟轉插款式有關（300A 款 / 400A 款），出廠已設好。一般不要動，調得比款式高可能過熱損壞。",
   setparamVoltageHint: "轉插最多讓樁用多高的電壓給車充。大部分車（400V 平台，例如 Tesla）用 500V；800V 平台的車（例如 Porsche Taycan、現代 Ioniq 5）要調高，最高 1000V。",
   setparamModeNamed: "模式 {mode} · {name}", setparamModeClosed: "模式 {mode}（未開放設置）",
@@ -1125,7 +1125,7 @@ Object.assign(zh, {
 });
 Object.assign(en, {
   setparamAdapterTab: "Flash parameter settings", setparamTitle: "Flash parameter settings", setparamChoose: "What do you want to change?",
-  "setparam.rated_current": "Maximum charging current", "setparam.max_voltage": "Maximum charging voltage", "setparam.work_mode": "Work mode (for factory testing)",
+  "setparam.rated_current": "Maximum charging current", "setparam.max_voltage": "Maximum charging voltage", "setparam.work_mode": "Work mode",
   setparamValue: "Change it to", setparamCurrentHint: "The adapter limits how much current can pass through. It depends on the adapter model (300 A or 400 A) and is set at the factory. Usually leave it alone: setting it above the model's rating could overheat and damage it.",
   setparamVoltageHint: "The adapter limits the voltage the charger can use for your car. Most cars (400 V systems, such as Tesla) use 500 V. For 800 V cars (such as Porsche Taycan or Hyundai Ioniq 5), set it higher, up to 1000 V.",
   setparamModeNamed: "Mode {mode} · {name}", setparamModeClosed: "Mode {mode} (not available to set)",
@@ -1160,7 +1160,7 @@ Object.assign(en, {
 });
 Object.assign(fr, {
   setparamAdapterTab: "Réglages Flash", setparamTitle: "Réglages des paramètres Flash", setparamChoose: "Que voulez-vous changer ?",
-  "setparam.rated_current": "Courant de charge maximal", "setparam.max_voltage": "Tension de charge maximale", "setparam.work_mode": "Mode de fonctionnement (réservé aux essais en usine)",
+  "setparam.rated_current": "Courant de charge maximal", "setparam.max_voltage": "Tension de charge maximale", "setparam.work_mode": "Mode de fonctionnement",
   setparamValue: "Nouvelle valeur", setparamCurrentHint: "L'adaptateur limite le courant qui peut passer. Cela dépend du modèle (300 A ou 400 A) et la valeur est réglée en usine. En général, ne la changez pas : une valeur supérieure à celle du modèle peut provoquer une surchauffe et l'endommager.",
   setparamVoltageHint: "L'adaptateur limite la tension que la borne peut utiliser pour charger la voiture. Pour la plupart des voitures (système 400 V, comme Tesla), choisissez 500 V. Pour une voiture à système 800 V (comme la Porsche Taycan ou la Hyundai Ioniq 5), augmentez la valeur, jusqu'à 1 000 V.",
   setparamModeNamed: "Mode {mode} · {name}", setparamModeClosed: "Mode {mode} (réglage non disponible)",
