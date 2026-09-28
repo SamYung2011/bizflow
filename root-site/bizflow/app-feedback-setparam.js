@@ -5,6 +5,13 @@ const VOLTAGE_PRESETS = [
   { value: "500", label: "setparamPreset500" },
   { value: "1000", label: "setparamPreset1000" },
 ];
+// The only work modes that can be set; mode 4 has no name yet.
+export const WORK_MODES = [
+  { value: 1, name: "setparamMode1Name", hint: "setparamMode1Hint" },
+  { value: 2, name: "setparamMode2Name", hint: "setparamMode2Hint" },
+  { value: 3, name: "setparamMode3Name", hint: "setparamMode3Hint" },
+  { value: 4, hint: "setparamMode4Hint" },
+];
 const PROTOCOL_KEYS = {
   rated_current: "ratedCurrent",
   max_voltage: "maxVoltage",
@@ -43,17 +50,29 @@ export function matchFlashCertid(devices, input) {
   return { certid: matches[0].certid, device: matches[0] };
 }
 
-export function formatSetparamValue(param, value) {
+// A chosen mode wins; otherwise the typed device's current mode, else mode 1.
+export function selectedWorkMode(view) {
+  const wanted = view.valueInput
+    ? Number(view.valueInput)
+    : matchFlashCertid(view.devices, view.certidInput).device?.params?.workMode;
+  return WORK_MODES.find(({ value }) => value === wanted) || WORK_MODES[0];
+}
+
+export function formatSetparamValue(param, value, t) {
   if (value == null) return "—";
-  if (param === "work_mode") return String(value);
+  if (param === "work_mode") {
+    const mode = WORK_MODES.find((item) => item.value === value);
+    if (!mode) return t("setparamModeClosed", { mode: value });
+    return mode.name ? t("setparamModeNamed", { mode: value, name: t(mode.name) }) : t("setparamModeNumber", { mode: value });
+  }
   return `${Number(value) / 10} ${param === "rated_current" ? "A" : "V"}`;
 }
 
-export function setparamConfirmationLines(devices, param, value) {
+export function setparamConfirmationLines(devices, param, value, t) {
   return devices.filter((row) => row.params != null).map((row) => ({
     certid: row.certid,
-    before: formatSetparamValue(param, row.params[PROTOCOL_KEYS[param]]),
-    after: formatSetparamValue(param, value),
+    before: formatSetparamValue(param, row.params[PROTOCOL_KEYS[param]], t),
+    after: formatSetparamValue(param, value, t),
   }));
 }
 
@@ -63,7 +82,7 @@ export function setparamStatusText(record, t) {
   if (record.status === "no_reply") return t("setparamNoReply");
   if (record.status === "success") {
     const reported = Object.keys(record.params || {}).map((param) =>
-      `${t(`setparam.${param}`)} ${formatSetparamValue(param, record.values?.[PROTOCOL_KEYS[param]])}`,
+      `${t(`setparam.${param}`)} ${formatSetparamValue(param, record.values?.[PROTOCOL_KEYS[param]], t)}`,
     ).join(", ");
     return t("setparamSuccess", { values: reported });
   }
@@ -106,7 +125,7 @@ export function setparamErrorText(error, t) {
 
 function details(record, t) {
   return Object.entries(record.params || {}).map(([param, value]) =>
-    `${t(`setparam.${param}`)} ${formatSetparamValue(param, value)}`,
+    `${t(`setparam.${param}`)} ${formatSetparamValue(param, value, t)}`,
   ).join(", ");
 }
 
@@ -114,8 +133,9 @@ export function renderFlashSetparam(view, { t, escape: e, lang }) {
   const disabled = view.loading || view.sending;
   const supported = view.devices.filter((row) => row.params != null);
   const unsupported = view.devices.length - supported.length;
+  const mode = view.param === "work_mode" ? selectedWorkMode(view) : null;
   const inputHint = view.param === "rated_current" ? "setparamCurrentHint"
-    : view.param === "max_voltage" ? "setparamVoltageHint" : "setparamModeHint";
+    : view.param === "max_voltage" ? "setparamVoltageHint" : mode.hint;
   const confirm = view.confirm;
   return `<div class="app-feedback-device-panel app-feedback-setparam">
     <section class="app-feedback-card">
@@ -124,7 +144,9 @@ export function renderFlashSetparam(view, { t, escape: e, lang }) {
         ${PARAMS.map((param) => `<button type="button" class="app-feedback-button${view.param === param ? " app-feedback-button--primary" : ""}" data-setparam-param="${param}" aria-pressed="${view.param === param}"${disabled ? " disabled" : ""}>${e(t(`setparam.${param}`))}</button>`).join("")}
       </div>
       <div class="app-feedback-setparam__form">
-        <label><span>${e(t("setparamValue"))}</span><input class="app-feedback-control" type="number" step="${view.param === "work_mode" ? "1" : "0.1"}" data-setparam-value value="${e(view.valueInput)}"${disabled ? " disabled" : ""}></label>
+        <label><span>${e(t("setparamValue"))}</span>${mode
+          ? `<select class="app-feedback-control" data-setparam-value${disabled ? " disabled" : ""}>${WORK_MODES.map((item) => `<option value="${item.value}"${item === mode ? " selected" : ""}>${e(formatSetparamValue("work_mode", item.value, t))}</option>`).join("")}</select>`
+          : `<input class="app-feedback-control" type="number" step="0.1" data-setparam-value value="${e(view.valueInput)}"${disabled ? " disabled" : ""}>`}</label>
         ${view.param === "max_voltage" ? `<div class="app-feedback-setparam__presets" role="group" aria-label="${e(t("setparam.max_voltage"))}">
           ${VOLTAGE_PRESETS.map(({ value, label }) => `<button type="button" class="app-feedback-button" data-setparam-voltage="${value}"${disabled ? " disabled" : ""}>${e(t(label))}</button>`).join("")}
         </div>` : ""}
@@ -143,7 +165,7 @@ export function renderFlashSetparam(view, { t, escape: e, lang }) {
       <h2>${e(t("setparamCurrentValues"))}</h2>
       ${view.loading ? `<p>${e(t("devicesLoading"))}</p>` : `<div class="app-feedback-setparam__table-wrap"><table class="app-feedback-setparam__table"><thead><tr>
         <th>${e(t("setparamDeviceId"))}</th><th>${e(t("status"))}</th><th>${e(t("setparam.max_voltage"))}</th><th>${e(t("setparam.rated_current"))}</th><th>${e(t("setparam.work_mode"))}</th><th>${e(t("setparamCanSet"))}</th>
-      </tr></thead><tbody>${view.devices.map((row) => `<tr><td title="${e(row.certid)}">${e(String(row.certid).slice(0, 6))}</td><td>${e(t(row.online ? "online" : "offline"))}</td><td>${e(formatSetparamValue("max_voltage", row.params?.maxVoltage))}</td><td>${e(formatSetparamValue("rated_current", row.params?.ratedCurrent))}</td><td>${e(formatSetparamValue("work_mode", row.params?.workMode))}</td><td>${e(t(row.params ? "setparamSupported" : "setparamUnsupported"))}</td></tr>`).join("")}</tbody></table></div>`}
+      </tr></thead><tbody>${view.devices.map((row) => `<tr><td title="${e(row.certid)}">${e(String(row.certid).slice(0, 6))}</td><td>${e(t(row.online ? "online" : "offline"))}</td><td>${e(formatSetparamValue("max_voltage", row.params?.maxVoltage))}</td><td>${e(formatSetparamValue("rated_current", row.params?.ratedCurrent))}</td><td>${e(formatSetparamValue("work_mode", row.params?.workMode, t))}</td><td>${e(t(row.params ? "setparamSupported" : "setparamUnsupported"))}</td></tr>`).join("")}</tbody></table></div>`}
       ${!view.loading && !view.devices.length ? `<p>${e(t("noDevices"))}</p>` : ""}
     </section>
     <section class="app-feedback-card">
@@ -167,7 +189,8 @@ export function createFlashSetparamController({ view, call, signal, isActive, re
   const visible = () => isActive() && document.visibilityState === "visible";
   const pending = () => view.records.some((row) => ["queued", "waiting"].includes(row.status));
   function value() {
-    const converted = toSetparamProtocolValue(view.param, view.valueInput);
+    const input = view.param === "work_mode" ? selectedWorkMode(view).value : view.valueInput;
+    const converted = toSetparamProtocolValue(view.param, input);
     if (converted === null) {
       view.error = t("setparamInvalidValue");
       rerender();
@@ -246,6 +269,7 @@ export function createFlashSetparamController({ view, call, signal, isActive, re
     }
   }
   function onInput(target) {
+    const shownMode = view.param === "work_mode" && selectedWorkMode(view);
     if (target.matches("[data-setparam-value]")) view.valueInput = target.value;
     else if (target.matches("[data-setparam-certid]")) view.certidInput = target.value;
     else if (target.matches("[data-setparam-password]")) {
@@ -254,6 +278,15 @@ export function createFlashSetparamController({ view, call, signal, isActive, re
     }
     else return false;
     view.error = "";
+    if (shownMode && selectedWorkMode(view) !== shownMode) {
+      // Redraw the picker and its description, then let typing in the device ID continue.
+      rerender();
+      if (target.matches("[data-setparam-certid]")) {
+        const input = document.querySelector("[data-setparam-certid]");
+        input.focus();
+        input.setSelectionRange(target.selectionStart, target.selectionEnd);
+      }
+    }
     return true;
   }
   function onClick(target) {
@@ -305,7 +338,7 @@ export function createFlashSetparamController({ view, call, signal, isActive, re
     if (target.closest?.("[data-setparam-all]")) {
       const converted = value();
       if (converted === null) return true;
-      view.confirm = { kind: "all", param: view.param, value: converted, lines: setparamConfirmationLines(view.devices, view.param, converted) };
+      view.confirm = { kind: "all", param: view.param, value: converted, lines: setparamConfirmationLines(view.devices, view.param, converted, t) };
       view.passwordError = "";
       view.error = "";
       rerender();
