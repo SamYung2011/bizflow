@@ -2294,10 +2294,10 @@ for (const param of ["rated_current", "work_mode"]) {
   assert.doesNotMatch(renderFlashSetparam(otherView, { t: setparamT, escape: String, lang: "zh" }), /data-setparam-voltage=/);
 }
 const workModeDevices = [...setparamDevices, { certid: "0DC517040000000000000001", online: false, params: { maxVoltage: 5000, ratedCurrent: 4000, workMode: 7 } }];
-assert.deepEqual(WORK_MODES.map((mode) => formatSetparamValue("work_mode", mode.value, setparamT)), ["模式 1 · 標準流程（國標）", "模式 2 · BYD 流程（歐標）", "模式 3 · 歐標流程", "模式 4"]);
+assert.deepEqual(WORK_MODES.map((mode) => formatSetparamValue("work_mode", mode.value, setparamT)), ["模式 1 · 標準（預設）", "模式 2 · 比亞迪", "模式 3 · 先讀車輛資料", "模式 4 · 先等絕緣檢查"]);
 assert.equal(formatSetparamValue("work_mode", 7, setparamT), "模式 7（未開放設置）");
 assert.equal(formatSetparamValue("work_mode", null, setparamT), "—");
-assert.equal(formatSetparamValue("work_mode", 2, (key, values) => translateAppFeedback("en", key, values)), "Mode 2 · BYD flow (CCS)");
+assert.equal(formatSetparamValue("work_mode", 4, (key, values) => translateAppFeedback("en", key, values)), "Mode 4 · Wait for insulation check");
 const workModeView = { ...createFlashSetparamState(), param: "work_mode", devices: workModeDevices };
 assert.equal(selectedWorkMode(workModeView).value, 1, "set all starts at mode 1");
 assert.equal(selectedWorkMode({ ...workModeView, certidInput: "0DB897" }).value, 2, "one device starts at its current mode");
@@ -2307,16 +2307,20 @@ const workModeHtml = renderFlashSetparam({ ...workModeView, certidInput: "0DB897
 assert.match(workModeHtml, /<select class="app-feedback-control" data-setparam-value>/);
 assert.doesNotMatch(workModeHtml, /type="number"/);
 assert.equal(workModeHtml.match(/<option /g).length, 4);
-assert.match(workModeHtml, /<option value="2" selected>模式 2 · BYD 流程（歐標）<\/option>/);
-assert.match(workModeHtml, /<option value="4">模式 4<\/option>/);
-assert.match(workModeHtml, /先發起歐標充電確認私有協議，再閉合 CC1 開始國標充電流程。/);
-assert.match(workModeHtml, /<td>模式 1 · 標準流程（國標）<\/td>/);
+assert.match(workModeHtml, /<option value="2" selected>模式 2 · 比亞迪<\/option>/);
+assert.match(workModeHtml, /<option value="4">模式 4 · 先等絕緣檢查<\/option>/);
+assert.match(workModeHtml, /比亞迪（BYD）的車用這個。/);
+assert.match(workModeHtml, /<td>模式 1 · 標準（預設）<\/td>/);
 assert.match(workModeHtml, /<td>模式 7（未開放設置）<\/td>/);
 assert.deepEqual(setparamConfirmationLines(workModeDevices, "work_mode", 1, setparamT).map((line) => `${line.before} → ${line.after}`), [
-  "模式 1 · 標準流程（國標） → 模式 1 · 標準流程（國標）",
-  "模式 2 · BYD 流程（歐標） → 模式 1 · 標準流程（國標）",
-  "模式 7（未開放設置） → 模式 1 · 標準流程（國標）",
+  "模式 1 · 標準（預設） → 模式 1 · 標準（預設）",
+  "模式 2 · 比亞迪 → 模式 1 · 標準（預設）",
+  "模式 7（未開放設置） → 模式 1 · 標準（預設）",
 ]);
+for (const lang of ["zh", "en", "fr"]) {
+  const modeCopy = WORK_MODES.flatMap((mode) => [appFeedbackCopy[lang][mode.name], appFeedbackCopy[lang][mode.hint]]).join(" ");
+  assert.doesNotMatch(modeCopy, /GB\/T|CCS|BHM|BRO|CC1/, `${lang} work mode copy stays plain`);
+}
 assert.equal(setparamErrorText({ backendDetail: { error: "param_out_of_range", param: "rated_current", min: 1, max: 20000 } }, setparamT), "最大充電電流不能超過 2000 A");
 assert.equal(setparamErrorText({ backendDetail: { error: "param_out_of_range", param: "max_voltage", min: 2000, max: 10000 } }, setparamT), "最高充電電壓只能填 200 V–1000 V");
 assert.equal(setparamErrorText({ backendDetail: { error: "password_incorrect" } }, setparamT), "密碼不對，請重新輸入");
@@ -2331,8 +2335,8 @@ for (const [status, expected] of [["queued", "等設備上線"], ["waiting", "�
 const setparamCopyKeys = [
   "setparamChoose", "setparam.max_voltage", "setparam.rated_current", "setparam.work_mode",
   "setparamValue", "setparamVoltageHint", "setparamCurrentHint",
-  "setparamModeNamed", "setparamModeNumber", "setparamModeClosed",
-  ...WORK_MODES.flatMap((mode) => [mode.name, mode.hint].filter(Boolean)),
+  "setparamModeNamed", "setparamModeClosed",
+  ...WORK_MODES.flatMap((mode) => [mode.name, mode.hint]),
   "setparamPreset500", "setparamPreset1000", "setparamDevicePlaceholder",
   "setparamSend", "setparamAll", "setparamCurrentValues", "setparamUnsupported",
   "setparamHistory", "setparamNoHistory", "setparamConfirmTitle", "setparamConfirmIntro",
@@ -2463,7 +2467,7 @@ try {
   modeController.onClick(click("[data-setparam-param]", { dataset: { setparamParam: "work_mode" } }));
   modeController.onClick(click("[data-setparam-all]"));
   assert.equal(modeView.confirm.value, 1);
-  assert.equal(modeView.confirm.lines[1].after, "模式 1 · 標準流程（國標）");
+  assert.equal(modeView.confirm.lines[1].after, "模式 1 · 標準（預設）");
   modeController.onClick(click("[data-setparam-confirm]"));
   await new Promise(setImmediate);
   assert.deepEqual(modeSent[0], { params: { work_mode: 1 }, all: true });

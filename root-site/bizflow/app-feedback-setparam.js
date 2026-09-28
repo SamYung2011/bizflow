@@ -5,12 +5,12 @@ const VOLTAGE_PRESETS = [
   { value: "500", label: "setparamPreset500" },
   { value: "1000", label: "setparamPreset1000" },
 ];
-// The only work modes that can be set; mode 4 has no name yet.
+// The only work modes that can be set.
 export const WORK_MODES = [
   { value: 1, name: "setparamMode1Name", hint: "setparamMode1Hint" },
   { value: 2, name: "setparamMode2Name", hint: "setparamMode2Hint" },
   { value: 3, name: "setparamMode3Name", hint: "setparamMode3Hint" },
-  { value: 4, hint: "setparamMode4Hint" },
+  { value: 4, name: "setparamMode4Name", hint: "setparamMode4Hint" },
 ];
 const PROTOCOL_KEYS = {
   rated_current: "ratedCurrent",
@@ -62,8 +62,7 @@ export function formatSetparamValue(param, value, t) {
   if (value == null) return "—";
   if (param === "work_mode") {
     const mode = WORK_MODES.find((item) => item.value === value);
-    if (!mode) return t("setparamModeClosed", { mode: value });
-    return mode.name ? t("setparamModeNamed", { mode: value, name: t(mode.name) }) : t("setparamModeNumber", { mode: value });
+    return mode ? t("setparamModeNamed", { mode: value, name: t(mode.name) }) : t("setparamModeClosed", { mode: value });
   }
   return `${Number(value) / 10} ${param === "rated_current" ? "A" : "V"}`;
 }
