@@ -3,11 +3,21 @@ export const SUPPORT_LIMITS = { voiceMaxSeconds: 60, attachmentMaxMb: 20 };
 export const SUPPORT_CATEGORIES = [
   '充電問題', '付款與退款', '訂單問題', '帳號與登入',
   '設備與綁定', '發票與收據', 'APP 使用', '其他問題',
+  '服務跟進', '功能建議',
 ];
 export const SUPPORT_PAGE_SIZE = 30;
 
-const systemKeys = { '已转人工客服': '已轉人工客服', '客服已结束本次服务': '客服已結束本次服務', '使用者已结束本次服务': '使用者已結束本次服務' };
+const systemKeys = {
+  '已转人工客服': '已轉人工客服',
+  '客服已结束本次服务': '客服已結束本次服務',
+  '使用者已结束本次服务': '使用者已結束本次服務',
+  '使用者已重新开启本次服务': '使用者已重新開啟本次服務',
+};
 export const systemMessageKey = content => systemKeys[content] || content;
+export function supportCaseId(id) {
+  const number = Number(id);
+  return Number.isSafeInteger(number) && number > 0 ? `HM-CS-${String(number).padStart(6, '0')}` : '';
+}
 
 export function mergeMessages(current = [], incoming = []) {
   const entries = new Map(current.map(message => [message.clientMsgId || message.id, message]));

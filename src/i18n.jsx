@@ -6,7 +6,9 @@ const STORAGE_KEY = "bizflow-lang";
 
 const DICT_EN = {
   "使用者已结束本次服务": "The user has ended this conversation",
+  "使用者已重新开启本次服务": "The user reopened this conversation",
   "使用者已結束本次服務": "The user has ended this conversation",
+  "使用者已重新開啟本次服務": "The user reopened this conversation",
 
   "未登入或沒有主站權限": "Sign in with main-site access",
   "請先登入客服工作台": "Please sign in to the support workspace",
@@ -26,6 +28,7 @@ const DICT_EN = {
   "{count} 條未讀": "{count} unread",
   "AI 轉人工": "AI handoff",
   "使用者發起": "Started by user",
+  "意見反饋": "Feedback",
   "已認領": "Assigned",
   "沒有符合條件的會話": "No matching conversations",
   "載入更多會話": "Load more conversations",
@@ -83,6 +86,8 @@ const DICT_EN = {
   "發票與收據": "Invoices & receipts",
   "APP 使用": "Using the APP",
   "其他問題": "Other",
+  "服務跟進": "Service follow-up",
+  "功能建議": "Feature suggestion",
   // ── 充電樁意向表單（訂單銷售組新子板塊，2026-06-25）──
   "充電樁意向表單": "Charger Intent Forms",
   "意向登記": "Intent Leads",
@@ -1942,7 +1947,9 @@ const DICT_EN = {
 
 const DICT_FR = {
   "使用者已结束本次服务": "L’utilisateur a clôturé cette conversation",
+  "使用者已重新开启本次服务": "L’utilisateur a rouvert cette conversation",
   "使用者已結束本次服務": "L’utilisateur a clôturé cette conversation",
+  "使用者已重新開啟本次服務": "L’utilisateur a rouvert cette conversation",
 
   "未登入或沒有主站權限": "Connectez-vous avec un accès au site principal",
   "請先登入客服工作台": "Connectez-vous à l’espace d’assistance",
@@ -1962,6 +1969,7 @@ const DICT_FR = {
   "{count} 條未讀": "{count} non lus",
   "AI 轉人工": "Transfert de l’IA",
   "使用者發起": "Initiée par l’utilisateur",
+  "意見反饋": "Avis et commentaires",
   "已認領": "Attribuée",
   "沒有符合條件的會話": "Aucune conversation correspondante",
   "載入更多會話": "Charger plus de conversations",
@@ -2019,6 +2027,8 @@ const DICT_FR = {
   "發票與收據": "Factures et reçus",
   "APP 使用": "Utilisation de l’APP",
   "其他問題": "Autres",
+  "服務跟進": "Suivi du service",
+  "功能建議": "Suggestion de fonctionnalité",
   // ── 充電樁意向表單（訂單銷售組新子板塊，2026-06-25）──
   "充電樁意向表單": "Demandes de borne",
   "意向登記": "Prospects",

@@ -32,7 +32,8 @@ export default function ConversationList({ query, selectedId, onSelect, filters,
         key={item.id} onClick={() => onSelect(item.id)} aria-current={selectedId === item.id ? 'true' : undefined}>
         <span className={`support-avatar tone-${item.id % 5}`}>{item.userNickname?.slice(0, 1).toUpperCase()}</span>
         <span className="support-conversation-copy"><span className="support-conversation-title"><strong>{item.userNickname}</strong>
-          {item.category && <span className="support-category">{t(item.category)}</span>}</span>
+          {item.category && <span className="support-category">{t(item.category)}</span>}
+          {item.source === 'feedback' && <span className="support-category">{t('意見反饋')}</span>}</span>
           <span className="support-preview">{item.lastMessagePreview === '[attachment]' ? t('附件') : item.lastSenderRole === 'system' ? t(systemMessageKey(item.lastMessagePreview)) : item.lastMessagePreview}</span>
           <span className="support-conversation-source">{t(item.source === 'ai_handoff' ? 'AI 轉人工' : '使用者發起')}
             {item.assigneeEmail && <span> · {t('已認領')}</span>}</span>
