@@ -86,6 +86,7 @@ import {
   renderFlashSetparam,
   selectedWorkMode,
   setparamConfirmationLines,
+  setparamCurrentStepNote,
   setparamErrorText,
   setparamStatusText,
   toSetparamProtocolValue,
@@ -2283,10 +2284,27 @@ assert.match(html, /0DB897034096400000EC7477: 300 A → 450 A/);
 assert.match(html, /1 台固件太舊，這次不改/);
 assert.match(html, /type="password" autocomplete="current-password"/);
 assert.match(html, /一般不要動/);
+assert.match(html, /1 台固件太舊，這次不改<\/p><p>會先設一次 299\.8 A，設備回覆成功後再設 450 A。<\/p>/, "set all explains the 299.8 A step after the device list");
+// Above 300 A the firmware needs 299.8 A first; the server queues that step, the confirmation only says so.
+assert.equal(setparamCurrentStepNote("rated_current", 3500, setparamT), "會先設一次 299.8 A，設備回覆成功後再設 350 A。");
+assert.equal(setparamCurrentStepNote("rated_current", 3001, setparamT), "會先設一次 299.8 A，設備回覆成功後再設 300.1 A。");
+for (const [param, value] of [["rated_current", 3000], ["rated_current", 2500], ["max_voltage", 6000], ["work_mode", 4]]) {
+  assert.equal(setparamCurrentStepNote(param, value, setparamT), "", `${param} ${value} has no first step`);
+}
+assert.equal(setparamCurrentStepNote("rated_current", 3500, (key, values) => translateAppFeedback("en", key, values)), "It will first set 299.8 A, then set 350 A once the device confirms.");
+assert.equal(setparamCurrentStepNote("rated_current", 3500, (key, values) => translateAppFeedback("fr", key, values)), "L'appareil passera d'abord à 299.8 A, puis à 350 A une fois ce premier réglage confirmé.");
+const singleCurrentHtml = (value) => renderFlashSetparam(
+  { ...createFlashSetparamState(), param: "rated_current", confirm: { kind: "single", param: "rated_current", value, certid: setparamDevices[0].certid } },
+  { t: setparamT, escape: String, lang: "zh" },
+);
+assert.match(singleCurrentHtml(3500), /<p>會先設一次 299\.8 A，設備回覆成功後再設 350 A。<\/p><p>改電流需要再輸入一次登入密碼。<\/p>/);
+assert.match(singleCurrentHtml(3000), /<p>改電流需要再輸入一次登入密碼。<\/p>/);
+assert.doesNotMatch(singleCurrentHtml(3000), /299\.8/, "300 A and below go out directly");
 const voltageView = createFlashSetparamState();
 voltageView.confirm = { kind: "all", param: "max_voltage", value: 6000, lines: [] };
 const voltageHtml = renderFlashSetparam(voltageView, { t: setparamT, escape: String, lang: "zh" });
 assert.doesNotMatch(voltageHtml, /type="password"/);
+assert.doesNotMatch(voltageHtml, /會先設一次/);
 assert.match(voltageHtml, /data-setparam-voltage="500"[^>]*>大部分車 500V<\/button>/);
 assert.match(voltageHtml, /data-setparam-voltage="1000"[^>]*>800V 平台 1000V<\/button>/);
 for (const param of ["rated_current", "work_mode"]) {
@@ -2332,6 +2350,21 @@ for (const [status, expected] of [["queued", "等設備上線"], ["waiting", "�
   const record = { ...baseRecord, status, result: status === "failed" ? -3 : 0 };
   assert.match(setparamStatusText(record, setparamT), new RegExp(expected));
 }
+// The target of a current above 300 A: waiting for 299.8 A, cancelled with the first step's reason, or replaced.
+const chainRecord = { params: { rated_current: 3500 }, values: null, result: null, afterReqid: "admin-setparam-1790000000000", afterResult: null };
+const chainTexts = [
+  [{ ...chainRecord, status: "held" }, "等 299.8 A 生效"],
+  [{ ...chainRecord, status: "cancelled", afterResult: -3 }, "299.8 A 未成功，未設 350 A：設備正在充電，充完再改"],
+  [{ ...chainRecord, status: "cancelled", afterResult: -5 }, "299.8 A 未成功，未設 350 A：設備現在不讓改"],
+  [{ ...chainRecord, status: "superseded" }, "沒送出：後來又改了電流，以最新一次為準"],
+];
+for (const [record, expected] of chainTexts) {
+  assert.equal(setparamStatusText(record, setparamT), expected);
+  assert.doesNotMatch(expected, /[B-Zb-z]|-\d/, "chain status copy has no English sentence or raw result code");
+}
+assert.equal(setparamStatusText({ ...chainRecord, status: "cancelled", afterResult: -3 }, (key, values) => translateAppFeedback("en", key, values)),
+  "299.8 A did not go through, so 350 A was not set: The device is charging. Try again when charging ends");
+assert.equal(setparamStatusText({ ...chainRecord, status: "held" }, (key, values) => translateAppFeedback("fr", key, values)), "En attente de l'application de 299.8 A");
 const setparamCopyKeys = [
   "setparamChoose", "setparam.max_voltage", "setparam.rated_current", "setparam.work_mode",
   "setparamValue", "setparamVoltageHint", "setparamCurrentHint",
@@ -2345,7 +2378,8 @@ const setparamCopyKeys = [
   "setparamResultRange", "setparamResultCharging", "setparamResultMissing",
   "setparamResultCondition", "setparamResultOther", "setparamVoltageOutOfRange",
   "setparamCurrentOutOfRange", "setparamModeOutOfRange", "setparamInvalidTarget",
-  "setparamServiceError",
+  "setparamServiceError", "setparamCurrentStepNote", "setparamStepHeld",
+  "setparamStepCancelled", "setparamSuperseded",
 ];
 for (const lang of ["zh", "en", "fr"]) {
   for (const key of setparamCopyKeys) {
@@ -2408,6 +2442,7 @@ try {
   controller.onClick(click("[data-setparam-send]"));
   assert.equal(sent.length, 1, "a single current change waits for the password dialog");
   assert.equal(controllerView.confirm.kind, "single");
+  assert.match(renderFlashSetparam(controllerView, { t: setparamT, escape: String, lang: "zh" }), /會先設一次 299\.8 A，設備回覆成功後再設 400 A。/);
   controller.onInput({ matches: (selector) => selector === "[data-setparam-password]", value: "wrong-test-password" });
   failPassword = true;
   controller.onClick(click("[data-setparam-confirm]"));
@@ -2426,10 +2461,28 @@ try {
   assert.equal(sent.length, 3, "set all waits for confirmation");
   assert.equal(controllerView.confirm.lines.length, 2);
   assert.match(renderFlashSetparam(controllerView, { t: setparamT, escape: String, lang: "zh" }), /type="password"/);
+  assert.match(renderFlashSetparam(controllerView, { t: setparamT, escape: String, lang: "zh" }), /會先設一次 299\.8 A，設備回覆成功後再設 400 A。/);
   controller.onInput({ matches: (selector) => selector === "[data-setparam-password]", value: "all-test-password" });
   controller.onClick(click("[data-setparam-confirm]"));
   await new Promise(setImmediate);
   assert.deepEqual(sent[3], { params: { rated_current: 4000 }, all: true, password: "all-test-password" });
+
+  // A target still waiting for its 299.8 A step keeps the page polling until it settles.
+  const polling = [];
+  let history = [{ ...chainRecord, status: "held" }];
+  const pollController = createFlashSetparamController({
+    view: createFlashSetparamState(),
+    call: async (path) => path.startsWith("/devices/flash-setparam/recent") ? { items: history } : { items: setparamDevices, total: setparamDevices.length },
+    signal: new AbortController().signal,
+    isActive: () => true,
+    rerender: () => {},
+    t: setparamT,
+    setPolling: (value) => polling.push(value),
+  });
+  await pollController.read();
+  history = [{ ...chainRecord, status: "cancelled", afterResult: -3 }];
+  await pollController.read();
+  assert.deepEqual(polling, [true, false]);
 
   controller.onClick(click("[data-setparam-param]", { dataset: { setparamParam: "max_voltage" } }));
   controller.onInput({ matches: (selector) => selector === "[data-setparam-value]", value: "600" });
