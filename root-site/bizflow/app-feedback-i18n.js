@@ -1122,6 +1122,9 @@ Object.assign(zh, {
   setparamFailed: "沒改成：{reason}", setparamResultMissing: "設備不認這個設定（固件可能太舊）",
   setparamResultRange: "數值超出能設的範圍", setparamResultCharging: "設備正在充電，充完再改",
   setparamResultCondition: "設備現在不讓改", setparamResultOther: "沒改成（代碼 {code}）",
+  setparamCurrentStepNote: "會先設一次 {first}，設備回覆成功後再設 {target}。",
+  setparamStepHeld: "等 {first} 生效", setparamStepCancelled: "{first} 未成功，未設 {target}：{reason}",
+  setparamSuperseded: "沒送出：後來又改了電流，以最新一次為準",
 });
 Object.assign(en, {
   setparamAdapterTab: "Flash parameter settings", setparamTitle: "Flash parameter settings", setparamChoose: "What do you want to change?",
@@ -1157,6 +1160,9 @@ Object.assign(en, {
   setparamFailed: "Could not change it: {reason}", setparamResultMissing: "The device does not recognise this setting (firmware may be too old)",
   setparamResultRange: "The number is outside the allowed range", setparamResultCharging: "The device is charging. Try again when charging ends",
   setparamResultCondition: "The device cannot change this right now", setparamResultOther: "Could not change it (code {code})",
+  setparamCurrentStepNote: "It will first set {first}, then set {target} once the device confirms.",
+  setparamStepHeld: "Waiting for {first} to take effect", setparamStepCancelled: "{first} did not go through, so {target} was not set: {reason}",
+  setparamSuperseded: "Not sent: the current was changed again later, so the latest change applies",
 });
 Object.assign(fr, {
   setparamAdapterTab: "Réglages Flash", setparamTitle: "Réglages des paramètres Flash", setparamChoose: "Que voulez-vous changer ?",
@@ -1192,6 +1198,9 @@ Object.assign(fr, {
   setparamFailed: "Modification impossible : {reason}", setparamResultMissing: "L'appareil ne reconnaît pas ce réglage (micrologiciel peut-être trop ancien)",
   setparamResultRange: "La valeur dépasse la plage autorisée", setparamResultCharging: "L'appareil est en charge. Réessayez une fois la charge terminée",
   setparamResultCondition: "L'appareil ne permet pas cette modification pour le moment", setparamResultOther: "Modification impossible (code {code})",
+  setparamCurrentStepNote: "L'appareil passera d'abord à {first}, puis à {target} une fois ce premier réglage confirmé.",
+  setparamStepHeld: "En attente de l'application de {first}", setparamStepCancelled: "{first} n'a pas abouti, {target} n'a donc pas été appliqué : {reason}",
+  setparamSuperseded: "Non envoyé : le courant a été modifié de nouveau, la dernière modification s'applique",
 });
 
 export const appFeedbackCopy = { zh, en, fr };

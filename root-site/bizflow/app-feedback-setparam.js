@@ -17,6 +17,12 @@ const PROTOCOL_KEYS = {
   max_voltage: "maxVoltage",
   work_mode: "workMode",
 };
+// Firmware guard: a current above 300 A is accepted only right after 299.8 A.
+// ota-admin (flash_setparam.CURRENT_GUARD_*) queues that first step; the page only explains it.
+const CURRENT_GUARD = { above: 3000, first: 2998 };
+// Records in these states can still change, so the page keeps polling.
+const OPEN_STATUSES = ["queued", "waiting", "held"];
+const RESULT_REASONS = { "-1": "setparamResultMissing", "-2": "setparamResultRange", "-3": "setparamResultCharging", "-5": "setparamResultCondition" };
 
 export function createFlashSetparamState() {
   return {
@@ -75,21 +81,39 @@ export function setparamConfirmationLines(devices, param, value, t) {
   }));
 }
 
+// The confirmation line for a current above 300 A; empty otherwise.
+export function setparamCurrentStepNote(param, value, t) {
+  if (param !== "rated_current" || value <= CURRENT_GUARD.above) return "";
+  return t("setparamCurrentStepNote", {
+    first: formatSetparamValue(param, CURRENT_GUARD.first),
+    target: formatSetparamValue(param, value),
+  });
+}
+
+function resultReason(code, t) {
+  return RESULT_REASONS[String(code)] ? t(RESULT_REASONS[String(code)]) : t("setparamResultOther", { code });
+}
+
 export function setparamStatusText(record, t) {
   if (record.status === "queued") return t("setparamQueued");
   if (record.status === "waiting") return t("setparamWaiting");
   if (record.status === "no_reply") return t("setparamNoReply");
+  if (record.status === "held") return t("setparamStepHeld", { first: formatSetparamValue("rated_current", CURRENT_GUARD.first) });
+  if (record.status === "superseded") return t("setparamSuperseded");
+  if (record.status === "cancelled") {
+    return t("setparamStepCancelled", {
+      first: formatSetparamValue("rated_current", CURRENT_GUARD.first),
+      target: formatSetparamValue("rated_current", record.params?.rated_current),
+      reason: resultReason(record.afterResult, t),
+    });
+  }
   if (record.status === "success") {
     const reported = Object.keys(record.params || {}).map((param) =>
       `${t(`setparam.${param}`)} ${formatSetparamValue(param, record.values?.[PROTOCOL_KEYS[param]], t)}`,
     ).join(", ");
     return t("setparamSuccess", { values: reported });
   }
-  const reasons = { "-1": "setparamResultMissing", "-2": "setparamResultRange", "-3": "setparamResultCharging", "-5": "setparamResultCondition" };
-  const reason = reasons[String(record.result)]
-    ? t(reasons[String(record.result)])
-    : t("setparamResultOther", { code: record.result });
-  return t("setparamFailed", { reason });
+  return t("setparamFailed", { reason: resultReason(record.result, t) });
 }
 
 export function setparamErrorText(error, t) {
@@ -136,6 +160,8 @@ export function renderFlashSetparam(view, { t, escape: e, lang }) {
   const inputHint = view.param === "rated_current" ? "setparamCurrentHint"
     : view.param === "max_voltage" ? "setparamVoltageHint" : mode.hint;
   const confirm = view.confirm;
+  const stepNote = confirm ? setparamCurrentStepNote(confirm.param, confirm.value, t) : "";
+  const stepNoteHtml = stepNote ? `<p>${e(stepNote)}</p>` : "";
   return `<div class="app-feedback-device-panel app-feedback-setparam">
     <section class="app-feedback-card">
       <h2>${e(t("setparamTitle"))}</h2>
@@ -173,9 +199,9 @@ export function renderFlashSetparam(view, { t, escape: e, lang }) {
     </section>
     ${confirm ? `<div class="app-feedback-overlay app-feedback-device-confirm-overlay" data-setparam-overlay><section class="app-feedback-device-confirm" role="alertdialog" aria-modal="true" aria-labelledby="setparam-confirm-title">
       <h2 id="setparam-confirm-title">${e(t(confirm.kind === "single" ? "setparamPasswordTitle" : "setparamConfirmTitle"))}</h2>
-      ${confirm.kind === "single" ? `<p>${e(t("setparamPasswordPrompt"))}</p>` : `<p>${e(t("setparamConfirmIntro", { count: confirm.lines.length }))}</p>
+      ${confirm.kind === "single" ? `${stepNoteHtml}<p>${e(t("setparamPasswordPrompt"))}</p>` : `<p>${e(t("setparamConfirmIntro", { count: confirm.lines.length }))}</p>
       <ul class="app-feedback-setparam__confirm-list">${confirm.lines.map((line) => `<li title="${e(line.certid)}">${e(line.certid)}: ${e(line.before)} → ${e(line.after)}</li>`).join("")}</ul>
-      <p>${e(t("setparamSkippedCount", { count: unsupported }))}</p>`}
+      <p>${e(t("setparamSkippedCount", { count: unsupported }))}</p>${stepNoteHtml}`}
       ${confirm.param === "rated_current" ? `<label class="app-feedback-setparam__password"><span>${e(t("setparamPasswordLabel"))}</span><input class="app-feedback-control" type="password" autocomplete="current-password" data-setparam-password value="${e(view.passwordInput)}"${view.sending ? " disabled" : ""}></label>${view.passwordError ? `<div class="app-feedback-alert" role="alert">${e(view.passwordError)}</div>` : ""}` : ""}
       ${view.error ? `<div class="app-feedback-alert" role="alert">${e(view.error)}</div>` : ""}
       <div class="app-feedback-device-confirm__actions"><button type="button" class="app-feedback-button" data-setparam-cancel${view.sending ? " disabled" : ""}>${e(t("cancel"))}</button><button type="button" class="app-feedback-button app-feedback-button--danger" data-setparam-confirm${view.sending ? " disabled" : ""}>${e(t(view.sending ? "refreshing" : "setparamConfirmSend"))}</button></div>
@@ -186,7 +212,7 @@ export function renderFlashSetparam(view, { t, escape: e, lang }) {
 export function createFlashSetparamController({ view, call, signal, isActive, rerender, t, setPolling }) {
   let request = 0;
   const visible = () => isActive() && document.visibilityState === "visible";
-  const pending = () => view.records.some((row) => ["queued", "waiting"].includes(row.status));
+  const pending = () => view.records.some((row) => OPEN_STATUSES.includes(row.status));
   function value() {
     const input = view.param === "work_mode" ? selectedWorkMode(view).value : view.valueInput;
     const converted = toSetparamProtocolValue(view.param, input);
