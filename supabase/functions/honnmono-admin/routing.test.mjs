@@ -131,6 +131,21 @@ test("maps only the feedback and device-admin routes", () => {
   );
 });
 
+test("northbound staff routes map to Shenzhen and reject traversal or unsupported verbs", () => {
+  assert.equal(mapHonnmonoAdminPath("/northbound/cases", "GET"), "/internal/admin/northbound/cases");
+  assert.equal(mapHonnmonoAdminPath("/northbound/cases/42/stage", "POST"), "/internal/admin/northbound/cases/42/stage");
+  assert.equal(mapHonnmonoAdminPath("/northbound/files/abc/proof%20one.jpg", "GET"),
+    "/internal/admin/northbound/files/abc/proof%20one.jpg");
+  assert.equal(isMainAccessRoute("/northbound/cases", "GET"), true);
+  assert.equal(isAllowedHonnmonoUpstream(new URL("https://app-api.honnmono.top/internal/admin/northbound/cases")), true);
+  for (const path of ["/northbound/..%2Fsupport/cases", "/northbound/%2e%2e%5csupport/cases",
+    "/northbound/cases//42", "/northbound/cases/%2e%2e%2f42"]) {
+    assert.equal(mapHonnmonoAdminPath(path, "GET"), "", path);
+  }
+  assert.equal(mapHonnmonoAdminPath("/northbound/cases", "DELETE"), "");
+  assert.equal(isAllowedHonnmonoUpstream(new URL("https://app-api.honnmono.top/internal/admin/northbound/%2e%2e%2Fsupport")), false);
+});
+
 
 test("rejects writes, raw download proxying, and unrelated routes", () => {
   assert.equal(mapHonnmonoAdminPath("/feedback", "POST"), "");

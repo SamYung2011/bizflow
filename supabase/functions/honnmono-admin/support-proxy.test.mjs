@@ -14,6 +14,14 @@ test('support bytes, signature rewrite, limits and methods', async t => {
       assert.equal(result.headers.get('x-content-type-options'), 'nosniff');
       assert.equal(result.headers.get('access-control-allow-origin'), '*');
     });
+    await t.test('S8 northbound file returns exact bytes with private headers', async () => {
+      const bytes = new Uint8Array([0, 255, 10, 34]);
+      globalThis.fetch = async () => new Response(bytes, { headers: { 'content-type': 'image/png' } });
+      const result = await invoke('/internal/admin/northbound/files/abc/image.png');
+      assert.deepEqual(new Uint8Array(await result.arrayBuffer()), bytes);
+      assert.equal(result.headers.get('cache-control'), 'private, no-store');
+      assert.equal(result.headers.get('x-content-type-options'), 'nosniff');
+    });
     await t.test('upload sends untouched bytes with internal identity and rewrites only signed upload URL', async () => {
       const bytes = new Uint8Array([0, 128, 255]);
       globalThis.fetch = async (_url, init) => {

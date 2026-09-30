@@ -1,20 +1,37 @@
 export const SUPPORT_UPLOAD_BYTES = 20 * 1024 * 1024;
 const JSON_BYTES = 4 * 1024 * 1024;
 
+function safeSegments(path, prefix) {
+  if (!path.startsWith(prefix)) return false;
+  try {
+    return path.slice(prefix.length).split('/').every(part => {
+      const decoded = decodeURIComponent(part);
+      return decoded && decoded !== '.' && decoded !== '..' && !/[\\/]/.test(decoded);
+    });
+  } catch { return false; }
+}
+
 export function supportUpstreamPath(path, method) {
   if (!['GET', 'POST', 'DELETE'].includes(method) || !path.startsWith('/support/')) return '';
+  if (!safeSegments(path, '/support/')) return '';
   const parts = path.slice('/support/'.length).split('/');
-  try {
-    if (parts.some(part => !part || /[\\/]/.test(decodeURIComponent(part)) || ['.', '..'].includes(decodeURIComponent(part)))) return '';
-  } catch { return ''; }
   if (/^\/support\/upload\/[A-Za-z0-9_-]{1,64}$/.test(path)) {
     return method === 'POST' ? `/internal/cloud-storage/upload/${parts[1]}` : '';
   }
   return `/internal/admin${path}`;
 }
 
+export function northboundUpstreamPath(path, method) {
+  if (!['GET', 'POST'].includes(method) || !safeSegments(path, '/northbound/')) return '';
+  return `/internal/admin${path}`;
+}
+
 export function isSupportUpstream(path) {
   return path.startsWith('/internal/admin/support/') || /^\/internal\/cloud-storage\/upload\/[A-Za-z0-9_-]{1,64}$/.test(path);
+}
+
+export function isStaffUpstream(path) {
+  return isSupportUpstream(path) || safeSegments(path, '/internal/admin/northbound/');
 }
 
 async function readLimited(stream, limit) {
@@ -38,7 +55,8 @@ async function readLimited(stream, limit) {
 export async function forwardSupport(req, upstreamUrl, { token, operatorEmail, cors }) {
   const reply = (body, status = 200) => Response.json(body, { status, headers: { ...cors, 'Cache-Control': 'no-store' } });
   const upload = upstreamUrl.pathname.startsWith('/internal/cloud-storage/upload/');
-  const file = upstreamUrl.pathname.startsWith('/internal/admin/support/files/');
+  const file = upstreamUrl.pathname.startsWith('/internal/admin/support/files/') ||
+    upstreamUrl.pathname.startsWith('/internal/admin/northbound/files/');
   let body;
   if (['POST', 'DELETE'].includes(req.method)) {
     try { body = await readLimited(req.body, upload ? SUPPORT_UPLOAD_BYTES : JSON_BYTES); }

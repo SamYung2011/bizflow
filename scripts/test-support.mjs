@@ -227,7 +227,7 @@ check('feedback label appears in list and header; case number stays visible for 
 
 // Render the real App.jsx embed branch through the employee query/hydration sequence.
 const appSource = await readFile('src/App.jsx', 'utf8');
-const embedStart = appSource.indexOf('  if (tab === "appSupport" && new URLSearchParams');
+const embedStart = appSource.indexOf('  if (["appSupport", "appNorthbound"].includes(tab) && new URLSearchParams');
 assert(embedStart !== -1);
 const embedBranch = appSource.slice(embedStart, appSource.indexOf('\n\n  return (', embedStart));
 const embedCode = await transform(`
@@ -239,8 +239,9 @@ const embedCode = await transform(`
 `, { loader: 'jsx' });
 const require = createRequire(import.meta.url), React = require('react');
 const { renderToStaticMarkup } = require('react-dom/server');
-const embed = new Function('React', 'Suspense', 'AppSupportView', embedCode.code)(
-  React, React.Suspense, () => React.createElement('div', null, 'support-ready'));
+const embed = new Function('React', 'Suspense', 'AppSupportView', 'AppNorthboundView', embedCode.code)(
+  React, React.Suspense, () => React.createElement('div', null, 'support-ready'),
+  () => React.createElement('div', null, 'northbound-ready'));
 const renderEmbed = props => renderToStaticMarkup(embed(props));
 const employee = { user_id: 'staff-id', bizflow_main_access: true };
 check('embed shows the same loading fallback during employee fetch and effect hydration', () => {

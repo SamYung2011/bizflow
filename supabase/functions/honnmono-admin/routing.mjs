@@ -1,4 +1,4 @@
-import { supportUpstreamPath, isSupportUpstream } from "./support-proxy.mjs";
+import { supportUpstreamPath, northboundUpstreamPath, isStaffUpstream } from "./support-proxy.mjs";
 
 // Per-route upstream budgets. The defaults are 10 s / 16 KB; three routes need
 // more room, and they are named here so index.ts and its tests read the same
@@ -44,6 +44,7 @@ export function isMainAccessRoute(subPath, method) {
   const certid = "[A-Za-z0-9_-]{1,64}";
   return (
     path.startsWith("/support/") ||
+    path.startsWith("/northbound/") ||
     (method === "GET" && (
       path === "/device/binding" ||
       path === "/devices/flash" ||
@@ -63,6 +64,7 @@ export function isMainAccessRoute(subPath, method) {
 export function mapHonnmonoAdminPath(pathname, method) {
   const normalized = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
   if (normalized.startsWith("/support/")) return supportUpstreamPath(normalized, method);
+  if (normalized.startsWith("/northbound/")) return northboundUpstreamPath(normalized, method);
   if (method === "GET" && normalized === "/feedback") {
     return "/internal/admin/feedback";
   }
@@ -200,7 +202,7 @@ export function isAllowedHonnmonoUpstream(url) {
     url.username === "" &&
     url.password === "" &&
     (
-      isSupportUpstream(url.pathname) ||
+      isStaffUpstream(url.pathname) ||
       url.pathname === "/internal/admin/feedback" ||
       /^\/internal\/admin\/feedback\/[1-9]\d*$/.test(url.pathname) ||
       /^\/internal\/admin\/feedback\/[1-9]\d*\/log-link$/.test(url.pathname) ||

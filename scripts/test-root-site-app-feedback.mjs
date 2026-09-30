@@ -1357,8 +1357,8 @@ tabScope.dispose();
 assert.match(pageSource, /poll:\s*pollActiveTab/);
 assert.match(
   pageSource,
-  /if \(!\["support", "device", "sim"\]\.includes\(state\.activeTab\) && !\(state\.activeTab === "devices" && state\.adapters\.kind === "setparam"\)\) poller\.start\(state\.activeTab === "devices" \? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS\)/,
-  "the SIM tab is a one-shot lookup form, so it must not start the poller",
+  /if \(!\["support", "northbound", "device", "sim"\]\.includes\(state\.activeTab\) && !\(state\.activeTab === "devices" && state\.adapters\.kind === "setparam"\)\) poller\.start\(state\.activeTab === "devices" \? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS\)/,
+  "the Northbound iframe and SIM lookup do not start the feedback poller",
 );
 assert.match(pageSource, /return pollAdapterList\(\{ signal \}\)/);
 assert.match(pageSource, /loadAdapters\(\{ silent: true, signal \}\)/);

@@ -87,13 +87,13 @@ try {
       assert.equal(routeManifest[`/bizflow/${id}.html`].frame.access, 'bf-admin');
     }
   });
-  await check('employee starts on support with three tabs, ignores admin tabs and makes no background loads', async () => {
+  await check('employee starts on support with northbound tab, ignores admin tabs and makes no background loads', async () => {
     for (const activeTab of [undefined, 'feedback', 'device', 'sim']) {
       const f = await mount(false, { activeTab });
       try {
         assert.equal(f.controller.captureState().activeTab, 'support');
         assert.match(f.html(), /data-support-frame/);
-        assert.deepEqual([...f.html().matchAll(/data-app-feedback-tab="([^"]+)"/g)].map(m => m[1]), ['support', 'device', 'devices']);
+        assert.deepEqual([...f.html().matchAll(/data-app-feedback-tab="([^"]+)"/g)].map(m => m[1]), ['support', 'northbound', 'device', 'devices']);
         assert.doesNotMatch(f.html(), /data-ota-|data-sim-|data-adapter-/);
         for (const tab of ['feedback', 'sim']) await f.tab(tab);
         assert.equal(f.controller.captureState().activeTab, 'support');
@@ -185,10 +185,10 @@ try {
       assert.ok(f.calls.some(x => x.path.startsWith('/devices/dc-pro/A/sessions?')));
     } finally { f.dispose(); }
   });
-  await check('admin retains five tabs, initial feedback and polling, device OTA, list and SIM loads', async () => {
+  await check('admin retains all tabs, initial feedback and polling, device OTA, list and SIM loads', async () => {
     const f = await mount(true);
     try {
-      assert.deepEqual([...f.html().matchAll(/data-app-feedback-tab="([^"]+)"/g)].map(m => m[1]), ['feedback', 'support', 'device', 'devices', 'sim']);
+      assert.deepEqual([...f.html().matchAll(/data-app-feedback-tab="([^"]+)"/g)].map(m => m[1]), ['feedback', 'support', 'northbound', 'device', 'devices', 'sim']);
       assert.ok(f.calls.some(x => x.path.startsWith('/feedback?')));
       assert.ok(f.timers.some(x => x.ms === 30_000));
       await f.tab('support'); assert.match(f.html(), /view=appSupport&embed=1/);

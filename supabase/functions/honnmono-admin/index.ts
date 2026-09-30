@@ -1,5 +1,5 @@
 // honnmono-admin: authenticated JSON bridge from BizFlow to the Shenzhen App API.
-// Support, binding lookup and unbind admit active main-site employees; other
+// Support, northbound, binding lookup and unbind admit active main-site employees; other
 // routes remain admin-only.
 //
 // Routes:
@@ -24,6 +24,7 @@
 //   POST /honnmono-admin/sim/cards
 //   POST /honnmono-admin/sim/cards/import
 //   POST /honnmono-admin/sim/refresh
+//   GET/POST /honnmono-admin/northbound/... (staff cases and files)
 //
 // Budgets: every upstream call gets 10 s and a 16 KB request body, except the
 // device unbind (90 s), the SIM lookup and refresh (60 s each: Shenzhen chains
@@ -424,7 +425,7 @@ Deno.serve(async (req) => {
     return json({ error: "Server misconfigured" }, 500);
   }
 
-  if (subPath.startsWith("/support/")) {
+  if (subPath.startsWith("/support/") || subPath.startsWith("/northbound/")) {
     return forwardSupport(req, upstreamUrl, {
       token: HONNMONO_ADMIN_INTERNAL_TOKEN, operatorEmail: guard.operatorEmail, cors: CORS_HEADERS,
     });
