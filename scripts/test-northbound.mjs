@@ -51,14 +51,23 @@ try {
 } finally { globalThis.fetch = originalFetch; }
 
 const i18n = await readFile('src/i18n.jsx', 'utf8');
-function dictionary(name) {
+function dictionaryParts(name) {
   const marker = `const DICT_${name} = `;
   const start = i18n.indexOf(marker) + marker.length;
   const base = vm.runInNewContext(`(${i18n.slice(start, i18n.indexOf('\n};', start) + 2)})`);
   const extension = i18n.match(new RegExp(`Object\\.assign\\(DICT_${name}, (\\{[\\s\\S]*?\\})\\);`));
-  return Object.assign(base, vm.runInNewContext(`(${extension[1]})`));
+  return [base, vm.runInNewContext(`(${extension[1]})`)];
 }
-const en = dictionary('EN'), fr = dictionary('FR');
+const [enBase, enExtension] = dictionaryParts('EN');
+const [frBase, frExtension] = dictionaryParts('FR');
+check('P7 translations preserve every existing dictionary value', () => {
+  for (const [base, extension] of [[enBase, enExtension], [frBase, frExtension]]) {
+    for (const [key, value] of Object.entries(extension)) {
+      if (Object.hasOwn(base, key)) assert.equal(value, base[key], `${key} changed`);
+    }
+  }
+});
+const en = Object.assign(enBase, enExtension), fr = Object.assign(frBase, frExtension);
 const sources = ['src/views/honnmono/AppNorthbound.jsx',
   ...(await readdir('src/views/honnmono/northbound')).filter(x => /\.(jsx|js)$/.test(x)).map(x => `src/views/honnmono/northbound/${x}`)];
 const keys = new Set();

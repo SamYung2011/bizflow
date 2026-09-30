@@ -35,18 +35,18 @@ function DocumentRow({ document, options, onReview, onPreview, busy }) {
   const { t } = useT();
   const [note, setNote] = useState('');
   return <div className="nb-doc">
-    <button type="button" className="nb-doc-open" onClick={() => onPreview(document)}
+    <button type="button" className="nb-doc-open" disabled={document.status === 'removed'} onClick={() => onPreview(document)}
       aria-label={t('查看文件：{name}', { name: document.name })}>
       <Thumbnail document={document} options={options} />
       <span><strong>{document.name}</strong><small>{t('第 {version} 版', { version: document.version })} · {t(
         document.status === 'accepted' ? '已接受' : document.status === 'rejected' ? '已退回'
           : document.status === 'removed' ? '已移除' : '待核對')}</small></span>
     </button>
-    <input value={note} onChange={event => setNote(event.target.value)}
+    {onReview && <><input value={note} onChange={event => setNote(event.target.value)}
       placeholder={t('文件備註（選填）')} aria-label={t('文件備註（選填）')} />
     <div className="nb-row-actions">
       <button type="button" disabled={busy || document.status === 'removed'} onClick={() => onReview(document.id, 'accepted', note)}>{t('接受')}</button>
       <button type="button" disabled={busy || document.status === 'removed'} onClick={() => onReview(document.id, 'rejected', note)}>{t('退回')}</button>
-    </div>
+    </div></>}
   </div>;
 }

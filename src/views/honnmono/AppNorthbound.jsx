@@ -28,7 +28,7 @@ function Workspace({ session }) {
     queryFn: ({ signal }) => getCase(selectedId, { ...options, signal }),
     enabled: !!selectedId, refetchInterval: 10000, staleTime: 0,
   });
-  const rows = list.data?.items || [];
+  const rows = (list.data?.items || []).filter(row => row.submittedAt != null);
   const total = list.data?.total || 0;
   const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
   async function reload() { await Promise.all([list.refetch(), detail.refetch()]); }

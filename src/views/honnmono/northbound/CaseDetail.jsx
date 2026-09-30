@@ -102,9 +102,9 @@ export default function CaseDetail({ record, options, reload, lang }) {
     <Timeline record={record} t={t} lang={lang} />
     <section className="nb-card"><h3>{t('申請文件')}</h3>
       <Files documents={record.documents} options={options} onPreview={openFile} busy={busy}
-        onReview={(docId, status, note) => run(() => api.reviewDocument(record.id, docId, { status, note }, options))} />
+        onReview={record.submittedAt ? (docId, status, note) => run(() => api.reviewDocument(record.id, docId, { status, note }, options)) : null} />
     </section>
-    <div className="nb-detail-grid nb-actions">
+    {!!record.submittedAt && <div className="nb-detail-grid nb-actions">
       <section className="nb-card"><h3>{t('更新辦理階段')}</h3>
         <label className="nb-field">{t('階段')}<select value={stage} onChange={event => setStage(event.target.value)}>
           {STAGES.map(([code, label]) => <option key={code} value={code}>{t(label)}</option>)}
@@ -114,23 +114,23 @@ export default function CaseDetail({ record, options, reload, lang }) {
           <option value="">{t('請選擇')}</option><option value="approved">{t('已批核')}</option>
           <option value="rejected">{t('未獲批准')}</option></select></label>
           {result === 'approved' && <label className="nb-field">{t('資格有效至')}<input type="date" value={resultDate} onChange={event => setResultDate(event.target.value)} /></label>}</>}
-        <button className="nb-primary" type="button" disabled={busy || record.status === 'draft' || (stage === 'result' && !result)}
+        <button className="nb-primary" type="button" disabled={busy || !record.submittedAt || (stage === 'result' && !result)}
           onClick={() => run(() => api.changeStage(record.id, { status: stage, note: stageNote || null,
             ...(stage === 'result' ? { result, ...(result === 'approved' && resultDate ? { qualifiedUntil: resultDate } : {}) } : {}) }, options))}>{t('儲存階段')}</button>
-        {record.status === 'draft' && <small className="nb-muted">{t('草稿由使用者提交後才能更新階段')}</small>}
+        {!record.submittedAt && <small className="nb-muted">{t('草稿由使用者提交後才能更新階段')}</small>}
       </section>
       <section className="nb-card"><h3>{t('要求補交文件')}</h3>
         <div className="nb-check-grid">{KINDS.map(([kind, label]) => <label key={kind}>
           <input type="checkbox" checked={wanted.includes(kind)} onChange={() => toggleKind(kind)} />{t(label)}</label>)}</div>
         <label className="nb-field">{t('補件備註')}<textarea value={requestNote} onChange={event => setRequestNote(event.target.value)} /></label>
-        <button className="nb-primary" type="button" disabled={busy || record.status === 'draft' || record.status === 'result' || record.status === 'cancelled' || !wanted.length}
+        <button className="nb-primary" type="button" disabled={busy || !record.submittedAt || record.status === 'result' || record.status === 'cancelled' || !wanted.length}
           onClick={() => run(async () => { await api.requestDocuments(record.id, { kinds: wanted, note: requestNote }, options); setWanted([]); setRequestNote(''); })}>{t('發出補件要求')}</button>
         {!!record.pendingRequests?.length && <div className="nb-pending">{record.pendingRequests.map(item =>
           <p key={item.requestId}><strong>{item.requestId}</strong> · {item.kinds.map(kind => t(KINDS.find(([code]) => code === kind)?.[1] || '其他文件')).join(lang === 'zh' ? '、' : ', ')}</p>)}</div>}
       </section>
       <section className="nb-card"><h3>{t('通知使用者')}</h3>
         <label className="nb-field">{t('通知內容')}<textarea value={notice} onChange={event => setNotice(event.target.value)} /></label>
-        <button className="nb-primary" type="button" disabled={busy || !notice.trim()}
+        <button className="nb-primary" type="button" disabled={busy || !record.submittedAt || !notice.trim()}
           onClick={() => run(async () => { await api.addNotice(record.id, { text: notice.trim() }, options); setNotice(''); })}>{t('儲存通知')}</button>
       </section>
       <section className="nb-card"><h3>{t('資格與續期核對')}</h3>
@@ -139,7 +139,7 @@ export default function CaseDetail({ record, options, reload, lang }) {
         <TriSelect t={t} label={t('續期電郵')} value={flags.renewalEmailOk} onChange={value => updateFlag('renewalEmailOk', value)} />
         <TriSelect t={t} label={t('去年資料一致')} value={flags.renewalDataSame} onChange={value => updateFlag('renewalDataSame', value)} />
         <label className="nb-field">{t('資格有效至')}<input type="date" value={flags.qualifiedUntil} onChange={event => updateFlag('qualifiedUntil', event.target.value)} /></label>
-        <button className="nb-primary" type="button" disabled={busy || !Object.keys(flagEdits).length}
+        <button className="nb-primary" type="button" disabled={busy || !record.submittedAt || !Object.keys(flagEdits).length}
           onClick={() => run(async () => {
             const body = Object.fromEntries(Object.entries(flagEdits).map(([key, value]) =>
               [key, key === 'qualifiedUntil' ? value || null : parseTri(value)]));
@@ -147,7 +147,7 @@ export default function CaseDetail({ record, options, reload, lang }) {
             setFlagEdits({});
           })}>{t('儲存核對')}</button>
       </section>
-    </div>
+    </div>}
     {preview && <div className="nb-preview-overlay" role="presentation" onClick={() => setPreview(null)}>
       <div className="nb-preview" role="dialog" aria-modal="true" aria-label={t('查看文件')} onClick={event => event.stopPropagation()}>
         <header><strong>{preview.name}</strong><button type="button" onClick={() => setPreview(null)}>{t('關閉')}</button></header>
