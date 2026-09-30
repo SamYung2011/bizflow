@@ -38,7 +38,7 @@ const people = [
   ['Alex Chan', '66001001', 'ai_handoff', 0, 'open'],
   ['Sophie Wong', '66001002', 'manual', 1, 'open'],
   ['Daniel Lee', '66001003', 'manual', 4, 'open'],
-  ['Emma Lam', '66001004', 'manual', 3, 'open'],
+  ['Emma Lam', '66001004', 'feedback', 3, 'open'],
   ['Ryan Ho', '66001005', 'manual', 2, 'closed'],
 ];
 const conversations = people.map(([userNickname, userPhone, source, category, status], index) => ({

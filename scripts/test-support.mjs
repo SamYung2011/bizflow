@@ -16,12 +16,20 @@ const api = await moduleFor('src/lib/supportApi.js');
 check('unset VITE_SUPPORT_MOCK selects the real bridge', () => assert.equal(api.SUPPORT_MOCK, false));
 const mock = await moduleFor('src/lib/supportMock.js');
 const config = await moduleFor('src/lib/supportConfig.js');
+check('P6 categories, reopened system text and case number use the shared support contract', () => {
+  assert.deepEqual(config.SUPPORT_CATEGORIES.slice(-2), ['服務跟進', '功能建議']);
+  assert.equal(config.systemMessageKey('使用者已重新开启本次服务'), '使用者已重新開啟本次服務');
+  assert.equal(config.supportCaseId(123), 'HM-CS-000123');
+  assert.equal(config.supportCaseId(1234567), 'HM-CS-1234567');
+  assert.equal(config.supportCaseId(null), '');
+});
 mock.configureMock({ delay: 0, sendDelay: 0 });
 const conversations = await mock.listConversations();
-check('five fixtures cover manual, AI, claimed, closed and unread states', () => {
+check('five fixtures cover manual, AI, feedback, claimed, closed and unread states', () => {
   assert.equal(conversations.length, 5);
   assert(conversations.some(item => item.source === 'ai_handoff' && item.summary && item.unreadCount));
   assert(conversations.some(item => item.source === 'manual' && !item.summary));
+  assert(conversations.some(item => item.source === 'feedback'));
   assert(conversations.some(item => item.assigneeEmail));
   assert(conversations.some(item => item.status === 'closed'));
 });
@@ -185,7 +193,18 @@ const rendered = await build({ stdin: { contents: `
   import React from 'react';
   import { renderToStaticMarkup } from 'react-dom/server';
   import AppSupport from './src/views/honnmono/AppSupport.jsx';
+  import ConversationList from './src/views/honnmono/support/ConversationList.jsx';
+  import ConversationHeader from './src/views/honnmono/support/ConversationHeader.jsx';
   export const deny = props => renderToStaticMarkup(React.createElement(AppSupport, props));
+  export const feedbackList = source => renderToStaticMarkup(React.createElement(ConversationList, {
+    query: { data: { pages: [[{ id: 123, userNickname: 'Sample', source, category: 'APP 使用',
+      status: 'open', lastSenderRole: 'user', lastMessageAt: Date.now(), unreadCount: 0 }]] } },
+    selectedId: null, onSelect: () => {}, filters: { state: 'waiting', category: '', search: '' }, setFilters: () => {}
+  }));
+  export const feedbackHeader = source => renderToStaticMarkup(React.createElement(ConversationHeader, {
+    conversation: { id: 123, userNickname: 'Sample', source, category: 'APP 使用', status: 'open',
+      lastSenderRole: 'user', userPhone: '', userEmail: '' }, employees: [], onChange: () => {}, onBack: () => {}
+  }));
 `, resolveDir: process.cwd() }, bundle: true, format: 'cjs', platform: 'node', write: false,
   loader: { '.css': 'empty' }, define: { 'import.meta.env': '{"VITE_SUPPORT_MOCK":"0"}' } });
 const compiled = { exports: {} };
@@ -196,6 +215,14 @@ check('missing session and missing operator email render only the access guard',
     const html = compiled.exports.deny(props);
     assert(html.includes('role="alert"')); assert(!html.includes('support-workspace'));
   }
+});
+check('feedback label appears in list and header; case number stays visible for all sources', () => {
+  const list = compiled.exports.feedbackList('feedback'), header = compiled.exports.feedbackHeader('feedback');
+  assert(list.includes('意見反饋')); assert(header.includes('意見反饋'));
+  assert(header.includes('HM-CS-000123'));
+  assert(!compiled.exports.feedbackList('manual').includes('意見反饋'));
+  assert(!compiled.exports.feedbackHeader('manual').includes('意見反饋'));
+  assert(compiled.exports.feedbackHeader('manual').includes('HM-CS-000123'));
 });
 
 // Render the real App.jsx embed branch through the employee query/hydration sequence.

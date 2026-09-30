@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useT } from '../../../i18n.jsx';
-import { SUPPORT_CATEGORIES, conversationState, staffName } from '../../../lib/supportConfig.js';
+import { SUPPORT_CATEGORIES, conversationState, staffName, supportCaseId } from '../../../lib/supportConfig.js';
 import SupportIcon from './SupportIcon.jsx';
 
 export default function ConversationHeader({ conversation, employees, onChange, onBack }) {
@@ -16,7 +16,9 @@ export default function ConversationHeader({ conversation, employees, onChange, 
     <div className="support-header-main">
       <button className="support-icon-button support-back" aria-label={t('返回會話列表')} onClick={onBack}><SupportIcon name="back" /></button>
       <span className={`support-avatar tone-${conversation.id % 5}`}>{conversation.userNickname?.slice(0, 1).toUpperCase()}</span>
-      <div className="support-contact"><div><h2>{conversation.userNickname}</h2><span className={`support-status ${state}`}>
+      <div className="support-contact"><div><h2>{conversation.userNickname}</h2>
+        {conversation.source === 'feedback' && <span className="support-category">{t('意見反饋')}</span>}
+        <span className={`support-status ${state}`}>
         <i />{t(state === 'closed' ? '已結束' : state === 'waiting' ? '待回覆' : '處理中')}</span></div>
         <p>{conversation.userPhone || '—'}<span> · </span>{conversation.userEmail || '—'}</p></div>
       <div className="support-header-actions">
@@ -24,7 +26,7 @@ export default function ConversationHeader({ conversation, employees, onChange, 
           <SupportIcon name="check" size={16} />{t('結束會話')}</button>}
       </div>
     </div>
-    <div className="support-header-details"><label>{t('問題類型')}
+    <div className="support-header-details"><span className="support-case-id">{supportCaseId(conversation.id)}</span><label>{t('問題類型')}
       <select value={conversation.category || ''} disabled={busy} aria-label={t('問題類型')}
         onChange={event => change({ category: event.target.value })}>
         <option value="">{t('未分類')}</option>

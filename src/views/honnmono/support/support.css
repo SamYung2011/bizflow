@@ -43,6 +43,7 @@
 .support-conversation-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .support-conversation-title strong { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 650; }
 .support-category { flex-shrink: 0; max-width: 82px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; line-height: 18px; padding: 0 5px; border: 1px solid #dfe5f4; color: #6e7d9b; background: #f4f6fd; border-radius: 4px; }
+.support-case-id { color: var(--support-text); font-weight: 650; white-space: nowrap; }
 .support-preview { display: block; color: #788297; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; margin-top: 5px; }
 .support-conversation-source { display: block; color: #939caf; font-size: 10px; margin-top: 5px; }
 .support-conversation-meta { display: flex; flex-direction: column; align-items: flex-end; align-self: stretch; justify-content: space-between; padding: 2px 0 6px; }
