@@ -725,8 +725,8 @@ function renderAdapterPanel() {
 
 function renderTabs() {
   const tabs = state.isAdmin
-    ? [["feedback", "feedbackTab"], ["support", "supportTab"], ["device", "deviceUnbindTab"], ["devices", "deviceListTab"], ["sim", "simCardTab"]]
-    : [["support", "supportTab"], ["device", "deviceUnbindTab"], ["devices", "deviceListTab"]];
+    ? [["feedback", "feedbackTab"], ["support", "supportTab"], ["northbound", "northboundTab"], ["device", "deviceUnbindTab"], ["devices", "deviceListTab"], ["sim", "simCardTab"]]
+    : [["support", "supportTab"], ["northbound", "northboundTab"], ["device", "deviceUnbindTab"], ["devices", "deviceListTab"]];
   return `<nav class="app-feedback-tabs" aria-label="${rawE(t("honnmonoAppTitle"))}">
     ${tabs.map(([id, label]) => `<button type="button" class="app-feedback-tab${state.activeTab === id ? " is-active" : ""}" data-app-feedback-tab="${id}" aria-selected="${state.activeTab === id}">${rawE(t(label))}</button>`).join("")}
   </nav>`;
@@ -735,7 +735,7 @@ function renderTabs() {
 function render(nextHelpers) {
   helpers = nextHelpers;
   const isFeedback = state.activeTab === "feedback";
-  const subtitleKey = state.activeTab === "support" ? "supportSubtitle" : isFeedback
+  const subtitleKey = state.activeTab === "support" ? "supportSubtitle" : state.activeTab === "northbound" ? "northboundSubtitle" : isFeedback
     ? "subtitle"
     : state.activeTab === "devices"
       ? "deviceListSubtitle"
@@ -751,6 +751,8 @@ function render(nextHelpers) {
     ${
       state.activeTab === "support"
         ? `<iframe class="app-support-frame" title="${rawE(t("supportTab"))}" src="/task-platform/?view=appSupport&embed=1&lang=${helpers.lang}" data-support-frame></iframe>`
+        : state.activeTab === "northbound"
+          ? `<iframe class="app-support-frame" title="${rawE(t("northboundTab"))}" src="/task-platform/?view=appNorthbound&embed=1&lang=${helpers.lang}" data-northbound-frame></iframe>`
         : isFeedback ? renderFeedbackPanel()
         : state.activeTab === "devices"
           ? renderAdapterPanel()
@@ -1601,7 +1603,7 @@ async function downloadLog(id) {
 }
 
 function switchAppTab(nextTab) {
-  if (!state || !(state.isAdmin ? ["feedback", "support", "device", "devices", "sim"] : ["support", "device", "devices"]).includes(nextTab)) {
+  if (!state || !(state.isAdmin ? ["feedback", "support", "northbound", "device", "devices", "sim"] : ["support", "northbound", "device", "devices"]).includes(nextTab)) {
     return;
   }
   if (state.activeTab === nextTab) return;
@@ -1612,7 +1614,7 @@ function switchAppTab(nextTab) {
   state.detail = null;
   state.detailError = null;
   state.downloadError = null;
-  if (nextTab === "support") {
+  if (nextTab === "support" || nextTab === "northbound") {
     activePoller?.pause();
     rerender();
     return;
@@ -2023,8 +2025,8 @@ function createState(historyState, currentUser) {
   return {
     isAdmin,
     activeTab: !isAdmin
-      ? saved.activeTab === "devices" ? "devices" : "support"
-      : ["support", "device", "devices", "sim"].includes(saved.activeTab)
+      ? ["northbound", "devices"].includes(saved.activeTab) ? saved.activeTab : "support"
+      : ["support", "northbound", "device", "devices", "sim"].includes(saved.activeTab)
         ? saved.activeTab
         : "feedback",
     device: createDeviceUnbindState(saved),
@@ -2177,7 +2179,7 @@ export async function mountPage({
         poll: pollActiveTab,
       });
       activePoller = poller;
-      if (!["support", "device", "sim"].includes(state.activeTab) && !(state.activeTab === "devices" && state.adapters.kind === "setparam")) poller.start(state.activeTab === "devices" ? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS);
+      if (!["support", "northbound", "device", "sim"].includes(state.activeTab) && !(state.activeTab === "devices" && state.adapters.kind === "setparam")) poller.start(state.activeTab === "devices" ? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS);
       if ((state.isAdmin && state.activeTab === "device") || (state.activeTab === "devices" && state.adapters.kind !== "setparam")) void otaController.load({ includeLegacy: state.isAdmin });
       if (state.activeTab === "devices") {
         if (state.adapters.kind === "setparam") void setparamController.read();

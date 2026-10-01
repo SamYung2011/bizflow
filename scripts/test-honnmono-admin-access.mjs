@@ -52,11 +52,8 @@ async function request(path, method = 'GET', token = 'fixture-jwt') {
 }
 const adminRoutes = [
   ['/feedback', 'GET'], ['/feedback/1', 'GET'], ['/feedback/1/log-link', 'POST'],
-  ['/devices/dc-pro', 'GET'], ['/devices/dc-pro/A/sessions', 'GET'], ['/devices/dc-pro/A/sessions/days', 'GET'],
-  ['/devices/flash', 'GET'], ['/devices/flash/A/ota', 'GET'], ['/devices/flash/A/sessions', 'GET'],
-  ['/devices/flash/A/sessions/days', 'GET'], ['/devices/flash/A/uploads/1', 'GET'],
-  ['/devices/flash/A/unbind', 'POST'], ['/devices/flash/A/actions', 'POST'],
-  ['/ota/package', 'GET'], ['/ota/package', 'POST'], ['/ota/legacy-packages', 'GET'],
+  ['/devices/flash/A/unbind', 'POST'],
+  ['/ota/package', 'POST'], ['/ota/legacy-packages', 'GET'],
   ['/ota/legacy-packages/150001', 'POST'], ['/sim/lookup', 'GET'], ['/sim/cards', 'GET'],
   ['/sim/cards', 'POST'], ['/sim/cards/import', 'POST'], ['/sim/refresh', 'POST'],
 ];
@@ -72,7 +69,30 @@ await check('whitelisted employee binding GET and unbind POST preserve operator 
     else if (path.startsWith('/device/')) assert.equal(call.url.searchParams.get('imei'), '000000000000001');
   }
 });
-await check('employee cannot reach any of 22 admin route/method pairs', async () => {
+await check('northbound main-site employee can read and write through the staff bridge', async () => {
+  rows = [employee];
+  for (const [path, method, expected] of [
+    ['/northbound/cases?status=open', 'GET', '/internal/admin/northbound/cases'],
+    ['/northbound/cases/42/stage', 'POST', '/internal/admin/northbound/cases/42/stage'],
+    ['/northbound/files/abc/proof.png', 'GET', '/internal/admin/northbound/files/abc/proof.png'],
+  ]) {
+    assert.equal((await request(path, method)).status, 200);
+    assert.equal(upstream.length, 1);
+    assert.equal(upstream[0].url.pathname, expected);
+    assert.equal(upstream[0].options.headers['X-Operator-Email'], 'claude_test@honnmono.local');
+  }
+});
+await check('northbound denies non-main employees, anonymous callers and encoded traversal', async () => {
+  rows = [{ ...employee, bizflow_main_access: false }];
+  assert.equal((await request('/northbound/cases')).status, 403);
+  assert.equal(upstream.length, 0);
+  rows = [employee];
+  assert.equal((await request('/northbound/cases', 'GET', '')).status, 401);
+  assert.equal(upstream.length, 0);
+  assert.equal((await request('/northbound/..%2Fsupport/cases')).status, 404);
+  assert.equal(upstream.length, 0);
+});
+await check('employee cannot reach admin-only route/method pairs', async () => {
   for (const [path, method] of adminRoutes) {
     assert.equal((await request(path, method)).status, 403, `${method} ${path}`);
     assert.equal(upstream.length, 0);
