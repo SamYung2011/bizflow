@@ -24,5 +24,10 @@ export const DOC_KINDS = [
   ['policy_doc', '保單文件'], ['scene_photo', '事故相片'], ['repair_quote', '維修報價'],
   ['police_doc', '警方文件'], ['other', '其他文件'],
 ];
+export const NCD = { unknown: '不清楚' };
+export const CLAIMS_RECORD = {
+  none: '過去三年沒有', one: '過去三年一次',
+  two_or_more: '過去三年兩次或以上', unknown: '不清楚',
+};
 export const labelFor = (type, status) => ({ policy: POLICY_STATUS, claim: CLAIM_STATUS,
   enquiry: ENQUIRY_STATUS })[type]?.[status] || status || '—';

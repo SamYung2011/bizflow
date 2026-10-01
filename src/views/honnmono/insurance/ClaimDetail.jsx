@@ -6,11 +6,12 @@ import { ActionStatus, Documents, Field, Line, UserCard, useAction } from './Com
 import { CLAIM_RESULTS, CLAIM_STAGES, CLAIM_STATUS, DOC_KINDS } from './labels.js';
 
 function Timeline({ record, lang, t }) {
-  const active = CLAIM_STAGES.findIndex(([code]) => code === record.status);
+  const steps = CLAIM_STAGES.filter(([code]) => code !== 'cancelled');
+  const active = record.status === 'cancelled' ? -1 : steps.findIndex(([code]) => code === record.status);
   const notices = (record.events || []).filter(event => event.type === 'notice' && event.text);
   return <section className="nb-card"><h3>{t('出險進度')}</h3>
-    <ol className="nb-timeline">{CLAIM_STAGES.filter(([code]) => code !== 'cancelled').map(([code, label], index) => <li key={code}
-      className={index < active ? 'is-complete' : index === active ? 'is-current' : ''}>
+    <ol className="nb-timeline">{steps.map(([code, label], index) => <li key={code}
+      className={record.status === 'result' || (active >= 0 && index < active) ? 'is-complete' : index === active ? 'is-current' : ''}>
       <span className="nb-step-dot"/><span>{t(label)}</span>
       {index === active && record.stageNote && <small>{record.stageNote}</small>}
     </li>)}</ol>

@@ -40,6 +40,8 @@ export default function PolicyDetail({ record, options, reload, lang }) {
     <section className="nb-card ins-spaced"><h3>{t('保單文件')}</h3>
       <Documents documents={record.documents} options={options} lang={lang} /></section>
     <section className="nb-card"><h3>{t('人工整理保單')}</h3>
+      {record.previousPolicy && <button type="button" className="ins-link" disabled={action.busy}
+        onClick={() => setForm(initial(record.previousPolicy))}>{t('帶入上一張保單資料')}</button>}
       <div className="nb-detail-grid">
         <label className="nb-field">{t('連結車輛')}<select value={form.carId} onChange={event => set('carId', event.target.value)}>
           <option value="">{t('未連結')}</option>
@@ -50,10 +52,11 @@ export default function PolicyDetail({ record, options, reload, lang }) {
           <option value="">{t('未選擇')}</option><option value="certificate">{t('保險證書')}</option>
           <option value="policy">{t('保單')}</option><option value="other">{t('其他')}</option></select></label>
         {fields.map(([key, label, type]) => <Field key={key} label={t(label)} value={form[key]}
+          required={key === 'insurer' || key === 'coverEnd'}
           type={type || 'text'} onChange={value => set(key, value)} />)}
       </div>
       <Field label={t('給使用者看的備註')} value={form.note} onChange={value => set('note', value)} multiline />
-      <div className="ins-actions"><button className="nb-primary" type="button" disabled={action.busy || record.status === 'superseded' || record.status === 'removed'}
+      <div className="ins-actions"><button className="nb-primary" type="button" disabled={action.busy || !form.insurer.trim() || !form.coverEnd || record.status === 'superseded' || record.status === 'removed'}
         onClick={() => submit('ready')}>{t('標記已整理')}</button>
         <button type="button" disabled={action.busy || record.status === 'superseded' || record.status === 'removed'}
           onClick={() => submit('unreadable')}>{t('標記未能讀取')}</button></div>

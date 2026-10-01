@@ -19,6 +19,7 @@ export default function ConversationHeader({ conversation, employees, onChange, 
       <div className="support-contact"><div><h2>{conversation.userNickname}</h2>
         {conversation.source === 'feedback' && <span className="support-category">{t('意見反饋')}</span>}
         {conversation.source === 'northbound' && <span className="support-category">{t('港車北上')}</span>}
+        {conversation.source === 'insurance' && <span className="support-category">{t('車保')}</span>}
         <span className={`support-status ${state}`}>
         <i />{t(state === 'closed' ? '已結束' : state === 'waiting' ? '待回覆' : '處理中')}</span></div>
         <p>{conversation.userPhone || '—'}<span> · </span>{conversation.userEmail || '—'}</p></div>

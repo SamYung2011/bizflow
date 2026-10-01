@@ -3,7 +3,17 @@ import { useT } from '../../../i18n.jsx';
 import { formatFeedbackTime } from '../../../lib/honnmonoAdmin.js';
 import { changeEnquiryStage } from '../../../lib/insuranceApi.js';
 import { ActionStatus, Field, Line, UserCard, useAction } from './Common.jsx';
-import { ENQUIRY_STATUS } from './labels.js';
+import { ENQUIRY_STATUS, CLAIMS_RECORD, NCD } from './labels.js';
+
+const changeLabels = { coverChoice: '想要的保障', ncd: '無索償折扣（NCD）',
+  driverAge: '主要司機年齡', drivingYears: '駕駛年資', claimsRecord: '事故／索償紀錄' };
+function eventTitle(event) {
+  if (event.type === 'quote') return '發出報價';
+  if (event.type === 'info_request') return '要求補充資料';
+  if (event.actor === 'user' && event.payload?.fields?.length) return '使用者補充資料';
+  if (event.actor === 'user') return '提交詢價';
+  return ({ assigned: '分派代理', done: '標記完成', cancelled: '取消詢價' })[event.stage] || '代理跟進';
+}
 
 export default function EnquiryDetail({ record, options, reload, lang }) {
   const { t } = useT();
@@ -26,10 +36,10 @@ export default function EnquiryDetail({ record, options, reload, lang }) {
       <section className="nb-card"><h3>{t('本次詢價')}</h3>
         <Line label={t('報價車輛')}>{record.carLabel}</Line>
         <Line label={t('想要的保障')}>{t(({ third_party: '第三者保障', comprehensive: '綜合車保', agent_suggest: '請代理提供方案' })[record.coverChoice])}</Line>
-        <Line label={t('無索償折扣（NCD）')}>{record.ncd}</Line>
+        <Line label={t('無索償折扣（NCD）')}>{record.ncd ? t(NCD[record.ncd] || record.ncd) : null}</Line>
         <Line label={t('主要司機年齡')}>{record.driverAge}</Line>
         <Line label={t('駕駛年資')}>{record.drivingYears}</Line>
-        <Line label={t('事故／索償紀錄')}>{record.claimsRecord}</Line>
+        <Line label={t('事故／索償紀錄')}>{record.claimsRecord ? t(CLAIMS_RECORD[record.claimsRecord] || record.claimsRecord) : null}</Line>
       </section></div>
     <div className="nb-detail-grid ins-spaced">
       <section className="nb-card"><h3>{t('車輛')}</h3>
@@ -46,6 +56,15 @@ export default function EnquiryDetail({ record, options, reload, lang }) {
       <Line label={t('保障')}>{record.quote.cover}</Line><Line label={t('墊底費')}>{record.quote.excess}</Line>
       <Line label={t('報價有效期')}>{record.quote.validUntil}</Line><Line label={t('承接代理')}>{record.agentName}</Line>
     </section>}
+    <section className="nb-card ins-spaced"><h3>{t('辦理紀錄')}</h3>
+      <ol className="nb-timeline">{(record.events || []).map(event => <li key={event.id}>
+        <span className="nb-step-dot"/><strong>{t(eventTitle(event))}</strong>
+        <small>{formatFeedbackTime(event.createdAt, lang)}</small>
+        {event.text && <p>{event.text}</p>}
+        {!!event.payload?.fields?.length && <p>{t('補充欄位')}：{event.payload.fields.map(key => t(changeLabels[key] || key)).join('、')}</p>}
+        {event.payload?.quote?.premium && <p>{t('總保費')}：{event.payload.quote.premium}</p>}
+      </li>)}</ol>
+    </section>
     <div className="nb-detail-grid nb-actions">
       <section className="nb-card"><h3>{t('代理跟進')}</h3>
         <Field label={t('承接代理')} value={agentName} onChange={setAgentName}/>

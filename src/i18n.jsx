@@ -4078,6 +4078,25 @@ Object.assign(DICT_FR, {
   "報價已到": "Devis reçu",
 });
 
+Object.assign(DICT_EN, {
+  "車保": "Motor insurance", "第 {version} 份": "File {version}",
+  "查看已移除文件": "Show removed files", "收起已移除文件": "Hide removed files",
+  "帶入上一張保單資料": "Use previous policy details",
+  "過去三年沒有": "None in the past three years", "過去三年一次": "One in the past three years",
+  "過去三年兩次或以上": "Two or more in the past three years", "不清楚": "Not sure",
+  "辦理紀錄": "Activity history", "使用者補充資料": "User supplied details",
+  "提交詢價": "Enquiry submitted", "補充欄位": "Updated fields",
+});
+Object.assign(DICT_FR, {
+  "車保": "Assurance auto", "第 {version} 份": "Fichier {version}",
+  "查看已移除文件": "Voir les fichiers supprimés", "收起已移除文件": "Masquer les fichiers supprimés",
+  "帶入上一張保單資料": "Reprendre les détails de la police précédente",
+  "過去三年沒有": "Aucun sur les trois dernières années", "過去三年一次": "Un sur les trois dernières années",
+  "過去三年兩次或以上": "Deux ou plus sur les trois dernières années", "不清楚": "Incertain",
+  "辦理紀錄": "Historique du dossier", "使用者補充資料": "Détails ajoutés par l’utilisateur",
+  "提交詢價": "Demande de devis envoyée", "補充欄位": "Champs mis à jour",
+});
+
 const I18nContext = createContext({ lang: "zh", setLang: () => {}, t: (s) => s });
 
 export function I18nProvider({ children }) {

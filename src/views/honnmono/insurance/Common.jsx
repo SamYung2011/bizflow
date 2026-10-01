@@ -8,8 +8,8 @@ const value = item => item == null || item === '' ? '—' : String(item);
 export function Line({ label, children }) {
   return <div className="nb-info-line"><span>{label}</span><strong>{value(children)}</strong></div>;
 }
-export function Field({ label, value: input, onChange, type = 'text', multiline = false, children }) {
-  return <label className="nb-field">{label}{children || (multiline
+export function Field({ label, value: input, onChange, type = 'text', multiline = false, required = false, children }) {
+  return <label className="nb-field">{label}{required ? ' *' : ''}{children || (multiline
     ? <textarea value={input ?? ''} onChange={event => onChange(event.target.value)} />
     : <input type={type} value={input ?? ''} onChange={event => onChange(event.target.value)} />)}</label>;
 }
@@ -27,7 +27,10 @@ export function useAction(reload) {
   async function run(action) {
     setBusy(true); setError(''); setSuccess('');
     try { await action(); await reload(); setSuccess(t('已儲存')); }
-    catch { setError(t('操作失敗，請重試')); }
+    catch (failure) {
+      const message = /^HTTP \d+: (.+)$/.exec(failure?.message || '');
+      setError(message ? message[1] : t('操作失敗，請重試'));
+    }
     finally { setBusy(false); }
   }
   return { busy, error, success, run };
@@ -50,10 +53,10 @@ function DocumentRow({ document, options, onPreview, onReview, busy, lang }) {
     return () => { live = false; if (url) URL.revokeObjectURL(url); };
   }, [document.thumbCfid, options]);
   return <div className="nb-doc">
-    <button type="button" className="nb-doc-open" onClick={() => onPreview(document)}>
+    <button type="button" className="nb-doc-open" disabled={document.status === 'removed'} onClick={() => onPreview(document)}>
       {thumb ? <img className="nb-thumb" src={thumb} alt={t('文件縮圖')} /> :
         <span className="nb-file-placeholder">{document.mime?.startsWith('image/') ? 'IMG' : 'PDF'}</span>}
-      <span><strong>{document.name}</strong><small>{t('第 {version} 版', { version: document.version })} ·
+      <span><strong>{document.name}</strong><small>{t('第 {version} 份', { version: document.version })} ·
         {t(({ accepted: '已接受', rejected: '已退回', removed: '已移除' })[document.status] || '待核對')} ·
         {formatFeedbackTime(document.createdAt, lang)}</small></span>
     </button>
@@ -78,12 +81,8 @@ export function Documents({ documents = [], options, onReview, busy, lang }) {
       setPreview({ name: document.name, mime: document.mime, url: URL.createObjectURL(blob) });
     } catch { setError(t('無法讀取附件，請重試。')); }
   }
-  const latest = new Map();
-  for (const item of documents) if (item.status !== 'removed') {
-    latest.set(item.kind, Math.max(latest.get(item.kind) || 0, item.version));
-  }
-  const current = documents.filter(item => item.status !== 'removed' && item.version === latest.get(item.kind));
-  const historical = documents.filter(item => !current.includes(item));
+  const current = documents.filter(item => item.status !== 'removed');
+  const removed = documents.filter(item => item.status === 'removed');
   const shown = showHistory ? documents : current;
   return <>{error && <p role="alert" className="nb-alert">{error}</p>}
     <div className="nb-doc-groups">{!shown.length && <p className="nb-muted">{t('尚未上傳文件')}</p>}
@@ -93,8 +92,8 @@ export function Documents({ documents = [], options, onReview, busy, lang }) {
         {files.map(item => <DocumentRow key={item.id} document={item} options={options}
           onPreview={openFile} onReview={onReview} busy={busy} lang={lang} />)}</div> : null;
     })}</div>
-    {!!historical.length && <button className="ins-link" type="button" onClick={() => setShowHistory(value => !value)}>
-      {t(showHistory ? '收起歷史版本' : '查看歷史版本')}</button>}
+    {!!removed.length && <button className="ins-link" type="button" onClick={() => setShowHistory(value => !value)}>
+      {t(showHistory ? '收起已移除文件' : '查看已移除文件')}</button>}
     {preview && <div className="nb-preview-overlay" role="presentation" onClick={() => setPreview(null)}>
       <div className="nb-preview" role="dialog" aria-modal="true" aria-label={t('查看文件')} onClick={event => event.stopPropagation()}>
         <header><strong>{preview.name}</strong><button type="button" onClick={() => setPreview(null)}>{t('關閉')}</button></header>

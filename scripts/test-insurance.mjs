@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
-import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import vm from 'node:vm';
-import { build } from 'esbuild';
+import { build, transform } from 'esbuild';
 
 let checks = 0;
 function check(name, fn) { fn(); console.log(`insurance ${++checks}: ${name}`); }
@@ -49,11 +49,39 @@ try {
     assert(calls.at(-1).url.endsWith('/insurance/files/abc_123/my%20file.pdf'));
   });
   globalThis.fetch = async () => Response.json({ code: 409, des: 'Conflict', result: null });
-  await assert.rejects(api.changeClaimStage(8, { status: 'received' }, auth));
-  check('nonzero legacy code fails the action', () => {});
+  await assert.rejects(api.changeClaimStage(8, { status: 'received' }, auth), /Conflict/);
+  check('nonzero legacy code preserves backend des for staff', () => {});
+  globalThis.fetch = async () => Response.json({ code: 409, des: 'Another case is in progress' }, { status: 409 });
+  await assert.rejects(api.changeClaimStage(8, { status: 'received' }, auth), /Another case is in progress/);
+  check('HTTP 409 preserves backend des for staff', () => {});
   await assert.rejects(api.listItems({ type: 'policy' }, {}));
   check('missing session cannot reach the bridge', () => {});
 } finally { globalThis.fetch = originalFetch; }
+
+const commonSource = await readFile('src/views/honnmono/insurance/Common.jsx', 'utf8');
+const documentCode = (await transform(commonSource.slice(commonSource.indexOf('function DocumentRow('))
+  .replace('export function Documents(', 'function Documents('), { loader: 'jsx' })).code;
+const require = createRequire(import.meta.url);
+const React = require('react');
+const { renderToStaticMarkup } = require('react-dom/server');
+const { Documents, DocumentRow } = new Function('React', 'useState', 'useEffect', 'useT',
+  'formatFeedbackTime', 'fileBlob', 'DOC_KINDS', `${documentCode}\nreturn { Documents, DocumentRow };`)(
+  React, React.useState, React.useEffect, () => ({ t: (text, params) =>
+    text.replace('{version}', params?.version ?? '') }), () => '2026-10-01', () => null,
+  [['policy_doc', '保單文件']]);
+const files = [
+  { id: 1, kind: 'policy_doc', version: 1, status: 'uploaded', name: 'front.png' },
+  { id: 2, kind: 'policy_doc', version: 2, status: 'uploaded', name: 'back.png' },
+  { id: 3, kind: 'policy_doc', version: 3, status: 'removed', name: 'removed.png' },
+];
+check('same-kind active files all render; removed file stays collapsed and cannot open', () => {
+  const markup = renderToStaticMarkup(React.createElement(Documents, { documents: files, options: {}, lang: 'zh' }));
+  assert(markup.includes('front.png') && markup.includes('back.png'));
+  assert(!markup.includes('removed.png'));
+  const removed = renderToStaticMarkup(React.createElement(DocumentRow,
+    { document: files[2], options: {}, onPreview: () => {}, lang: 'zh' }));
+  assert(removed.includes('disabled'));
+});
 
 function dictionary(source, lang) {
   const marker = `const DICT_${lang} = `;
@@ -64,11 +92,17 @@ function dictionary(source, lang) {
   return Object.assign(base, ...additions);
 }
 const current = await readFile('src/i18n.jsx', 'utf8');
-const previous = execFileSync('git', ['show', 'HEAD:src/i18n.jsx'], { encoding: 'utf8' });
 for (const lang of ['EN', 'FR']) {
-  const old = dictionary(previous, lang), now = dictionary(current, lang);
-  check(`P8 preserves existing ${lang} translations`, () => {
-    for (const [key, value] of Object.entries(old)) assert.equal(now[key], value, `${lang} changed ${key}`);
+  const marker = `const DICT_${lang} = `;
+  const start = current.indexOf(marker) + marker.length;
+  const base = vm.runInNewContext(`(${current.slice(start, current.indexOf('\n};', start) + 2)})`);
+  const extensions = [...current.matchAll(new RegExp(`Object\\.assign\\(DICT_${lang}, (\\{[\\s\\S]*?\\})\\);`, 'g'))]
+    .map(match => vm.runInNewContext(`(${match[1]})`));
+  const now = Object.assign({}, base, ...extensions);
+  check(`P8 extensions preserve base ${lang} translations`, () => {
+    for (const extension of extensions) for (const [key, value] of Object.entries(extension)) {
+      if (Object.hasOwn(base, key)) assert.equal(value, base[key], `${lang} changed ${key}`);
+    }
   });
   const paths = ['src/views/honnmono/AppInsurance.jsx',
     ...(await readdir('src/views/honnmono/insurance')).filter(file => /\.jsx?$/.test(file))

@@ -67,7 +67,7 @@ function Workspace({ session }) {
                 className={selectedId === row.id ? 'nb-case is-selected' : 'nb-case'}
                 onClick={() => setSelectedId(row.id)}>
                 <span><strong>{row.number || (row.region === 'hk' ? t('香港保單') : t('內地保單')) + ` #${row.id}`}</strong></span>
-                <span className="nb-case-name">{row.user?.nickname || row.user?.email || '—'} · {row.plateNo || ''}</span>
+                <span className="nb-case-name">{[row.user?.nickname || row.user?.email || '—', row.plateNo || row.carLabel].filter(Boolean).join(' · ')}</span>
                 <span className="nb-case-meta">{t(labelFor(type, row.status))}</span>
                 <time>{formatFeedbackTime(row.lastActionAt, lang)}</time>
               </button>)}

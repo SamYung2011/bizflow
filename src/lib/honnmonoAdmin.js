@@ -36,7 +36,8 @@ export async function callHonnmonoAdmin(
   }
   if (!response.ok) {
     const detail = parsed && typeof parsed === "object"
-      ? (parsed.error ?? parsed.detail ?? parsed.msg)
+      ? (subPath.startsWith('/insurance/') ? (parsed.des ?? parsed.detail?.des ?? parsed.error ?? parsed.detail ?? parsed.msg)
+        : (parsed.error ?? parsed.detail ?? parsed.msg))
       : parsed;
     throw new Error(`HTTP ${response.status}: ${detail ?? "Unknown error"}`);
   }

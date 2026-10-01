@@ -168,7 +168,10 @@ globalThis.fetch = nativeFetch;
 const localeSource = await readFile('src/i18n.jsx', 'utf8');
 function dictionary(name) {
   const start = localeSource.indexOf(`const DICT_${name} = `) + `const DICT_${name} = `.length;
-  return vm.runInNewContext(`(${localeSource.slice(start, localeSource.indexOf('\n};', start) + 2)})`);
+  const base = vm.runInNewContext(`(${localeSource.slice(start, localeSource.indexOf('\n};', start) + 2)})`);
+  const additions = [...localeSource.matchAll(new RegExp(`Object\\.assign\\(DICT_${name}, (\\{[\\s\\S]*?\\})\\);`, 'g'))]
+    .map(match => vm.runInNewContext(`(${match[1]})`));
+  return Object.assign(base, ...additions);
 }
 const en = dictionary('EN'), fr = dictionary('FR');
 const sources = ['src/views/honnmono/AppSupport.jsx', 'src/lib/supportConfig.js', 'src/lib/supportMock.js',
@@ -227,21 +230,22 @@ check('feedback label appears in list and header; case number stays visible for 
 
 // Render the real App.jsx embed branch through the employee query/hydration sequence.
 const appSource = await readFile('src/App.jsx', 'utf8');
-const embedStart = appSource.indexOf('  if (["appSupport", "appNorthbound"].includes(tab) && new URLSearchParams');
+const embedStart = appSource.indexOf('  if (["appSupport", "appNorthbound", "appInsurance"].includes(tab) && new URLSearchParams');
 assert(embedStart !== -1);
 const embedBranch = appSource.slice(embedStart, appSource.indexOf('\n\n  return (', embedStart));
 const embedCode = await transform(`
-  return ({ qEmployees, currentEmployee, isBizflowMainAllowed = false }) => {
-    const tab = 'appSupport', window = { location: { search: '?embed=1' } };
+  return ({ qEmployees, currentEmployee, isBizflowMainAllowed = false, tab = 'appSupport' }) => {
+    const window = { location: { search: '?embed=1' } };
     const userId = 'staff-id', employees = qEmployees.data || [], session = {}, t = text => text;
     ${embedBranch}
   };
 `, { loader: 'jsx' });
 const require = createRequire(import.meta.url), React = require('react');
 const { renderToStaticMarkup } = require('react-dom/server');
-const embed = new Function('React', 'Suspense', 'AppSupportView', 'AppNorthboundView', embedCode.code)(
+const embed = new Function('React', 'Suspense', 'AppSupportView', 'AppNorthboundView', 'AppInsuranceView', embedCode.code)(
   React, React.Suspense, () => React.createElement('div', null, 'support-ready'),
-  () => React.createElement('div', null, 'northbound-ready'));
+  () => React.createElement('div', null, 'northbound-ready'),
+  () => React.createElement('div', null, 'insurance-ready'));
 const renderEmbed = props => renderToStaticMarkup(embed(props));
 const employee = { user_id: 'staff-id', bizflow_main_access: true };
 check('embed shows the same loading fallback during employee fetch and effect hydration', () => {
@@ -251,6 +255,12 @@ check('embed shows the same loading fallback during employee fetch and effect hy
 });
 check('embed mounts support after the employee and main access are resolved', () => {
   assert(renderEmbed({ qEmployees: { isSuccess: true, data: [employee] }, currentEmployee: employee, isBizflowMainAllowed: true }).includes('support-ready'));
+});
+check('embed mounts insurance with the same employee gate', () => {
+  assert(renderEmbed({ tab: 'appInsurance', qEmployees: { isSuccess: true, data: [employee] },
+    currentEmployee: employee, isBizflowMainAllowed: true }).includes('insurance-ready'));
+  assert.equal(renderEmbed({ tab: 'appInsurance', qEmployees: { isSuccess: true, data: [] } }),
+    '<div role="alert">未登入或沒有主站權限</div>');
 });
 check('embed denies access only after the employee lookup confirms no main access', () => {
   assert.equal(renderEmbed({ qEmployees: { isSuccess: true, data: [] } }), '<div role="alert">未登入或沒有主站權限</div>');

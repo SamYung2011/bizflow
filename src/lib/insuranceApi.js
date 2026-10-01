@@ -7,7 +7,8 @@ async function request(path, options, body) {
   const payload = await callHonnmonoAdmin(`${prefix}${path}`, {
     ...options, ...(body === undefined ? {} : { method: 'POST', body }),
   });
-  if (payload?.code !== 0) throw new Error('Insurance request failed');
+  if (payload?.code !== 0) throw new Error(payload?.des
+    ? `HTTP ${payload.code}: ${payload.des}` : 'Insurance request failed');
   return payload.result;
 }
 
