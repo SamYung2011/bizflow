@@ -4086,6 +4086,7 @@ Object.assign(DICT_EN, {
   "過去三年兩次或以上": "Two or more in the past three years", "不清楚": "Not sure",
   "辦理紀錄": "Activity history", "使用者補充資料": "User supplied details",
   "提交詢價": "Enquiry submitted", "補充欄位": "Updated fields",
+  "使用者取消詢價": "User cancelled the enquiry",
 });
 Object.assign(DICT_FR, {
   "車保": "Assurance auto", "第 {version} 份": "Fichier {version}",
@@ -4095,6 +4096,7 @@ Object.assign(DICT_FR, {
   "過去三年兩次或以上": "Deux ou plus sur les trois dernières années", "不清楚": "Incertain",
   "辦理紀錄": "Historique du dossier", "使用者補充資料": "Détails ajoutés par l’utilisateur",
   "提交詢價": "Demande de devis envoyée", "補充欄位": "Champs mis à jour",
+  "使用者取消詢價": "L’utilisateur a annulé la demande",
 });
 
 const I18nContext = createContext({ lang: "zh", setLang: () => {}, t: (s) => s });

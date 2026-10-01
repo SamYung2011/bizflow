@@ -4,6 +4,20 @@
 
 const PROXY_PATH = "/honnmono-admin";
 
+export function insuranceErrorDetail(parsed) {
+  const value = parsed?.des ?? parsed?.detail?.des ?? parsed?.error ?? parsed?.detail ?? parsed?.msg;
+  const entries = Array.isArray(value) ? value : value && typeof value === 'object' ? [value] : [];
+  if (entries.length) {
+    const parts = entries.map(entry => {
+      if (typeof entry === 'string') return entry;
+      const field = Array.isArray(entry?.loc) ? entry.loc.filter(part => part !== 'body').join('.') : entry?.field;
+      return [field, entry?.msg ?? entry?.reason ?? entry?.des].filter(Boolean).join('：');
+    }).filter(Boolean);
+    return parts.join('；') || '操作失敗，請重試';
+  }
+  return typeof value === 'string' && value.trim() ? value : '操作失敗，請重試';
+}
+
 
 export async function callHonnmonoAdmin(
   subPath,
@@ -36,7 +50,7 @@ export async function callHonnmonoAdmin(
   }
   if (!response.ok) {
     const detail = parsed && typeof parsed === "object"
-      ? (subPath.startsWith('/insurance/') ? (parsed.des ?? parsed.detail?.des ?? parsed.error ?? parsed.detail ?? parsed.msg)
+      ? (subPath.startsWith('/insurance/') ? insuranceErrorDetail(parsed)
         : (parsed.error ?? parsed.detail ?? parsed.msg))
       : parsed;
     throw new Error(`HTTP ${response.status}: ${detail ?? "Unknown error"}`);

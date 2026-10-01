@@ -54,9 +54,32 @@ try {
   globalThis.fetch = async () => Response.json({ code: 409, des: 'Another case is in progress' }, { status: 409 });
   await assert.rejects(api.changeClaimStage(8, { status: 'received' }, auth), /Another case is in progress/);
   check('HTTP 409 preserves backend des for staff', () => {});
+  globalThis.fetch = async () => Response.json({ detail: [{ loc: ['body', 'ncd'], msg: 'too long' }] }, { status: 422 });
+  await assert.rejects(api.changeEnquiryStage(10, { status: 'assigned' }, auth), error =>
+    error.message.includes('ncd：too long') && !error.message.includes('[object Object]'));
+  check('structured validation error shows field and reason', () => {});
   await assert.rejects(api.listItems({ type: 'policy' }, {}));
   check('missing session cannot reach the bridge', () => {});
 } finally { globalThis.fetch = originalFetch; }
+
+const logicBundle = await build({ entryPoints: ['src/views/honnmono/insurance/viewLogic.js'],
+  bundle: true, platform: 'node', format: 'esm', write: false });
+const logic = await import(`data:text/javascript;base64,${Buffer.from(logicBundle.outputFiles[0].text).toString('base64')}`);
+check('submitted claim has first step complete and second current', () => {
+  const stages = [['submitted'], ['received'], ['result']];
+  assert.equal(logic.claimActiveStep('submitted', stages), 1);
+  assert.equal(logic.claimActiveStep('cancelled', stages), -1);
+  assert.equal(logic.claimActiveStep('result', stages), 2);
+});
+check('user cancellation has its own enquiry activity label', () => {
+  assert.equal(logic.enquiryEventTitle({ actor: 'user', stage: 'submitted' }), '提交詢價');
+  assert.equal(logic.enquiryEventTitle({ actor: 'user', stage: 'cancelled' }), '使用者取消詢價');
+});
+check('previous policy fills blank fields without overwriting staff edits or note', () => {
+  assert.deepEqual(logic.fillEmptyPolicyFields({ insurer: 'New', coverEnd: '', note: 'Mine' },
+    { insurer: 'Old', coverEnd: '2027-12-31', note: 'Unreadable' }),
+  { insurer: 'New', coverEnd: '2027-12-31', note: 'Mine' });
+});
 
 const commonSource = await readFile('src/views/honnmono/insurance/Common.jsx', 'utf8');
 const documentCode = (await transform(commonSource.slice(commonSource.indexOf('function DocumentRow('))

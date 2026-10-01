@@ -4,6 +4,7 @@ import { formatFeedbackTime } from '../../../lib/honnmonoAdmin.js';
 import { extractPolicy } from '../../../lib/insuranceApi.js';
 import { ActionStatus, Documents, Field, Line, UserCard, useAction } from './Common.jsx';
 import { POLICY_STATUS } from './labels.js';
+import { fillEmptyPolicyFields } from './viewLogic.js';
 
 const fields = [
   ['insurer', '保險公司'], ['policyNo', '保單號碼'], ['plateNo', '車牌'],
@@ -41,7 +42,8 @@ export default function PolicyDetail({ record, options, reload, lang }) {
       <Documents documents={record.documents} options={options} lang={lang} /></section>
     <section className="nb-card"><h3>{t('人工整理保單')}</h3>
       {record.previousPolicy && <button type="button" className="ins-link" disabled={action.busy}
-        onClick={() => setForm(initial(record.previousPolicy))}>{t('帶入上一張保單資料')}</button>}
+        onClick={() => setForm(current => fillEmptyPolicyFields(current, initial(record.previousPolicy)))}>
+        {t('帶入上一張保單資料')}</button>}
       <div className="nb-detail-grid">
         <label className="nb-field">{t('連結車輛')}<select value={form.carId} onChange={event => set('carId', event.target.value)}>
           <option value="">{t('未連結')}</option>

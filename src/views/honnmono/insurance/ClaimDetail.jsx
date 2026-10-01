@@ -4,10 +4,11 @@ import { formatFeedbackTime } from '../../../lib/honnmonoAdmin.js';
 import * as api from '../../../lib/insuranceApi.js';
 import { ActionStatus, Documents, Field, Line, UserCard, useAction } from './Common.jsx';
 import { CLAIM_RESULTS, CLAIM_STAGES, CLAIM_STATUS, DOC_KINDS } from './labels.js';
+import { claimActiveStep } from './viewLogic.js';
 
 function Timeline({ record, lang, t }) {
   const steps = CLAIM_STAGES.filter(([code]) => code !== 'cancelled');
-  const active = record.status === 'cancelled' ? -1 : steps.findIndex(([code]) => code === record.status);
+  const active = claimActiveStep(record.status, steps);
   const notices = (record.events || []).filter(event => event.type === 'notice' && event.text);
   return <section className="nb-card"><h3>{t('出險進度')}</h3>
     <ol className="nb-timeline">{steps.map(([code, label], index) => <li key={code}

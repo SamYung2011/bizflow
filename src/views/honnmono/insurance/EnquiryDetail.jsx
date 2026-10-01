@@ -4,17 +4,10 @@ import { formatFeedbackTime } from '../../../lib/honnmonoAdmin.js';
 import { changeEnquiryStage } from '../../../lib/insuranceApi.js';
 import { ActionStatus, Field, Line, UserCard, useAction } from './Common.jsx';
 import { ENQUIRY_STATUS, CLAIMS_RECORD, NCD } from './labels.js';
+import { enquiryEventTitle } from './viewLogic.js';
 
 const changeLabels = { coverChoice: '想要的保障', ncd: '無索償折扣（NCD）',
   driverAge: '主要司機年齡', drivingYears: '駕駛年資', claimsRecord: '事故／索償紀錄' };
-function eventTitle(event) {
-  if (event.type === 'quote') return '發出報價';
-  if (event.type === 'info_request') return '要求補充資料';
-  if (event.actor === 'user' && event.payload?.fields?.length) return '使用者補充資料';
-  if (event.actor === 'user') return '提交詢價';
-  return ({ assigned: '分派代理', done: '標記完成', cancelled: '取消詢價' })[event.stage] || '代理跟進';
-}
-
 export default function EnquiryDetail({ record, options, reload, lang }) {
   const { t } = useT();
   const action = useAction(reload);
@@ -58,7 +51,7 @@ export default function EnquiryDetail({ record, options, reload, lang }) {
     </section>}
     <section className="nb-card ins-spaced"><h3>{t('辦理紀錄')}</h3>
       <ol className="nb-timeline">{(record.events || []).map(event => <li key={event.id}>
-        <span className="nb-step-dot"/><strong>{t(eventTitle(event))}</strong>
+        <span className="nb-step-dot"/><strong>{t(enquiryEventTitle(event))}</strong>
         <small>{formatFeedbackTime(event.createdAt, lang)}</small>
         {event.text && <p>{event.text}</p>}
         {!!event.payload?.fields?.length && <p>{t('補充欄位')}：{event.payload.fields.map(key => t(changeLabels[key] || key)).join('、')}</p>}

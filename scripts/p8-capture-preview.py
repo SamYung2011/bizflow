@@ -63,9 +63,12 @@ def capture(scenario, language):
 
 
 def main():
+    global OUTPUT
     parser = argparse.ArgumentParser()
     parser.add_argument('scenarios', nargs='*', default=SCENARIOS)
+    parser.add_argument('--output', type=pathlib.Path, default=OUTPUT)
     args = parser.parse_args()
+    OUTPUT = args.output
     OUTPUT.mkdir(parents=True, exist_ok=True)
     for scenario in args.scenarios:
         capture(scenario, 'zh')

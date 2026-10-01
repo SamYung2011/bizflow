@@ -22,6 +22,10 @@ const event = (kind, stage, text = '') => ({ id: now, type: kind, stage, text, a
 
 if (scenario === 'policy-ready') Object.assign(record, { status: 'ready', insurer: '本地保險公司', coverEnd: '2027-10-01', staffNote: '已核對保單資料。' });
 if (scenario === 'policy-unreadable') Object.assign(record, { status: 'unreadable', staffNote: '保單影像未能讀取，請重新上傳。' });
+if (scenario === 'enquiry-user-cancel') {
+  record.status = 'cancelled';
+  record.events.push({ id: now, type: 'user', actor: 'user', stage: 'cancelled', payload: {}, createdAt: now });
+}
 if (scenario === 'claim-accepted') record.documents[0].status = 'accepted';
 if (scenario === 'claim-returned') Object.assign(record.documents[0], { status: 'rejected', staffNote: '請補拍文件右下角。' });
 if (scenario.startsWith('claim-stage-')) {
@@ -56,6 +60,9 @@ window.fetch = async (input, options) => {
   const route = url.pathname.split('/insurance/')[1];
   if (route.startsWith('files/')) return new Response(new Blob([]), { status: 200 });
   if (options?.method === 'POST') {
+    if (scenario === 'policy-validation') return new Response(JSON.stringify({
+      detail: [{ loc: ['body', 'ncd'], msg: 'too long' }],
+    }), { status: 422, headers: { 'Content-Type': 'application/json' } });
     const body = JSON.parse(options.body || '{}');
     if (route.includes('/extract')) Object.assign(details.policy.result, body);
     if (route.includes('/documents/') && route.endsWith('/review')) {
@@ -89,7 +96,7 @@ let selectedType = type === 'policy';
 let selectedRecord = scenario.endsWith('-list');
 let actionStarted = false;
 let actionPrepared = false;
-const actionLabel = query.get('lang') !== 'zh' ? null : scenario === 'policy-ready' ? '標記已整理' :
+const actionLabel = query.get('lang') !== 'zh' ? null : ['policy-ready', 'policy-validation'].includes(scenario) ? '標記已整理' :
   scenario === 'policy-unreadable' ? '標記未能讀取' :
   scenario === 'policy-history' ? '查看已移除文件' :
   scenario === 'claim-accepted' ? '接受' : scenario === 'claim-returned' ? '退回' :
@@ -126,7 +133,8 @@ const timer = setInterval(() => {
       button.click(); actionStarted = true;
       return;
     }
-    if (actionLabel && scenario !== 'policy-history' && !document.querySelector('[role="status"]')) return;
+    if (actionLabel && scenario !== 'policy-history' &&
+        !document.querySelector(scenario === 'policy-validation' ? '[role="alert"]' : '[role="status"]')) return;
     clearInterval(timer);
     const workspace = document.querySelector('.nb-workspace');
     workspace.style.height = '2200px';
