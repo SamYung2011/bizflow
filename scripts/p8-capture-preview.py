@@ -15,7 +15,7 @@ SCENARIOS = [
     'policy-list', 'policy-detail', 'policy-history', 'policy-ready', 'policy-unreadable',
     'claim-list', 'claim-detail', 'claim-accepted', 'claim-returned',
     'claim-stage-received', 'claim-stage-insurer_accepted', 'claim-stage-assessing',
-    'claim-stage-paid', 'claim-stage-denied', 'claim-stage-closed',
+    'claim-stage-paid', 'claim-stage-denied', 'claim-stage-closed', 'claim-stage-cancelled',
     'claim-request', 'claim-notice',
     'enquiry-list', 'enquiry-detail', 'enquiry-stage-assigned',
     'enquiry-stage-need_info', 'enquiry-stage-quoted', 'enquiry-stage-done',
