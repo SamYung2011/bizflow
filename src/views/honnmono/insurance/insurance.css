@@ -14,3 +14,4 @@
 .ins-workspace .nb-row-actions input { width: 100px; }
 .ins-workspace .nb-row-actions button { min-width: 54px; white-space: nowrap; }
 @media (max-width: 1100px) { .ins-workspace .nb-doc { grid-template-columns: 1fr; } }
+.ins-workspace .nb-timeline li > p { grid-column: 2; margin: 0; min-width: 0; overflow-wrap: anywhere; }

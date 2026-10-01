@@ -1,0 +1,1 @@
+{"code":0,"des":"success","result":{"items":[{"type":"policy","id":1,"status":"ready","lastActionAt":1790827753106,"user":{"id":1,"nickname":"P8 User","email":"p8user@example.test","phone":"+85212345678","phoneHk":"","phoneCn":""},"region":"hk","policyNo":null,"plateNo":null}],"page":1,"size":30,"total":1}}
