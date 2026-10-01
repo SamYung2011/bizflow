@@ -1,4 +1,4 @@
-import { supportUpstreamPath, northboundUpstreamPath, isStaffUpstream } from "./support-proxy.mjs";
+import { supportUpstreamPath, northboundUpstreamPath, insuranceUpstreamPath, isStaffUpstream } from "./support-proxy.mjs";
 
 // Per-route upstream budgets. The defaults are 10 s / 16 KB; three routes need
 // more room, and they are named here so index.ts and its tests read the same
@@ -45,6 +45,7 @@ export function isMainAccessRoute(subPath, method) {
   return (
     path.startsWith("/support/") ||
     path.startsWith("/northbound/") ||
+    path.startsWith("/insurance/") ||
     (method === "GET" && (
       path === "/device/binding" ||
       path === "/devices/flash" ||
@@ -65,6 +66,7 @@ export function mapHonnmonoAdminPath(pathname, method) {
   const normalized = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
   if (normalized.startsWith("/support/")) return supportUpstreamPath(normalized, method);
   if (normalized.startsWith("/northbound/")) return northboundUpstreamPath(normalized, method);
+  if (normalized.startsWith("/insurance/")) return insuranceUpstreamPath(normalized, method);
   if (method === "GET" && normalized === "/feedback") {
     return "/internal/admin/feedback";
   }

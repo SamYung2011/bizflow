@@ -26,12 +26,18 @@ export function northboundUpstreamPath(path, method) {
   return `/internal/admin${path}`;
 }
 
+export function insuranceUpstreamPath(path, method) {
+  if (!['GET', 'POST'].includes(method) || !safeSegments(path, '/insurance/')) return '';
+  return `/internal/admin${path}`;
+}
+
 export function isSupportUpstream(path) {
   return path.startsWith('/internal/admin/support/') || /^\/internal\/cloud-storage\/upload\/[A-Za-z0-9_-]{1,64}$/.test(path);
 }
 
 export function isStaffUpstream(path) {
-  return isSupportUpstream(path) || safeSegments(path, '/internal/admin/northbound/');
+  return isSupportUpstream(path) || safeSegments(path, '/internal/admin/northbound/') ||
+    safeSegments(path, '/internal/admin/insurance/');
 }
 
 async function readLimited(stream, limit) {
@@ -56,7 +62,8 @@ export async function forwardSupport(req, upstreamUrl, { token, operatorEmail, c
   const reply = (body, status = 200) => Response.json(body, { status, headers: { ...cors, 'Cache-Control': 'no-store' } });
   const upload = upstreamUrl.pathname.startsWith('/internal/cloud-storage/upload/');
   const file = upstreamUrl.pathname.startsWith('/internal/admin/support/files/') ||
-    upstreamUrl.pathname.startsWith('/internal/admin/northbound/files/');
+    upstreamUrl.pathname.startsWith('/internal/admin/northbound/files/') ||
+    upstreamUrl.pathname.startsWith('/internal/admin/insurance/files/');
   let body;
   if (['POST', 'DELETE'].includes(req.method)) {
     try { body = await readLimited(req.body, upload ? SUPPORT_UPLOAD_BYTES : JSON_BYTES); }

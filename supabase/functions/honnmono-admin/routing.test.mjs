@@ -146,6 +146,21 @@ test("northbound staff routes map to Shenzhen and reject traversal or unsupporte
   assert.equal(isAllowedHonnmonoUpstream(new URL("https://app-api.honnmono.top/internal/admin/northbound/%2e%2e%2Fsupport")), false);
 });
 
+test("insurance staff routes require main access and reject path traversal", () => {
+  assert.equal(mapHonnmonoAdminPath("/insurance/items", "GET"), "/internal/admin/insurance/items");
+  assert.equal(mapHonnmonoAdminPath("/insurance/claims/42/stage", "POST"), "/internal/admin/insurance/claims/42/stage");
+  assert.equal(mapHonnmonoAdminPath("/insurance/files/abc/proof%20one.jpg", "GET"),
+    "/internal/admin/insurance/files/abc/proof%20one.jpg");
+  assert.equal(isMainAccessRoute("/insurance/items", "GET"), true);
+  assert.equal(isAllowedHonnmonoUpstream(new URL("https://app-api.honnmono.top/internal/admin/insurance/items")), true);
+  for (const path of ["/insurance/..%2Fsupport/items", "/insurance/%2e%2e%5csupport/items",
+    "/insurance/items//42", "/insurance/items/%2e%2e%2f42"]) {
+    assert.equal(mapHonnmonoAdminPath(path, "GET"), "", path);
+  }
+  assert.equal(mapHonnmonoAdminPath("/insurance/items", "DELETE"), "");
+  assert.equal(isAllowedHonnmonoUpstream(new URL("https://app-api.honnmono.top/internal/admin/insurance/%2e%2e%2Fsupport")), false);
+});
+
 
 test("rejects writes, raw download proxying, and unrelated routes", () => {
   assert.equal(mapHonnmonoAdminPath("/feedback", "POST"), "");

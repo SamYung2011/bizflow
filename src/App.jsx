@@ -9,6 +9,7 @@ const OcppUsersView = lazy(() => import("./views/ocpp/OcppUsers.jsx"));
 const OcppFinanceView = lazy(() => import("./views/ocpp/finance/OcppFinance.jsx"));
 const AppSupportView = lazy(() => import("./views/honnmono/AppSupport.jsx"));
 const AppNorthboundView = lazy(() => import("./views/honnmono/AppNorthbound.jsx"));
+const AppInsuranceView = lazy(() => import("./views/honnmono/AppInsurance.jsx"));
 const AppFeedbackView = lazy(() => import("./views/honnmono/AppFeedback.jsx"));
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase, fetchAllTable } from "./lib/supabaseClient.js";
@@ -1052,6 +1053,7 @@ export default function App() {
       ...(isBfAdmin ? [{ id: "appFeedback", label: t("用戶反饋"), icon: "chat" }] : []),
       { id: "appSupport", label: t("APP 客服"), icon: "chat" },
       { id: "appNorthbound", label: t("APP 北上"), icon: "car" },
+      { id: "appInsurance", label: t("APP 車保"), icon: "car" },
     ]}] : []),
     { type: "single", id: "gototeam", label: t("團隊管理"), icon: "external", external: "https://team.honnmono.top" },
   ];
@@ -1771,8 +1773,8 @@ export default function App() {
     return <div style={{ height: "100vh", background: "#f7f8fc" }} />;
   }
 
-  if (["appSupport", "appNorthbound"].includes(tab) && new URLSearchParams(window.location.search).get("embed") === "1") {
-    const supportFallback = <div>{t(tab === "appSupport" ? "載入客服會話…" : "載入北上案件…")}</div>;
+  if (["appSupport", "appNorthbound", "appInsurance"].includes(tab) && new URLSearchParams(window.location.search).get("embed") === "1") {
+    const supportFallback = <div>{t(tab === "appSupport" ? "載入客服會話…" : tab === "appNorthbound" ? "載入北上案件…" : "載入車保資料…")}</div>;
     if (!currentEmployee) {
       // 查询完成后，AppContext 还需一次 effect 才把员工资料同步到 currentEmployee。
       if (qEmployees.isPending || qEmployees.data?.some(employee => employee.user_id === userId)) return supportFallback;
@@ -1781,7 +1783,8 @@ export default function App() {
     return isBizflowMainAllowed ? <Suspense fallback={supportFallback}>
       {tab === "appSupport"
         ? <AppSupportView session={session} employees={employees} embedded />
-        : <AppNorthboundView session={session} embedded />}
+        : tab === "appNorthbound" ? <AppNorthboundView session={session} embedded />
+          : <AppInsuranceView session={session} embedded />}
     </Suspense> : <div role="alert">{t("未登入或沒有主站權限")}</div>;
   }
 
@@ -2061,6 +2064,12 @@ export default function App() {
         {tab === "appNorthbound" && isBizflowMainAllowed && (
           <Suspense fallback={<div>{t("載入北上案件…")}</div>}>
             <AppNorthboundView session={session} />
+          </Suspense>
+        )}
+
+        {tab === "appInsurance" && isBizflowMainAllowed && (
+          <Suspense fallback={<div>{t("載入車保資料…")}</div>}>
+            <AppInsuranceView session={session} />
           </Suspense>
         )}
 
