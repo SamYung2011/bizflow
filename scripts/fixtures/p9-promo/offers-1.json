@@ -1,0 +1,33 @@
+{
+  "code": 0,
+  "des": "success",
+  "result": {
+    "id": 1,
+    "title": "本地接口驗證 1791445558",
+    "summary": "接口回放",
+    "category": "本地測試",
+    "terms": "本地測試條款",
+    "merchant": {
+      "name": "本地商戶",
+      "address": null,
+      "phone": null,
+      "note": null
+    },
+    "merchantName": "本地商戶",
+    "merchantAddress": null,
+    "merchantPhone": null,
+    "merchantNote": null,
+    "claimStart": null,
+    "claimEnd": null,
+    "validUntil": null,
+    "validDays": 30,
+    "perUserLimit": 1,
+    "totalQuota": 2,
+    "claimedCount": 1,
+    "status": "published",
+    "sort": 0,
+    "createdBy": "p9@example.test",
+    "createdAt": 1791445558053,
+    "updatedAt": 1791445558083
+  }
+}

@@ -725,8 +725,8 @@ function renderAdapterPanel() {
 
 function renderTabs() {
   const tabs = state.isAdmin
-    ? [["feedback", "feedbackTab"], ["support", "supportTab"], ["northbound", "northboundTab"], ["insurance", "insuranceTab"], ["device", "deviceUnbindTab"], ["devices", "deviceListTab"], ["sim", "simCardTab"]]
-    : [["support", "supportTab"], ["northbound", "northboundTab"], ["insurance", "insuranceTab"], ["device", "deviceUnbindTab"], ["devices", "deviceListTab"]];
+    ? [["feedback", "feedbackTab"], ["support", "supportTab"], ["northbound", "northboundTab"], ["insurance", "insuranceTab"], ["offers", "offersTab"], ["device", "deviceUnbindTab"], ["devices", "deviceListTab"], ["sim", "simCardTab"]]
+    : [["support", "supportTab"], ["northbound", "northboundTab"], ["insurance", "insuranceTab"], ["offers", "offersTab"], ["device", "deviceUnbindTab"], ["devices", "deviceListTab"]];
   return `<nav class="app-feedback-tabs" aria-label="${rawE(t("honnmonoAppTitle"))}">
     ${tabs.map(([id, label]) => `<button type="button" class="app-feedback-tab${state.activeTab === id ? " is-active" : ""}" data-app-feedback-tab="${id}" aria-selected="${state.activeTab === id}">${rawE(t(label))}</button>`).join("")}
   </nav>`;
@@ -735,7 +735,7 @@ function renderTabs() {
 function render(nextHelpers) {
   helpers = nextHelpers;
   const isFeedback = state.activeTab === "feedback";
-  const subtitleKey = state.activeTab === "support" ? "supportSubtitle" : state.activeTab === "northbound" ? "northboundSubtitle" : state.activeTab === "insurance" ? "insuranceSubtitle" : isFeedback
+  const subtitleKey = state.activeTab === "support" ? "supportSubtitle" : state.activeTab === "northbound" ? "northboundSubtitle" : state.activeTab === "insurance" ? "insuranceSubtitle" : state.activeTab === "offers" ? "offersSubtitle" : isFeedback
     ? "subtitle"
     : state.activeTab === "devices"
       ? "deviceListSubtitle"
@@ -755,6 +755,8 @@ function render(nextHelpers) {
           ? `<iframe class="app-support-frame" title="${rawE(t("northboundTab"))}" src="/task-platform/?view=appNorthbound&embed=1&lang=${helpers.lang}" data-northbound-frame></iframe>`
         : state.activeTab === "insurance"
           ? `<iframe class="app-support-frame" title="${rawE(t("insuranceTab"))}" src="/task-platform/?view=appInsurance&embed=1&lang=${helpers.lang}" data-insurance-frame></iframe>`
+        : state.activeTab === "offers"
+          ? `<iframe class="app-support-frame" title="${rawE(t("offersTab"))}" src="/task-platform/?view=appOffers&embed=1&lang=${helpers.lang}" data-offers-frame></iframe>`
         : isFeedback ? renderFeedbackPanel()
         : state.activeTab === "devices"
           ? renderAdapterPanel()
@@ -1605,7 +1607,7 @@ async function downloadLog(id) {
 }
 
 function switchAppTab(nextTab) {
-  if (!state || !(state.isAdmin ? ["feedback", "support", "northbound", "insurance", "device", "devices", "sim"] : ["support", "northbound", "insurance", "device", "devices"]).includes(nextTab)) {
+  if (!state || !(state.isAdmin ? ["feedback", "support", "northbound", "insurance", "offers", "device", "devices", "sim"] : ["support", "northbound", "insurance", "offers", "device", "devices"]).includes(nextTab)) {
     return;
   }
   if (state.activeTab === nextTab) return;
@@ -1616,7 +1618,7 @@ function switchAppTab(nextTab) {
   state.detail = null;
   state.detailError = null;
   state.downloadError = null;
-  if (nextTab === "support" || nextTab === "northbound" || nextTab === "insurance") {
+  if (nextTab === "support" || nextTab === "northbound" || nextTab === "insurance" || nextTab === "offers") {
     activePoller?.pause();
     rerender();
     return;
@@ -2027,8 +2029,8 @@ function createState(historyState, currentUser) {
   return {
     isAdmin,
     activeTab: !isAdmin
-      ? ["northbound", "insurance", "devices"].includes(saved.activeTab) ? saved.activeTab : "support"
-      : ["support", "northbound", "insurance", "device", "devices", "sim"].includes(saved.activeTab)
+      ? ["northbound", "insurance", "offers", "devices"].includes(saved.activeTab) ? saved.activeTab : "support"
+      : ["support", "northbound", "insurance", "offers", "device", "devices", "sim"].includes(saved.activeTab)
         ? saved.activeTab
         : "feedback",
     device: createDeviceUnbindState(saved),
@@ -2181,7 +2183,7 @@ export async function mountPage({
         poll: pollActiveTab,
       });
       activePoller = poller;
-      if (!["support", "northbound", "insurance", "device", "sim"].includes(state.activeTab) && !(state.activeTab === "devices" && state.adapters.kind === "setparam")) poller.start(state.activeTab === "devices" ? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS);
+      if (!["support", "northbound", "insurance", "offers", "device", "sim"].includes(state.activeTab) && !(state.activeTab === "devices" && state.adapters.kind === "setparam")) poller.start(state.activeTab === "devices" ? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS);
       if ((state.isAdmin && state.activeTab === "device") || (state.activeTab === "devices" && state.adapters.kind !== "setparam")) void otaController.load({ includeLegacy: state.isAdmin });
       if (state.activeTab === "devices") {
         if (state.adapters.kind === "setparam") void setparamController.read();

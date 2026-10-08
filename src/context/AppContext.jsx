@@ -32,7 +32,7 @@ export function AppProvider({ children }) {
   // 全 App 共享：當前 tab。部分高頻/重資料 query 只在對應 tab 啟動，避免首頁被無關輪詢拖慢。
   const [tab, setTab] = useState(() => {
     const view = new URLSearchParams(window.location.search).get('view');
-    return ['appSupport', 'appNorthbound', 'appInsurance'].includes(view) ? view : 'dashboard';
+    return ['appSupport', 'appNorthbound', 'appInsurance', 'appOffers'].includes(view) ? view : 'dashboard';
   })
   const isWhatsappTab = tab === 'whatsapp'
   const isProductsTab = tab === 'products'

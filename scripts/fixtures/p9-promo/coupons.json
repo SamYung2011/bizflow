@@ -1,0 +1,65 @@
+{
+  "code": 0,
+  "des": "success",
+  "result": {
+    "items": [
+      {
+        "id": 3,
+        "code": "HM-CP-544982",
+        "offerId": 3,
+        "status": "available",
+        "validUntil": 1791532021643,
+        "claimedAt": 1791445621643,
+        "presentedAt": null,
+        "usedAt": null,
+        "voidReason": null,
+        "offerTitle": "PG 並發驗證 1791445621617343000",
+        "user": {
+          "id": 1001,
+          "nickname": "P9 Local",
+          "email": "p9-local@example.test",
+          "phone": "66001001"
+        }
+      },
+      {
+        "id": 2,
+        "code": "HM-CP-180282",
+        "offerId": 2,
+        "status": "expired",
+        "validUntil": 1794037558192,
+        "claimedAt": 1791445558192,
+        "presentedAt": null,
+        "usedAt": null,
+        "voidReason": "本地取消",
+        "offerTitle": "本地接口驗證 1791445558 B",
+        "user": {
+          "id": 1001,
+          "nickname": "P9 Local",
+          "email": "p9-local@example.test",
+          "phone": "66001001"
+        }
+      },
+      {
+        "id": 1,
+        "code": "HM-CP-290435",
+        "offerId": 1,
+        "status": "used",
+        "validUntil": 1794037558116,
+        "claimedAt": 1791445558116,
+        "presentedAt": 1791445558138,
+        "usedAt": 1791445558169,
+        "voidReason": null,
+        "offerTitle": "本地接口驗證 1791445558",
+        "user": {
+          "id": 1001,
+          "nickname": "P9 Local",
+          "email": "p9-local@example.test",
+          "phone": "66001001"
+        }
+      }
+    ],
+    "page": 1,
+    "size": 100,
+    "total": 3
+  }
+}

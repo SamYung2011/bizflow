@@ -425,7 +425,7 @@ Deno.serve(async (req) => {
     return json({ error: "Server misconfigured" }, 500);
   }
 
-  if (subPath.startsWith("/support/") || subPath.startsWith("/northbound/") || subPath.startsWith("/insurance/")) {
+  if (subPath.startsWith("/support/") || subPath.startsWith("/northbound/") || subPath.startsWith("/insurance/") || subPath.startsWith("/promo/")) {
     return forwardSupport(req, upstreamUrl, {
       token: HONNMONO_ADMIN_INTERNAL_TOKEN, operatorEmail: guard.operatorEmail, cors: CORS_HEADERS,
     });

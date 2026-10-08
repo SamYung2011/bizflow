@@ -4099,6 +4099,53 @@ Object.assign(DICT_FR, {
   "使用者取消詢價": "L’utilisateur a annulé la demande",
 });
 
+Object.assign(DICT_EN, {
+  "APP 優惠": "APP Offers", "管理優惠及使用者優惠券": "Manage offers and user coupons",
+  "優惠類型": "Offer type", "優惠券": "Coupon",
+  "新增優惠": "New offer", "優惠篩選": "Filter by offer", "全部優惠": "All offers",
+  "搜尋優惠或類別": "Search offers or categories", "搜尋券號或使用者": "Search code or user",
+  "已領 {claimed}／{total}": "Claimed {claimed} / {total}",
+  "載入優惠資料…": "Loading offers…", "從左側選擇優惠或優惠券。": "Select an offer or coupon on the left.",
+  "編輯優惠": "Edit offer", "草稿": "Draft", "上架中": "Published",
+  "標題": "Title", "類別": "Category", "一句簡介": "Short summary", "條款": "Terms",
+  "商戶名稱": "Merchant name", "商戶地址": "Merchant address", "商戶電話": "Merchant phone",
+  "預約說明": "Booking instructions", "領取期開始": "Claim period starts", "領取期結束": "Claim period ends",
+  "券有效期規則": "Coupon validity", "領取後 N 天": "N days after claim",
+  "固定到期日": "Fixed expiry date", "領取後天數": "Days after claim",
+  "每人限領": "Limit per user", "總量（空為不限）": "Total quota (blank for unlimited)",
+  "儲存": "Save", "上架": "Publish", "下架": "Unpublish", "結束": "End",
+  "請填妥優惠內容與有效期": "Complete the offer and validity rule", "已儲存": "Saved",
+  "優惠券詳情": "Coupon details", "可使用": "Available", "已使用": "Used",
+  "已作廢": "Voided", "券號": "Coupon code", "使用者": "User",
+  "有效期": "Valid until", "核銷備註（可空）": "Use note (optional)", "標記已使用": "Mark as used",
+  "作廢原因": "Void reason", "作廢": "Void", "請填寫作廢原因": "Enter a void reason",
+  "狀態已更新": "Status updated", "事件時間線": "Event timeline", "已領取": "Claimed",
+  "已出示": "Presented",
+});
+Object.assign(DICT_FR, {
+  "APP 優惠": "Offres APP", "管理優惠及使用者優惠券": "Gérer les offres et les coupons des utilisateurs",
+  "優惠類型": "Type d’offre", "優惠券": "Coupon",
+  "新增優惠": "Nouvelle offre", "優惠篩選": "Filtrer par offre", "全部優惠": "Toutes les offres",
+  "搜尋優惠或類別": "Rechercher une offre ou une catégorie", "搜尋券號或使用者": "Rechercher un code ou un utilisateur",
+  "已領 {claimed}／{total}": "Réclamés {claimed} / {total}",
+  "載入優惠資料…": "Chargement des offres…", "從左側選擇優惠或優惠券。": "Choisissez une offre ou un coupon à gauche.",
+  "編輯優惠": "Modifier l’offre", "草稿": "Brouillon", "上架中": "Publiée",
+  "標題": "Titre", "類別": "Catégorie", "一句簡介": "Résumé", "條款": "Conditions",
+  "商戶名稱": "Nom du commerçant", "商戶地址": "Adresse du commerçant", "商戶電話": "Téléphone du commerçant",
+  "預約說明": "Instructions de réservation", "領取期開始": "Début de la période", "領取期結束": "Fin de la période",
+  "券有效期規則": "Validité du coupon", "領取後 N 天": "N jours après obtention",
+  "固定到期日": "Date d’expiration fixe", "領取後天數": "Jours après obtention",
+  "每人限領": "Limite par utilisateur", "總量（空為不限）": "Quota total (vide = illimité)",
+  "儲存": "Enregistrer", "上架": "Publier", "下架": "Retirer", "結束": "Terminer",
+  "請填妥優惠內容與有效期": "Complétez l’offre et sa validité", "已儲存": "Enregistré",
+  "優惠券詳情": "Détails du coupon", "可使用": "Disponible", "已使用": "Utilisé",
+  "已作廢": "Annulé", "券號": "Code du coupon", "使用者": "Utilisateur",
+  "有效期": "Valable jusqu’au", "核銷備註（可空）": "Note d’utilisation (facultative)", "標記已使用": "Marquer utilisé",
+  "作廢原因": "Motif d’annulation", "作廢": "Annuler", "請填寫作廢原因": "Indiquez un motif d’annulation",
+  "狀態已更新": "Statut mis à jour", "事件時間線": "Historique", "已領取": "Obtenu",
+  "已出示": "Présenté", "員工": "Employé",
+});
+
 const I18nContext = createContext({ lang: "zh", setLang: () => {}, t: (s) => s });
 
 export function I18nProvider({ children }) {

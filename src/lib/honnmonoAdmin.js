@@ -27,7 +27,7 @@ export async function callHonnmonoAdmin(
   const anon = import.meta.env.VITE_SUPABASE_ANON_KEY;
   if (!base || !anon) throw new Error("Supabase env missing");
   if (!accessToken) throw new Error("Missing access token");
-  if (!["GET", "POST"].includes(method)) throw new Error("Unsupported method");
+  if (!["GET", "POST", "PATCH"].includes(method)) throw new Error("Unsupported method");
 
   const response = await fetch(`${base}/functions/v1${PROXY_PATH}${subPath}`, {
     method,
@@ -50,7 +50,7 @@ export async function callHonnmonoAdmin(
   }
   if (!response.ok) {
     const detail = parsed && typeof parsed === "object"
-      ? (subPath.startsWith('/insurance/') ? insuranceErrorDetail(parsed)
+      ? ((subPath.startsWith('/insurance/') || subPath.startsWith('/promo/')) ? insuranceErrorDetail(parsed)
         : (parsed.error ?? parsed.detail ?? parsed.msg))
       : parsed;
     throw new Error(`HTTP ${response.status}: ${detail ?? "Unknown error"}`);

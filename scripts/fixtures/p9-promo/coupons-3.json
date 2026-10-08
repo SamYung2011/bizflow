@@ -1,0 +1,60 @@
+{
+  "code": 0,
+  "des": "success",
+  "result": {
+    "id": 3,
+    "code": "HM-CP-544982",
+    "offerId": 3,
+    "status": "available",
+    "validUntil": 1791532021643,
+    "claimedAt": 1791445621643,
+    "presentedAt": null,
+    "usedAt": null,
+    "voidReason": null,
+    "offerTitle": "PG 並發驗證 1791445621617343000",
+    "user": {
+      "id": 1001,
+      "nickname": "P9 Local",
+      "email": "p9-local@example.test",
+      "phone": "66001001"
+    },
+    "offer": {
+      "id": 3,
+      "title": "PG 並發驗證 1791445621617343000",
+      "summary": "本地",
+      "category": "本地測試",
+      "terms": "本地",
+      "merchant": {
+        "name": null,
+        "address": null,
+        "phone": null,
+        "note": null
+      },
+      "merchantName": null,
+      "merchantAddress": null,
+      "merchantPhone": null,
+      "merchantNote": null,
+      "claimStart": null,
+      "claimEnd": null,
+      "validUntil": null,
+      "validDays": 1,
+      "perUserLimit": 1,
+      "totalQuota": 1,
+      "claimedCount": 1,
+      "status": "published",
+      "sort": 0,
+      "createdBy": "p9@example.test",
+      "createdAt": 1791445621624,
+      "updatedAt": 1791445621632
+    },
+    "events": [
+      {
+        "id": 6,
+        "type": "claimed",
+        "text": "已領取",
+        "actor": "user",
+        "createdAt": 1791445621643
+      }
+    ]
+  }
+}
