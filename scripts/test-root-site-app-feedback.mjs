@@ -1357,8 +1357,8 @@ tabScope.dispose();
 assert.match(pageSource, /poll:\s*pollActiveTab/);
 assert.match(
   pageSource,
-  /if \(!\["support", "northbound", "device", "sim"\]\.includes\(state\.activeTab\) && !\(state\.activeTab === "devices" && state\.adapters\.kind === "setparam"\)\) poller\.start\(state\.activeTab === "devices" \? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS\)/,
-  "the Northbound iframe and SIM lookup do not start the feedback poller",
+  /if \(!\["support", "northbound", "insurance", "device", "sim"\]\.includes\(state\.activeTab\) && !\(state\.activeTab === "devices" && state\.adapters\.kind === "setparam"\)\) poller\.start\(state\.activeTab === "devices" \? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS\)/,
+  "the support, Northbound and insurance iframes and SIM lookup do not start the feedback poller",
 );
 assert.match(pageSource, /return pollAdapterList\(\{ signal \}\)/);
 assert.match(pageSource, /loadAdapters\(\{ silent: true, signal \}\)/);
