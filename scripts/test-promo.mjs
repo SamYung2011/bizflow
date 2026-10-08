@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
+import { promoSummary } from '../src/views/honnmono/support/format.js';
+
+assert.equal(promoSummary('優惠 · 旅途服務禮遇\n\n優惠 旅途服務禮遇\n\n優惠券 HM-CP-123456 · 旅途服務禮遇'),
+  '優惠 旅途服務禮遇\n優惠券 HM-CP-123456 · 旅途服務禮遇');
+console.log('Promo summary: 1/1');
 
 const bundle = await build({ entryPoints: ['src/lib/promoApi.js'], bundle: true,
   platform: 'node', format: 'esm', write: false,

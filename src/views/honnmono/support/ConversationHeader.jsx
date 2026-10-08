@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useT } from '../../../i18n.jsx';
 import { SUPPORT_CATEGORIES, conversationState, staffName, supportCaseId } from '../../../lib/supportConfig.js';
 import SupportIcon from './SupportIcon.jsx';
+import { promoSummary } from './format.js';
 
 export default function ConversationHeader({ conversation, employees, onChange, onBack }) {
   const { t } = useT();
@@ -39,7 +40,7 @@ export default function ConversationHeader({ conversation, employees, onChange, 
         ? t('負責人：{name}', { name: staffName(conversation.assigneeEmail, employees) }) : t('尚未認領')}</span>
       <span className="support-source-label">{t(conversation.source === 'ai_handoff' ? 'AI 轉人工' : '使用者發起')}</span>
     </div>
-    {conversation.summary && <details className="support-summary" open><summary><span>{t('個案摘要')}</span><span>{t('AI 已整理')}</span></summary><p>{conversation.summary}</p></details>}
+    {conversation.summary && <details className="support-summary" open><summary><span>{t('個案摘要')}</span><span>{t('AI 已整理')}</span></summary><p>{conversation.source === 'promo' ? promoSummary(conversation.summary) : conversation.summary}</p></details>}
     {error && <div className="support-error" role="alert">{t('操作失敗，請重試')}</div>}
   </header>;
 }
