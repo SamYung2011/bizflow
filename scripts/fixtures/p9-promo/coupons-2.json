@@ -11,26 +11,22 @@
     "presentedAt": null,
     "usedAt": null,
     "voidReason": "本地取消",
-    "offerTitle": "本地接口驗證 1791445558 B",
+    "offerTitle": "合作服務禮遇",
     "user": {
       "id": 1001,
       "nickname": "P9 Local",
       "email": "p9-local@example.test",
-      "phone": "66001001"
+      "phone": "p9-local@example.test",
+      "phoneHk": "61234567",
+      "phoneCn": "13800138000"
     },
     "offer": {
       "id": 2,
-      "title": "本地接口驗證 1791445558 B",
-      "summary": "接口回放",
-      "category": "本地測試",
-      "terms": "本地測試條款",
-      "merchant": {
-        "name": "本地商戶",
-        "address": null,
-        "phone": null,
-        "note": null
-      },
-      "merchantName": "本地商戶",
+      "title": "合作服務禮遇",
+      "summary": "為車主安排的合作服務",
+      "category": "車主服務",
+      "terms": "請於有效期內向合作商戶出示優惠券。",
+      "merchantName": "合作服務中心",
       "merchantAddress": null,
       "merchantPhone": null,
       "merchantNote": null,
@@ -45,6 +41,7 @@
       "sort": 0,
       "createdBy": "p9@example.test",
       "createdAt": 1791445558178,
+      "updatedBy": "p9@example.test",
       "updatedAt": 1791445558185
     },
     "events": [
@@ -58,7 +55,7 @@
       {
         "id": 5,
         "type": "voided",
-        "text": "本地取消",
+        "text": "商戶取消安排",
         "actor": "p9@example.test",
         "createdAt": 1791445558199
       }

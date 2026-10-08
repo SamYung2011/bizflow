@@ -38,4 +38,12 @@ try {
   await assert.rejects(api.listOffers({}, auth), /HTTP 401/);
   await assert.rejects(api.listOffers({}, {}), /Missing access token/);
   console.log('PROMO_API_AUTH=3/3');
+  globalThis.fetch = async () => Response.json({ code: 409, des: 'Coupon already used', result: {} }, { status: 409 });
+  await assert.rejects(api.useCoupon(9, {}, auth), /Coupon already used/);
+  globalThis.fetch = async () => Response.json({ code: 409, des: 'Offer changed', result: {} });
+  await assert.rejects(api.updateOffer(7, {}, auth), /Offer changed/);
+  globalThis.fetch = async () => Response.json({ detail: [{ loc: ['body', 'title'], msg: 'Field required' }] }, { status: 422 });
+  await assert.rejects(api.createOffer({}, auth), error => error.message.includes('title：Field required') &&
+    !error.message.includes('[object Object]'));
+  console.log('PROMO_API_ERRORS=3/3');
 } finally { globalThis.fetch = previous; }

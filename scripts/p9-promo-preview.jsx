@@ -12,6 +12,10 @@ import offer3 from './fixtures/p9-promo/offers-3.json';
 import coupon1 from './fixtures/p9-promo/coupons-1.json';
 import coupon2 from './fixtures/p9-promo/coupons-2.json';
 import coupon3 from './fixtures/p9-promo/coupons-3.json';
+import support from './fixtures/p9-promo/support.json';
+import ConversationHeader from '../src/views/honnmono/support/ConversationHeader.jsx';
+import ConversationList from '../src/views/honnmono/support/ConversationList.jsx';
+import '../src/views/honnmono/support/support.css';
 
 const scenario = new URLSearchParams(location.search).get('scenario') || 'offer-list';
 const offerDetails = { 1: offer1, 2: offer2, 3: offer3 };
@@ -41,11 +45,17 @@ window.fetch = async (input, options) => {
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 createRoot(document.getElementById('root')).render(<I18nProvider><QueryClientProvider client={queryClient}>
-  <AppOffers session={{ access_token: 'local-fixture', user: { id: 1, email: 'p9-local@example.test' } }}/>
+  {scenario === 'support-tag' ? <div className="support-workspace">
+    <ConversationList query={{ data: { pages: [[support]] } }} selectedId={support.id} onSelect={() => {}}
+      filters={{ state: 'waiting', category: '', search: '' }} setFilters={() => {}} />
+    <div className="support-thread"><ConversationHeader conversation={support} employees={[]}
+      onChange={async () => {}} onBack={() => {}} /></div>
+  </div> : <AppOffers session={{ access_token: 'local-fixture', user: { id: 1, email: 'p9-local@example.test' } }}/>}
 </QueryClientProvider></I18nProvider>);
 
 let switched = false, selected = false;
 const timer = setInterval(() => {
+  if (scenario === 'support-tag') { clearInterval(timer); window.__P9_PREVIEW_READY = true; return; }
   if (scenario.startsWith('coupon') || scenario === 'used' || scenario === 'voided' || scenario === 'available') {
     if (!switched) { document.querySelectorAll('.promo-tabs button')[1]?.click(); switched = true; return; }
   } else switched = true;

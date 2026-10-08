@@ -85,6 +85,7 @@ function Workspace({ session }) {
                 {type === 'offers' ? <small>{t('已領 {claimed}／{total}', { claimed: row.claimedCount,
                   total: row.totalQuota == null ? '∞' : row.totalQuota })}</small> :
                   <time>{formatFeedbackTime(row.validUntil, lang)}</time>}
+                {type === 'offers' && <small>{row.updatedBy} · {formatFeedbackTime(row.updatedAt, lang)}</small>}
               </button>)}
       </div>
       <footer className="nb-page-controls"><span>{t('共 {count} 宗', { count: total })}</span>

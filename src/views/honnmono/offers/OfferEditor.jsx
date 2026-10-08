@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useT } from '../../../i18n.jsx';
 import { createOffer, updateOffer } from '../../../lib/promoApi.js';
 
@@ -42,7 +42,6 @@ export default function OfferEditor({ record, options, categories, onSaved }) {
   const [form, setForm] = useState(() => fromOffer(record));
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  useEffect(() => { setForm(fromOffer(record)); setMessage(''); }, [record?.id]);
   const set = (field, value) => setForm(current => ({ ...current, [field]: value }));
   const field = (name, label, type = 'text', extra = {}) => <label className="promo-field" key={name}>
     <span>{t(label)}</span><input type={type} value={form[name]} onChange={event => set(name, event.target.value)} {...extra}/>

@@ -23,6 +23,17 @@ import {
   validateOtaAdminBody,
 } from "./routing.mjs";
 
+test("promo permits staff reads, writes and PATCH while rejecting DELETE and traversal", () => {
+  for (const [path, method] of [["/promo/offers", "GET"], ["/promo/offers", "POST"],
+    ["/promo/offers/42", "PATCH"], ["/promo/coupons/9/use", "POST"], ["/promo/coupons/9/void", "POST"]]) {
+    assert.equal(mapHonnmonoAdminPath(path, method), `/internal/admin${path}`);
+    assert.equal(isMainAccessRoute(path, method), true);
+  }
+  for (const path of ["/promo/offers/42", "/promo/coupons/9"])
+    assert.equal(mapHonnmonoAdminPath(path, "DELETE"), "");
+  assert.equal(mapHonnmonoAdminPath("/promo/..%2Fsupport/cases", "GET"), "");
+});
+
 test("routes only flash parameter writes and recent reads to ota-admin", () => {
   const write = "/devices/flash-setparam";
   const recent = "/devices/flash-setparam/recent";

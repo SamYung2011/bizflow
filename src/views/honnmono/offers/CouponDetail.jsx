@@ -24,7 +24,9 @@ export default function CouponDetail({ record, options, onChanged }) {
     <header><h2>{t('優惠券詳情')}</h2><span className="promo-pill">{t(({ available: '可使用', used: '已使用', expired: record.voidReason ? '已作廢' : '已過期' })[record.status] || record.status)}</span></header>
     <dl className="promo-facts">
       <div><dt>{t('券號')}</dt><dd>{record.code}</dd></div>
-      <div><dt>{t('使用者')}</dt><dd>{record.user?.nickname || '—'} · {record.user?.email || '—'} · {record.user?.phone || '—'}</dd></div>
+      <div><dt>{t('使用者')}</dt><dd>{record.user?.nickname || '—'} · {record.user?.email || '—'}</dd></div>
+      <div><dt>{t('香港電話')}</dt><dd>{record.user?.phoneHk || '—'}</dd></div>
+      <div><dt>{t('內地電話')}</dt><dd>{record.user?.phoneCn || '—'}</dd></div>
       <div><dt>{t('優惠')}</dt><dd>{record.offerTitle}</dd></div>
       <div><dt>{t('有效期')}</dt><dd>{formatFeedbackTime(record.validUntil, lang)}</dd></div>
     </dl>
@@ -38,7 +40,8 @@ export default function CouponDetail({ record, options, onChanged }) {
     <h3>{t('事件時間線')}</h3>
     <ol className="promo-timeline">{(record.events || []).map(event => <li key={event.id}>
       <strong>{t(({ claimed: '已領取', presented: '已出示', used: '已使用', voided: '已作廢' })[event.type] || event.type)}</strong>
-      <span>{formatFeedbackTime(event.createdAt, lang)} · {event.actor === 'staff' ? t('員工') : event.actor}</span>
+      <span>{formatFeedbackTime(event.createdAt, lang)} · {event.actor === 'user' ? t('使用者') :
+        event.actor === 'staff' ? t('員工') : event.actor}</span>
       {event.text && <p>{event.text}</p>}
     </li>)}</ol>
   </section>;
