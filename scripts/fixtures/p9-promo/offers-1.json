@@ -1,0 +1,28 @@
+{
+  "code": 0,
+  "des": "success",
+  "result": {
+    "id": 1,
+    "title": "合作服務禮遇",
+    "summary": "為車主安排的合作服務",
+    "category": "車主服務",
+    "terms": "請於有效期內向合作商戶出示優惠券。",
+    "merchantName": "合作服務中心",
+    "merchantAddress": null,
+    "merchantPhone": null,
+    "merchantNote": null,
+    "claimStart": null,
+    "claimEnd": null,
+    "validUntil": null,
+    "validDays": 30,
+    "perUserLimit": 1,
+    "totalQuota": 2,
+    "claimedCount": 1,
+    "status": "published",
+    "sort": 0,
+    "createdBy": "p9@example.test",
+    "createdAt": 1791445558053,
+    "updatedBy": "p9@example.test",
+    "updatedAt": 1791445558083
+  }
+}

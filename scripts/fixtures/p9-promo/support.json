@@ -1,0 +1,22 @@
+{
+  "id": 1,
+  "status": "open",
+  "source": "promo",
+  "category": "其他問題",
+  "summary": "優惠 · 旅途服務禮遇\n\n優惠 旅途服務禮遇\n\n優惠券 HM-CP-318369 · 旅途服務禮遇",
+  "userId": 1001,
+  "lastSenderRole": "system",
+  "lastMessageAt": 1791445558147,
+  "lastMessagePreview": "優惠服務跟進",
+  "userReadMsgId": 0,
+  "staffReadMsgId": 0,
+  "assigneeEmail": null,
+  "createdAt": 1791445558147,
+  "closedAt": null,
+  "closedBy": null,
+  "userNickname": "P9 Local",
+  "userPhone": "66001001",
+  "userEmail": "p9-local@example.test",
+  "unreadCount": 0,
+  "firstUserMessage": ""
+}

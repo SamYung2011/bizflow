@@ -1,0 +1,27 @@
+.promo-workspace .nb-sidebar { min-width: 320px; }
+.promo-tabs { display: grid; grid-template-columns: 1fr 1fr; }
+.promo-new { margin: 12px 16px; padding: 11px 14px; border: 0; border-radius: 8px; background: #ffd12d; color: #151515; font-weight: 700; cursor: pointer; }
+.promo-filter { display: grid; gap: 6px; padding: 8px 16px; font-size: 13px; color: #575757; }
+.promo-filter select { min-height: 38px; padding: 7px; border: 1px solid #d5d5d5; border-radius: 6px; background: white; }
+.promo-detail { padding: 28px 34px 50px; max-width: 940px; }
+.promo-detail header { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; }
+.promo-detail h2 { margin: 0; font-size: 25px; }
+.promo-detail h3 { margin: 32px 0 14px; }
+.promo-pill { padding: 5px 10px; border-radius: 999px; background: #fff2bf; font-size: 12px; }
+.promo-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.promo-field { display: grid; gap: 7px; font-size: 13px; color: #4b4b4b; }
+.promo-field input, .promo-field textarea, .promo-field select { width: 100%; box-sizing: border-box; min-height: 40px; padding: 9px 11px; border: 1px solid #d9d9d9; border-radius: 7px; background: white; color: #1d1d1d; font: inherit; }
+.promo-field textarea { resize: vertical; }
+.promo-span { grid-column: 1 / -1; }
+.promo-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 25px; }
+.promo-actions button, .promo-coupon-actions button { padding: 10px 18px; border: 1px solid #d0d0d0; border-radius: 7px; background: white; cursor: pointer; font-weight: 600; }
+.promo-actions button:nth-child(2), .promo-coupon-actions button { border-color: #ffd12d; background: #ffd12d; }
+.promo-actions button:disabled, .promo-coupon-actions button:disabled { opacity: .55; cursor: default; }
+.promo-message { margin-top: 14px; color: #654c00; }
+.promo-facts { display: grid; gap: 12px; margin: 0; }
+.promo-facts div { display: grid; grid-template-columns: 110px 1fr; gap: 14px; padding: 12px 0; border-bottom: 1px solid #eee; }
+.promo-facts dt { color: #666; }.promo-facts dd { margin: 0; overflow-wrap: anywhere; }
+.promo-coupon-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 12px; max-width: 600px; margin-top: 24px; }
+.promo-timeline { border-left: 2px solid #ffd12d; padding-left: 22px; list-style: none; }
+.promo-timeline li { margin: 0 0 20px; }.promo-timeline span { display: block; color: #666; font-size: 12px; margin-top: 4px; }.promo-timeline p { margin: 5px 0; }
+@media (max-width: 800px) { .promo-fields { grid-template-columns: 1fr; }.promo-detail { padding: 20px; }.promo-coupon-actions { grid-template-columns: 1fr; } }

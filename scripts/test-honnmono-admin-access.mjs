@@ -47,7 +47,7 @@ async function request(path, method = 'GET', token = 'fixture-jwt') {
   calls.length = 0; upstream.length = 0;
   return handler(new Request(`https://edge.fixture.invalid/honnmono-admin${path}`, {
     method, headers: token ? { Authorization: `Bearer ${token}` } : {},
-    ...(method === 'POST' ? { body: JSON.stringify({ imei: '000000000000001', expected_userid: 42 }) } : {}),
+    ...(['POST', 'PATCH'].includes(method) ? { body: JSON.stringify({ imei: '000000000000001', expected_userid: 42 }) } : {}),
   }));
 }
 const adminRoutes = [
@@ -57,6 +57,14 @@ const adminRoutes = [
   ['/ota/legacy-packages/150001', 'POST'], ['/sim/lookup', 'GET'], ['/sim/cards', 'GET'],
   ['/sim/cards', 'POST'], ['/sim/cards/import', 'POST'], ['/sim/refresh', 'POST'],
 ];
+await check('browser PATCH preflight is allowed without forwarding', async () => {
+  const response = await handler(new Request('https://edge.fixture.invalid/honnmono-admin/promo/offers/42', {
+    method: 'OPTIONS', headers: { Origin: 'https://staff.fixture.invalid', 'Access-Control-Request-Method': 'PATCH' },
+  }));
+  assert.equal(response.status, 200);
+  assert(response.headers.get('Access-Control-Allow-Methods').split(/,\s*/).includes('PATCH'));
+  assert.equal(upstream.length, 0);
+});
 await check('whitelisted employee binding GET and unbind POST preserve operator audit and body', async () => {
   for (const [path, method] of [['/device/binding?imei=000000000000001', 'GET'], ['/device/unbind', 'POST'], ['/support/conversations', 'GET'], ['/support/conversations/1/messages', 'POST']]) {
     assert.equal((await request(path, method)).status, 200);
@@ -90,6 +98,32 @@ await check('northbound denies non-main employees, anonymous callers and encoded
   assert.equal((await request('/northbound/cases', 'GET', '')).status, 401);
   assert.equal(upstream.length, 0);
   assert.equal((await request('/northbound/..%2Fsupport/cases')).status, 404);
+  assert.equal(upstream.length, 0);
+});
+await check('promo employee GET, POST and PATCH preserve path, body and operator', async () => {
+  rows = [employee];
+  for (const [path, method, expected] of [
+    ['/promo/offers?status=published', 'GET', '/internal/admin/promo/offers'],
+    ['/promo/offers', 'POST', '/internal/admin/promo/offers'],
+    ['/promo/offers/42', 'PATCH', '/internal/admin/promo/offers/42'],
+    ['/promo/coupons/9/use', 'POST', '/internal/admin/promo/coupons/9/use'],
+  ]) {
+    assert.equal((await request(path, method)).status, 200);
+    assert.equal(upstream.length, 1);
+    assert.equal(upstream[0].url.pathname, expected);
+    assert.equal(upstream[0].options.headers['X-Operator-Email'], 'claude_test@honnmono.local');
+    if (method !== 'GET') assert.deepEqual(JSON.parse(typeof upstream[0].options.body === 'string' ? upstream[0].options.body : new TextDecoder().decode(upstream[0].options.body)),
+      { imei: '000000000000001', expected_userid: 42 });
+  }
+});
+await check('promo denies missing main access, anonymous callers and encoded traversal', async () => {
+  rows = [{ ...employee, bizflow_main_access: false }];
+  assert.equal((await request('/promo/offers')).status, 403);
+  assert.equal(upstream.length, 0);
+  rows = [employee];
+  assert.equal((await request('/promo/offers', 'GET', '')).status, 401);
+  assert.equal(upstream.length, 0);
+  assert.equal((await request('/promo/..%2Fsupport/cases')).status, 404);
   assert.equal(upstream.length, 0);
 });
 await check('employee cannot reach admin-only route/method pairs', async () => {
