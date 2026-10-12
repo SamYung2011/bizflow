@@ -125,6 +125,26 @@ await check('promo employee GET, POST and PATCH preserve path, body and operator
       { imei: '000000000000001', expected_userid: 42 });
   }
 });
+await check('knowledge POST/PATCH preserve JSON body, query and both staff headers', async () => {
+  rows = [employee];
+  for (const [path, method, body] of [
+    ['/knowledge/topics?preview=1', 'POST', { slug: 'local', title: { 'zh-Hant': '本機' } }],
+    ['/knowledge/articles/42?preview=1', 'PATCH', { body: { 'zh-Hant': 'x'.repeat(60000) }, enabled: true }],
+  ]) {
+    upstream.length = 0;
+    const response = await handler(new Request(`https://edge.fixture.invalid/honnmono-admin${path}`, {
+      method, headers: { Authorization: 'Bearer fixture-jwt', 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }));
+    assert.equal(response.status, 200); assert.equal(upstream.length, 1);
+    const call = upstream[0];
+    assert.equal(call.url.pathname, '/internal/admin' + path.split('?')[0]);
+    assert.equal(call.url.searchParams.get('preview'), '1'); assert.equal(call.options.method, method);
+    assert.equal(call.options.headers['X-Operator-Email'], 'claude_test@honnmono.local');
+    assert.equal(call.options.headers['X-Internal-Token'], env.HONNMONO_ADMIN_INTERNAL_TOKEN);
+    assert.deepEqual(JSON.parse(new TextDecoder().decode(call.options.body)), body);
+  }
+  console.log('KNOWLEDGE_BRIDGE_WRITES=2/2');
+});
 await check('promo denies missing main access, anonymous callers and encoded traversal', async () => {
   rows = [{ ...employee, bizflow_main_access: false }];
   assert.equal((await request('/promo/offers')).status, 403);

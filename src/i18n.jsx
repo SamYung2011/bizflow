@@ -4148,13 +4148,8 @@ Object.assign(DICT_FR, {
 
 const I18nContext = createContext({ lang: "zh", setLang: () => {}, t: (s) => s });
 
-// Part 11 adds missing keys only; existing pages retain their translations.
-function addKnowledgeTranslations(dictionary, entries) {
-  for (const [key, value] of Object.entries(entries)) {
-    if (!Object.prototype.hasOwnProperty.call(dictionary, key)) dictionary[key] = value;
-  }
-}
-addKnowledgeTranslations(DICT_EN, {
+// Part 11 knowledge workspace — new copy only.
+Object.assign(DICT_EN, {
   "APP 知識庫": "APP Knowledge",
   "編輯 App 助手的知識庫內容": "Edit knowledge content for the App assistant",
   "載入知識庫…": "Loading knowledge…",
@@ -4168,7 +4163,6 @@ addKnowledgeTranslations(DICT_EN, {
   "已啟用文章 {enabled}／{total}": "Enabled articles {enabled}/{total}",
   "已啟用": "Enabled",
   "已停用": "Disabled",
-  "啟用主題": "Enable topic",
   "停用": "Disable",
   "停用後此主題下的文章一併隱藏": "Disabling this topic also hides all its articles",
   "新增文章": "New article",
@@ -4182,7 +4176,6 @@ addKnowledgeTranslations(DICT_EN, {
   "已上架": "Published",
   "列表標題": "List title",
   "列表標題（留空 = 同標題）": "List title (blank = same as title)",
-  "標題": "Title",
   "副標": "Subtitle",
   "主題說明": "Topic description",
   "文章摘要": "Article summary",
@@ -4212,25 +4205,15 @@ addKnowledgeTranslations(DICT_EN, {
   "請填妥繁體正文": "Enter the Traditional Chinese content",
   "此 slug 已被使用": "This slug is already in use",
   "更新人": "Updated by",
-  "更新時間": "Updated at",
-  "排序": "Sort order",
-  "類型": "Type",
-  "狀態": "Status",
-  "草稿": "Draft",
-  "全部": "All",
-  "狀態篩選": "Filter by status",
-  "儲存": "Save",
-  "上架": "Publish",
-  "下架": "Unpublish",
-  "已儲存": "Saved",
-  "上一頁": "Previous",
-  "下一頁": "Next",
-  "搜尋": "Search",
-  "重試": "Retry",
-  "載入失敗，請重試": "Loading failed. Please retry"
+  "slug": "Slug",
+  "導語（選填）": "Introduction (optional)",
+  "留空時 App 自動由繁體轉成簡體": "When blank, the App converts Traditional Chinese to Simplified Chinese",
+  "收起主題編輯": "Collapse topic editor",
+  "App 直接使用，不可改": "Used directly by the App; cannot be changed",
+  "此項目由 App 直接使用，不能改 slug 或停用": "This item is used directly by the App. Its slug and enabled state are protected."
 });
 
-addKnowledgeTranslations(DICT_FR, {
+Object.assign(DICT_FR, {
   "APP 知識庫": "Base de connaissances APP",
   "編輯 App 助手的知識庫內容": "Modifier les connaissances de l’assistant App",
   "載入知識庫…": "Chargement des connaissances…",
@@ -4244,7 +4227,6 @@ addKnowledgeTranslations(DICT_FR, {
   "已啟用文章 {enabled}／{total}": "Articles activés {enabled}/{total}",
   "已啟用": "Activé",
   "已停用": "Désactivé",
-  "啟用主題": "Activer le thème",
   "停用": "Désactiver",
   "停用後此主題下的文章一併隱藏": "Désactiver ce thème masque également tous ses articles",
   "新增文章": "Nouvel article",
@@ -4258,7 +4240,6 @@ addKnowledgeTranslations(DICT_FR, {
   "已上架": "Publié",
   "列表標題": "Titre dans la liste",
   "列表標題（留空 = 同標題）": "Titre dans la liste (vide = titre identique)",
-  "標題": "Titre",
   "副標": "Sous-titre",
   "主題說明": "Description du thème",
   "文章摘要": "Résumé de l’article",
@@ -4288,22 +4269,12 @@ addKnowledgeTranslations(DICT_FR, {
   "請填妥繁體正文": "Saisissez le contenu en chinois traditionnel",
   "此 slug 已被使用": "Ce slug est déjà utilisé",
   "更新人": "Modifié par",
-  "更新時間": "Date de modification",
-  "排序": "Ordre de tri",
-  "類型": "Type",
-  "狀態": "État",
-  "草稿": "Brouillon",
-  "全部": "Tous",
-  "狀態篩選": "Filtrer par état",
-  "儲存": "Enregistrer",
-  "上架": "Publier",
-  "下架": "Dépublier",
-  "已儲存": "Enregistré",
-  "上一頁": "Précédent",
-  "下一頁": "Suivant",
-  "搜尋": "Rechercher",
-  "重試": "Réessayer",
-  "載入失敗，請重試": "Échec du chargement. Réessayez"
+  "slug": "Slug",
+  "導語（選填）": "Introduction (facultative)",
+  "留空時 App 自動由繁體轉成簡體": "Si vide, l’App convertit le chinois traditionnel en chinois simplifié",
+  "收起主題編輯": "Réduire l’éditeur du thème",
+  "App 直接使用，不可改": "Utilisé directement par l’App ; modification interdite",
+  "此項目由 App 直接使用，不能改 slug 或停用": "Cet élément est utilisé directement par l’App. Son slug et son activation sont protégés."
 });
 
 export function I18nProvider({ children }) {

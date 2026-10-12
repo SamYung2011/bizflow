@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 
 const bundle = await build({ entryPoints: ['src/lib/knowledgeApi.js'], bundle: true,
@@ -50,10 +50,28 @@ async function dictionaries(source) {
     bundle: true, platform: 'node', format: 'esm', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(output.outputFiles[0].text).toString('base64')}`);
 }
-const oldTranslations = await dictionaries(execFileSync('git', ['show', 'main:src/i18n.jsx'], { encoding: 'utf8' }));
+const oldTranslations = await dictionaries(execFileSync('git', ['show', '5096f3b:src/i18n.jsx'], { encoding: 'utf8' }));
 const currentTranslations = await dictionaries(await readFile('src/i18n.jsx', 'utf8'));
 for (const name of ['DICT_EN', 'DICT_FR']) {
   for (const [key, value] of Object.entries(oldTranslations[name])) assert.equal(currentTranslations[name][key], value, `${name}: ${key}`);
-  assert(currentTranslations[name]['啟用主題']); assert(currentTranslations[name]['主題說明']); assert(currentTranslations[name]['文章摘要']);
+  assert(currentTranslations[name]['啟用']); assert(currentTranslations[name]['主題說明']); assert(currentTranslations[name]['文章摘要']);
 }
 console.log('KNOWLEDGE_I18N_COMPAT=2/2');
+
+
+const knowledgeSources = ['src/views/honnmono/AppKnowledge.jsx',
+  ...(await readdir('src/views/honnmono/knowledge')).filter(name => /\.(jsx|js)$/.test(name))
+    .map(name => `src/views/honnmono/knowledge/${name}`)];
+const keys = new Set();
+for (const file of knowledgeSources) {
+  const source = await readFile(file, 'utf8');
+  for (const match of source.matchAll(/'([^'\n]*[\u3400-\u9fff][^'\n]*)'/g)) keys.add(match[1]);
+  assert(!/>[^<{]*[\u3400-\u9fff][^<{]*</.test(source), `${file}: literal Chinese JSX`);
+  assert(!/老板|老闆/.test(source));
+}
+for (const key of keys) {
+  assert(currentTranslations.DICT_EN[key], `EN missing: ${key}`);
+  assert(currentTranslations.DICT_FR[key], `FR missing: ${key}`);
+}
+assert.equal(currentTranslations.DICT_EN.slug, 'Slug'); assert.equal(currentTranslations.DICT_FR.slug, 'Slug');
+console.log(`KNOWLEDGE_COPY_KEYS=${keys.size}/${keys.size}; EN+FR complete`);

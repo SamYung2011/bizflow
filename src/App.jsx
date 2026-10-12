@@ -1056,8 +1056,8 @@ export default function App() {
       { id: "appSupport", label: t("APP 客服"), icon: "chat" },
       { id: "appNorthbound", label: t("APP 北上"), icon: "car" },
       { id: "appInsurance", label: t("APP 車保"), icon: "car" },
-      { id: "appKnowledge", label: t("APP 知識庫"), icon: "file" },
       { id: "appOffers", label: t("APP 優惠"), icon: "money" },
+      { id: "appKnowledge", label: t("APP 知識庫"), icon: "invoice" },
     ]}] : []),
     { type: "single", id: "gototeam", label: t("團隊管理"), icon: "external", external: "https://team.honnmono.top" },
   ];

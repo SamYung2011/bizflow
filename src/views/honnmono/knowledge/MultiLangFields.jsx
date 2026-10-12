@@ -1,24 +1,29 @@
 import React, { useState } from 'react';
 import { useT } from '../../../i18n.jsx';
+import { sourceFields } from './form.js';
+import StepsEditor from './StepsEditor.jsx';
 
-const sourceKeys = ['sourceName', 'sourceDesc', 'scope'];
-export default function MultiLangFields({ fields, value, onChange, children, onCopyLanguage }) {
+const sourceKeys = sourceFields.map(field => field.key);
+export default function MultiLangFields({ fields, value, onChange }) {
   const { t } = useT();
   const [language, setLanguage] = useState('zh-Hant');
   const copy = () => {
     const next = { ...value };
-    for (const field of fields) next[field.key] = { ...value[field.key], [language]: value[field.key]?.['zh-Hant'] || '' };
+    for (const field of fields) next[field.key] = { ...value[field.key],
+      [language]: structuredClone(value[field.key]?.['zh-Hant'] || (field.kind === 'steps' ? [] : '')) };
     onChange(next);
-    onCopyLanguage?.(language);
   };
+  const update = (key, next) => onChange({ ...value, [key]: { ...value[key], [language]: next } });
   const renderFields = (items, extraClass = '') => <div className={`promo-fields ${extraClass}`}>
-    {items.map(field => <label key={field.key} className={`promo-field ${field.multiline ? 'promo-span' : ''}`}>
+    {items.map(field => field.kind === 'steps' ? <div className="promo-span" key={field.key}>
+      <StepsEditor steps={value[field.key]?.[language] || []} required={language === 'zh-Hant' && !!field.required}
+        onChange={steps => update(field.key, steps)}/>
+    </div> : <label key={field.key} className={`promo-field ${field.multiline ? 'promo-span' : ''}`}>
       <span>{t(field.label)}{language === 'zh-Hant' && field.required ? ' *' : ''}</span>
-      {field.multiline ? <textarea rows={field.key === 'body' ? 10 : 3} maxLength={field.max}
-        value={value[field.key]?.[language] || ''} onChange={event => onChange({ ...value,
-          [field.key]: { ...value[field.key], [language]: event.target.value } })}/>
+      {field.multiline ? <textarea rows={field.rows || 3} maxLength={field.max}
+        value={value[field.key]?.[language] || ''} onChange={event => update(field.key, event.target.value)}/>
         : <input maxLength={field.max} value={value[field.key]?.[language] || ''}
-          onChange={event => onChange({ ...value, [field.key]: { ...value[field.key], [language]: event.target.value } })}/>}
+          onChange={event => update(field.key, event.target.value)}/>}
     </label>)}
   </div>;
   return <div className="knowledge-languages">
@@ -28,11 +33,10 @@ export default function MultiLangFields({ fields, value, onChange, children, onC
           onClick={() => setLanguage(key)}>{t(label)}</button>)}
     </div>
     {language !== 'zh-Hant' && <div className="knowledge-fallback">
-      <p>{t('留空時 App 自動顯示繁體（簡體會自動轉換）')}</p>
-      <button type="button" onClick={copy}>{t('複製繁體內容')}</button>
+      <p>{t(language === 'zh-Hans' ? '留空時 App 自動由繁體轉成簡體' : '留空時 App 自動顯示繁體（簡體會自動轉換）')}</p>
+      {language === 'en' && <button type="button" onClick={copy}>{t('複製繁體內容')}</button>}
     </div>}
     {renderFields(fields.filter(field => !sourceKeys.includes(field.key)))}
-    {children?.(language)}
     {renderFields(fields.filter(field => sourceKeys.includes(field.key)), 'knowledge-source-fields')}
   </div>;
 }

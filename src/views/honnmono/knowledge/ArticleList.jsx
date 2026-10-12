@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useT } from '../../../i18n.jsx';
+import { PAGE_SIZE } from './form.js';
 import { formatFeedbackTime } from '../../../lib/honnmonoAdmin.js';
 
 export default function ArticleList({ query, filters, onFilters, onSelect, onNew }) {
   const { t, lang } = useT();
   const [draft, setDraft] = useState(filters.q);
-  const data = query.data || { items: [], total: 0 }, pages = Math.max(1, Math.ceil(data.total / 30));
+  const data = query.data || { items: [], total: 0 }, pages = Math.max(1, Math.ceil(data.total / (data.size || PAGE_SIZE)));
   return <section className="knowledge-article-list">
     <header><h2>{t('主題文章')}</h2><button type="button" className="promo-new" onClick={onNew}>{t('新增文章')}</button></header>
     <div className="knowledge-list-tools">
