@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
 
 import { buildCustomerGroups } from "../root-site/data/customer-groups.js";
+import { executeRpc, prepareRpcBody, prepareRpcCall } from "./test-support/rpc-generic-plan.mjs";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const migrationPath = join(repoRoot, "migrations/102_bizflow_data_phase1.sql");
@@ -19,6 +20,11 @@ const customerPageMigrationPath = join(repoRoot, "migrations/108_bizflow_custome
 const waOriginalPolicyMigrationPath = join(repoRoot, "migrations/013_wa_admin_rls.sql");
 const waAdminMigrationPath = join(repoRoot, "migrations/109_wa_admin_rls_alignment.sql");
 const orderDateSortMigrationPath = join(repoRoot, "migrations/122_bizflow_order_page_sort_by_order_date.sql");
+const orderGenericPlanMigrationPath = join(repoRoot, "migrations/126_bizflow_order_page_visible_employees_20261012.sql");
+const materializedReadMigrations = [
+  "127_bizflow_customer_page_materialized_reads_20261012.sql",
+  "128_bizflow_home_dashboard_materialized_reads_20261012.sql"
+];
 
 function executable(name) {
   for (const candidate of [`/opt/homebrew/bin/${name}`, `/usr/local/bin/${name}`, name]) {
@@ -84,8 +90,12 @@ function asAuthenticatedEmail(email, statement) {
 }
 
 function timedAuthenticated(statement) {
+  const name = statement.match(/SELECT public\.(\w+)\(/)?.[1];
+  assert.ok(name, "performance measurements must be an RPC call");
+  const definition = sql(`SELECT pg_get_functiondef('public.${name}'::regproc);`);
+  const prepared = prepareRpcCall(statement, definition);
   const startedAt = performance.now();
-  const value = asAuthenticated(statement);
+  const value = asAuthenticated(`SET plan_cache_mode = force_generic_plan; ${prepared}`);
   return { value, elapsedMs: performance.now() - startedAt };
 }
 
@@ -108,16 +118,16 @@ function activeFunctionBody(signature) {
 }
 
 function explainOrderPage({ search = "NULL::text", offset = 0, limit = 50 } = {}) {
-  let body = activeFunctionBody("public.bizflow_order_page(text,text,text,date,date,text,integer,integer)");
-  const replacements = new Map([
-    ["p_search", search], ["p_source", "NULL::text"], ["p_shipping", "NULL::text"],
-    ["p_date_from", "NULL::date"], ["p_date_to", "NULL::date"], ["p_sort", "'newest'::text"],
-    ["p_offset", `${offset}::integer`], ["p_limit", `${limit}::integer`]
-  ]);
-  for (const [parameter, value] of replacements) {
-    body = body.replace(new RegExp(`\\b${parameter}\\b`, "g"), value);
-  }
-  return explainAuthenticated(body);
+  const definition = sql("SELECT pg_get_functiondef('public.bizflow_order_page(text,text,text,date,date,text,integer,integer)'::regprocedure);");
+  return JSON.parse(sql(`
+    SET ROLE authenticated;
+    SET request.jwt.claim.sub = '20000000-0000-0000-0000-000000000001';
+    SET statement_timeout = '8s';
+    SET plan_cache_mode = force_generic_plan;
+    ${prepareRpcBody(definition)}
+    EXPLAIN (ANALYZE, VERBOSE, BUFFERS, TIMING OFF, FORMAT JSON)
+    ${executeRpc("rpc_generic", [search, "NULL", "NULL", "NULL", "NULL", "'newest'", String(offset), String(limit)])}
+  `));
 }
 
 function planNodes(value, nodes = []) {
@@ -167,6 +177,9 @@ function customerId(index) {
 }
 
 function testOrderPageDateSort() {
+  // Recreate the pre-122 boundary explicitly; generic-plan gates earlier in
+  // this suite install 126, which already contains the date-sort correction.
+  run(psql, psqlArgs(["-f", repairMigrationPath]), { quiet: true });
   // Imported invoices: order dates and import timestamps deliberately disagree.
   sql(`
     INSERT INTO public.invoices(id,date,created_at,total,notes,items) VALUES
@@ -605,6 +618,8 @@ try {
   assert.deepEqual(postPatchHome, prePatchHome,
     "migration 105 must preserve Home output when no dirty product-name whitespace is present");
   assert.equal(asAuthenticated("SELECT current_user;"), "authenticated", "performance gates must execute as authenticated");
+  assert.equal(asAuthenticated("SELECT is_admin = false AND bizflow_main_access = true FROM public.employees WHERE user_id = auth.uid();"), "t",
+    "generic plan performance gates must use a non-admin employee with main access");
   assert.equal(sql("SELECT prosecdef FROM pg_proc WHERE oid='public.bizflow_order_revenue(text)'::regprocedure;"), "f",
     "the revenue permission gate must remain SECURITY INVOKER");
   assert.equal(sql("SELECT has_function_privilege('anon','public.bizflow_jsonb_array(jsonb)','EXECUTE');"), "f");
@@ -626,6 +641,7 @@ try {
   assert.equal(Number(home.value), 4496);
   assert.ok(home.elapsedMs < 1000, `authenticated Home RPC must stay below 1s, got ${home.elapsedMs.toFixed(1)}ms`);
 
+  run(psql, psqlArgs(["-f", orderGenericPlanMigrationPath]), { quiet: true });
   const orderPage = timedAuthenticated("SELECT public.bizflow_order_page(NULL,NULL,NULL,NULL,NULL,'newest',0,50)->>'total_count';");
   assert.equal(Number(orderPage.value), 6603);
   assert.ok(orderPage.elapsedMs < 300,
@@ -704,6 +720,7 @@ try {
   run(psql, psqlArgs(["-f", repairMigrationPath]), { quiet: true });
   run(psql, psqlArgs(["-f", patchMigrationPath]), { quiet: true });
   run(psql, psqlArgs(["-f", patchMigrationPath]), { quiet: true });
+  run(psql, psqlArgs(["-f", orderGenericPlanMigrationPath]), { quiet: true });
   sql("ANALYZE;");
   assertPageBoundedJsonExpansion(explainOrderPage(), 50);
 
@@ -827,6 +844,9 @@ try {
   run(psql, psqlArgs(["-f", homeSalesGateMigrationPath]), { quiet: true });
   run(psql, psqlArgs(["-f", customerPageMigrationPath]), { quiet: true });
   run(psql, psqlArgs(["-f", customerPageMigrationPath]), { quiet: true });
+  for (const file of materializedReadMigrations) {
+    run(psql, psqlArgs(["-f", join(repoRoot, "migrations", file)]), { quiet: true });
+  }
   sql(`
     INSERT INTO public.employees(id,user_id,name,email,is_admin,bizflow_main_access) VALUES
       ('90000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000003','WA admin by user id','stale-admin@example.test',true,true),
