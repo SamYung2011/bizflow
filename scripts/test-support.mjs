@@ -230,7 +230,7 @@ check('feedback label appears in list and header; case number stays visible for 
 
 // Render the real App.jsx embed branch through the employee query/hydration sequence.
 const appSource = await readFile('src/App.jsx', 'utf8');
-const embedStart = appSource.indexOf('  if (["appSupport", "appNorthbound", "appInsurance", "appOffers"].includes(tab) && new URLSearchParams');
+const embedStart = appSource.indexOf('  if (["appSupport", "appNorthbound", "appInsurance", "appOffers", "appKnowledge"].includes(tab) && new URLSearchParams');
 assert(embedStart !== -1);
 const embedBranch = appSource.slice(embedStart, appSource.indexOf('\n\n  return (', embedStart));
 const embedCode = await transform(`
@@ -242,11 +242,12 @@ const embedCode = await transform(`
 `, { loader: 'jsx' });
 const require = createRequire(import.meta.url), React = require('react');
 const { renderToStaticMarkup } = require('react-dom/server');
-const embed = new Function('React', 'Suspense', 'AppSupportView', 'AppNorthboundView', 'AppInsuranceView', 'AppOffersView', embedCode.code)(
+const embed = new Function('React', 'Suspense', 'AppSupportView', 'AppNorthboundView', 'AppInsuranceView', 'AppOffersView', 'AppKnowledgeView', embedCode.code)(
   React, React.Suspense, () => React.createElement('div', null, 'support-ready'),
   () => React.createElement('div', null, 'northbound-ready'),
   () => React.createElement('div', null, 'insurance-ready'),
-  () => React.createElement('div', null, 'offers-ready'));
+  () => React.createElement('div', null, 'offers-ready'),
+  () => React.createElement('div', null, 'knowledge-ready'));
 const renderEmbed = props => renderToStaticMarkup(embed(props));
 const employee = { user_id: 'staff-id', bizflow_main_access: true };
 check('embed shows the same loading fallback during employee fetch and effect hydration', () => {
@@ -266,6 +267,12 @@ check('embed mounts insurance with the same employee gate', () => {
 check('embed mounts offers with the same employee gate', () => {
   assert(renderEmbed({ tab: 'appOffers', qEmployees: { isSuccess: true, data: [employee] },
     currentEmployee: employee, isBizflowMainAllowed: true }).includes('offers-ready'));
+});
+check('embed mounts knowledge with the same employee gate', () => {
+  assert(renderEmbed({ tab: 'appKnowledge', qEmployees: { isSuccess: true, data: [employee] },
+    currentEmployee: employee, isBizflowMainAllowed: true }).includes('knowledge-ready'));
+  assert.equal(renderEmbed({ tab: 'appKnowledge', qEmployees: { isSuccess: true, data: [] } }),
+    '<div role="alert">未登入或沒有主站權限</div>');
 });
 check('embed denies access only after the employee lookup confirms no main access', () => {
   assert.equal(renderEmbed({ qEmployees: { isSuccess: true, data: [] } }), '<div role="alert">未登入或沒有主站權限</div>');

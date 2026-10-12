@@ -36,13 +36,18 @@ export function promoUpstreamPath(path, method) {
   return `/internal/admin${path}`;
 }
 
+export function knowledgeUpstreamPath(path, method) {
+  if (!['GET', 'POST', 'PATCH'].includes(method) || !safeSegments(path, '/knowledge/')) return '';
+  return `/internal/admin${path}`;
+}
+
 export function isSupportUpstream(path) {
   return path.startsWith('/internal/admin/support/') || /^\/internal\/cloud-storage\/upload\/[A-Za-z0-9_-]{1,64}$/.test(path);
 }
 
 export function isStaffUpstream(path) {
   return isSupportUpstream(path) || safeSegments(path, '/internal/admin/northbound/') ||
-    safeSegments(path, '/internal/admin/insurance/') || safeSegments(path, '/internal/admin/promo/');
+    safeSegments(path, '/internal/admin/insurance/') || safeSegments(path, '/internal/admin/promo/') || safeSegments(path, '/internal/admin/knowledge/');
 }
 
 async function readLimited(stream, limit) {

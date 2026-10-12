@@ -65,6 +65,15 @@ await check('browser PATCH preflight is allowed without forwarding', async () =>
   assert(response.headers.get('Access-Control-Allow-Methods').split(/,\s*/).includes('PATCH'));
   assert.equal(upstream.length, 0);
 });
+
+await check('knowledge PATCH preflight is allowed without forwarding', async () => {
+  const response = await handler(new Request('https://edge.fixture.invalid/honnmono-admin/knowledge/articles/42', {
+    method: 'OPTIONS', headers: { Origin: 'https://staff.fixture.invalid', 'Access-Control-Request-Method': 'PATCH' },
+  }));
+  assert.equal(response.status, 200);
+  assert(response.headers.get('Access-Control-Allow-Methods').split(/,\s*/).includes('PATCH'));
+  assert.equal(upstream.length, 0);
+});
 await check('whitelisted employee binding GET and unbind POST preserve operator audit and body', async () => {
   for (const [path, method] of [['/device/binding?imei=000000000000001', 'GET'], ['/device/unbind', 'POST'], ['/support/conversations', 'GET'], ['/support/conversations/1/messages', 'POST']]) {
     assert.equal((await request(path, method)).status, 200);
@@ -115,6 +124,26 @@ await check('promo employee GET, POST and PATCH preserve path, body and operator
     if (method !== 'GET') assert.deepEqual(JSON.parse(typeof upstream[0].options.body === 'string' ? upstream[0].options.body : new TextDecoder().decode(upstream[0].options.body)),
       { imei: '000000000000001', expected_userid: 42 });
   }
+});
+await check('knowledge POST/PATCH preserve JSON body, query and both staff headers', async () => {
+  rows = [employee];
+  for (const [path, method, body] of [
+    ['/knowledge/topics?preview=1', 'POST', { slug: 'local', title: { 'zh-Hant': '本機' } }],
+    ['/knowledge/articles/42?preview=1', 'PATCH', { body: { 'zh-Hant': 'x'.repeat(60000) }, enabled: true }],
+  ]) {
+    upstream.length = 0;
+    const response = await handler(new Request(`https://edge.fixture.invalid/honnmono-admin${path}`, {
+      method, headers: { Authorization: 'Bearer fixture-jwt', 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }));
+    assert.equal(response.status, 200); assert.equal(upstream.length, 1);
+    const call = upstream[0];
+    assert.equal(call.url.pathname, '/internal/admin' + path.split('?')[0]);
+    assert.equal(call.url.searchParams.get('preview'), '1'); assert.equal(call.options.method, method);
+    assert.equal(call.options.headers['X-Operator-Email'], 'claude_test@honnmono.local');
+    assert.equal(call.options.headers['X-Internal-Token'], env.HONNMONO_ADMIN_INTERNAL_TOKEN);
+    assert.deepEqual(JSON.parse(new TextDecoder().decode(call.options.body)), body);
+  }
+  console.log('KNOWLEDGE_BRIDGE_WRITES=2/2');
 });
 await check('promo denies missing main access, anonymous callers and encoded traversal', async () => {
   rows = [{ ...employee, bizflow_main_access: false }];
