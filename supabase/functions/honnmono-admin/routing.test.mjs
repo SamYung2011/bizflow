@@ -473,3 +473,19 @@ test("support maps JSON, file and upload routes and admits main-site employees",
   assert.equal(isAllowedHonnmonoUpstream(new URL("https://app-api.honnmono.top/internal/cloud-storage/file/cf-one/name")), false);
   assert.equal(isAllowedHonnmonoUpstream(new URL("https://evil.test/internal/admin/support/conversations")), false);
 });
+
+
+test("knowledge SK1-SK8 mapping, staff access, unsupported methods and traversal", () => {
+  for (const [path, method] of [["/knowledge/topics", "GET"], ["/knowledge/topics", "POST"],
+    ["/knowledge/topics/1", "GET"], ["/knowledge/topics/1", "PATCH"],
+    ["/knowledge/articles", "GET"], ["/knowledge/articles", "POST"],
+    ["/knowledge/articles/2", "GET"], ["/knowledge/articles/2", "PATCH"]]) {
+    assert.equal(mapHonnmonoAdminPath(path, method), `/internal/admin${path}`);
+    assert.equal(isMainAccessRoute(path, method), true);
+    assert.equal(isAllowedHonnmonoUpstream(new URL(`https://app-api.honnmono.top/internal/admin${path}`)), true);
+  }
+  for (const path of ["/knowledge/topics/1", "/knowledge/articles/2"])
+    assert.equal(mapHonnmonoAdminPath(path, "DELETE"), "");
+  for (const path of ["/knowledge/..%2Fsupport/cases", "/knowledge/%2e%2e/topics", "/knowledge/%5c/topics", "/knowledge/%broken"])
+    assert.equal(mapHonnmonoAdminPath(path, "GET"), "");
+});

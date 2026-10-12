@@ -93,7 +93,7 @@ try {
       try {
         assert.equal(f.controller.captureState().activeTab, 'support');
         assert.match(f.html(), /data-support-frame/);
-        assert.deepEqual([...f.html().matchAll(/data-app-feedback-tab="([^"]+)"/g)].map(m => m[1]), ['support', 'northbound', 'insurance', 'device', 'devices']);
+        assert.deepEqual([...f.html().matchAll(/data-app-feedback-tab="([^"]+)"/g)].map(m => m[1]), ['support', 'northbound', 'insurance', 'offers', 'knowledge', 'device', 'devices']);
         assert.doesNotMatch(f.html(), /data-ota-|data-sim-|data-adapter-/);
         for (const tab of ['feedback', 'sim']) await f.tab(tab);
         assert.equal(f.controller.captureState().activeTab, 'support');
@@ -188,7 +188,7 @@ try {
   await check('admin retains all tabs, initial feedback and polling, device OTA, list and SIM loads', async () => {
     const f = await mount(true);
     try {
-      assert.deepEqual([...f.html().matchAll(/data-app-feedback-tab="([^"]+)"/g)].map(m => m[1]), ['feedback', 'support', 'northbound', 'insurance', 'device', 'devices', 'sim']);
+      assert.deepEqual([...f.html().matchAll(/data-app-feedback-tab="([^"]+)"/g)].map(m => m[1]), ['feedback', 'support', 'northbound', 'insurance', 'offers', 'knowledge', 'device', 'devices', 'sim']);
       assert.ok(f.calls.some(x => x.path.startsWith('/feedback?')));
       assert.ok(f.timers.some(x => x.ms === 30_000));
       await f.tab('support'); assert.match(f.html(), /view=appSupport&embed=1/);

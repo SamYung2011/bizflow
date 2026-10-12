@@ -65,6 +65,15 @@ await check('browser PATCH preflight is allowed without forwarding', async () =>
   assert(response.headers.get('Access-Control-Allow-Methods').split(/,\s*/).includes('PATCH'));
   assert.equal(upstream.length, 0);
 });
+
+await check('knowledge PATCH preflight is allowed without forwarding', async () => {
+  const response = await handler(new Request('https://edge.fixture.invalid/honnmono-admin/knowledge/articles/42', {
+    method: 'OPTIONS', headers: { Origin: 'https://staff.fixture.invalid', 'Access-Control-Request-Method': 'PATCH' },
+  }));
+  assert.equal(response.status, 200);
+  assert(response.headers.get('Access-Control-Allow-Methods').split(/,\s*/).includes('PATCH'));
+  assert.equal(upstream.length, 0);
+});
 await check('whitelisted employee binding GET and unbind POST preserve operator audit and body', async () => {
   for (const [path, method] of [['/device/binding?imei=000000000000001', 'GET'], ['/device/unbind', 'POST'], ['/support/conversations', 'GET'], ['/support/conversations/1/messages', 'POST']]) {
     assert.equal((await request(path, method)).status, 200);
