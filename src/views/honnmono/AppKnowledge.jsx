@@ -36,6 +36,7 @@ function Workspace({ session }) {
     await cache.invalidateQueries({ queryKey: key }); };
   const loadError = query => <div role="alert" className="nb-error">{t('載入失敗，請重試')}
     <button type="button" onClick={() => query.refetch()}>{t('重試')}</button></div>;
+  const notice = message && <p role="status" className="knowledge-notice">{message}</p>;
   return <div className="nb-workspace knowledge-workspace">
     <aside className="nb-sidebar">
       <header><span className="nb-eyebrow">Honnmono APP</span><h1>{t('APP 知識庫')}</h1><p>{t('編輯 App 助手的知識庫內容')}</p></header>
@@ -51,14 +52,13 @@ function Workspace({ session }) {
       </div>
     </aside>
     <main className="nb-main">
-      {message && <p role="status" className="knowledge-notice">{message}</p>}
       {newArticle || articleId != null ? articleId != null && article.isPending ? <p className="nb-loading">{t('載入知識庫…')}</p> :
         articleId != null && article.isError ? loadError(article) : <ArticleEditor key={articleId || 'new'} record={articleId ? article.data : undefined}
-          topics={rows} topicId={topicId} options={options} onSaved={savedArticle} onStatus={setMessage} onBack={() => { setArticleId(null); setNewArticle(false); setMessage(''); }}/>
-        : newTopic ? <TopicEditor key="new" options={options} onSaved={savedTopic} onStatus={setMessage}/> : topicId == null ? <div className="nb-welcome">
+          topics={rows} topicId={topicId} options={options} onSaved={savedArticle} onStatus={setMessage} notice={notice} onBack={() => { setArticleId(null); setNewArticle(false); setMessage(''); }}/>
+        : newTopic ? <TopicEditor key="new" options={options} onSaved={savedTopic} onStatus={setMessage} notice={notice}/> : topicId == null ? <div className="nb-welcome">
           <h2>{t('選擇主題')}</h2><p>{t('從左側選擇主題或新增主題。')}</p></div> : topic.isPending ? <p className="nb-loading">{t('載入知識庫…')}</p> :
           topic.isError ? loadError(topic) : <>
-            <TopicEditor key={`topic-${topicId}`} record={topic.data} options={options} onSaved={savedTopic} onStatus={setMessage}/>
+            <TopicEditor key={`topic-${topicId}`} record={topic.data} options={options} onSaved={savedTopic} onStatus={setMessage} notice={notice}/>
             <ArticleList key={`articles-${topicId}`} query={articles} filters={filters} onFilters={setFilters} onSelect={setArticleId}
               onNew={() => { setNewArticle(true); setArticleId(null); setMessage(''); }}/>
           </>}

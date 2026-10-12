@@ -4,7 +4,7 @@ import { createTopic, updateTopic } from '../../../lib/knowledgeApi.js';
 import MultiLangFields from './MultiLangFields.jsx';
 import { fromRecord, payload, saveError, topicFields, validate, isLocked } from './form.js';
 
-export default function TopicEditor({ record, options, onSaved, onStatus }) {
+export default function TopicEditor({ record, options, onSaved, onStatus, notice }) {
   const { t } = useT();
   const [form, setForm] = useState(() => fromRecord(record));
   const [busy, setBusy] = useState(false);
@@ -36,10 +36,11 @@ export default function TopicEditor({ record, options, onSaved, onStatus }) {
     <MultiLangFields fields={topicFields} value={form} onChange={setForm}/>
     <div className="promo-actions">
       <button type="button" disabled={busy} onClick={() => act()}>{t('儲存')}</button>
-      <button type="button" disabled={busy || form.enabled} onClick={() => act(true)}>{t('啟用')}</button>
-      {!locked && <button type="button" disabled={busy || !form.enabled} onClick={() => act(false)}>{t('停用')}</button>}
+      <button type="button" disabled={busy || form.enabled} onClick={() => act(true)}>{t('啟用主題')}</button>
+      {!locked && <button type="button" disabled={busy || !form.enabled} onClick={() => act(false)}>{t('停用主題')}</button>}
     </div>
-    {!locked && <p className="nb-muted">{t('停用後此主題下的文章一併隱藏')}</p>}
     </>}
+    {notice}
+    {expanded && !locked && <p className="nb-muted">{t('停用後此主題下的文章一併隱藏')}</p>}
   </section>;
 }

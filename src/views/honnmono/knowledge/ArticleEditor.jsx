@@ -4,7 +4,7 @@ import { createArticle, updateArticle } from '../../../lib/knowledgeApi.js';
 import MultiLangFields from './MultiLangFields.jsx';
 import { articleFields, fromRecord, payload, saveError, validate, isLocked } from './form.js';
 
-export default function ArticleEditor({ record, topicId, topics, options, onSaved, onBack, onStatus }) {
+export default function ArticleEditor({ record, topicId, topics, options, onSaved, onBack, onStatus, notice }) {
   const { t } = useT();
   const [form, setForm] = useState(() => ({ ...fromRecord(record), topicId: record?.topicId || topicId, kind: record?.kind || 'article' }));
   const [busy, setBusy] = useState(false);
@@ -28,7 +28,7 @@ export default function ArticleEditor({ record, topicId, topics, options, onSave
     <button type="button" className="knowledge-back" onClick={onBack}>{t('返回文章列表')}</button>
     <header><h2>{t(record?.id ? '編輯文章' : '新增文章')}</h2><span className="promo-pill">{t(form.enabled ? '已上架' : '草稿')}</span></header>
     <div className="promo-fields">
-      <label className="promo-field"><span>{t('所屬主題')}</span><select value={form.topicId}
+      <label className="promo-field"><span>{t('所屬主題')}</span><select value={form.topicId} disabled={locked}
         onChange={event => setForm({ ...form, topicId: event.target.value })}>
         {topics.map(topic => <option key={topic.id} value={topic.id}>{topic.title['zh-Hant']}</option>)}
       </select></label>
@@ -46,5 +46,6 @@ export default function ArticleEditor({ record, topicId, topics, options, onSave
       <button type="button" disabled={busy || form.enabled} onClick={() => act(true)}>{t('上架')}</button>
       {!locked && <button type="button" disabled={busy || !form.enabled} onClick={() => act(false)}>{t('下架')}</button>}
     </div>
+    {notice}
   </section>;
 }

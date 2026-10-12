@@ -48,7 +48,8 @@ window.fetch = async (input, options = {}) => {
   } else {
     const locked = group.find(row => row.id === Number(id));
     if (locked && ['insurance', 'northbound', 'hk-accident-guide'].includes(locked.slug) &&
-        ((Object.hasOwn(body, 'slug') && body.slug !== locked.slug) || body.enabled === false))
+        ((Object.hasOwn(body, 'slug') && body.slug !== locked.slug) || body.enabled === false ||
+         (kind === 'articles' && Object.hasOwn(body, 'topicId') && body.topicId !== locked.topicId)))
       return Response.json({ code: 422, des: 'slug_locked' }, { status: 422 });
     if (body.slug && group.some(row => row.slug === body.slug && row.id !== Number(id)))
       return Response.json({ code: 409, des: 'slug_taken', result: {} }, { status: 409 });

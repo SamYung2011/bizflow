@@ -23,7 +23,7 @@
 .knowledge-article-list th { color: #666; background: #fafafa; font-weight: 500; }
 .knowledge-article-list td, .knowledge-article-list th { padding: 14px 10px; border-bottom: 1px solid #eee; }
 .knowledge-article-link { border: 0; padding: 0; background: transparent; color: #665000; text-align: left; cursor: pointer; font-weight: 600; }
-.knowledge-notice { margin: 16px 34px; color: #654c00; }
+.knowledge-notice { margin: 16px 0; color: #654c00; }
 @media (max-width: 900px) { .knowledge-list-tools, .knowledge-fallback { flex-direction: column; align-items: stretch; }.knowledge-article-list { padding: 20px; } }
 
 @media (max-width: 700px) { .knowledge-workspace { grid-template-columns: 1fr; height: auto; max-height: none; overflow: visible; }.knowledge-workspace .nb-sidebar { max-height: 300px; border-right: 0; border-bottom: 1px solid #ddd; }.knowledge-workspace .nb-main { overflow: visible; } }

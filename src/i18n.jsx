@@ -4151,6 +4151,7 @@ const I18nContext = createContext({ lang: "zh", setLang: () => {}, t: (s) => s }
 // Part 11 knowledge workspace — new copy only.
 Object.assign(DICT_EN, {
   "APP 知識庫": "APP Knowledge",
+  "啟用主題": "Enable topic", "停用主題": "Disable topic",
   "編輯 App 助手的知識庫內容": "Edit knowledge content for the App assistant",
   "載入知識庫…": "Loading knowledge…",
   "新增主題": "New topic",
@@ -4215,6 +4216,7 @@ Object.assign(DICT_EN, {
 
 Object.assign(DICT_FR, {
   "APP 知識庫": "Base de connaissances APP",
+  "啟用主題": "Activer le thème", "停用主題": "Désactiver le thème",
   "編輯 App 助手的知識庫內容": "Modifier les connaissances de l’assistant App",
   "載入知識庫…": "Chargement des connaissances…",
   "新增主題": "Nouveau thème",
