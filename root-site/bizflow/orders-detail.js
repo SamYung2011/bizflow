@@ -573,6 +573,7 @@ function printableOrder() {
       quantity: item.quantity,
       price: item.price
     })),
+    fees: { shipping: state.fees.shipping, ...Object.fromEntries(["deposit", "discount", "service"].map(key => [key, state.feesEnabled[key] ? state.fees[key] : 0])) },
     paymentTotal: currentTotals().paymentTotal
   });
 }

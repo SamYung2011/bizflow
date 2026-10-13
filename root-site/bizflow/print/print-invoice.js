@@ -29,9 +29,36 @@ function itemRows(items) {
     .join("");
 }
 
+const PRINT_FEES = Object.freeze([
+  { key: "shipping", label: "Shipping", names: ["運費", "郵費", "shipping", "freight"] },
+  { key: "deposit", label: "Deposit", names: ["押金", "deposit"] },
+  { key: "service", label: "Service fee", names: ["手續費", "service fee", "service"] },
+  { key: "discount", label: "Discount", names: ["優惠", "折扣", "discount"] }
+]);
+
+function feeType(item) {
+  const name = String(item?.name ?? "").trim().toLowerCase();
+  return PRINT_FEES.find(fee => fee.names.includes(name));
+}
+
+function feeRows(fees) {
+  return PRINT_FEES.map(fee => {
+    let value = Number(fees?.[fee.key]) || 0;
+    if (fee.key === "discount") value = -Math.abs(value);
+    return value ? `<div class="table-row" data-print-fee="${fee.key}"><div>${fee.label}</div><div>1</div><div class="col-price">${escapeHtml(moneyValue(value))}</div></div>` : "";
+  }).join("");
+}
+
 export function toPrintableOrder(source, overrides = {}) {
   const row = source?.order ?? source ?? {};
   const detail = source?.detail ?? row.detail ?? {};
+  const suppliedItems = detail.items ?? row.items;
+  const sourceItems = Array.isArray(suppliedItems) ? suppliedItems : [];
+  const rawFees = {};
+  for (const item of sourceItems) {
+    const fee = feeType(item);
+    if (fee) rawFees[fee.key] = (rawFees[fee.key] || 0) + Number(item.price || 0) * Number(item.quantity ?? item.qty ?? 1);
+  }
   const customer = typeof row.customer === "object" ? row.customer?.name : row.customer;
   return {
     orderNo: detail.orderNo ?? row.orderNo ?? row.no ?? "",
@@ -41,7 +68,8 @@ export function toPrintableOrder(source, overrides = {}) {
     email: detail.email ?? row.email ?? "",
     shippingAddress: detail.shippingAddress ?? row.shippingAddress ?? row.address ?? "",
     carModel: detail.carModel ?? row.carModel ?? "",
-    items: detail.items ?? row.items ?? [],
+    items: sourceItems.filter(item => !feeType(item)),
+    fees: detail.fees ?? row.fees ?? rawFees,
     paymentTotal: detail.paymentTotal ?? row.paymentTotal ?? "",
     ...overrides
   };
@@ -66,6 +94,7 @@ export function buildInvoiceDocument(order, mode = { invoice: true, receipt: tru
   // 快照只有合并车型字段，按单据约定整串放 make 行，model 行诚实留空。
   const carMake = escapeHtml(order?.carModel ?? "");
   const rows = itemRows(order?.items);
+  const fees = feeRows(order?.fees);
   const total = escapeHtml(moneyValue(order?.paymentTotal));
 
   const invoicePage = mode.invoice
@@ -79,7 +108,8 @@ export function buildInvoiceDocument(order, mode = { invoice: true, receipt: tru
         "{{car_make}}": carMake,
         "{{car_model}}": "",
         "{{Total_Sum}}": total,
-        "{{invoice_rows}}": rows
+        "{{invoice_rows}}": rows,
+        "{{invoice_fee_rows}}": fees
       })
     : "";
 
@@ -99,7 +129,8 @@ export function buildInvoiceDocument(order, mode = { invoice: true, receipt: tru
           "{{r_car_make}}": carMake,
           "{{r_car_model}}": "",
           "{{r_Total_Sum}}": total,
-          "{{r_rows}}": rows
+          "{{r_rows}}": rows,
+          "{{r_fee_rows}}": fees
         }
       )
     : "";

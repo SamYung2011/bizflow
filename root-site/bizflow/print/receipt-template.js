@@ -53,6 +53,7 @@ export const RECEIPT_FRAGMENT =
 '    </div>\n' +
 '    <div class="table-body">\n' +
 '      {{r_rows}}\n' +
+'      {{r_fee_rows}}\n' +
 '    </div>\n' +
 '  </div>\n' +
 '  <div class="amount-block">\n' +
