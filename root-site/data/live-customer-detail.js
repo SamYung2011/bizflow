@@ -33,10 +33,10 @@ export async function getLiveCustomerDetail(id, { refresh = false } = {}) {
   const cached = readLiveQueryCache({ userId: account, namespace: NAMESPACE, query });
   if (cached && !cached.stale && !refresh) return cached.value;
   const key = `${account}:${version}:${query.id}`;
-  if (requests.has(key)) return requests.get(key);
+  if (requests.has(key) && !refresh) return requests.get(key);
   const request = (async () => {
     const result = await client.rpc("bizflow_customer_detail", { p_customer_id: query.id });
-    if (version !== generation || userId !== account) throw new DOMException("Customer detail superseded", "AbortError");
+    if (version !== generation || userId !== account || requests.get(key) !== request) throw new DOMException("Customer detail superseded", "AbortError");
     if (result.error) throw result.error;
     if (!result.data) return null;
     if (!result.data.customer?.id || !Array.isArray(result.data.customer.detail?.orders)

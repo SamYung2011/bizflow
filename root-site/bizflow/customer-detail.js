@@ -3,6 +3,7 @@
 
 import { getCurrentUser, getCustomerDetailData, getCustomerMergeCandidates, getOrdersPageData } from "../data/provider.js";
 import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
+import { showNotice } from "../components/notice.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
 import { renderEmailSuggestion, safeSetSelectionRange, suggestEmail } from "../components/email-suggest.js";
 import { renderManagementPager } from "../components/management-list.js";
@@ -20,6 +21,9 @@ import { toPrintableOrder } from "./print/print-invoice.js";
 const dict = {
   zh: {
     "customer.root": "客戶",
+    "customer.imei": "IMEI",
+    "customer.existingImei": "已有 IMEI",
+    "customer.saveNotice": "已儲存",
     "customer.moreActions": "更多動作",
     "customer.merge": "合併顧客",
     "customer.delete": "刪除顧客",
@@ -83,6 +87,9 @@ const dict = {
   },
   en: {
     "customer.root": "Customers",
+    "customer.imei": "IMEI",
+    "customer.existingImei": "Existing IMEIs",
+    "customer.saveNotice": "Saved",
     "customer.moreActions": "More actions",
     "customer.merge": "Merge customer",
     "customer.delete": "Delete customer",
@@ -146,6 +153,9 @@ const dict = {
   },
   fr: {
     "customer.root": "Clients",
+    "customer.imei": "IMEI",
+    "customer.existingImei": "IMEI existants",
+    "customer.saveNotice": "Enregistré",
     "customer.moreActions": "Plus d'actions",
     "customer.merge": "Fusionner client",
     "customer.delete": "Supprimer client",
@@ -324,6 +334,11 @@ function renderStatCard(helpers) {
   </section>`;
 }
 
+function customerImeis() {
+  return [...new Set([...(detailData?.devices ?? []).map(device => device.imei),
+    ...(detailData?.customer.imeiCodes ?? []), detailData?.customer.imei].filter(Boolean).map(String))];
+}
+
 function renderCustomerCard(helpers) {
   const { escapeHtml, lang } = helpers;
   const { customer, detail } = detailData;
@@ -345,6 +360,10 @@ function renderCustomerCard(helpers) {
       <div class="orders-customer-line customer-detail-customer-line">
         <span>${escapeHtml(pageT(lang, "customer.carModel"))}</span>
         <strong title="${escapeHtml(carModel)}">${escapeHtml(carModel)}</strong>
+      </div>
+      <div class="orders-customer-line customer-detail-customer-line" data-customer-imeis>
+        <span>${escapeHtml(pageT(lang, "customer.imei"))}</span>
+        <strong>${escapeHtml(customerImeis().join(" · ") || "—")}</strong>
       </div>
       <div class="orders-field">
         <span class="orders-field__label">${escapeHtml(pageT(lang, "customer.shippingAddress"))}</span>
@@ -414,6 +433,7 @@ function renderEditInput(key, value, helpers, disabledAttributes = "") {
   const { escapeHtml, lang } = helpers;
   return `<div class="form-new-customer__field">
     <label class="form-new-customer__label" for="customer-edit-${escapeHtml(key)}">${escapeHtml(pageT(lang, `customer.field.${key}`))}</label>
+    ${key === "imei" && customerImeis().length ? `<div class="form-new-customer__label" data-customer-existing-imeis>${escapeHtml(pageT(lang, "customer.existingImei"))}: ${escapeHtml(customerImeis().join(" · "))}</div>` : ""}
     <input id="customer-edit-${escapeHtml(key)}" class="form-new-customer__value" data-customer-edit-field="${escapeHtml(key)}" value="${escapeHtml(value)}"${disabledAttributes}>
     ${key === "email" ? renderEmailSuggestion({ value, lang, escapeHtml, target: "edit-customer" }) : ""}
   </div>`;
@@ -766,12 +786,22 @@ function applyUpdatedCustomer(result, values) {
   detail.carModel = [result.customer.car_make, result.customer.car_model].filter(Boolean).join(" ") || null;
   detail.shippingAddress = result.customer.address || "";
   const imei = String(values.imei || "").replace(/[\s-]+/g, "");
-  if (imei && !result.deviceConflicts.length && !result.deviceError) customer.imei = imei;
+  if (imei && !result.deviceConflicts.length && !result.deviceError) {
+    customer.imeiCodes = [...new Set([...(customer.imeiCodes ?? []), imei])];
+    customer.imei = imei;
+  }
+}
+
+function syncCustomerEditInputs() {
+  document.querySelectorAll("[data-customer-edit-field]").forEach(field => {
+    state.editDraft[field.getAttribute("data-customer-edit-field")] = field.value;
+  });
 }
 
 async function saveCustomerEdit() {
   const mountId = activeMountId;
   const scope = activeScope;
+  syncCustomerEditInputs();
   const values = { ...state.editDraft };
   const preserveCarModel = state.editModelFallback && values.carModel === customerEditBaseline().carModel;
   state.writeBusy = true;
@@ -781,29 +811,25 @@ async function saveCustomerEdit() {
     const result = await updateLiveOrderCustomer(detailData.customer.id, values, { preserveCarModel });
     if (!isCurrentCustomerDetailMount(mountId, scope)) return;
     applyUpdatedCustomer(result, values);
-    try {
-      const refreshed = await getCustomerDetailData(detailData.customer.id, { refresh: true });
-      if (!isCurrentCustomerDetailMount(mountId, scope)) return;
-      if (refreshed) detailData = refreshed;
-    } catch (error) {
-      // The write already succeeded; keep its optimistic fields if the read is offline.
-      console.warn("[customer-detail] post-write detail refresh failed", error);
-    }
-    if (!isCurrentCustomerDetailMount(mountId, scope)) return;
     state.editModalOpen = false;
     state.editDraft = {};
     state.editModelFallback = false;
-    if (result.deviceError) console.error("[customer-detail] customer device write failed", result.deviceError);
-    const noticeKey = result.deviceError
-      ? "customer.deviceFailed"
-      : result.deviceConflicts.length
-        ? "customer.imeiConflict"
-        : "customer.saved";
-    setCustomerDetailNotice(pageT(currentHelpers?.lang ?? "zh", noticeKey), noticeKey === "customer.saved" ? "success" : "error");
+    const noticeKey = result.deviceError ? "customer.deviceFailed"
+      : result.deviceConflicts.length ? "customer.imeiConflict" : "customer.saveNotice";
+    showNotice(pageT(currentHelpers?.lang ?? "zh", noticeKey), noticeKey === "customer.saveNotice" ? "success" : "error");
+    // Paint the committed write immediately; linked orders/devices may refresh more slowly.
+    rerender();
+    try {
+      const refreshed = await getCustomerDetailData(detailData.customer.id, { refresh: true });
+      if (!isCurrentCustomerDetailMount(mountId, scope)) return;
+      if (refreshed) { detailData = refreshed; applyUpdatedCustomer(result, values); }
+    } catch (error) {
+      console.warn("[customer-detail] post-write detail refresh failed", error);
+    }
   } catch (error) {
     if (!isCurrentCustomerDetailMount(mountId, scope)) return;
     console.error("[customer-detail] customer write failed", error);
-    setCustomerDetailNotice(friendlyCustomerDetailWriteError(error));
+    showNotice(friendlyCustomerDetailWriteError(error), "error");
   } finally {
     if (!isCurrentCustomerDetailMount(mountId, scope)) return;
     state.writeBusy = false;

@@ -35,6 +35,7 @@ await check('failed post-write refresh after navigation cannot mutate the next p
   const state={editDraft:{name:'Before'},editModelFallback:false,editModalOpen:true};
   const context={state,activeMountId:1,activeScope:{},detailData:{customer:{id}},console:{warn(){},error(){}},
     isCurrentCustomerDetailMount:()=>current,setCustomerDetailNotice(){},rerender(){},applyUpdatedCustomer(){},
+    syncCustomerEditInputs(){},showNotice(){},currentHelpers:{lang:"en"},pageT(){return "Saved";},
     updateLiveOrderCustomer:async()=>({deviceConflicts:[]}),
     getCustomerDetailData:()=>{reading=true;return new Promise((_,reject)=>{rejectRead=reject;});}
   };
