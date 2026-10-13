@@ -6,7 +6,7 @@ let count=0;function check(label,run){run();console.log(`ok ${++count} - ${label
 for (const [name,mode] of [['invoice',{invoice:true,receipt:false}],['receipt',{invoice:false,receipt:true}]]) {
  check(`${name} includes each fee below products and keeps amount due`,()=>{
   const html=buildInvoiceDocument(order,mode);
-  for(const label of ['Shipping','Deposit','Service fee','Discount'])assert.ok(html.includes(label));
+  for(const label of ['Shipping','押金','手續費','優惠折扣'])assert.ok(html.includes(label));
   assert.ok(html.indexOf('Own test product')<html.indexOf('data-print-fee="shipping"'));
   assert.ok(html.includes('HKD$ 290'));assert.ok(html.includes('>-15</div>'));assert.ok(!html.includes('{{'));
   const rows=[...html.matchAll(/<div class="table-row"[^>]*>\s*<div>(.*?)<\/div>\s*<div>(.*?)<\/div>\s*<div class="col-price">(.*?)<\/div>/g)];

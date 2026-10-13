@@ -31,9 +31,9 @@ function itemRows(items) {
 
 const PRINT_FEES = Object.freeze([
   { key: "shipping", label: "Shipping" },
-  { key: "deposit", label: "Deposit" },
-  { key: "service", label: "Service fee" },
-  { key: "discount", label: "Discount" }
+  { key: "deposit", label: "押金" },
+  { key: "service", label: "手續費" },
+  { key: "discount", label: "優惠折扣" }
 ]);
 
 function feeRows(fees) {
