@@ -2159,3 +2159,11 @@ button.order-card__phone:focus-visible {
     width: 100%;
   }
 }
+
+.orders-delete {
+  padding: var(--space-4) var(--space-10);
+  border: 0;
+  border-radius: var(--radius-10);
+  background: color-mix(in srgb, var(--red) 10%, var(--white));
+  color: var(--red);
+}

@@ -343,7 +343,7 @@ export async function invalidateOrderQueriesAfterWrite(invoice = null) {
   }
   invalidateLiveQueryCacheAfterWrite({ userId: context.userId, namespace: ORDER_NAMESPACE, preserve });
   invalidateLiveQueryCacheAfterWrite({ userId: context.userId, namespace: ORDER_REVENUE_NAMESPACE });
-  if (invoice?.id) invalidateLiveQueryCacheAfterWrite({ userId: context.userId, namespace: ORDER_DETAIL_NAMESPACE });
+  invalidateLiveQueryCacheAfterWrite({ userId: context.userId, namespace: ORDER_DETAIL_NAMESPACE });
   if (preserve) dispatchQueryUpdate(activeQuery, preserve.value, "write");
   if (activeQuery) backgroundRefresh(context, activeQuery, "write-refresh");
 }

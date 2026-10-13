@@ -12,6 +12,7 @@ import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import {
   getLiveOrderWriteOptions,
   markLiveOrderPaid,
+  deleteLiveOrder,
   updateLiveOrder,
   updateLiveOrderCustomer,
   updateLiveOrderShipping
@@ -22,6 +23,9 @@ import { toPrintableOrder } from "./print/print-invoice.js";
 const dict = {
   zh: {
     "orders.root": "訂單",
+    "orders.delete": "刪除訂單",
+    "orders.delete.confirm": "確定刪除訂單 {orderNo}？",
+    "orders.delete.failed": "刪除失敗，請重試",
     "orders.shipping": "運送",
     "orders.pickup": "自取",
     "orders.payment": "付款",
@@ -121,6 +125,9 @@ const dict = {
   },
   en: {
     "orders.root": "Orders",
+    "orders.delete": "Delete order",
+    "orders.delete.confirm": "Delete order {orderNo}?",
+    "orders.delete.failed": "Could not delete the order. Please retry.",
     "orders.shipping": "Shipping",
     "orders.pickup": "Pickup",
     "orders.payment": "Payment",
@@ -220,6 +227,9 @@ const dict = {
   },
   fr: {
     "orders.root": "Commandes",
+    "orders.delete": "Supprimer la commande",
+    "orders.delete.confirm": "Supprimer la commande {orderNo} ?",
+    "orders.delete.failed": "Impossible de supprimer la commande. Réessayez.",
     "orders.shipping": "Expédition",
     "orders.pickup": "Retrait",
     "orders.payment": "Paiement",
@@ -340,6 +350,7 @@ let state = initialDetailState();
 let currentHelpers = null;
 let printDialog = null;
 let activeScope = null;
+let activeNavigation = null;
 let activeMountId = 0;
 const shippingFeePanel = createShippingFeePanel();
 
@@ -761,6 +772,9 @@ function renderDetail(helpers) {
     ${renderCustomerInfo(helpers)}
     ${renderTrackingCard(helpers)}
     ${renderTimeline(helpers)}
+    <div class="orders-card-actions orders-card-actions--end">
+      <button type="button" class="orders-delete" data-order-delete data-orders-write${writeAttributes}>${escapeHtml(pageT(lang, "orders.delete"))}</button>
+    </div>
     ${renderProductModal(helpers)}
     ${renderCustomerEditModal(helpers)}
   </div>`;
@@ -1131,6 +1145,33 @@ async function ensureOrderEditData() {
   return request;
 }
 
+async function deleteOrder() {
+  const mountId = activeMountId, scope = activeScope;
+  const lang = currentHelpers?.lang ?? "zh";
+  const accepted = await confirmInPage(pageT(lang, "orders.delete.confirm").replace("{orderNo}", detailData.detail.orderNo), {
+    title: pageT(lang, "orders.delete"), confirmLabel: pageT(lang, "orders.delete"), danger: true
+  });
+  if (!accepted || !isCurrentOrderDetailMount(mountId, scope)) return;
+  state.busy = "delete";
+  setNotice(""); rerender();
+  let navigated = false;
+  try {
+    await deleteLiveOrder(detailData.order.id);
+    if (!isCurrentOrderDetailMount(mountId, scope)) return;
+    // Deletion leaves no editable order; avoid the unsaved-change gate on the way back.
+    state = initialDetailState();
+    const url = new URL("./orders.html", window.location.href);
+    if (activeNavigation?.navigate) void activeNavigation.navigate(url);
+    else window.location.assign(url.href);
+    navigated = true;
+  } catch (error) {
+    if (!isCurrentOrderDetailMount(mountId, scope)) return;
+    setNotice(pageT(lang, "orders.delete.failed"));
+  } finally {
+    if (isCurrentOrderDetailMount(mountId, scope) && !navigated) { state.busy = ""; rerender(); }
+  }
+}
+
 async function onOrderDetailClick(event) {
   const printOpen = event.target.closest("[data-print-open]");
   if (printOpen) {
@@ -1139,6 +1180,10 @@ async function onOrderDetailClick(event) {
   }
   if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
   if (state.busy && event.target.closest("[data-orders-write]")) return;
+  if (event.target.closest("[data-order-delete]")) {
+    if (liveWritable) await deleteOrder();
+    return;
+  }
   if (event.target.closest("[data-order-edit-open]")) {
     await ensureOrderEditData();
     return;
@@ -1336,9 +1381,10 @@ function hasOrderDetailUnsavedChanges() {
     || customerDraftChanged();
 }
 
-export async function mountPage({ scope, signal, url = new URL(window.location.href) } = {}) {
+export async function mountPage({ scope, signal, navigation, url = new URL(window.location.href) } = {}) {
   const mountId = ++activeMountId;
   activeScope = scope;
+  activeNavigation = navigation;
   const orderId = url.searchParams.get("id");
   const [nextDetailData, nextCurrentUser] = await Promise.all([
     getOrderDetailData(orderId),
@@ -1392,7 +1438,7 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
       pickerData = { productGroups: [] };
       writeOptions = { invoice: null, defaultWarehouseId: null, salespeople: [] };
       currentHelpers = null;
-      if (activeScope === scope) activeScope = null;
+      if (activeScope === scope) { activeScope = null; activeNavigation = null; }
       state = initialDetailState();
     }
   };
