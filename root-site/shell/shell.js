@@ -20,7 +20,13 @@ let companies = [
   // 品牌名称固定使用官方字面量，不参与界面语言本地化。
   { key: "driver-ez", label: "Driver EZ" }
 ];
+function readSidebarCollapsed() {
+  try { return window.localStorage.getItem("bizflow-sidebar-collapsed") === "true"; }
+  catch { return false; }
+}
+
 const state = {
+  sidebarCollapsed: readSidebarCollapsed(),
   lang: initialLang,
   company: companies[0].key,
   drawerOpen: false,
@@ -222,10 +228,15 @@ function renderDrawerButton() {
   </button>`;
 }
 
+function renderSidebarToggle() {
+  const label = t(state.sidebarCollapsed ? "shell.expandSidebar" : "shell.collapseSidebar");
+  return `<button type="button" class="tp-component btn-toggle-sidebar shell-icon-button btn-toggle-sidebar--${state.sidebarCollapsed ? "open" : "close"}" data-action="toggle-sidebar" aria-expanded="${!state.sidebarCollapsed}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"></button>`;
+}
+
 function renderTopbar() {
   return `<header class="shell-topbar">
     <div class="shell-topbar__brand">
-      <span class="shell-topbar__desktop-brand">${renderCompanySelect()}</span>
+      <span class="shell-topbar__desktop-brand">${renderSidebarToggle()}${renderCompanySelect()}</span>
       <span class="shell-topbar__mobile-brand">${renderCompanySelect({ mobile: true })}</span>
     </div>
     ${renderGlobalSearch({ t, icon, escapeHtml })}
@@ -269,7 +280,7 @@ function renderAddRow() {
 }
 
 function renderSidebar() {
-  return `<aside class="shell-sidebar">
+  return `<aside class="shell-sidebar" ${mode === "desktop" && state.sidebarCollapsed ? 'inert aria-hidden="true"' : 'aria-hidden="false"'}>
     ${renderLanguageSelect()}
     ${renderNav()}
     ${renderAddRow()}
@@ -329,7 +340,7 @@ function renderForcedPasswordModal() {
 function render() {
   window.__shellBootCleanup?.();
   document.documentElement.lang = state.lang === "zh" ? "zh-Hant" : state.lang;
-  root.innerHTML = `<div class="shell-app shell-app--${mode} ${state.drawerOpen ? "is-drawer-open" : ""}">
+  root.innerHTML = `<div class="shell-app shell-app--${mode} ${state.drawerOpen ? "is-drawer-open" : ""} ${state.sidebarCollapsed ? "is-sidebar-collapsed" : ""}">
     ${renderTopbar()}
     ${renderSidebar()}
     ${renderDrawer()}
@@ -369,6 +380,22 @@ function syncShellState() {
   app.classList.toggle("shell-app--mobile", mode === "mobile");
   app.classList.toggle("shell-app--desktop", mode === "desktop");
   app.classList.toggle("is-drawer-open", state.drawerOpen);
+  app.classList.toggle("is-sidebar-collapsed", state.sidebarCollapsed);
+  const sidebar = app.querySelector(".shell-sidebar");
+  if (sidebar) {
+    const hidden = mode === "desktop" && state.sidebarCollapsed;
+    sidebar.inert = hidden;
+    sidebar.setAttribute("aria-hidden", String(hidden));
+  }
+  const toggle = app.querySelector('[data-action="toggle-sidebar"]');
+  if (toggle) {
+    toggle.classList.toggle("btn-toggle-sidebar--open", state.sidebarCollapsed);
+    toggle.classList.toggle("btn-toggle-sidebar--close", !state.sidebarCollapsed);
+    toggle.setAttribute("aria-expanded", String(!state.sidebarCollapsed));
+    const label = t(state.sidebarCollapsed ? "shell.expandSidebar" : "shell.collapseSidebar");
+    toggle.setAttribute("aria-label", label);
+    toggle.title = label;
+  }
   app.querySelector('[data-action="open-drawer"]')?.setAttribute("aria-expanded", String(state.drawerOpen));
   app.querySelector(".shell-mobile-drawer")?.setAttribute("aria-hidden", String(!state.drawerOpen));
 }
@@ -457,6 +484,11 @@ document.addEventListener("click", async (event) => {
 
   const action = event.target.closest("[data-action]")?.dataset.action;
 
+  if (action === "toggle-sidebar" && mode === "desktop") {
+    state.sidebarCollapsed = !state.sidebarCollapsed;
+    try { window.localStorage.setItem("bizflow-sidebar-collapsed", String(state.sidebarCollapsed)); } catch {}
+    syncShellState();
+  }
   if (action === "open-drawer") {
     state.drawerOpen = true;
     syncShellState();

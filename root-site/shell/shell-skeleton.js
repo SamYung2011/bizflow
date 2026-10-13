@@ -6,9 +6,11 @@
   const navRows = window.location.pathname.includes("/team/") ? 2 : 6;
   const block = (className = "") => `<span class="shell-boot__block${className ? ` ${className}` : ""}"></span>`;
 
+  let sidebarCollapsed = false;
+  try { sidebarCollapsed = window.localStorage.getItem("bizflow-sidebar-collapsed") === "true"; } catch {}
   const render = () => {
     const mode = mobileViewport?.matches ? "mobile" : "desktop";
-    root.innerHTML = `<div class="shell-app shell-app--${mode} shell-boot" aria-hidden="true">
+    root.innerHTML = `<div class="shell-app shell-app--${mode} ${sidebarCollapsed ? "is-sidebar-collapsed" : ""} shell-boot" aria-hidden="true">
       <header class="shell-topbar">
         <div class="shell-topbar__brand">
           <span class="shell-topbar__desktop-brand">${block("shell-boot__brand")}</span>

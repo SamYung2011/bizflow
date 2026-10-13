@@ -418,7 +418,7 @@ body {
   padding: var(--space-20);
   overflow: hidden auto;
   background: var(--white);
-  transition: width var(--transition);
+  transition: width var(--transition), transform var(--transition);
 }
 
 .shell-nav {
@@ -540,6 +540,14 @@ body {
   padding: 84px var(--space-20) var(--space-20);
   background: var(--gray-10);
   transition: margin-left var(--transition);
+}
+
+.shell-app--desktop.is-sidebar-collapsed .shell-sidebar {
+  transform: translateX(-100%);
+}
+
+.shell-app--desktop.is-sidebar-collapsed .shell-main {
+  margin-left: 0;
 }
 
 .shell-page-inner {
