@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createBoundedReadPg } from './test-support/bounded-read-pg.mjs';
 const pg = createBoundedReadPg(fileURLToPath(new URL('../', import.meta.url)));
-const id = '30000000-0000-0000-0000-000000000101', legacy = '30000000-0000-0000-0000-000000000102';
+const id = '6063', legacy = '30000000-0000-0000-0000-000000000102';
 let count = 0;
 function check(label, run) { run(); console.log(`ok ${++count} - ${label}`); }
 try {
@@ -45,6 +45,7 @@ try {
   pg.asUser(`SELECT bizflow_delete_order('${id}');`);
   check('aggregated sale stock returned once and one reversal retained after FK nulling', () => {
     assert.equal(pg.sql('SELECT qty FROM inventory_stock;'),'5');
+    assert.equal(pg.sql("SELECT reason FROM inventory_movements WHERE type='sale_reverse';"),'發票 #129 刪除返還');
     assert.equal(pg.sql("SELECT delta||'|'||(invoice_id IS NULL)::text FROM inventory_movements WHERE type='sale_reverse';"),'3|true');
   });
   check('IMEI restored, warranty removed and cascading children removed', () => {
@@ -56,14 +57,18 @@ try {
     assert.throws(()=>pg.asUser(`SELECT bizflow_delete_order('${id}');`),/P0002/);
     assert.equal(pg.sql('SELECT qty FROM inventory_stock;'),'5');
   });
-  check('legacy order without deductions can be deleted directly', () => {
+  check('UUID-text legacy order without deductions can be deleted directly', () => {
     pg.sql(`INSERT INTO invoices(id,legacy_skip_deduct) VALUES('${legacy}',true);`);
     pg.asUser(`SELECT bizflow_delete_order('${legacy}');`);
     assert.equal(pg.sql('SELECT count(*) FROM invoices;'),'0');
     assert.equal(pg.sql('SELECT qty FROM inventory_stock;'),'5');
   });
   check('security definer has fixed search_path and no public/anon grant', () => {
-    assert.equal(pg.sql("SELECT prosecdef AND proconfig=ARRAY['search_path=public'] AND NOT has_function_privilege('anon',oid,'EXECUTE') AND has_function_privilege('authenticated',oid,'EXECUTE') FROM pg_proc WHERE oid='bizflow_delete_order(uuid)'::regprocedure;"),'t');
+    assert.equal(pg.sql("SELECT prosecdef AND proconfig=ARRAY['search_path=public'] AND NOT has_function_privilege('anon',oid,'EXECUTE') AND has_function_privilege('authenticated',oid,'EXECUTE') FROM pg_proc WHERE oid='bizflow_delete_order(text)'::regprocedure;"),'t');
+  });
+  check('old uuid overload is removed and schema reload notification is included',()=>{
+    assert.equal(pg.sql("SELECT to_regprocedure('bizflow_delete_order(uuid)') IS NULL;"),'t');
+    assert.ok(migration.includes("NOTIFY pgrst, 'reload schema'"));
   });
   console.log(`ORDER_DELETE_PG=${count}/${count}`);
 } finally { pg.close(); }

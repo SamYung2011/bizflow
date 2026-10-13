@@ -22,7 +22,7 @@ const dict = {
   zh: {
     "customer.root": "客戶",
     "customer.imei": "IMEI",
-    "customer.existingImei": "已有 IMEI",
+    "customer.existingImei": "已有 IMEI：",
     "customer.saveNotice": "已儲存",
     "customer.moreActions": "更多動作",
     "customer.merge": "合併顧客",
@@ -74,8 +74,7 @@ const dict = {
     "customer.action.submit": "提交",
     "customer.action.close": "關閉",
     "customer.action.saving": "保存中…",
-    "customer.saved": "顧客資料已更新",
-    "customer.failed": "更新顧客資料失敗，請稍後再試",
+    "customer.failed": "儲存失敗，請重試",
     "customer.deviceFailed": "顧客資料已更新，但 IMEI 未能保存",
     "customer.imeiConflict": "顧客資料已更新，但 IMEI 已屬於其他顧客",
     "customer.validation.name": "請輸入顧客姓名",
@@ -88,7 +87,7 @@ const dict = {
   en: {
     "customer.root": "Customers",
     "customer.imei": "IMEI",
-    "customer.existingImei": "Existing IMEIs",
+    "customer.existingImei": "Existing IMEIs:",
     "customer.saveNotice": "Saved",
     "customer.moreActions": "More actions",
     "customer.merge": "Merge customer",
@@ -140,8 +139,7 @@ const dict = {
     "customer.action.submit": "Submit",
     "customer.action.close": "Close",
     "customer.action.saving": "Saving…",
-    "customer.saved": "Customer details updated",
-    "customer.failed": "Could not update the customer. Please try again.",
+    "customer.failed": "Could not save. Please try again.",
     "customer.deviceFailed": "Customer updated, but the IMEI could not be saved",
     "customer.imeiConflict": "Customer updated, but the IMEI belongs to another customer",
     "customer.validation.name": "Enter a customer name",
@@ -154,7 +152,7 @@ const dict = {
   fr: {
     "customer.root": "Clients",
     "customer.imei": "IMEI",
-    "customer.existingImei": "IMEI existants",
+    "customer.existingImei": "IMEI existants :",
     "customer.saveNotice": "Enregistré",
     "customer.moreActions": "Plus d'actions",
     "customer.merge": "Fusionner client",
@@ -206,8 +204,7 @@ const dict = {
     "customer.action.submit": "Soumettre",
     "customer.action.close": "Fermer",
     "customer.action.saving": "Enregistrement…",
-    "customer.saved": "Informations client mises à jour",
-    "customer.failed": "Impossible de mettre à jour le client. Réessayez.",
+    "customer.failed": "Impossible d’enregistrer. Réessayez.",
     "customer.deviceFailed": "Client mis à jour, mais l’IMEI n’a pas pu être enregistré",
     "customer.imeiConflict": "Client mis à jour, mais l’IMEI appartient à un autre client",
     "customer.validation.name": "Saisissez le nom du client",
@@ -433,7 +430,7 @@ function renderEditInput(key, value, helpers, disabledAttributes = "") {
   const { escapeHtml, lang } = helpers;
   return `<div class="form-new-customer__field">
     <label class="form-new-customer__label" for="customer-edit-${escapeHtml(key)}">${escapeHtml(pageT(lang, `customer.field.${key}`))}</label>
-    ${key === "imei" && customerImeis().length ? `<div class="form-new-customer__label" data-customer-existing-imeis>${escapeHtml(pageT(lang, "customer.existingImei"))}: ${escapeHtml(customerImeis().join(" · "))}</div>` : ""}
+    ${key === "imei" && customerImeis().length ? `<div class="form-new-customer__label" data-customer-existing-imeis>${escapeHtml(pageT(lang, "customer.existingImei"))} ${escapeHtml(customerImeis().join(" · "))}</div>` : ""}
     <input id="customer-edit-${escapeHtml(key)}" class="form-new-customer__value" data-customer-edit-field="${escapeHtml(key)}" value="${escapeHtml(value)}"${disabledAttributes}>
     ${key === "email" ? renderEmailSuggestion({ value, lang, escapeHtml, target: "edit-customer" }) : ""}
   </div>`;

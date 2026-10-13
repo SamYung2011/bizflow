@@ -1,5 +1,6 @@
 -- 离职但主站标记仍开的员工不能再读写主站；管理员也必须在职。
--- 任务 RPC 从在职成员集合输出，隐藏全离职负责的任务；不删除任何记录。
+-- 任务 RPC 仅排除可确认已离职的负责人，隐藏全离职负责的任务；不删除任何记录。
+-- members 和员工关联表保留 116 原样，用于历史署名；选人名单由任务页映射一处过滤。
 -- 单人旧任务回退 employee_id；无负责人任务仍显示。保留 116 的 RLS 和受控子表读取。
 -- 回滚：恢复 064 的 helper 定义和 116 的 bizflow_team_task_page 定义（只执行定义，勿重跑 064 数据更新）。
 BEGIN;
@@ -71,26 +72,26 @@ AS $function$
     WHERE company.id = (SELECT company_id FROM scope)
     LIMIT 1
   ),
-  active_members AS MATERIALIZED (
-    SELECT employee.* FROM public.employees AS employee WHERE employee.active = true
+  inactive AS MATERIALIZED (
+    SELECT id FROM public.employees WHERE active = false
   ),
   scoped_assignees AS MATERIALIZED (
     SELECT assignee.* FROM public.bizflow_scoped_task_assignees() AS assignee
   ),
   task_owners AS MATERIALIZED (
-    SELECT assignee.task_id, bool_or(member.id IS NOT NULL) AS has_active
+    SELECT assignee.task_id, bool_or(inactive.id IS NULL) AS has_active
     FROM scoped_assignees AS assignee
-    LEFT JOIN active_members AS member ON member.id = assignee.employee_id
+    LEFT JOIN inactive ON inactive.id = assignee.employee_id
     GROUP BY assignee.task_id
   ),
   visible_task_rows AS MATERIALIZED (
     SELECT task.*
     FROM public.employee_tasks AS task
     LEFT JOIN task_owners AS owners ON owners.task_id = task.id
-    LEFT JOIN active_members AS legacy_owner ON legacy_owner.id = task.employee_id
+    LEFT JOIN inactive AS legacy_owner ON legacy_owner.id = task.employee_id
     WHERE task.company_id = (SELECT company_id FROM scope)
       AND (owners.has_active OR (owners.task_id IS NULL
-        AND (task.employee_id IS NULL OR legacy_owner.id IS NOT NULL)))
+        AND (legacy_owner.id IS NULL)))
   ),
   task_stats AS MATERIALIZED (
     SELECT
@@ -121,8 +122,9 @@ AS $function$
   assignee_rows AS MATERIALIZED (
     SELECT assignee.*
     FROM scoped_assignees AS assignee
-    JOIN active_members AS member ON member.id = assignee.employee_id
+    LEFT JOIN inactive ON inactive.id = assignee.employee_id
     JOIN task_rows AS task ON task.id = assignee.task_id
+    WHERE inactive.id IS NULL
   ),
   feedback_rows AS MATERIALIZED (
     SELECT feedback.*
@@ -159,7 +161,7 @@ AS $function$
     ), '[]'::jsonb),
     'members', COALESCE((
       SELECT jsonb_agg(to_jsonb(employee) ORDER BY employee.created_at ASC, employee.id ASC)
-      FROM active_members AS employee
+      FROM public.employees AS employee
     ), '[]'::jsonb),
     'departments', COALESCE((
       SELECT jsonb_agg(to_jsonb(department) ORDER BY department.name ASC, department.id ASC)
@@ -168,12 +170,10 @@ AS $function$
     'employeeDepartments', COALESCE((
       SELECT jsonb_agg(to_jsonb(link) ORDER BY link.created_at ASC)
       FROM public.employee_departments AS link
-      JOIN active_members AS member ON member.id = link.employee_id
     ), '[]'::jsonb),
     'employeeCompanies', COALESCE((
       SELECT jsonb_agg(to_jsonb(link) ORDER BY link.joined_at ASC, link.id ASC)
       FROM public.employee_companies AS link
-      JOIN active_members AS member ON member.id = link.employee_id
     ), '[]'::jsonb),
     'roles', COALESCE((
       SELECT jsonb_agg(to_jsonb(role) ORDER BY role.name ASC, role.id ASC)

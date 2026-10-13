@@ -18,6 +18,15 @@
   gap: var(--space-20);
 }
 
+[data-app-feedback-chrome],
+[data-app-frame-panels] {
+  display: contents;
+}
+
+[data-app-native-panel]:not([hidden]) {
+  display: contents;
+}
+
 .app-feedback-head {
   display: flex;
   align-items: flex-start;

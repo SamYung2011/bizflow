@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { buildTeamTaskSnapshotsFromRows } from '../root-site/data/live-snapshots.js';
+import { instrumentModule } from './test-support/bounded-page-runtime.mjs';
 import { createBoundedReadPg } from './test-support/bounded-read-pg.mjs';
 const pg=createBoundedReadPg(fileURLToPath(new URL('../',import.meta.url)));
 const emp=n=>`10000000-0000-0000-0000-${String(n).padStart(12,'0')}`;
@@ -12,7 +14,7 @@ try {
  pg.sql(`
  ALTER TABLE employees ADD COLUMN is_super_admin boolean DEFAULT false;
  ALTER TABLE employee_companies ADD COLUMN id uuid DEFAULT gen_random_uuid();
- ALTER TABLE employee_tasks ADD COLUMN department_id uuid, ADD COLUMN note text, ADD COLUMN attachments jsonb DEFAULT '[]', ADD COLUMN completed_at timestamptz;
+ ALTER TABLE employee_tasks ADD COLUMN department_id uuid, ADD COLUMN note text, ADD COLUMN attachments jsonb DEFAULT '[]', ADD COLUMN completed_at timestamptz, ADD COLUMN title_edited_by uuid, ADD COLUMN title_edited_at timestamptz, ADD COLUMN approved_by uuid, ADD COLUMN approved_at timestamptz;
  ALTER TABLE task_assignees ADD COLUMN created_at timestamptz DEFAULT now(), ADD COLUMN completed_at timestamptz;
  ALTER TABLE employee_task_feedbacks ADD COLUMN id uuid DEFAULT gen_random_uuid(), ADD COLUMN created_at timestamptz DEFAULT now();
  ALTER TABLE employee_departments ADD COLUMN created_at timestamptz DEFAULT now();
@@ -45,6 +47,7 @@ try {
  INSERT INTO task_assignees(task_id,employee_id) VALUES('${tid(1)}','${emp(2)}'),('${tid(2)}','${emp(2)}'),('${tid(2)}','${emp(4)}'),('${tid(6)}','${emp(4)}');
  `);
  pg.sql(readFileSync(new URL('../migrations/116_task_scope_setbased_rls.sql',import.meta.url),'utf8'));
+ const before=JSON.parse(pg.asUser(`SELECT bizflow_team_task_page('${company}',NULL,true)::text;`));
  const migration=readFileSync(new URL('../migrations/130_has_bizflow_main_access_active_20261013.sql',import.meta.url),'utf8');
  const signature='bizflow_team_task_page(uuid,integer,boolean,timestamp with time zone,timestamp with time zone,timestamp with time zone,text,timestamp with time zone)';
  const oid=pg.sql(`SELECT '${signature}'::regprocedure::oid;`);
@@ -62,12 +65,15 @@ try {
  });
  const payload=(n=1)=>JSON.parse(pg.asUser(`SELECT bizflow_team_task_page('${company}',NULL,true)::text;`,user(n)));
  const data=payload();
- check('one active roster serves team member and assignment screens',()=>assert.deepEqual(data.members.map(e=>e.id).sort(),[emp(1),emp(4)]));
+ check('raw members and employee links match 116 including departed historical authors',()=>{
+  for(const key of ['members','employeeDepartments','employeeCompanies'])assert.deepEqual(data[key],before[key]);
+  assert.deepEqual(data.members.map(e=>e.id).sort(),[emp(1),emp(2),emp(3),emp(4)]);
+ });
  check('sole inactive and legacy inactive hidden; unassigned, mixed and active kept',()=>assert.deepEqual(data.tasks.map(t=>t.id).sort(),[tid(2),tid(3),tid(5),tid(6)]));
  check('mixed task only returns active avatar/name and totals use filtered set',()=>{
   assert.deepEqual(data.assignees.filter(a=>a.task_id===tid(2)).map(a=>a.employee_id),[emp(4)]);
   assert.deepEqual(data.taskStats,{total:4,completed:1,open:3,abandoned:0});
-  assert.equal(data.employeeCompanies.some(b=>[emp(2),emp(3)].includes(b.employee_id)),false);
+  assert.equal(data.employeeCompanies.some(b=>[emp(2),emp(3)].includes(b.employee_id)),true);
  });
  check('hidden tasks and inactive owner links remain in database',()=>{
   assert.equal(pg.sql('SELECT count(*) FROM employee_tasks;'),'6');assert.equal(pg.sql('SELECT count(*) FROM task_assignees;'),'4');
@@ -76,6 +82,42 @@ try {
   assert.deepEqual(payload(2).tasks,[]);
   assert.equal(pg.sql(`SELECT '${signature}'::regprocedure::oid;`),oid);
   assert.equal(pg.sql(`SELECT NOT prosecdef AND proconfig=ARRAY['search_path=""'] FROM pg_proc WHERE oid='${signature}'::regprocedure;`),'t');
+ });
+ pg.sql(`UPDATE employee_tasks SET creator_employee_id='${emp(2)}', title_edited_by='${emp(2)}', approved_by='${emp(3)}' WHERE id='${tid(2)}';`);
+ const historical=payload();
+ const currentUser={employeeId:emp(1),name:'Main fixture',activeCompanyId:company};
+ const {tasksSnapshot,membersSnapshot,teamExtrasSnapshot}=await buildTeamTaskSnapshotsFromRows(historical,currentUser);
+ check('departed creator, title editor and approver names survive row mapping',()=>{
+  const task=tasksSnapshot.tasks.find(t=>t.id===tid(2));
+  const name=id=>historical.members.find(e=>e.id===id).name;
+  assert.equal(task.creator,name(emp(2)));assert.equal(task.titleEditedBy,name(emp(2)));assert.equal(task.approvedBy,name(emp(3)));
+  assert.equal(membersSnapshot.membersStats.left,2);
+ });
+ check('one provider mapping filters task pickers without removing historical signatures',()=>{
+  const provider=instrumentModule(new URL('../root-site/data/provider.js',import.meta.url),{rootSiteUrl:path=>path,featureAiBatchForCompany:()=>false},'({buildTeamTaskData})');
+  const page=provider.buildTeamTaskData({snap:tasksSnapshot,membersSnap:membersSnapshot,teamExtras:teamExtrasSnapshot,authUser:currentUser,unread:{}});
+  assert.deepEqual(JSON.parse(JSON.stringify(page.members.filter(m=>m.id).map(m=>m.id))).sort(),[emp(1),emp(4)]);
+  assert.equal(page.tasks.find(t=>t.id===tid(2)).creator,tasksSnapshot.tasks.find(t=>t.id===tid(2)).creator);
+ });
+ pg.sql(`
+ INSERT INTO employees(id,user_id,name,active) VALUES('${emp(5)}','${user(5)}','Own RLS-invisible active owner',true),('${emp(6)}','${user(6)}','Own unknown-status owner',NULL);
+ INSERT INTO employee_tasks(id,company_id,title,employee_id,status) VALUES
+ ('${tid(7)}','${company}','Own unseen active sole owner','${emp(5)}','open'),
+ ('${tid(8)}','${company}','Own unseen mixed owner','${emp(2)}','open'),
+ ('${tid(9)}','${company}','Own unknown-status owner','${emp(6)}','open');
+ INSERT INTO task_assignees(task_id,employee_id) VALUES('${tid(7)}','${emp(5)}'),('${tid(8)}','${emp(2)}'),('${tid(8)}','${emp(5)}'),('${tid(9)}','${emp(6)}');
+ ALTER TABLE employees ENABLE ROW LEVEL SECURITY;
+ CREATE POLICY own_fixture_employee_visibility ON employees FOR SELECT TO authenticated USING(id <> '${emp(5)}');
+ `);
+ const scoped=payload();
+ check('RLS-invisible active sole and mixed owners keep their tasks and assignee rows',()=>{
+  assert.equal(scoped.members.some(e=>e.id===emp(5)),false);
+  assert.ok(scoped.tasks.some(t=>t.id===tid(7)));assert.ok(scoped.tasks.some(t=>t.id===tid(8)));
+  assert.deepEqual(scoped.assignees.filter(a=>a.task_id===tid(8)).map(a=>a.employee_id),[emp(5)]);
+  assert.equal(scoped.taskStats.total,7);
+ });
+ check('only confirmed inactive owners are removed; null active is retained',()=>{
+  assert.ok(scoped.tasks.some(t=>t.id===tid(9)));assert.equal(scoped.tasks.some(t=>t.id===tid(1)),false);
  });
  console.log(`INACTIVE_EMPLOYEE_PG=${count}/${count}`);
 }finally{pg.close();}

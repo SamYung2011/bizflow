@@ -444,14 +444,16 @@ async function loadCurrentUser({ timeoutMs = AUTH_CONTEXT_TIMEOUT_MS } = {}) {
 }
 
 export function consumeDisabledAccountNotice() {
-  const disabled = safeLocalStorageGet("bizflow-account-disabled") === "1";
-  if (disabled) safeLocalStorageSet("bizflow-account-disabled", "");
-  return disabled;
+  try {
+    const disabled = window.sessionStorage.getItem("bizflow-account-disabled") === "1";
+    if (disabled) window.sessionStorage.removeItem("bizflow-account-disabled");
+    return disabled;
+  } catch { return false; }
 }
 
 async function rejectInactiveEmployee(employee) {
   if (employee?.active !== false) return false;
-  safeLocalStorageSet("bizflow-account-disabled", "1");
+  try { window.sessionStorage.setItem("bizflow-account-disabled", "1"); } catch {}
   await signOut();
   return true;
 }

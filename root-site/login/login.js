@@ -60,7 +60,8 @@ import { completePasswordSignIn } from "./signed-in-user.js";
       "auth.emailExists": "该邮箱已注册",
       "auth.weakPassword": "密码强度不足，请至少输入 6 位",
       "auth.failed": "操作失败，请稍后重试",
-      "auth.pending": "帳號已停用",
+      "auth.disabled": "帳號已停用",
+      "auth.pending": "账户尚未通过人员审核",
       "auth.registered": "注册申请已提交，请等待管理员审核",
       "auth.resetSent": "驗證碼已發送，請查看郵件",
       "auth.otpFormat": "請輸入 6 位數字驗證碼",
@@ -114,7 +115,8 @@ import { completePasswordSignIn } from "./signed-in-user.js";
       "auth.emailExists": "This email is already registered",
       "auth.weakPassword": "Use a password with at least 6 characters",
       "auth.failed": "The operation failed. Try again later",
-      "auth.pending": "Your account has been disabled",
+      "auth.disabled": "Your account has been disabled",
+      "auth.pending": "Your personnel account is awaiting approval",
       "auth.registered": "Registration submitted for administrator review",
       "auth.resetSent": "Verification code sent. Check your email",
       "auth.otpFormat": "Enter the 6-digit verification code",
@@ -168,7 +170,8 @@ import { completePasswordSignIn } from "./signed-in-user.js";
       "auth.emailExists": "Cet e-mail est déjà enregistré",
       "auth.weakPassword": "Utilisez un mot de passe d'au moins 6 caractères",
       "auth.failed": "L'opération a échoué. Réessayez plus tard",
-      "auth.pending": "Votre compte a été désactivé",
+      "auth.disabled": "Votre compte a été désactivé",
+      "auth.pending": "Votre compte employé est en attente d'approbation",
       "auth.registered": "Inscription envoyée pour validation",
       "auth.resetSent": "Code de vérification envoyé. Consultez votre e-mail",
       "auth.otpFormat": "Saisissez le code de vérification à 6 chiffres",
@@ -371,7 +374,7 @@ import { completePasswordSignIn } from "./signed-in-user.js";
   }
 
   function authErrorKey(error) {
-    if (consumeDisabledAccountNotice()) return "auth.pending";
+    if (consumeDisabledAccountNotice()) return "auth.disabled";
     const code = String(error?.code || "").toLowerCase();
     const message = String(error?.message || "").toLowerCase();
     if (state.view === "forgot" && state.forgotStage === "verify"
@@ -513,7 +516,7 @@ import { completePasswordSignIn } from "./signed-in-user.js";
         });
         if (!user) {
           await signOut();
-          throw { messageKey: "auth.pending" };
+          throw { messageKey: consumeDisabledAccountNotice() ? "auth.disabled" : "auth.pending" };
         }
         routeForUser(user);
         return;
@@ -564,7 +567,7 @@ import { completePasswordSignIn } from "./signed-in-user.js";
 
   renderView();
   renderLanguage();
-  if (consumeDisabledAccountNotice()) showMessage("auth.pending");
+  if (consumeDisabledAccountNotice()) showMessage("auth.disabled");
   void (async () => {
     try {
       state.authConfigured = await isAuthConfigured();
@@ -581,13 +584,13 @@ import { completePasswordSignIn } from "./signed-in-user.js";
             if (user) routeForUser(user);
             else {
               await signOut();
-              showMessage("auth.pending");
+              showMessage(consumeDisabledAccountNotice() ? "auth.disabled" : "auth.pending");
             }
           }
         }
       }
     } catch {
-      showMessage(consumeDisabledAccountNotice() ? "auth.pending" : "auth.failed");
+      showMessage(consumeDisabledAccountNotice() ? "auth.disabled" : "auth.failed");
     } finally {
       state.authReady = true;
     }

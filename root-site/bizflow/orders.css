@@ -2167,3 +2167,9 @@ button.order-card__phone:focus-visible {
   background: color-mix(in srgb, var(--red) 10%, var(--white));
   color: var(--red);
 }
+
+.orders-delete:disabled {
+  background: var(--gray-15);
+  color: var(--gray-40);
+  cursor: not-allowed;
+}

@@ -678,7 +678,7 @@ function buildTeamTaskData({ snap, membersSnap, teamExtras, authUser, unread }) 
   const members = r9Members
     ? [
         { name: "Honnmono", dept: "all", taskCount: statsOk ? ts.open : 0, active: true, badge: 0 },
-        ...membersSnap.members.map((member) => ({
+        ...membersSnap.members.filter((member) => member.status === "active").map((member) => ({
           id: member.id,
           userId: member.userId,
           name: member.name,
@@ -1002,20 +1002,9 @@ const R9_PERMISSION_LABEL_KEYS = {
   can_approve_registration: "members.permission.approveRegistration"
 };
 
-async function loadMembersSnapshot() {
-  return resolveLiveQueryOrLegacy({
-    readLive: async () => {
-      if (!TEAM_TASK_RPC_ENABLED) return LIVE_TEAM_TASK_MISS;
-      const [payload, authUser] = await Promise.all([
-        getLiveTeamTaskPage({ completedLimit: null, includeDetail: true }), getAuthCurrentUser()
-      ]);
-      if (payload === LIVE_TEAM_TASK_MISS) return LIVE_TEAM_TASK_MISS;
-      return (await buildTeamTaskSnapshotsFromRows(payload, authUser)).membersSnapshot;
-    },
-    miss: LIVE_TEAM_TASK_MISS,
-    readLegacy: () => loadProviderSnapshot("members.json", () =>
-      fetchSnapshot(MEMBERS_SNAPSHOT_URL, "members.json", "home/mock members"))
-  });
+function loadMembersSnapshot() {
+  return loadProviderSnapshot("members.json", () =>
+    fetchSnapshot(MEMBERS_SNAPSHOT_URL, "members.json", "home/mock members"));
 }
 
 function isR9Member(member) {

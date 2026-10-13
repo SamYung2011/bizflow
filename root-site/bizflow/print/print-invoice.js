@@ -30,16 +30,11 @@ function itemRows(items) {
 }
 
 const PRINT_FEES = Object.freeze([
-  { key: "shipping", label: "Shipping", names: ["運費", "郵費", "shipping", "freight"] },
-  { key: "deposit", label: "Deposit", names: ["押金", "deposit"] },
-  { key: "service", label: "Service fee", names: ["手續費", "service fee", "service"] },
-  { key: "discount", label: "Discount", names: ["優惠", "折扣", "discount"] }
+  { key: "shipping", label: "Shipping" },
+  { key: "deposit", label: "Deposit" },
+  { key: "service", label: "Service fee" },
+  { key: "discount", label: "Discount" }
 ]);
-
-function feeType(item) {
-  const name = String(item?.name ?? "").trim().toLowerCase();
-  return PRINT_FEES.find(fee => fee.names.includes(name));
-}
 
 function feeRows(fees) {
   return PRINT_FEES.map(fee => {
@@ -54,11 +49,6 @@ export function toPrintableOrder(source, overrides = {}) {
   const detail = source?.detail ?? row.detail ?? {};
   const suppliedItems = detail.items ?? row.items;
   const sourceItems = Array.isArray(suppliedItems) ? suppliedItems : [];
-  const rawFees = {};
-  for (const item of sourceItems) {
-    const fee = feeType(item);
-    if (fee) rawFees[fee.key] = (rawFees[fee.key] || 0) + Number(item.price || 0) * Number(item.quantity ?? item.qty ?? 1);
-  }
   const customer = typeof row.customer === "object" ? row.customer?.name : row.customer;
   return {
     orderNo: detail.orderNo ?? row.orderNo ?? row.no ?? "",
@@ -68,8 +58,8 @@ export function toPrintableOrder(source, overrides = {}) {
     email: detail.email ?? row.email ?? "",
     shippingAddress: detail.shippingAddress ?? row.shippingAddress ?? row.address ?? "",
     carModel: detail.carModel ?? row.carModel ?? "",
-    items: sourceItems.filter(item => !feeType(item)),
-    fees: detail.fees ?? row.fees ?? rawFees,
+    items: sourceItems,
+    fees: detail.fees ?? row.fees ?? {},
     paymentTotal: detail.paymentTotal ?? row.paymentTotal ?? "",
     ...overrides
   };

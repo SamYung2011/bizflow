@@ -14,9 +14,11 @@ for (const [name,mode] of [['invoice',{invoice:true,receipt:false}],['receipt',{
  });
 }
 check('absent/zero fees produce no empty fee rows',()=>{const html=buildInvoiceDocument({...order,fees:{}},{invoice:true,receipt:false});assert.ok(!html.includes('data-print-fee='));});
-check('raw invoice fee items are split once and positive discount is printed negative',()=>{
- const next=toPrintableOrder({items:[{name:'Product',qty:1,price:100},{name:'押金',qty:1,price:60},{name:'優惠',qty:1,price:-10}],paymentTotal:150});
- assert.equal(next.items.length,1);assert.equal(next.fees.deposit,60);assert.equal(next.fees.discount,-10);
- const html=buildInvoiceDocument({...next,fees:{...next.fees,discount:10}},{invoice:false,receipt:true});assert.ok(html.includes('>-10</div>'));assert.equal((html.match(/data-print-fee="deposit"/g)||[]).length,1);
+check('normalized detail items and fees are used directly; positive discount prints negative',()=>{
+ const items=[{name:'Own ordinary product containing deposit in its name',quantity:1,price:100}];
+ const next=toPrintableOrder({detail:{items,fees:{deposit:60,discount:10},paymentTotal:150}});
+ assert.equal(next.items,items);assert.equal(next.fees.deposit,60);
+ const html=buildInvoiceDocument(next,{invoice:false,receipt:true});assert.ok(html.includes('>-10</div>'));assert.equal((html.match(/data-print-fee="deposit"/g)||[]).length,1);
+ assert.ok(html.includes(items[0].name));
 });
 console.log(`PRINT_FEES=${count}/${count}`);

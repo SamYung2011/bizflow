@@ -60,7 +60,20 @@ await check('support keeps other staff names with a paged id/email/name-only dir
  const client={from(table){assert.equal(table,'employees');return{select(columns){assert.equal(columns,'id,email,name');return this;},order(key){assert.equal(key,'id');return this;},async range(from,to){reads.push([from,to]);return{data:rows.slice(from,to+1),error:null};}};}};
  const staff=await listSupportStaff(client);assert.equal(staff.length,1001);assert.deepEqual(reads,[[0,999],[1000,1999]]);
  assert.equal(staffName('staff1000@own.invalid',staff),'Own Staff 1000');
- const support=readFileSync(file('src/views/honnmono/AppSupport.jsx'),'utf8');assert.match(support,/useSupportStaff\(options\)/);
+ const support=readFileSync(file('src/views/honnmono/AppSupport.jsx'),'utf8');assert.match(support,/useSupportStaff\(options, embedded\)/);
  assert.equal((support.match(/employees={staff}/g)||[]).length,2);
+});
+await check('embed skips realtime and task cleanup; non-embed support uses context staff',()=>{
+ const source=readFileSync(file('src/App.jsx'),'utf8');
+ for(const marker of ['  // Realtime 訂閱 customers 表','  // 每次 app 載入清理超過 180 天']){
+  const effect=source.slice(source.indexOf(marker),source.indexOf('  }, [userId]);',source.indexOf(marker)));
+  assert.match(effect,/if \(!userId \|\| isStaffAppEmbed\(window.location.search\)\) return;/);
+ }
+ const querySource=readFileSync(file('src/views/honnmono/support/useSupportData.js'),'utf8');
+ const calls=[];const api=instrumentModule(file('src/views/honnmono/support/useSupportData.js'),{useAppEmbedVisible:()=>true,useQuery:q=>{calls.push(q);return{};}},'({useSupportStaff})');
+ api.useSupportStaff({operatorEmail:'own'},false);api.useSupportStaff({operatorEmail:'own'},true);
+ assert.equal(calls[0].enabled,false);assert.equal(calls[1].enabled,true);
+ const support=readFileSync(file('src/views/honnmono/AppSupport.jsx'),'utf8');assert.match(support,/const staff = embedded \? directory.data \|\| employees : employees;/);
+ const css=readFileSync(file('root-site/bizflow/app-feedback.css'),'utf8');assert.match(css,/\[data-app-native-panel\]:not\(\[hidden\]\)\s*{\s*display: contents;/);
 });
 console.log(`APP_EMBED_PERFORMANCE=${count}/${count}`);

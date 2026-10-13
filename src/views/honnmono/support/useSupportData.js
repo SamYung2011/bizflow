@@ -6,12 +6,12 @@ import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-quer
 import * as api from '../../../lib/supportApi.js';
 import { mergeMessages, SUPPORT_PAGE_SIZE } from '../../../lib/supportConfig.js';
 
-export function useSupportStaff(options) {
+export function useSupportStaff(options, embedded) {
   const visible = useAppEmbedVisible();
   return useQuery({
     queryKey: ['support', options.operatorEmail, 'staff'],
     queryFn: () => listSupportStaff(supabase),
-    enabled: visible, staleTime: 300000,
+    enabled: visible && embedded, staleTime: 300000,
   });
 }
 
