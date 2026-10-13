@@ -1,8 +1,9 @@
 -- 离职但主站标记仍开的员工不能再读写主站；管理员也必须在职。
--- 任务 RPC 仅排除可确认已离职的负责人，隐藏全离职负责的任务；不删除任何记录。
+-- 任务 RPC 通过统一 owner_scope helper 隐藏全离职负责的任务；不删除任何记录。
+-- 131 的红点、首页也调用同一 helper；MATERIALIZED 集合避免 126 的参数未知计划逐行重算。
 -- members 和员工关联表保留 116 原样，用于历史署名；选人名单由任务页映射一处过滤。
 -- 单人旧任务回退 employee_id；无负责人任务仍显示。保留 116 的 RLS 和受控子表读取。
--- 回滚：恢复 064 的 helper 定义和 116 的 bizflow_team_task_page 定义（只执行定义，勿重跑 064 数据更新）。
+-- 回滚：先恢复 131 的 unread/Home，再恢复 064 helper 和 116 task_page 定义；最后 DROP owner_scope(uuid)。勿重跑 064 数据更新。
 BEGIN;
 CREATE OR REPLACE FUNCTION has_bizflow_main_access()
 RETURNS boolean
@@ -21,6 +22,44 @@ $$;
 
 GRANT EXECUTE ON FUNCTION has_bizflow_main_access() TO anon, authenticated;
 
+
+-- 统一负责人范围：只排除 RLS 可见且明确 active=false 的员工。
+-- 没有多人负责人时回退 employee_id；无人负责、不可见或 NULL 状态的负责人保留。
+-- 集合读取、员工权限只算一次；调用方 MATERIALIZED 一次，不逐任务调标量 helper。
+CREATE OR REPLACE FUNCTION public.bizflow_task_owner_scope(p_company_id uuid DEFAULT NULL)
+RETURNS TABLE(task_id uuid, is_visible boolean, active_assignee_ids uuid[])
+LANGUAGE sql STABLE SECURITY INVOKER SET search_path = ''
+AS $function$
+  WITH
+  task_rows AS MATERIALIZED (
+    SELECT task.id, task.employee_id
+    FROM public.employee_tasks AS task
+    WHERE p_company_id IS NULL OR task.company_id = p_company_id
+  ),
+  inactive AS MATERIALIZED (
+    SELECT employee.id FROM public.employees AS employee WHERE employee.active = false
+  ),
+  owner_rows AS MATERIALIZED (
+    SELECT assignee.task_id, assignee.employee_id, inactive.id IS NULL AS is_active
+    FROM public.bizflow_scoped_task_assignees() AS assignee
+    JOIN task_rows AS task ON task.id = assignee.task_id
+    LEFT JOIN inactive ON inactive.id = assignee.employee_id
+  ),
+  task_owners AS MATERIALIZED (
+    SELECT owner.task_id, bool_or(owner.is_active) AS has_active,
+           array_agg(owner.employee_id) FILTER (WHERE owner.is_active) AS active_assignee_ids
+    FROM owner_rows AS owner
+    GROUP BY owner.task_id
+  )
+  SELECT task.id,
+         CASE WHEN owners.task_id IS NULL THEN legacy_owner.id IS NULL ELSE owners.has_active END,
+         COALESCE(owners.active_assignee_ids, ARRAY[]::uuid[])
+  FROM task_rows AS task
+  LEFT JOIN task_owners AS owners ON owners.task_id = task.id
+  LEFT JOIN inactive AS legacy_owner ON legacy_owner.id = task.employee_id;
+$function$;
+REVOKE ALL ON FUNCTION public.bizflow_task_owner_scope(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.bizflow_task_owner_scope(uuid) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.bizflow_team_task_page(
   p_company_id uuid DEFAULT NULL,
@@ -72,26 +111,17 @@ AS $function$
     WHERE company.id = (SELECT company_id FROM scope)
     LIMIT 1
   ),
-  inactive AS MATERIALIZED (
-    SELECT id FROM public.employees WHERE active = false
+  task_owner_scope AS MATERIALIZED (
+    SELECT * FROM public.bizflow_task_owner_scope((SELECT company_id FROM scope))
   ),
   scoped_assignees AS MATERIALIZED (
     SELECT assignee.* FROM public.bizflow_scoped_task_assignees() AS assignee
   ),
-  task_owners AS MATERIALIZED (
-    SELECT assignee.task_id, bool_or(inactive.id IS NULL) AS has_active
-    FROM scoped_assignees AS assignee
-    LEFT JOIN inactive ON inactive.id = assignee.employee_id
-    GROUP BY assignee.task_id
-  ),
   visible_task_rows AS MATERIALIZED (
     SELECT task.*
     FROM public.employee_tasks AS task
-    LEFT JOIN task_owners AS owners ON owners.task_id = task.id
-    LEFT JOIN inactive AS legacy_owner ON legacy_owner.id = task.employee_id
+    JOIN task_owner_scope AS owners ON owners.task_id = task.id AND owners.is_visible
     WHERE task.company_id = (SELECT company_id FROM scope)
-      AND (owners.has_active OR (owners.task_id IS NULL
-        AND (legacy_owner.id IS NULL)))
   ),
   task_stats AS MATERIALIZED (
     SELECT
@@ -122,9 +152,9 @@ AS $function$
   assignee_rows AS MATERIALIZED (
     SELECT assignee.*
     FROM scoped_assignees AS assignee
-    LEFT JOIN inactive ON inactive.id = assignee.employee_id
     JOIN task_rows AS task ON task.id = assignee.task_id
-    WHERE inactive.id IS NULL
+    JOIN task_owner_scope AS owners ON owners.task_id = task.id
+    WHERE assignee.employee_id IS NULL OR assignee.employee_id = ANY(owners.active_assignee_ids)
   ),
   feedback_rows AS MATERIALIZED (
     SELECT feedback.*

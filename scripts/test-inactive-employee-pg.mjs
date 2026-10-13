@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { performance } from 'node:perf_hooks';
 import { buildTeamTaskSnapshotsFromRows } from '../root-site/data/live-snapshots.js';
 import { instrumentModule } from './test-support/bounded-page-runtime.mjs';
 import { createBoundedReadPg } from './test-support/bounded-read-pg.mjs';
@@ -118,6 +119,121 @@ try {
  });
  check('only confirmed inactive owners are removed; null active is retained',()=>{
   assert.ok(scoped.tasks.some(t=>t.id===tid(9)));assert.equal(scoped.tasks.some(t=>t.id===tid(1)),false);
+ });
+
+ // 13: all three consumers use the same scope, including unread watermarks and Home feed.
+ pg.sql(`
+ UPDATE employee_tasks SET created_at='2026-01-01T00:00:00Z'::timestamptz + right(id::text,12)::integer * interval '1 hour';
+ UPDATE employee_tasks SET created_at='2030-01-01'::timestamptz WHERE id IN ('${tid(1)}','${tid(4)}');
+ INSERT INTO task_assignees(task_id,employee_id) VALUES('${tid(2)}','${emp(1)}');
+ INSERT INTO employee_tasks(id,company_id,title,employee_id,status) VALUES('${tid(10)}',md5('own-other-company')::uuid,'Own inaccessible company task','${emp(1)}','open');
+ `);
+ const homeMigration=readFileSync(new URL('../migrations/128_bizflow_home_dashboard_materialized_reads_20261012.sql',import.meta.url),'utf8');
+ pg.sql(homeMigration);
+ const home=(cid=company)=>JSON.parse(pg.asUser(`SELECT bizflow_home_dashboard(${cid===null?'NULL':`'${cid}'`})::text;`));
+ const unread=(cid=company,read=null)=>JSON.parse(pg.asUser(`SELECT bizflow_unread_summary(${cid===null?'NULL':`'${cid}'`},${read===null?'NULL':`'${read}'`})::text;`));
+ const oldHome=home(),oldUnread=unread();
+ const surfaces=readFileSync(new URL('../migrations/131_bizflow_departed_task_surfaces_20261013.sql',import.meta.url),'utf8');
+ pg.sql(surfaces);pg.sql(surfaces);
+ check('task unread count and watermark exclude sole/legacy inactive owners',()=>{
+  assert.equal(oldUnread.unread.tasks,9);assert.equal(unread().unread.tasks,7);
+  assert.equal(Date.parse(unread().watermarks.tasks),Date.parse('2026-01-01T09:00:00Z'));
+  assert.equal(unread(company,'2028-01-01').unread.tasks,0);
+  assert.equal(payload().unread.unread.tasks,7);
+  for(const key of ['orders','inventory','updates']){
+   assert.deepEqual(unread().unread[key],oldUnread.unread[key]);assert.deepEqual(unread().watermarks[key],oldUnread.watermarks[key]);
+  }
+ });
+ check('Home task count/cards/feed share task-page scope without losing historic names or members',()=>{
+  const value=home();assert.equal(oldHome.counts.tasks,9);assert.equal(value.counts.tasks,7);
+  const hidden=['Own inactive only','Own legacy inactive'];
+  assert.ok(oldHome.feed.some(t=>hidden.includes(t.title)));
+  assert.ok(!value.feed.some(t=>hidden.includes(t.title)));assert.ok(!value.tasks.some(t=>hidden.includes(t.title)));
+  assert.ok(value.tasks.some(t=>t.title==='Own mixed owners'));
+  const strip=value=>{const copy=structuredClone(value);delete copy.generated_at;delete copy.tasks;delete copy.feed;delete copy.counts.tasks;copy.members=copy.members.map(({openTasks,...member})=>member);return copy;};
+  assert.deepEqual(strip(value),strip(oldHome));
+  assert.equal(payload().members.some(e=>e.id===emp(2)),true);
+ });
+ check('forced generic plans agree for explicit company, NULL scope and read watermark',()=>{
+  const values=pg.asUser(`
+   SET plan_cache_mode=force_generic_plan;
+   PREPARE own_surface_check(uuid,timestamptz) AS SELECT jsonb_build_object(
+     'unread',bizflow_unread_summary($1,$2), 'home',bizflow_home_dashboard($1),
+     'page',bizflow_team_task_page($1,0,false,$2));
+   EXECUTE own_surface_check('${company}',NULL);
+   EXECUTE own_surface_check(NULL,NULL);
+   EXECUTE own_surface_check('${company}','2028-01-01');
+  `).split('\n').map(row=>JSON.parse(row));
+  assert.equal(values.length,3);
+  for(const [index,value] of values.entries()){
+   assert.equal(value.home.counts.tasks,7);assert.equal(value.page.taskStats.total,7);
+   assert.equal(value.unread.unread.tasks,index===2?0:7);assert.equal(value.page.unread.unread.tasks,index===2?0:7);
+  }
+ });
+ check('the one scope helper and all three RPCs retain invoker ACL/signatures and materialize once',()=>{
+  const helper='bizflow_task_owner_scope(uuid)';
+  assert.equal(pg.sql(`SELECT NOT prosecdef AND provolatile='s' AND proconfig=ARRAY['search_path=""'] AND NOT has_function_privilege('anon',oid,'EXECUTE') AND has_function_privilege('authenticated',oid,'EXECUTE') FROM pg_proc WHERE oid='${helper}'::regprocedure;`),'t');
+  assert.throws(()=>pg.sql("SET ROLE anon; SELECT * FROM bizflow_task_owner_scope(NULL);"),/42501/);
+  for(const signature of ['bizflow_unread_summary(uuid,timestamp with time zone,timestamp with time zone,timestamp with time zone,text,timestamp with time zone)','bizflow_home_dashboard(uuid)','bizflow_team_task_page(uuid,integer,boolean,timestamp with time zone,timestamp with time zone,timestamp with time zone,text,timestamp with time zone)']){
+   const body=pg.sql(`SELECT prosrc FROM pg_proc WHERE oid='${signature}'::regprocedure;`);
+   assert.equal((body.match(/public\.bizflow_task_owner_scope\(/g)||[]).length,1);
+   assert.match(body,/task_owner_scope AS MATERIALIZED/);
+   assert.equal(pg.sql(`SELECT NOT prosecdef AND provolatile='s' FROM pg_proc WHERE oid='${signature}'::regprocedure;`),'t');
+  }
+ });
+ check('missing unread/Home filters are each caught independently',()=>{
+  const mutation=surfaces.replaceAll('    JOIN task_owner_scope AS owners ON owners.task_id = task.id AND owners.is_visible\n','');
+  pg.sql(mutation);
+  assert.throws(()=>assert.equal(unread().unread.tasks,7));assert.throws(()=>assert.equal(home().counts.tasks,7));
+  pg.sql(surfaces);assert.equal(unread().unread.tasks,7);assert.equal(home().counts.tasks,7);
+ });
+ // Size/generic gate uses the production 031/043 indexes, absent from the minimal fixture.
+ pg.sql(`
+ ALTER TABLE task_assignees ADD PRIMARY KEY(task_id,employee_id);
+ CREATE INDEX task_assignees_employee_idx ON task_assignees(employee_id);
+ CREATE INDEX task_assignees_task_idx ON task_assignees(task_id);
+ CREATE INDEX employee_tasks_company_id_idx ON employee_tasks(company_id);
+ INSERT INTO employee_tasks(id,company_id,title,employee_id,status,created_at)
+ SELECT md5('own-scope-scale-'||n)::uuid,'${company}','Own scope scale '||n,
+        CASE WHEN n%4=0 THEN '${emp(2)}'::uuid ELSE '${emp(4)}'::uuid END,'done','2026-01-01'
+ FROM generate_series(1,5000) AS n;
+ INSERT INTO task_assignees(task_id,employee_id)
+ SELECT id,employee_id FROM employee_tasks WHERE title LIKE 'Own scope scale %';
+ ANALYZE employee_tasks;ANALYZE task_assignees;ANALYZE employees;
+ `);
+ check('5k tasks in a generic plan scan inactive employees and scoped assignees once',()=>{
+  const body=pg.sql("SELECT prosrc FROM pg_proc WHERE oid='bizflow_task_owner_scope(uuid)'::regprocedure;").replaceAll('p_company_id','$1');
+  const plan=JSON.parse(pg.asUser(`SET plan_cache_mode=force_generic_plan; PREPARE own_scope_plan(uuid) AS ${body} EXPLAIN (ANALYZE,VERBOSE,FORMAT JSON) EXECUTE own_scope_plan('${company}');`));
+  const nodes=[];const visit=node=>{nodes.push(node);for(const child of node.Plans||[])visit(child);};visit(plan[0].Plan);
+  const employees=nodes.filter(node=>node['Relation Name']==='employees');
+  assert.ok(employees.length);assert.ok(employees.every(node=>node['Actual Loops']===1));
+  const reads=nodes.filter(node=>node['Function Name']==='bizflow_scoped_task_assignees');
+  assert.equal(reads.length,1);assert.equal(reads[0]['Actual Loops'],1);
+  const started=performance.now();
+  const value=JSON.parse(pg.asUser(`SET plan_cache_mode=force_generic_plan; PREPARE own_surface_scale(uuid) AS SELECT jsonb_build_object('unread',bizflow_unread_summary($1),'home',bizflow_home_dashboard($1),'page',bizflow_team_task_page($1,0,false));EXECUTE own_surface_scale('${company}');`));
+  const elapsed=Math.round(performance.now()-started);
+  for(const count of [value.unread.unread.tasks,value.home.counts.tasks,value.page.taskStats.total])assert.equal(count,3757);
+  console.log(`TASK_OWNER_GENERIC_PLAN tasks=5000 employee_loops=1 assignee_helper_loops=1 scope_ms=${Math.round(plan[0]['Execution Time'])} three_surfaces_ms=${elapsed}`);
+ });
+
+ check('131 then 130 roll back cleanly and reapply restores all three filtered counts',()=>{
+  const oldUnreadSource=readFileSync(new URL('../migrations/104_bizflow_data_phase1_r5.sql',import.meta.url),'utf8');
+  const start=oldUnreadSource.indexOf('CREATE OR REPLACE FUNCTION public.bizflow_unread_summary(');
+  pg.sql(oldUnreadSource.slice(start,oldUnreadSource.indexOf("NOTIFY pgrst, 'reload schema';",start)));pg.sql(homeMigration);
+  assert.equal(unread().unread.tasks,5009);assert.equal(home().counts.tasks,5009);
+  assert.equal(payload().taskStats.total,3757);
+  const oldHelper=readFileSync(new URL('../migrations/064_bizflow_main_access.sql',import.meta.url),'utf8');
+  const begin=oldHelper.indexOf('CREATE OR REPLACE FUNCTION has_bizflow_main_access()');
+  pg.sql(oldHelper.slice(begin,oldHelper.indexOf('$$;',begin)+3));
+  const oldPage=readFileSync(new URL('../migrations/116_task_scope_setbased_rls.sql',import.meta.url),'utf8');
+  const pageStart=oldPage.indexOf('CREATE OR REPLACE FUNCTION public.bizflow_team_task_page(');
+  pg.sql(oldPage.slice(pageStart,oldPage.indexOf("NOTIFY pgrst, 'reload schema';",pageStart)));
+  pg.sql('DROP FUNCTION public.bizflow_task_owner_scope(uuid);');
+  assert.equal(pg.sql("SELECT to_regprocedure('bizflow_task_owner_scope(uuid)') IS NULL;"),'t');
+  assert.equal(payload().taskStats.total,5009);
+  assert.equal(pg.sql('SELECT count(*) FROM employee_tasks;'),'5010');
+  pg.sql(migration);pg.sql(surfaces);
+  assert.equal(unread().unread.tasks,3757);assert.equal(home().counts.tasks,3757);assert.equal(payload().taskStats.total,3757);
  });
  console.log(`INACTIVE_EMPLOYEE_PG=${count}/${count}`);
 }finally{pg.close();}
