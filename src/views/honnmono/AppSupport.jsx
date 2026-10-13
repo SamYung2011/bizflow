@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useT } from '../../i18n.jsx';
 import { SUPPORT_LIMITS } from '../../lib/supportConfig.js';
-import { useSupportList, useSupportThread } from './support/useSupportData.js';
+import { useSupportList, useSupportThread, useSupportStaff } from './support/useSupportData.js';
 import ConversationList from './support/ConversationList.jsx';
 import ConversationHeader from './support/ConversationHeader.jsx';
 import MessageThread from './support/MessageThread.jsx';
@@ -15,6 +15,8 @@ function Workspace({ session, employees }) {
   const [selectedId, setSelectedId] = useState(null);
   const [filters, setFilters] = useState({ state: 'waiting', category: '', search: '' });
   const options = useMemo(() => ({ accessToken: session.access_token, operatorEmail: session.user.email }), [session.access_token, session.user.email]);
+  const directory = useSupportStaff(options);
+  const staff = directory.data || employees;
   const list = useSupportList(options, filters);
   const data = useSupportThread(selectedId, options);
   const conversation = data.detail.data;
@@ -27,8 +29,8 @@ function Workspace({ session, employees }) {
       </div> : data.detail.isPending ? <SupportSkeleton /> : data.detail.isError ? <div className="support-error" role="alert">
         {t('載入失敗，請重試')} <button onClick={() => data.detail.refetch()}>{t('重試')}</button><button onClick={() => setSelectedId(null)}>{t('返回會話列表')}</button>
       </div> : <>
-        <ConversationHeader key={selectedId} conversation={conversation} employees={employees} onChange={data.change} onBack={() => setSelectedId(null)} />
-        <MessageThread key={`thread-${selectedId}`} conversation={conversation} data={data} employees={employees} options={options} />
+        <ConversationHeader key={selectedId} conversation={conversation} employees={staff} onChange={data.change} onBack={() => setSelectedId(null)} />
+        <MessageThread key={`thread-${selectedId}`} conversation={conversation} data={data} employees={staff} options={options} />
         <Composer key={`composer-${selectedId}`} closed={conversation.status === 'closed'} limits={conversation.limits || SUPPORT_LIMITS} onSend={data.send} />
       </>}
     </section>

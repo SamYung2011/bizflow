@@ -1,3 +1,4 @@
+import { useAppEmbedVisible } from '../../lib/appEmbedVisibility.js';
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useT } from '../../i18n.jsx';
@@ -13,6 +14,7 @@ const OFFER_STATUS = { draft: '草稿', published: '上架中', ended: '已結�
 const COUPON_STATUS = { available: '可使用', used: '已使用', expired: '已過期' };
 
 function Workspace({ session }) {
+  const visible = useAppEmbedVisible();
   const { t, lang } = useT();
   const options = useMemo(() => ({ accessToken: session.access_token }), [session.access_token]);
   const [type, setType] = useState('offers');
@@ -27,14 +29,14 @@ function Workspace({ session }) {
     queryFn: ({ signal }) => type === 'offers'
       ? listOffers({ status, q, page, size: PAGE_SIZE }, { ...options, signal })
       : listCoupons({ status, offerId: offerFilter, q, page, size: PAGE_SIZE }, { ...options, signal }),
-    refetchInterval: 10000, staleTime: 0 });
+    refetchInterval: 10000, staleTime: 0, enabled: visible });
   const detail = useQuery({ queryKey: ['appOffers', session.user.email, type, selectedId],
     queryFn: ({ signal }) => type === 'offers' ? getOffer(selectedId, { ...options, signal }) :
       getCoupon(selectedId, { ...options, signal }),
-    enabled: selectedId != null && !newOffer, refetchInterval: 10000, staleTime: 0 });
+    enabled: visible && selectedId != null && !newOffer, refetchInterval: 10000, staleTime: 0 });
   const allOffers = useQuery({ queryKey: ['appOffers', session.user.email, 'offerChoices'],
     queryFn: ({ signal }) => listOffers({ page: 1, size: 100 }, { ...options, signal }),
-    staleTime: 10000 });
+    staleTime: 10000, enabled: visible });
   const rows = list.data?.items || [];
   const total = list.data?.total || 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));

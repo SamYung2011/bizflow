@@ -1,20 +1,34 @@
+import { supabase } from '../../../lib/supabaseClient.js';
+import { listSupportStaff } from '../../../lib/supportStaff.js';
+import { useAppEmbedVisible } from '../../../lib/appEmbedVisibility.js';
 import { useEffect, useRef, useState } from 'react';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as api from '../../../lib/supportApi.js';
 import { mergeMessages, SUPPORT_PAGE_SIZE } from '../../../lib/supportConfig.js';
 
+export function useSupportStaff(options) {
+  const visible = useAppEmbedVisible();
+  return useQuery({
+    queryKey: ['support', options.operatorEmail, 'staff'],
+    queryFn: () => listSupportStaff(supabase),
+    enabled: visible, staleTime: 300000,
+  });
+}
+
 export function useSupportList(options, filters) {
+  const visible = useAppEmbedVisible();
   const params = { status: filters.state === 'closed' ? 'closed' : 'open',
     filter: filters.state === 'waiting' ? 'waiting_staff' : undefined, q: filters.search, size: SUPPORT_PAGE_SIZE };
   return useInfiniteQuery({
     queryKey: ['support', options.operatorEmail, 'list', params], initialPageParam: 1,
     queryFn: ({ pageParam, signal }) => api.listConversations({ ...params, page: pageParam }, { ...options, signal }),
     getNextPageParam: (last, pages) => last.length === SUPPORT_PAGE_SIZE ? pages.length + 1 : undefined,
-    refetchInterval: 10000, staleTime: 0, gcTime: 0,
+    enabled: visible, refetchInterval: 10000, staleTime: 0, gcTime: 0,
   });
 }
 
 export function useSupportThread(id, options) {
+  const visible = useAppEmbedVisible();
   const client = useQueryClient();
   const prefix = ['support', options.operatorEmail];
   const detailKey = [...prefix, 'detail', id], messageKey = [...prefix, 'messages', id];
@@ -26,7 +40,7 @@ export function useSupportThread(id, options) {
   activeId.current = id;
   useEffect(() => () => draftUrls.current.forEach(url => URL.revokeObjectURL(url)), []);
   const detail = useQuery({
-    queryKey: detailKey, enabled: !!id, gcTime: 0, staleTime: 0, refetchInterval: 3000,
+    queryKey: detailKey, enabled: visible && !!id, gcTime: 0, staleTime: 0, refetchInterval: 3000,
     queryFn: async ({ signal }) => {
       const conversation = await api.getConversation(id, { ...options, signal });
       if (!unread.current.has(id)) unread.current.set(id, conversation.staffReadMsgId);
@@ -34,7 +48,7 @@ export function useSupportThread(id, options) {
     },
   });
   const thread = useQuery({
-    queryKey: messageKey, enabled: !!id && !!detail.data, gcTime: 0, staleTime: 0, refetchInterval: 3000,
+    queryKey: messageKey, enabled: visible && !!id && !!detail.data, gcTime: 0, staleTime: 0, refetchInterval: 3000,
     queryFn: async ({ signal }) => {
       const current = client.getQueryData(messageKey) || [];
       let afterId = Math.max(0, ...current.map(message => message.id)), incoming = [], batch;

@@ -1,3 +1,4 @@
+import { useAppEmbedVisible } from '../../lib/appEmbedVisibility.js';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useT } from '../../i18n.jsx';
@@ -11,6 +12,7 @@ import './offers/offers.css';
 import './knowledge/knowledge.css';
 
 function Workspace({ session }) {
+  const visible = useAppEmbedVisible();
   const { t } = useT(), cache = useQueryClient();
   const options = useMemo(() => ({ accessToken: session.access_token }), [session.access_token]);
   const [topicId, setTopicId] = useState(null), [newTopic, setNewTopic] = useState(false);
@@ -18,13 +20,13 @@ function Workspace({ session }) {
   const [message, setMessage] = useState('');
   const [filters, setFilters] = useState({ q: '', enabled: '', page: 1 });
   const key = ['appKnowledge', session.user.email];
-  const topics = useQuery({ queryKey: [...key, 'topics'], queryFn: ({ signal }) => listTopics({ ...options, signal }), staleTime: 10000 });
+  const topics = useQuery({ queryKey: [...key, 'topics'], queryFn: ({ signal }) => listTopics({ ...options, signal }), staleTime: 10000, enabled: visible });
   const rows = topics.data || [];
   useEffect(() => { if (topicId == null && !newTopic && rows.length) setTopicId(rows[0].id); }, [topicId, newTopic, rows]);
-  const topic = useQuery({ queryKey: [...key, 'topic', topicId], queryFn: ({ signal }) => getTopic(topicId, { ...options, signal }), enabled: topicId != null });
+  const topic = useQuery({ queryKey: [...key, 'topic', topicId], queryFn: ({ signal }) => getTopic(topicId, { ...options, signal }), enabled: visible && topicId != null });
   const articles = useQuery({ queryKey: [...key, 'articles', topicId, filters],
-    queryFn: ({ signal }) => listArticles({ topicId, ...filters, size: PAGE_SIZE }, { ...options, signal }), enabled: topicId != null });
-  const article = useQuery({ queryKey: [...key, 'article', articleId], queryFn: ({ signal }) => getArticle(articleId, { ...options, signal }), enabled: articleId != null });
+    queryFn: ({ signal }) => listArticles({ topicId, ...filters, size: PAGE_SIZE }, { ...options, signal }), enabled: visible && topicId != null });
+  const article = useQuery({ queryKey: [...key, 'article', articleId], queryFn: ({ signal }) => getArticle(articleId, { ...options, signal }), enabled: visible && articleId != null });
   const chooseTopic = id => { setTopicId(id); setNewTopic(false); setArticleId(null); setNewArticle(false);
     setFilters({ q: '', enabled: '', page: 1 }); setMessage(''); };
   const savedTopic = async saved => { setTopicId(saved.id); setNewTopic(false);

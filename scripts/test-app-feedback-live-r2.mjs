@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { syncAppFramePanels } from "../root-site/bizflow/app-frame-panels.js";
 import { readFile } from "node:fs/promises";
 import { adapterListSignature } from "../root-site/bizflow/app-feedback.js";
 import { assertHonnmonoAdminRequest, formatFeedbackTime } from "../root-site/bizflow/app-feedback-api.js";
@@ -21,6 +22,11 @@ function fixture() {
   const calls = [], paints = [], listeners = new Map();
   const document = {
     visibilityState: "visible", activeElement: null,
+    createElement() {
+      const template = { innerHTML: "" };
+      template.content = { querySelector: () => ({ value: template.innerHTML }) };
+      return template;
+    },
     addEventListener(type, handler) { listeners.set(type, handler); },
     removeEventListener(type) { listeners.delete(type); },
     querySelector(selector) {
@@ -35,7 +41,12 @@ function fixture() {
     focus() { document.activeElement = input; },
   };
   const page = {
-    set outerHTML(value) { paints.push(JSON.parse(value)); document.activeElement = null; },
+    querySelector(selector) {
+      if (selector === "[data-app-frame-panels]") return null;
+      return { replaceWith(node) {
+        if (selector === "[data-app-native-panel]") { paints.push(JSON.parse(node.value)); document.activeElement = null; }
+      } };
+    },
   };
   const scope = {
     signal: controller.signal, isCurrent: () => current,
@@ -68,10 +79,11 @@ function fixture() {
     section("function switchAppTab", "function onFeedbackClick"),
     section("function onFeedbackInput", "function onFeedbackChange"),
   ].join("\n");
-  const make = new Function("document", "activeScope", "callHonnmonoAdmin", "createFeedbackPoller", "createAdapterOtaLoader", "adapterListSignature", "Date", "timers", "paints", "datePanel", `
+  const make = new Function("document", "activeScope", "callHonnmonoAdmin", "createFeedbackPoller", "createAdapterOtaLoader", "adapterListSignature", "Date", "timers", "paints", "datePanel", "syncAppFramePanels", `
     const PAGE_SIZE = 20, DEVICES_POLL_INTERVAL_MS = 10_000;
     const currentHongKongDate = () => '2026-09-09';
     const activeInstance = 1, helpers = {};
+    const t = key => key, rawE = value => value;
     const isActive = () => activeScope.isCurrent();
     const adapterSessionDatePanel = datePanel;
     const captureScrollState = () => ({}), restoreScrollState = () => {};
@@ -88,7 +100,7 @@ function fixture() {
   `);
   const api = make(document, scope, request, createFeedbackPoller, createAdapterOtaLoader, adapterListSignature,
     class extends Date { static now() { return now; } }, timers, paints,
-    { isOpen: () => panelOpen, close: () => { panelOpen = false; } });
+    { isOpen: () => panelOpen, close: () => { panelOpen = false; } }, syncAppFramePanels);
   const settle = () => new Promise((resolve) => setImmediate(resolve));
   return {
     ...api, calls, paints, document, input, row,

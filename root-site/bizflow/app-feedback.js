@@ -1,3 +1,4 @@
+import { renderAppFramePanel, syncAppFramePanels } from "./app-frame-panels.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { createDateRangePanel } from "../components/date-range-panel.js";
 import { displayDateInput, normalizeDateInput } from "../components/date-value.js";
@@ -732,34 +733,9 @@ function renderTabs() {
   </nav>`;
 }
 
-function render(nextHelpers) {
-  helpers = nextHelpers;
-  const isFeedback = state.activeTab === "feedback";
-  const subtitleKey = state.activeTab === "support" ? "supportSubtitle" : state.activeTab === "northbound" ? "northboundSubtitle" : state.activeTab === "insurance" ? "insuranceSubtitle" : state.activeTab === "offers" ? "offersSubtitle" : state.activeTab === "knowledge" ? "knowledgeSubtitle" : isFeedback
-    ? "subtitle"
-    : state.activeTab === "devices"
-      ? "deviceListSubtitle"
-      : state.activeTab === "sim"
-        ? "simSubtitle"
-        : "deviceUnbindSubtitle";
-  return `<section class="app-feedback-page" data-app-feedback-page>
-    <header class="app-feedback-head">
-      <div><h1>${rawE(t("honnmonoAppTitle"))}</h1><p>${rawE(t(subtitleKey))}</p></div>
-      ${isFeedback ? `<button type="button" class="app-feedback-button app-feedback-button--refresh" data-feedback-refresh${state.loading ? " disabled" : ""}>${rawE(t(state.loading ? "refreshing" : "refresh"))}</button>` : ""}
-    </header>
-    ${renderTabs()}
-    ${
-      state.activeTab === "support"
-        ? `<iframe class="app-support-frame" title="${rawE(t("supportTab"))}" src="/task-platform/?view=appSupport&embed=1&lang=${helpers.lang}" data-support-frame></iframe>`
-        : state.activeTab === "northbound"
-          ? `<iframe class="app-support-frame" title="${rawE(t("northboundTab"))}" src="/task-platform/?view=appNorthbound&embed=1&lang=${helpers.lang}" data-northbound-frame></iframe>`
-        : state.activeTab === "insurance"
-          ? `<iframe class="app-support-frame" title="${rawE(t("insuranceTab"))}" src="/task-platform/?view=appInsurance&embed=1&lang=${helpers.lang}" data-insurance-frame></iframe>`
-        : state.activeTab === "knowledge"
-          ? `<iframe class="app-support-frame" title="${rawE(t("knowledgeTab"))}" src="/task-platform/?view=appKnowledge&embed=1&lang=${helpers.lang}" data-knowledge-frame></iframe>`
-        : state.activeTab === "offers"
-          ? `<iframe class="app-support-frame" title="${rawE(t("offersTab"))}" src="/task-platform/?view=appOffers&embed=1&lang=${helpers.lang}" data-offers-frame></iframe>`
-        : isFeedback ? renderFeedbackPanel()
+function renderNativePanel() {
+  if (["support", "northbound", "insurance", "offers", "knowledge"].includes(state.activeTab)) return "";
+  return state.activeTab === "feedback" ? renderFeedbackPanel()
         : state.activeTab === "devices"
           ? renderAdapterPanel()
           : state.activeTab === "sim"
@@ -785,8 +761,27 @@ function render(nextHelpers) {
               formatTime: (value) => formatFeedbackTime(value, helpers.lang),
               errorCopy: otaErrorCopy,
             }) : ""}
-          </div>`
-    }
+          </div>`;
+}
+
+function render(nextHelpers) {
+  helpers = nextHelpers;
+  const isFeedback = state.activeTab === "feedback";
+  const subtitleKey = state.activeTab === "support" ? "supportSubtitle" : state.activeTab === "northbound" ? "northboundSubtitle" : state.activeTab === "insurance" ? "insuranceSubtitle" : state.activeTab === "offers" ? "offersSubtitle" : state.activeTab === "knowledge" ? "knowledgeSubtitle" : isFeedback
+    ? "subtitle"
+    : state.activeTab === "devices"
+      ? "deviceListSubtitle"
+      : state.activeTab === "sim"
+        ? "simSubtitle"
+        : "deviceUnbindSubtitle";
+  return `<section class="app-feedback-page" data-app-feedback-page>
+    <div data-app-feedback-chrome><header class="app-feedback-head">
+      <div><h1>${rawE(t("honnmonoAppTitle"))}</h1><p>${rawE(t(subtitleKey))}</p></div>
+      ${isFeedback ? `<button type="button" class="app-feedback-button app-feedback-button--refresh" data-feedback-refresh${state.loading ? " disabled" : ""}>${rawE(t(state.loading ? "refreshing" : "refresh"))}</button>` : ""}
+    </header>
+    ${renderTabs()}</div>
+    <div data-app-frame-panels>${renderAppFramePanel(state.activeTab, helpers.lang, t, rawE)}</div>
+    <div data-app-native-panel${["support", "northbound", "insurance", "offers", "knowledge"].includes(state.activeTab) ? " hidden" : ""}>${renderNativePanel()}</div>
   </section>`;
 }
 
@@ -814,7 +809,11 @@ function rerender({ preserveScroll = false } = {}) {
   if (!page || !helpers) return;
   adapterSessionDatePanel.close();
   const scrollState = preserveScroll ? captureScrollState() : null;
-  page.outerHTML = render(helpers);
+  const template = document.createElement("template");
+  template.innerHTML = render(helpers);
+  page.querySelector("[data-app-feedback-chrome]").replaceWith(template.content.querySelector("[data-app-feedback-chrome]"));
+  page.querySelector("[data-app-native-panel]").replaceWith(template.content.querySelector("[data-app-native-panel]"));
+  syncAppFramePanels(page, state.activeTab, helpers.lang, t, rawE);
   if (state?.activeTab === "devices") {
     state.adapters.adaptersDirty = false;
     state.adapters.otaDirty = false;
@@ -2096,22 +2095,8 @@ export async function mountPage({
   throwIfPageAborted(signal, scope);
   requireFeedbackRouteAccess(currentUser, session, { url, navigation });
   const nextState = createState(historyState, currentUser);
-  const initialList =
-    nextState.activeTab === "feedback"
-      ? callHonnmonoAdmin(listSubPath(nextState), { signal }).then(
-          (payload) => ({ payload, error: null }),
-          (error) => ({ payload: null, error }),
-        )
-      : Promise.resolve({ payload: null, error: null });
-  const initialResult = await initialList;
-  throwIfPageAborted(signal, scope);
   const { unread } = cachedPageUnread(currentUser);
-  if (initialResult.payload) {
-    applyFeedbackListPayload(nextState, initialResult.payload);
-    nextState.hasLoadedList = true;
-  } else if (initialResult.error) {
-    nextState.listError = initialResult.error;
-  }
+  nextState.loading = nextState.activeTab === "feedback";
   const instance = ++instanceSequence;
   activeInstance = instance;
   activeScope = scope;
@@ -2167,6 +2152,7 @@ export async function mountPage({
   return {
     page: createFeedbackPage({ currentUser, unread }),
     activate() {
+      syncAppFramePanels(document.querySelector("[data-app-feedback-page]"), state.activeTab, helpers.lang, t, rawE);
       void loadPageUnread({ scope, currentUser });
       scope.listen(document, "click", onFeedbackClick);
       scope.listen(document, "input", onFeedbackInput);
@@ -2185,6 +2171,7 @@ export async function mountPage({
         poll: pollActiveTab,
       });
       activePoller = poller;
+      if (state.activeTab === "feedback") void loadList();
       if (!["support", "northbound", "insurance", "offers", "knowledge", "device", "sim"].includes(state.activeTab) && !(state.activeTab === "devices" && state.adapters.kind === "setparam")) poller.start(state.activeTab === "devices" ? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS);
       if ((state.isAdmin && state.activeTab === "device") || (state.activeTab === "devices" && state.adapters.kind !== "setparam")) void otaController.load({ includeLegacy: state.isAdmin });
       if (state.activeTab === "devices") {
