@@ -1,3 +1,4 @@
+import { useAppEmbedVisible } from '../../lib/appEmbedVisibility.js';
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useT } from '../../i18n.jsx';
@@ -16,6 +17,7 @@ const details = { policy: getPolicy, claim: getClaim, enquiry: getEnquiry };
 const views = { policy: PolicyDetail, claim: ClaimDetail, enquiry: EnquiryDetail };
 
 function Workspace({ session }) {
+  const visible = useAppEmbedVisible();
   const { t, lang } = useT();
   const options = useMemo(() => ({ accessToken: session.access_token }), [session.access_token]);
   const [type, setType] = useState('policy');
@@ -27,12 +29,12 @@ function Workspace({ session }) {
   const list = useQuery({
     queryKey: ['appInsurance', session.user.email, 'list', type, status, q, page],
     queryFn: ({ signal }) => listItems({ type, status, q, page, size: PAGE_SIZE }, { ...options, signal }),
-    refetchInterval: 10000, staleTime: 0,
+    refetchInterval: 10000, staleTime: 0, enabled: visible,
   });
   const detail = useQuery({
     queryKey: ['appInsurance', session.user.email, 'detail', type, selectedId],
     queryFn: ({ signal }) => details[type](selectedId, { ...options, signal }),
-    enabled: selectedId != null, refetchInterval: 10000, staleTime: 0,
+    enabled: visible && selectedId != null, refetchInterval: 10000, staleTime: 0,
   });
   const rows = list.data?.items || [];
   const total = list.data?.total || 0;

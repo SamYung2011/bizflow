@@ -1,3 +1,4 @@
+import { useAppEmbedVisible } from '../../lib/appEmbedVisibility.js';
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useT } from '../../i18n.jsx';
@@ -11,6 +12,7 @@ const PAGE_SIZE = 30;
 const FILTERS = [['open', '進行中'], ['done', '已完成'], ['all', '全部']];
 
 function Workspace({ session }) {
+  const visible = useAppEmbedVisible();
   const { t, lang } = useT();
   const options = useMemo(() => ({ accessToken: session.access_token }), [session.access_token]);
   const [status, setStatus] = useState('open');
@@ -21,12 +23,12 @@ function Workspace({ session }) {
   const list = useQuery({
     queryKey: ['appNorthbound', session.user.email, 'list', status, q, page],
     queryFn: ({ signal }) => listCases({ status, q, page, size: PAGE_SIZE }, { ...options, signal }),
-    refetchInterval: 10000, staleTime: 0,
+    refetchInterval: 10000, staleTime: 0, enabled: visible,
   });
   const detail = useQuery({
     queryKey: ['appNorthbound', session.user.email, 'detail', selectedId],
     queryFn: ({ signal }) => getCase(selectedId, { ...options, signal }),
-    enabled: !!selectedId, refetchInterval: 10000, staleTime: 0,
+    enabled: visible && !!selectedId, refetchInterval: 10000, staleTime: 0,
   });
   const rows = (list.data?.items || []).filter(row => row.submittedAt != null);
   const total = list.data?.total || 0;

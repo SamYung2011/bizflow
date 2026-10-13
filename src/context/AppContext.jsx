@@ -3,6 +3,8 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase, fetchAllTable } from '../lib/supabaseClient.js'
 import { isNonWarrantyItem, itemWarrantyMonths } from '../lib/warranty.js'
 import { fmtInvNum } from '../lib/invoiceHelpers.js'
+import { isStaffAppEmbed } from '../lib/appEmbed.js'
+import { useAppEmbedVisible } from '../lib/appEmbedVisibility.js'
 
 // 庫存預警閾值（活 SKU 合計 < 50 視為低庫存）
 const LOW_STOCK_THRESHOLD = 50
@@ -29,6 +31,9 @@ export function AppProvider({ children }) {
 
   // 登入後才加載數據 — 用 user.id 作為依賴
   const userId = session?.user?.id
+  const isAppEmbed = isStaffAppEmbed(window.location.search)
+  const embedVisible = useAppEmbedVisible()
+  const loadMainTables = !!userId && !isAppEmbed
   // 全 App 共享：當前 tab。部分高頻/重資料 query 只在對應 tab 啟動，避免首頁被無關輪詢拖慢。
   const [tab, setTab] = useState(() => {
     const view = new URLSearchParams(window.location.search).get('view');
@@ -44,45 +49,55 @@ export function AppProvider({ children }) {
   const isUpdateLogTab = tab === 'updatelog'
 
   // 批 1：products / suppliers / warehouses / stocks
-  const qProducts = useQuery({ queryKey: ['bf', 'products'], queryFn: () => fetchAllTable('products', 'name'), enabled: !!userId })
-  const qWarehouses = useQuery({ queryKey: ['bf', 'warehouses'], queryFn: () => fetchAllTable('warehouses', 'sort_order'), enabled: !!userId })
-  const qStocks = useQuery({ queryKey: ['bf', 'inventory_stock'], queryFn: () => fetchAllTable('inventory_stock', null), enabled: !!userId })
-  const qSuppliers = useQuery({ queryKey: ['bf', 'suppliers'], queryFn: () => fetchAllTable('suppliers', 'created_at', false), enabled: !!userId && isSuppliersTab })
+  const qProducts = useQuery({ queryKey: ['bf', 'products'], queryFn: () => fetchAllTable('products', 'name'), enabled: loadMainTables })
+  const qWarehouses = useQuery({ queryKey: ['bf', 'warehouses'], queryFn: () => fetchAllTable('warehouses', 'sort_order'), enabled: loadMainTables })
+  const qStocks = useQuery({ queryKey: ['bf', 'inventory_stock'], queryFn: () => fetchAllTable('inventory_stock', null), enabled: loadMainTables })
+  const qSuppliers = useQuery({ queryKey: ['bf', 'suppliers'], queryFn: () => fetchAllTable('suppliers', 'created_at', false), enabled: loadMainTables && isSuppliersTab })
 
   // 批 2：customers / line_item_aliases
   // customers 高頻：staleTime: 0 → F5 立刻 hydrate 老 cache 顯示 + 同時 background refetch 拿最新
-  const qCustomers = useQuery({ queryKey: ['bf', 'customers'], queryFn: () => fetchAllTable('customers', 'name'), enabled: !!userId, staleTime: 0 })
-  const qCustomerDevices = useQuery({ queryKey: ['bf', 'customer_devices'], queryFn: () => fetchAllTable('customer_devices', 'created_at'), enabled: !!userId && (isCustomersTab || isInvoicesTab), staleTime: 0 })
-  const qLineItemAliases = useQuery({ queryKey: ['bf', 'line_item_aliases'], queryFn: () => fetchAllTable('line_item_aliases', 'alias_name'), enabled: !!userId && (isProductsTab || isInvoicesTab || isRevenueTab || isPendingDeductionTab) })
+  const qCustomers = useQuery({ queryKey: ['bf', 'customers'], queryFn: () => fetchAllTable('customers', 'name'), enabled: loadMainTables, staleTime: 0 })
+  const qCustomerDevices = useQuery({ queryKey: ['bf', 'customer_devices'], queryFn: () => fetchAllTable('customer_devices', 'created_at'), enabled: loadMainTables && (isCustomersTab || isInvoicesTab), staleTime: 0 })
+  const qLineItemAliases = useQuery({ queryKey: ['bf', 'line_item_aliases'], queryFn: () => fetchAllTable('line_item_aliases', 'alias_name'), enabled: loadMainTables && (isProductsTab || isInvoicesTab || isRevenueTab || isPendingDeductionTab) })
 
   // 批 3：invoices / inventory
   // invoices 高頻：staleTime: 0（同上）
-  const qInvoices = useQuery({ queryKey: ['bf', 'invoices'], queryFn: () => fetchAllTable('invoices', 'date', false), enabled: !!userId, staleTime: 0 })
-  const qInventory = useQuery({ queryKey: ['bf', 'inventory'], queryFn: () => fetchAllTable('inventory', null), enabled: !!userId && isInvoicesTab })
+  const qInvoices = useQuery({ queryKey: ['bf', 'invoices'], queryFn: () => fetchAllTable('invoices', 'date', false), enabled: loadMainTables, staleTime: 0 })
+  const qInventory = useQuery({ queryKey: ['bf', 'inventory'], queryFn: () => fetchAllTable('inventory', null), enabled: loadMainTables && isInvoicesTab })
 
   // 批 4：員工/任務/反饋/更新日誌/WhatsApp/companies 等
   // WhatsApp 全板塊高頻：只在 WhatsApp tab 啟動，避免首頁被 2s/5s 輪詢反覆重渲染。
-  const qEmployees = useQuery({ queryKey: ['bf', 'employees'], queryFn: () => fetchAllTable('employees', 'created_at'), enabled: !!userId })
-  const qTasks = useQuery({ queryKey: ['bf', 'employee_tasks'], queryFn: () => fetchAllTable('employee_tasks', 'created_at'), enabled: !!userId })
-  const qTaskAssignees = useQuery({ queryKey: ['bf', 'task_assignees'], queryFn: () => fetchAllTable('task_assignees', 'created_at', true, null), enabled: !!userId })
-  const qFeedbacks = useQuery({ queryKey: ['bf', 'employee_task_feedbacks'], queryFn: () => fetchAllTable('employee_task_feedbacks', 'created_at'), enabled: !!userId })
-  const qUpdateLogs = useQuery({ queryKey: ['bf', 'employee_update_logs'], queryFn: () => fetchAllTable('employee_update_logs', 'created_at', false), enabled: !!userId && isUpdateLogTab })
-  const qLogComments = useQuery({ queryKey: ['bf', 'employee_update_log_comments'], queryFn: () => fetchAllTable('employee_update_log_comments', 'created_at'), enabled: !!userId && isUpdateLogTab })
+  const qEmployees = useQuery({
+    queryKey: isAppEmbed ? ['bf', 'employees', userId] : ['bf', 'employees'],
+    queryFn: async () => {
+      if (!isAppEmbed) return fetchAllTable('employees', 'created_at');
+      const { data, error } = await supabase.from('employees').select('*').eq('user_id', userId).maybeSingle();
+      if (error) throw error;
+      return data ? [data] : [];
+    },
+    enabled: !!userId && embedVisible,
+    ...(isAppEmbed ? { refetchInterval: 30000, staleTime: 0 } : {}),
+  })
+  const qTasks = useQuery({ queryKey: ['bf', 'employee_tasks'], queryFn: () => fetchAllTable('employee_tasks', 'created_at'), enabled: loadMainTables })
+  const qTaskAssignees = useQuery({ queryKey: ['bf', 'task_assignees'], queryFn: () => fetchAllTable('task_assignees', 'created_at', true, null), enabled: loadMainTables })
+  const qFeedbacks = useQuery({ queryKey: ['bf', 'employee_task_feedbacks'], queryFn: () => fetchAllTable('employee_task_feedbacks', 'created_at'), enabled: loadMainTables })
+  const qUpdateLogs = useQuery({ queryKey: ['bf', 'employee_update_logs'], queryFn: () => fetchAllTable('employee_update_logs', 'created_at', false), enabled: loadMainTables && isUpdateLogTab })
+  const qLogComments = useQuery({ queryKey: ['bf', 'employee_update_log_comments'], queryFn: () => fetchAllTable('employee_update_log_comments', 'created_at'), enabled: loadMainTables && isUpdateLogTab })
   // wa_settings 不拉 admin_password / openai_api_key / Meta tokens（敏感欄位、走 wa-unlock Edge Function；DB 層 migration 057/078 已 column-level REVOKE）
-  const qWaSettings = useQuery({ queryKey: ['bf', 'wa_settings'], queryFn: async () => { const { data } = await supabase.from('wa_settings').select('id, claude_mode, openai_base_url, model, max_history, max_replies_per_min, reply_delay_base, cooldown_minutes, bot_phone, boss_chat_name, daily_report_hour, system_prompt, boss_prompt, knowledge, updated_at, bot_name, chargers_prompt, location_hint_prompt, latest_ext_version, wa_outbound_mode, meta_graph_version, meta_phone_number_id, meta_waba_id, meta_webhook_verify_token, meta_tts_enabled, meta_tts_relay_url, meta_tts_voice_id, meta_tts_language_boost, meta_tts_prompt').eq('id', 1).maybeSingle(); return data }, enabled: !!userId && isWhatsappTab, refetchInterval: 30000, staleTime: 0 })
-  const qWaWhitelist = useQuery({ queryKey: ['bf', 'wa_whitelist'], queryFn: () => fetchAllTable('wa_whitelist', 'created_at'), enabled: !!userId && isWhatsappTab, refetchInterval: 30000, staleTime: 0 })
-  const qWaMessages = useQuery({ queryKey: ['bf', 'wa_messages'], queryFn: async () => { const { data } = await supabase.from('wa_messages').select('*').order('created_at', { ascending: false }).limit(1000); return data || [] }, enabled: !!userId && isWhatsappTab, refetchInterval: 5000, staleTime: 0 })
-  const qWaPending = useQuery({ queryKey: ['bf', 'wa_replies_pending'], queryFn: async () => { const { data, error } = await supabase.from('wa_replies').select('*').is('delivered_at', null).or('channel.eq.extension,channel.is.null').order('created_at', { ascending: false }).limit(500); if (error) throw error; return data || [] }, enabled: !!userId && isWhatsappTab, refetchInterval: 5000, staleTime: 0 })
-  const qWaUnresolved = useQuery({ queryKey: ['bf', 'wa_unresolved'], queryFn: () => fetchAllTable('wa_unresolved', 'created_at', false), enabled: !!userId && isWhatsappTab, refetchInterval: 30000, staleTime: 0 })
-  const qCompanies = useQuery({ queryKey: ['bf', 'companies'], queryFn: () => fetchAllTable('companies', 'name', true), enabled: !!userId, refetchInterval: 60000 })
-  const qWaReports = useQuery({ queryKey: ['bf', 'wa_daily_reports'], queryFn: () => fetchAllTable('wa_daily_reports', 'report_date', false), enabled: !!userId && isWhatsappTab, refetchInterval: 60000, staleTime: 0 })
-  const qWaHeartbeat = useQuery({ queryKey: ['bf', 'wa_heartbeat'], queryFn: async () => { const { data } = await supabase.from('wa_heartbeat').select('*').eq('id', 1).maybeSingle(); return data }, enabled: !!userId && isWhatsappTab, refetchInterval: 15000, staleTime: 0 })
-  const qWaLogs = useQuery({ queryKey: ['bf', 'wa_logs'], queryFn: async () => { const { data } = await supabase.from('wa_logs').select('*').order('created_at', { ascending: false }).limit(500); return data || [] }, enabled: !!userId && isWhatsappTab, refetchInterval: 5000, staleTime: 0 })
-  const qWaClients = useQuery({ queryKey: ['bf', 'wa_clients'], queryFn: async () => { const { data } = await supabase.from('wa_clients').select('*').order('last_seen', { ascending: false }); return data || [] }, enabled: !!userId && isWhatsappTab, refetchInterval: 2000, staleTime: 0 })
+  const qWaSettings = useQuery({ queryKey: ['bf', 'wa_settings'], queryFn: async () => { const { data } = await supabase.from('wa_settings').select('id, claude_mode, openai_base_url, model, max_history, max_replies_per_min, reply_delay_base, cooldown_minutes, bot_phone, boss_chat_name, daily_report_hour, system_prompt, boss_prompt, knowledge, updated_at, bot_name, chargers_prompt, location_hint_prompt, latest_ext_version, wa_outbound_mode, meta_graph_version, meta_phone_number_id, meta_waba_id, meta_webhook_verify_token, meta_tts_enabled, meta_tts_relay_url, meta_tts_voice_id, meta_tts_language_boost, meta_tts_prompt').eq('id', 1).maybeSingle(); return data }, enabled: loadMainTables && isWhatsappTab, refetchInterval: 30000, staleTime: 0 })
+  const qWaWhitelist = useQuery({ queryKey: ['bf', 'wa_whitelist'], queryFn: () => fetchAllTable('wa_whitelist', 'created_at'), enabled: loadMainTables && isWhatsappTab, refetchInterval: 30000, staleTime: 0 })
+  const qWaMessages = useQuery({ queryKey: ['bf', 'wa_messages'], queryFn: async () => { const { data } = await supabase.from('wa_messages').select('*').order('created_at', { ascending: false }).limit(1000); return data || [] }, enabled: loadMainTables && isWhatsappTab, refetchInterval: 5000, staleTime: 0 })
+  const qWaPending = useQuery({ queryKey: ['bf', 'wa_replies_pending'], queryFn: async () => { const { data, error } = await supabase.from('wa_replies').select('*').is('delivered_at', null).or('channel.eq.extension,channel.is.null').order('created_at', { ascending: false }).limit(500); if (error) throw error; return data || [] }, enabled: loadMainTables && isWhatsappTab, refetchInterval: 5000, staleTime: 0 })
+  const qWaUnresolved = useQuery({ queryKey: ['bf', 'wa_unresolved'], queryFn: () => fetchAllTable('wa_unresolved', 'created_at', false), enabled: loadMainTables && isWhatsappTab, refetchInterval: 30000, staleTime: 0 })
+  const qCompanies = useQuery({ queryKey: ['bf', 'companies'], queryFn: () => fetchAllTable('companies', 'name', true), enabled: loadMainTables, refetchInterval: 60000 })
+  const qWaReports = useQuery({ queryKey: ['bf', 'wa_daily_reports'], queryFn: () => fetchAllTable('wa_daily_reports', 'report_date', false), enabled: loadMainTables && isWhatsappTab, refetchInterval: 60000, staleTime: 0 })
+  const qWaHeartbeat = useQuery({ queryKey: ['bf', 'wa_heartbeat'], queryFn: async () => { const { data } = await supabase.from('wa_heartbeat').select('*').eq('id', 1).maybeSingle(); return data }, enabled: loadMainTables && isWhatsappTab, refetchInterval: 15000, staleTime: 0 })
+  const qWaLogs = useQuery({ queryKey: ['bf', 'wa_logs'], queryFn: async () => { const { data } = await supabase.from('wa_logs').select('*').order('created_at', { ascending: false }).limit(500); return data || [] }, enabled: loadMainTables && isWhatsappTab, refetchInterval: 5000, staleTime: 0 })
+  const qWaClients = useQuery({ queryKey: ['bf', 'wa_clients'], queryFn: async () => { const { data } = await supabase.from('wa_clients').select('*').order('last_seen', { ascending: false }); return data || [] }, enabled: loadMainTables && isWhatsappTab, refetchInterval: 2000, staleTime: 0 })
   // shopify_settings 不拉 access_token（敏感欄位、走 shopify-settings Edge Function；DB 層 migration 059 已 column-level REVOKE）
-  const qShopifySettings = useQuery({ queryKey: ['bf', 'shopify_settings'], queryFn: async () => { const { data } = await supabase.from('shopify_settings').select('id, shop_domain, api_version, last_synced_at, updated_at').eq('id', 1).maybeSingle(); return data }, enabled: !!userId && isProductsTab, refetchInterval: 60000, staleTime: 0 })
+  const qShopifySettings = useQuery({ queryKey: ['bf', 'shopify_settings'], queryFn: async () => { const { data } = await supabase.from('shopify_settings').select('id, shop_domain, api_version, last_synced_at, updated_at').eq('id', 1).maybeSingle(); return data }, enabled: loadMainTables && isProductsTab, refetchInterval: 60000, staleTime: 0 })
   // M:N 关联表（migration 062）：bizflow product ↔ Shopify variant 多对多
-  const qShopifyVariantLinks = useQuery({ queryKey: ['bf', 'shopify_variant_links'], queryFn: () => fetchAllTable('shopify_variant_links', 'created_at'), enabled: !!userId && isProductsTab })
+  const qShopifyVariantLinks = useQuery({ queryKey: ['bf', 'shopify_variant_links'], queryFn: () => fetchAllTable('shopify_variant_links', 'created_at'), enabled: loadMainTables && isProductsTab })
 
   const [products, setProducts] = useState([])
   const [warehouses, setWarehouses] = useState([])
@@ -147,7 +162,7 @@ export function AppProvider({ children }) {
   const canViewRevenue = isBfAdmin || (currentEmployee && currentEmployee.can_view_revenue === true)
 
   // qTaskPending：依賴 isWaAdmin，1c 從 App.jsx 搬進來；只在 WhatsApp tab 用。
-  const qTaskPending = useQuery({ queryKey: ['bf', 'task_pending'], queryFn: () => fetchAllTable('task_pending', 'requested_at', false), enabled: !!userId && isWaAdmin && isWhatsappTab, refetchInterval: 15000 })
+  const qTaskPending = useQuery({ queryKey: ['bf', 'task_pending'], queryFn: () => fetchAllTable('task_pending', 'requested_at', false), enabled: loadMainTables && isWaAdmin && isWhatsappTab, refetchInterval: 15000 })
 
   // 全 App 共享：首屏 loading/error 匯總
   const [loading, setLoading] = useState(true)
@@ -155,14 +170,14 @@ export function AppProvider({ children }) {
 
   // 最快一張到位就解 spinner
   useEffect(() => {
-    if (qProducts.data || qInventory.data || qCustomers.data || qInvoices.data) setLoading(false)
-  }, [qProducts.data, qInventory.data, qCustomers.data, qInvoices.data])
+    if (isAppEmbed ? qEmployees.data !== undefined : qProducts.data || qInventory.data || qCustomers.data || qInvoices.data) setLoading(false)
+  }, [isAppEmbed, qEmployees.data, qProducts.data, qInventory.data, qCustomers.data, qInvoices.data])
 
   // 匯總錯誤
   useEffect(() => {
-    const errs = [qProducts.error, qInventory.error, qCustomers.error, qInvoices.error].filter(Boolean)
+    const errs = (isAppEmbed ? [qEmployees.error] : [qProducts.error, qInventory.error, qCustomers.error, qInvoices.error]).filter(Boolean)
     if (errs.length > 0) setLoadError(errs[0].message || String(errs[0]))
-  }, [qProducts.error, qInventory.error, qCustomers.error, qInvoices.error])
+  }, [isAppEmbed, qEmployees.error, qProducts.error, qInventory.error, qCustomers.error, qInvoices.error])
 
   // ─────────────────────────────────────────────────────────────
   // 跨 view 共用的派生 helper（從 App.jsx 推進 AppContext）

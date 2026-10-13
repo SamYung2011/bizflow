@@ -360,7 +360,7 @@ export function hasPermission(context, key) {
 }
 
 export function deriveAuthContext({ session, employee, bindings, companies, roles, pendingCompanyIds = [] }) {
-  if (!session?.user || !employee) return null;
+  if (!session?.user || !employee || employee.active === false) return null;
   const ownBindings = bindings.filter((binding) => binding.employee_id === employee.id);
   const defaultBinding = ownBindings.find((binding) => binding.is_default) ?? ownBindings[0] ?? null;
   const allowedCompanyIds = employee.is_super_admin === true
@@ -443,12 +443,28 @@ async function loadCurrentUser({ timeoutMs = AUTH_CONTEXT_TIMEOUT_MS } = {}) {
   return promise;
 }
 
+export function consumeDisabledAccountNotice() {
+  try {
+    const disabled = window.sessionStorage.getItem("bizflow-account-disabled") === "1";
+    if (disabled) window.sessionStorage.removeItem("bizflow-account-disabled");
+    return disabled;
+  } catch { return false; }
+}
+
+async function rejectInactiveEmployee(employee) {
+  if (employee?.active !== false) return false;
+  try { window.sessionStorage.setItem("bizflow-account-disabled", "1"); } catch {}
+  await signOut();
+  return true;
+}
+
 async function buildCurrentUser(session, assertCurrent, flightKey) {
   const client = requireClient(await getSupabaseClient());
   assertCurrent();
   const userId = session.user.id;
   const cached = await readLiveAuthCache(userId);
   assertCurrent();
+  if (await rejectInactiveEmployee(cached?.employee)) return null;
   const fetchAuthRows = () => {
     const rowsKey = `rows:${flightKey}`;
     if (authContextFlights.has(rowsKey)) return authContextFlights.get(rowsKey);
@@ -457,7 +473,7 @@ async function buildCurrentUser(session, assertCurrent, flightKey) {
       const employeeResult = await client.from("employees").select("*").eq("user_id", userId).maybeSingle();
       assertCurrent();
       if (employeeResult.error) throw employeeResult.error;
-      if (!employeeResult.data) return null;
+      if (!employeeResult.data || await rejectInactiveEmployee(employeeResult.data)) return null;
       const pendingResult = await client.from("company_join_pending")
         .select("company_id")
         .eq("employee_id", employeeResult.data.id)

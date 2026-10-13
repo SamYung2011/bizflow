@@ -678,7 +678,7 @@ function buildTeamTaskData({ snap, membersSnap, teamExtras, authUser, unread }) 
   const members = r9Members
     ? [
         { name: "Honnmono", dept: "all", taskCount: statsOk ? ts.open : 0, active: true, badge: 0 },
-        ...membersSnap.members.map((member) => ({
+        ...membersSnap.members.filter((member) => member.status === "active").map((member) => ({
           id: member.id,
           userId: member.userId,
           name: member.name,

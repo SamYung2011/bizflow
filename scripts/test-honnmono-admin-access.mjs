@@ -171,7 +171,7 @@ await check('missing employee, team, inactive, absent/false/string main access f
   for (const invalidRows of [[], [{}], [{ ...employee, kind: 'task' }], [{ ...employee, active: false }],
     [{ ...employee, active: 'true' }], [{ ...employee, kind: null }],
     [{ ...employee, bizflow_main_access: false }], [{ ...employee, bizflow_main_access: null }],
-    [{ ...employee, bizflow_main_access: 'true' }], [{ is_admin: 'true' }]]) {
+    [{ ...employee, bizflow_main_access: 'true' }], [{ is_admin: 'true' }], [{ is_admin: true, active: false }], [{ is_admin: true }]]) {
     rows = invalidRows;
     for (const [path, method] of [['/device/binding', 'GET'], ['/device/unbind', 'POST'], ['/support/conversations', 'GET'], ['/support/upload/abc', 'POST']]) {
       assert.equal((await request(path, method)).status, 403, JSON.stringify(rows));
@@ -180,7 +180,7 @@ await check('missing employee, team, inactive, absent/false/string main access f
   }
 });
 await check('existing admin access preserves every admin route even without main-access fields', async () => {
-  rows = [{ is_admin: true }];
+  rows = [{ is_admin: true, active: true }];
   for (const [path, method] of adminRoutes) {
     assert.equal((await request(path, method)).status, 200, `${method} ${path}`);
     assert.ok(upstream.length >= 1);

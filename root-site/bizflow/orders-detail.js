@@ -5,6 +5,7 @@ import { getOrderDetailData, getCurrentUser } from "../data/provider.js";
 import { cachedPageUnread, loadPageUnread } from "../data/page-unread.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { confirmInPage } from "../components/confirm-dialog.js";
+import { showNotice } from "../components/notice.js";
 import { renderNewCustomerFields } from "../components/new-customer-fields.js";
 import { renderSegment as renderSharedSegment } from "../components/segment.js";
 import { createShippingFeePanel } from "../components/shipping-fee-panel.js";
@@ -12,6 +13,7 @@ import { throwIfPageAborted } from "../spa/page-lifecycle.js";
 import {
   getLiveOrderWriteOptions,
   markLiveOrderPaid,
+  deleteLiveOrder,
   updateLiveOrder,
   updateLiveOrderCustomer,
   updateLiveOrderShipping
@@ -22,6 +24,11 @@ import { toPrintableOrder } from "./print/print-invoice.js";
 const dict = {
   zh: {
     "orders.root": "訂單",
+    "orders.delete": "刪除訂單",
+    "orders.delete.confirm": "確定刪除訂單 {orderNo}？",
+    "orders.delete.failed": "刪除失敗，請重試",
+    "orders.delete.missing": "訂單已不存在",
+    "orders.delete.deleting": "刪除中",
     "orders.shipping": "運送",
     "orders.pickup": "自取",
     "orders.payment": "付款",
@@ -121,6 +128,11 @@ const dict = {
   },
   en: {
     "orders.root": "Orders",
+    "orders.delete": "Delete order",
+    "orders.delete.confirm": "Delete order {orderNo}?",
+    "orders.delete.failed": "Could not delete the order. Please retry.",
+    "orders.delete.missing": "The order no longer exists",
+    "orders.delete.deleting": "Deleting",
     "orders.shipping": "Shipping",
     "orders.pickup": "Pickup",
     "orders.payment": "Payment",
@@ -220,6 +232,11 @@ const dict = {
   },
   fr: {
     "orders.root": "Commandes",
+    "orders.delete": "Supprimer la commande",
+    "orders.delete.confirm": "Supprimer la commande {orderNo} ?",
+    "orders.delete.failed": "Impossible de supprimer la commande. Réessayez.",
+    "orders.delete.missing": "La commande n’existe plus",
+    "orders.delete.deleting": "Suppression en cours",
     "orders.shipping": "Expédition",
     "orders.pickup": "Retrait",
     "orders.payment": "Paiement",
@@ -340,6 +357,7 @@ let state = initialDetailState();
 let currentHelpers = null;
 let printDialog = null;
 let activeScope = null;
+let activeNavigation = null;
 let activeMountId = 0;
 const shippingFeePanel = createShippingFeePanel();
 
@@ -562,6 +580,7 @@ function printableOrder() {
       quantity: item.quantity,
       price: item.price
     })),
+    fees: { shipping: state.fees.shipping, ...Object.fromEntries(["deposit", "discount", "service"].map(key => [key, state.feesEnabled[key] ? state.fees[key] : 0])) },
     paymentTotal: currentTotals().paymentTotal
   });
 }
@@ -761,6 +780,9 @@ function renderDetail(helpers) {
     ${renderCustomerInfo(helpers)}
     ${renderTrackingCard(helpers)}
     ${renderTimeline(helpers)}
+    <div class="orders-card-actions orders-card-actions--end">
+      <button type="button" class="orders-delete" data-order-delete data-orders-write${state.busy ? ' disabled aria-disabled="true"' : writeAttributes}>${escapeHtml(pageT(lang, state.busy === "delete" ? "orders.delete.deleting" : "orders.delete"))}</button>
+    </div>
     ${renderProductModal(helpers)}
     ${renderCustomerEditModal(helpers)}
   </div>`;
@@ -1131,6 +1153,41 @@ async function ensureOrderEditData() {
   return request;
 }
 
+function returnToOrderList() {
+  // Deleted/missing orders have no draft to guard when navigating away.
+  state = initialDetailState();
+  const url = new URL("./orders.html", window.location.href);
+  if (activeNavigation?.navigate) void activeNavigation.navigate(url);
+  else window.location.assign(url.href);
+}
+
+async function deleteOrder() {
+  const mountId = activeMountId, scope = activeScope;
+  const lang = currentHelpers?.lang ?? "zh";
+  const accepted = await confirmInPage(pageT(lang, "orders.delete.confirm").replace("{orderNo}", detailData.detail.orderNo), {
+    title: pageT(lang, "orders.delete"), confirmLabel: pageT(lang, "orders.delete"), danger: true
+  });
+  if (!accepted || !isCurrentOrderDetailMount(mountId, scope)) return;
+  state.busy = "delete";
+  setNotice(""); rerender();
+  let navigated = false;
+  try {
+    await deleteLiveOrder(detailData.order.id);
+    if (!isCurrentOrderDetailMount(mountId, scope)) return;
+    returnToOrderList();
+    navigated = true;
+  } catch (error) {
+    if (!isCurrentOrderDetailMount(mountId, scope)) return;
+    if (error?.code === "P0002") {
+      showNotice(pageT(lang, "orders.delete.missing"), "error");
+      returnToOrderList();
+      navigated = true;
+    } else setNotice(pageT(lang, "orders.delete.failed"));
+  } finally {
+    if (isCurrentOrderDetailMount(mountId, scope) && !navigated) { state.busy = ""; rerender(); }
+  }
+}
+
 async function onOrderDetailClick(event) {
   const printOpen = event.target.closest("[data-print-open]");
   if (printOpen) {
@@ -1139,6 +1196,10 @@ async function onOrderDetailClick(event) {
   }
   if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
   if (state.busy && event.target.closest("[data-orders-write]")) return;
+  if (event.target.closest("[data-order-delete]")) {
+    if (liveWritable) await deleteOrder();
+    return;
+  }
   if (event.target.closest("[data-order-edit-open]")) {
     await ensureOrderEditData();
     return;
@@ -1336,9 +1397,10 @@ function hasOrderDetailUnsavedChanges() {
     || customerDraftChanged();
 }
 
-export async function mountPage({ scope, signal, url = new URL(window.location.href) } = {}) {
+export async function mountPage({ scope, signal, navigation, url = new URL(window.location.href) } = {}) {
   const mountId = ++activeMountId;
   activeScope = scope;
+  activeNavigation = navigation;
   const orderId = url.searchParams.get("id");
   const [nextDetailData, nextCurrentUser] = await Promise.all([
     getOrderDetailData(orderId),
@@ -1392,7 +1454,7 @@ export async function mountPage({ scope, signal, url = new URL(window.location.h
       pickerData = { productGroups: [] };
       writeOptions = { invoice: null, defaultWarehouseId: null, salespeople: [] };
       currentHelpers = null;
-      if (activeScope === scope) activeScope = null;
+      if (activeScope === scope) { activeScope = null; activeNavigation = null; }
       state = initialDetailState();
     }
   };

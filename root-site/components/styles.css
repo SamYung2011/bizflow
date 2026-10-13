@@ -977,6 +977,10 @@ textarea {
   box-shadow: 0 var(--space-4) var(--space-20) color-mix(in srgb, var(--gray-80) 20%, transparent);
 }
 
+.phone-copy-notice--success {
+  background: var(--green);
+}
+
 .phone-copy-notice--error {
   background: var(--red);
 }

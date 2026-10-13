@@ -278,6 +278,7 @@ export const INVOICE_PAGE =
 '    </div>\n' +
 '    <div class="table-body">\n' +
 '      {{invoice_rows}}\n' +
+'      {{invoice_fee_rows}}\n' +
 '    </div>\n' +
 '  </div>\n' +
 '  <div class="amount-block">\n' +

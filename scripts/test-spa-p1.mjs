@@ -84,12 +84,12 @@ async function verifyManifest() {
     ["nav.tasks", "nav.whatsapp"],
     "the main Bizflow menu must expose task management immediately before WhatsApp"
   );
-  assert.equal(bizflowFallbackMenu.filter((item) => item.adminOnly).length, 5, "loading menu must preserve all admin gates");
+  assert.equal(bizflowFallbackMenu.filter((item) => item.adminOnly).length, 4, "loading menu must preserve all admin gates");
   const teamFallbackMenu = createRouteMenu("/team/members.html");
   assert.deepEqual(teamFallbackMenu.map((item) => item.href), ["/team/index.html", "/team/members.html"]);
   assert.equal(teamFallbackMenu.find((item) => item.active)?.key, "nav.team");
   assert.equal(createRouteFrame("/bizflow/ocpp-monitor.html").access, "bf-admin", "OCPP frames must carry the pre-render admin gate");
-  assert.equal(createRouteFrame("/bizflow/app-feedback.html").access, "bf-admin", "Honnmono APP feedback must carry the pre-render admin gate");
+  assert.equal(createRouteFrame("/bizflow/app-feedback.html").access, "default", "Honnmono APP must preserve the approved main-employee access gate");
   assert.equal(createRouteFrame("/bizflow/orders.html").access, "default");
   for (const route of routes) {
     const migrated = expectedSpaRoutes.includes(route.path);

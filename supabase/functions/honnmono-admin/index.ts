@@ -169,7 +169,7 @@ async function verifyAdmin(req: Request): Promise<GuardResult> {
     const rows = await r.json();
     if (!Array.isArray(rows) || rows.length === 0) return { ok: false, status: 403, error: "Not authorized" };
     const employee = rows[0];
-    const isAdmin = employee?.is_admin === true;
+    const isAdmin = employee?.is_admin === true && employee?.active === true;
     const mainAccess = employee?.bizflow_main_access === true &&
       employee?.active === true && employee?.kind === "employee";
     if (!isAdmin && !mainAccess) return { ok: false, status: 403, error: "Not authorized" };

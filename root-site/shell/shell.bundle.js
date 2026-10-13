@@ -45,6 +45,8 @@
       "shell.companyMenu": "\u5207\u63DB\u4F01\u696D",
       "shell.close": "\u95DC\u9589",
       "shell.menu": "\u9078\u55AE",
+      "shell.collapseSidebar": "\u6536\u8D77\u5074\u6B04",
+      "shell.expandSidebar": "\u5C55\u958B\u5074\u6B04",
       "shell.add": "\u65B0\u589E",
       "quickCreate.title": "\u5FEB\u901F\u65B0\u589E",
       "quickCreate.task": "\u65B0\u589E\u4EFB\u52D9",
@@ -111,6 +113,8 @@
       "shell.companyMenu": "Switch company",
       "shell.close": "Close",
       "shell.menu": "Menu",
+      "shell.collapseSidebar": "Collapse sidebar",
+      "shell.expandSidebar": "Expand sidebar",
       "shell.add": "Add",
       "quickCreate.title": "Quick create",
       "quickCreate.task": "New task",
@@ -177,6 +181,8 @@
       "shell.companyMenu": "Changer d'entreprise",
       "shell.close": "Fermer",
       "shell.menu": "Menu",
+      "shell.collapseSidebar": "Replier la barre lat\xE9rale",
+      "shell.expandSidebar": "D\xE9plier la barre lat\xE9rale",
       "shell.add": "Ajouter",
       "quickCreate.title": "Cr\xE9ation rapide",
       "quickCreate.task": "Nouvelle t\xE2che",
@@ -1242,7 +1248,15 @@
     // 品牌名称固定使用官方字面量，不参与界面语言本地化。
     { key: "driver-ez", label: "Driver EZ" }
   ];
+  function readSidebarCollapsed() {
+    try {
+      return window.localStorage.getItem("bizflow-sidebar-collapsed") === "true";
+    } catch {
+      return false;
+    }
+  }
   var state2 = {
+    sidebarCollapsed: readSidebarCollapsed(),
     lang: initialLang,
     company: companies[0].key,
     drawerOpen: false,
@@ -1393,10 +1407,14 @@
     ${anyMenuUnread ? redDot() : ""}
   </button>`;
   }
+  function renderSidebarToggle() {
+    const label = t(state2.sidebarCollapsed ? "shell.expandSidebar" : "shell.collapseSidebar");
+    return `<button type="button" class="tp-component btn-toggle-sidebar shell-icon-button btn-toggle-sidebar--${state2.sidebarCollapsed ? "open" : "close"}" data-action="toggle-sidebar" aria-expanded="${!state2.sidebarCollapsed}" aria-label="${escapeHtml2(label)}" title="${escapeHtml2(label)}"></button>`;
+  }
   function renderTopbar() {
     return `<header class="shell-topbar">
     <div class="shell-topbar__brand">
-      <span class="shell-topbar__desktop-brand">${renderCompanySelect()}</span>
+      <span class="shell-topbar__desktop-brand">${renderSidebarToggle()}${renderCompanySelect()}</span>
       <span class="shell-topbar__mobile-brand">${renderCompanySelect({ mobile: true })}</span>
     </div>
     ${renderGlobalSearch({ t, icon: icon2, escapeHtml: escapeHtml2 })}
@@ -1435,7 +1453,7 @@
   </button>`;
   }
   function renderSidebar() {
-    return `<aside class="shell-sidebar">
+    return `<aside class="shell-sidebar" ${mode === "desktop" && state2.sidebarCollapsed ? 'inert aria-hidden="true"' : 'aria-hidden="false"'}>
     ${renderLanguageSelect()}
     ${renderNav()}
     ${renderAddRow()}
@@ -1490,7 +1508,7 @@
   function render() {
     window.__shellBootCleanup?.();
     document.documentElement.lang = state2.lang === "zh" ? "zh-Hant" : state2.lang;
-    root.innerHTML = `<div class="shell-app shell-app--${mode} ${state2.drawerOpen ? "is-drawer-open" : ""}">
+    root.innerHTML = `<div class="shell-app shell-app--${mode} ${state2.drawerOpen ? "is-drawer-open" : ""} ${state2.sidebarCollapsed ? "is-sidebar-collapsed" : ""}">
     ${renderTopbar()}
     ${renderSidebar()}
     ${renderDrawer()}
@@ -1527,6 +1545,22 @@
     app.classList.toggle("shell-app--mobile", mode === "mobile");
     app.classList.toggle("shell-app--desktop", mode === "desktop");
     app.classList.toggle("is-drawer-open", state2.drawerOpen);
+    app.classList.toggle("is-sidebar-collapsed", state2.sidebarCollapsed);
+    const sidebar = app.querySelector(".shell-sidebar");
+    if (sidebar) {
+      const hidden = mode === "desktop" && state2.sidebarCollapsed;
+      sidebar.inert = hidden;
+      sidebar.setAttribute("aria-hidden", String(hidden));
+    }
+    const toggle = app.querySelector('[data-action="toggle-sidebar"]');
+    if (toggle) {
+      toggle.classList.toggle("btn-toggle-sidebar--open", state2.sidebarCollapsed);
+      toggle.classList.toggle("btn-toggle-sidebar--close", !state2.sidebarCollapsed);
+      toggle.setAttribute("aria-expanded", String(!state2.sidebarCollapsed));
+      const label = t(state2.sidebarCollapsed ? "shell.expandSidebar" : "shell.collapseSidebar");
+      toggle.setAttribute("aria-label", label);
+      toggle.title = label;
+    }
     app.querySelector('[data-action="open-drawer"]')?.setAttribute("aria-expanded", String(state2.drawerOpen));
     app.querySelector(".shell-mobile-drawer")?.setAttribute("aria-hidden", String(!state2.drawerOpen));
   }
@@ -1606,6 +1640,14 @@
       return;
     }
     const action = event.target.closest("[data-action]")?.dataset.action;
+    if (action === "toggle-sidebar" && mode === "desktop") {
+      state2.sidebarCollapsed = !state2.sidebarCollapsed;
+      try {
+        window.localStorage.setItem("bizflow-sidebar-collapsed", String(state2.sidebarCollapsed));
+      } catch {
+      }
+      syncShellState();
+    }
     if (action === "open-drawer") {
       state2.drawerOpen = true;
       syncShellState();

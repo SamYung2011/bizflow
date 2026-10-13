@@ -5,6 +5,7 @@ import { createContext, useContext, useState, useEffect } from "react";
 const STORAGE_KEY = "bizflow-lang";
 
 const DICT_EN = {
+  "帳號已停用": "Your account has been disabled",
   "等待": "Waiting",
   "員工管理": "Employees",
   "備註": "Note",
@@ -364,6 +365,7 @@ const DICT_EN = {
 };
 
 const DICT_FR = {
+  "帳號已停用": "Votre compte a été désactivé",
   "等待": "Attente",
   "員工管理": "Employés",
   "批准": "Approuver",

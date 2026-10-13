@@ -1,3 +1,4 @@
+import { isStaffAppEmbed } from "./lib/appEmbed.js";
 import React, { useState, useEffect, useMemo, Suspense, lazy } from "react";
 
 // 報銷模組：lazy load 防內存爆。切到「報銷」tab 才下載這 chunk
@@ -956,7 +957,7 @@ export default function App() {
   // Realtime 訂閱 customers 表：INSERT/UPDATE/DELETE 時靜默刷新本地 state
   // 用途：Framer 意向表單寫入 Supabase 後前端自動同步，不用 F5
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || isStaffAppEmbed(window.location.search)) return;
     const channel = supabase
       .channel("customers-realtime")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "customers" }, (payload) => {
@@ -980,7 +981,7 @@ export default function App() {
 
   // 每次 app 載入清理超過 180 天的已完成 / 已放棄 任務
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || isStaffAppEmbed(window.location.search)) return;
     (async () => {
       const cutoff = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString();
       const { data, error } = await supabase
@@ -1022,7 +1023,7 @@ export default function App() {
 
   // nav 分组结构：4 业务组 + 单项混合（2026-05-21 整合）
   // type='single': 直接 tab；type='group': 折叠组，children 为子 tab
-  const isBizflowMainAllowed = isBfAdmin || (currentEmployee && currentEmployee.bizflow_main_access === true);
+  const isBizflowMainAllowed = currentEmployee?.active !== false && (isBfAdmin || (currentEmployee && currentEmployee.bizflow_main_access === true));
   const navItems = [
     { type: "single", id: "dashboard", label: t("首頁"), icon: "dashboard" },
     { type: "group", id: "g_products", label: t("產品庫存"), icon: "product", children: [
@@ -1688,11 +1689,13 @@ export default function App() {
   useEffect(() => {
     if (shouldBlock) {
       (async () => {
+        const inactive = currentEmployee.active === false;
+        if (inactive) sessionStorage.setItem("bizflow-account-disabled", "1");
         try { await supabase.auth.signOut(); } catch {}
-        window.location.replace("https://team.honnmono.top");
+        window.location.replace(inactive ? "/login/index.html" : "https://team.honnmono.top");
       })();
     }
-  }, [shouldBlock]);
+  }, [shouldBlock, currentEmployee?.active]);
 
   // 認證載入中（Supabase 正在讀 session）
   if (authLoading) return (

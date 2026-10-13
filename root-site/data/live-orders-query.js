@@ -327,7 +327,7 @@ function patchListRow(order, invoice) {
   };
 }
 
-export async function invalidateOrderQueriesAfterWrite(invoice = null) {
+export async function invalidateOrderQueriesAfterWrite(invoice = null, { deletedInvoiceId = null } = {}) {
   const context = await sessionReadContext(ORDER_NAMESPACE);
   if (!context) return;
   orderQueryGeneration += 1;
@@ -335,15 +335,17 @@ export async function invalidateOrderQueriesAfterWrite(invoice = null) {
   if (activeQuery && activeUserId === context.userId) {
     const cached = readLiveQueryCache({ userId: context.userId, namespace: ORDER_NAMESPACE, query: activeQuery });
     if (cached?.value) {
-      const value = invoice
-        ? { ...cached.value, orders: cached.value.orders.map((order) => patchListRow(order, invoice)) }
-        : cached.value;
+      const value = deletedInvoiceId !== null
+        ? { ...cached.value, orders: cached.value.orders.filter((order) => String(order.id) !== String(deletedInvoiceId)) }
+        : invoice
+          ? { ...cached.value, orders: cached.value.orders.map((order) => patchListRow(order, invoice)) }
+          : cached.value;
       preserve = { query: activeQuery, value };
     }
   }
   invalidateLiveQueryCacheAfterWrite({ userId: context.userId, namespace: ORDER_NAMESPACE, preserve });
   invalidateLiveQueryCacheAfterWrite({ userId: context.userId, namespace: ORDER_REVENUE_NAMESPACE });
-  if (invoice?.id) invalidateLiveQueryCacheAfterWrite({ userId: context.userId, namespace: ORDER_DETAIL_NAMESPACE });
+  invalidateLiveQueryCacheAfterWrite({ userId: context.userId, namespace: ORDER_DETAIL_NAMESPACE });
   if (preserve) dispatchQueryUpdate(activeQuery, preserve.value, "write");
   if (activeQuery) backgroundRefresh(context, activeQuery, "write-refresh");
 }

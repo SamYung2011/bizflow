@@ -29,9 +29,26 @@ function itemRows(items) {
     .join("");
 }
 
+const PRINT_FEES = Object.freeze([
+  { key: "shipping", label: "Shipping" },
+  { key: "deposit", label: "Deposit" },
+  { key: "service", label: "Service fee" },
+  { key: "discount", label: "Discount" }
+]);
+
+function feeRows(fees) {
+  return PRINT_FEES.map(fee => {
+    let value = Number(fees?.[fee.key]) || 0;
+    if (fee.key === "discount") value = -Math.abs(value);
+    return value ? `<div class="table-row" data-print-fee="${fee.key}"><div>${fee.label}</div><div>1</div><div class="col-price">${escapeHtml(moneyValue(value))}</div></div>` : "";
+  }).join("");
+}
+
 export function toPrintableOrder(source, overrides = {}) {
   const row = source?.order ?? source ?? {};
   const detail = source?.detail ?? row.detail ?? {};
+  const suppliedItems = detail.items ?? row.items;
+  const sourceItems = Array.isArray(suppliedItems) ? suppliedItems : [];
   const customer = typeof row.customer === "object" ? row.customer?.name : row.customer;
   return {
     orderNo: detail.orderNo ?? row.orderNo ?? row.no ?? "",
@@ -41,7 +58,8 @@ export function toPrintableOrder(source, overrides = {}) {
     email: detail.email ?? row.email ?? "",
     shippingAddress: detail.shippingAddress ?? row.shippingAddress ?? row.address ?? "",
     carModel: detail.carModel ?? row.carModel ?? "",
-    items: detail.items ?? row.items ?? [],
+    items: sourceItems,
+    fees: detail.fees ?? row.fees ?? {},
     paymentTotal: detail.paymentTotal ?? row.paymentTotal ?? "",
     ...overrides
   };
@@ -66,6 +84,7 @@ export function buildInvoiceDocument(order, mode = { invoice: true, receipt: tru
   // 快照只有合并车型字段，按单据约定整串放 make 行，model 行诚实留空。
   const carMake = escapeHtml(order?.carModel ?? "");
   const rows = itemRows(order?.items);
+  const fees = feeRows(order?.fees);
   const total = escapeHtml(moneyValue(order?.paymentTotal));
 
   const invoicePage = mode.invoice
@@ -79,7 +98,8 @@ export function buildInvoiceDocument(order, mode = { invoice: true, receipt: tru
         "{{car_make}}": carMake,
         "{{car_model}}": "",
         "{{Total_Sum}}": total,
-        "{{invoice_rows}}": rows
+        "{{invoice_rows}}": rows,
+        "{{invoice_fee_rows}}": fees
       })
     : "";
 
@@ -99,7 +119,8 @@ export function buildInvoiceDocument(order, mode = { invoice: true, receipt: tru
           "{{r_car_make}}": carMake,
           "{{r_car_model}}": "",
           "{{r_Total_Sum}}": total,
-          "{{r_rows}}": rows
+          "{{r_rows}}": rows,
+          "{{r_fee_rows}}": fees
         }
       )
     : "";

@@ -31,14 +31,22 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 const originalFetch = globalThis.fetch, originalDocument = globalThis.document, originalWindow = globalThis.window;
 let checks = 0;
 async function check(name, run) { await run(); console.log(`unbind-access ${++checks}: ${name}`); }
-async function mount(isAdmin, saved = {}, lang = 'zh') {
+async function mount(isAdmin, saved = {}, lang = 'zh', initialResponder = null) {
   fixture.user = user(isAdmin); fixture.session = session;
   globalThis.document = new EventTarget();
   document.visibilityState = 'visible';
   globalThis.window = { scrollTo() {}, scrollX: 0, scrollY: 0 };
-  const element = { outerHTML: '' }, calls = [], timers = [];
+  const element = { outerHTML: '', querySelector(selector) {
+    if (selector === '[data-app-frame-panels]') return null;
+    return { replaceWith(node) { if (selector === '[data-app-native-panel]') element.outerHTML = node.html; } };
+  } }, calls = [], timers = [];
+  document.createElement = () => {
+    const template = { innerHTML: '' };
+    template.content = { querySelector: () => ({ html: template.innerHTML }) };
+    return template;
+  };
   document.querySelector = selector => selector === '[data-app-feedback-page]' ? element : null;
-  let responder = () => Response.json({ items: [], total: 0 });
+  let responder = initialResponder || (() => Response.json({ items: [], total: 0 }));
   globalThis.fetch = async (input, options) => {
     const url = new URL(input);
     assert.equal(url.origin, 'https://fixture.invalid');
@@ -65,6 +73,20 @@ async function mount(isAdmin, saved = {}, lang = 'zh') {
     dispose() { controller.dispose(); base.dispose(); } };
 }
 try {
+  await check('admin shell mounts and paints while its initial feedback request is still pending', async () => {
+    let release;
+    const pending = new Promise(resolve => { release = resolve; });
+    let timeout;
+    const mounted = await Promise.race([
+      mount(true, {}, 'zh', () => pending),
+      new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('mount waited for feedback')), 500); })
+    ]).finally(() => clearTimeout(timeout));
+    assert.match(mounted.html(), /data-app-feedback-page/);
+    assert.equal(mounted.calls.filter(call => call.path.startsWith('/feedback?')).length, 1);
+    mounted.controller.dispose();
+    release(Response.json({ items: [], total: 0 }));
+    await tick();
+  });
   await check('signed-in main-site predicate requires strict whitelist or admin and a real auth context', async () => {
     for (const [current, activeSession, allowed] of [
       [user(false), session, true], [user(true), session, true],

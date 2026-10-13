@@ -664,3 +664,12 @@ export async function updateLiveOrderShipping(invoiceId, { mode, trackingNumber 
   await invalidateOrderQueriesAfterWrite(result.data);
   return result.data;
 }
+
+export async function deleteLiveOrder(invoiceId) {
+  const { client } = await writeContext();
+  const result = await client.rpc("bizflow_delete_order", { p_invoice_id: invoiceId });
+  if (result.error?.code !== "P0002") throwIfError(result.error);
+  await invalidateOrderReads("invoices", "inventory_stock", "inventory_movements", "inventory", "shipment_events", "stock_deduction_audit", "warranty_renewals", "customers");
+  await invalidateOrderQueriesAfterWrite(null, { deletedInvoiceId: invoiceId });
+  throwIfError(result.error);
+}

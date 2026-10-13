@@ -1,8 +1,20 @@
 {
   "redirects": [
-    { "source": "/task-platform/login", "destination": "/login/", "permanent": false },
-    { "source": "/task-platform/login/(.*)", "destination": "/login/$1", "permanent": false },
-    { "source": "/task-platform/bizflow/(.*)", "destination": "/bizflow/$1", "permanent": false }
+    {
+      "source": "/task-platform/login",
+      "destination": "/login/",
+      "permanent": false
+    },
+    {
+      "source": "/task-platform/login/(.*)",
+      "destination": "/login/$1",
+      "permanent": false
+    },
+    {
+      "source": "/task-platform/bizflow/(.*)",
+      "destination": "/bizflow/$1",
+      "permanent": false
+    }
   ],
   "headers": [
     {
@@ -25,6 +37,15 @@
     },
     {
       "source": "/assets/root/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/task-platform/assets/(.*)-([A-Za-z0-9_-]{8,})\\.(js|css)",
       "headers": [
         {
           "key": "Cache-Control",
