@@ -125,6 +125,11 @@ function AfterAuth({ session, view, setView }) {
     refetchInterval: 15000,
   })
 
+  useEffect(() => {
+    if (qEmp.data?.active === false) void supabase.auth.signOut();
+  }, [qEmp.data?.active]);
+
+  if (qEmp.data?.active === false) return <Center>{t('帳號已停用')}</Center>
   if (qEmp.isLoading) return <Center>{t('正在載入…')}</Center>
   const me = qEmp.data
   if (!me) return <PendingPage pending={qPending.data} session={session} />

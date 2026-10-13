@@ -5,6 +5,7 @@ import { createContext, useContext, useState, useEffect } from "react";
 const STORAGE_KEY = "bizflow-lang";
 
 const DICT_EN = {
+  "帳號已停用": "Your account has been disabled",
   "使用者已结束本次服务": "The user has ended this conversation",
   "使用者已重新开启本次服务": "The user reopened this conversation",
   "使用者已結束本次服務": "The user has ended this conversation",
@@ -1946,6 +1947,7 @@ const DICT_EN = {
 };
 
 const DICT_FR = {
+  "帳號已停用": "Votre compte a été désactivé",
   "使用者已结束本次服务": "L’utilisateur a clôturé cette conversation",
   "使用者已重新开启本次服务": "L’utilisateur a rouvert cette conversation",
   "使用者已結束本次服務": "L’utilisateur a clôturé cette conversation",

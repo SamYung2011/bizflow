@@ -1002,9 +1002,20 @@ const R9_PERMISSION_LABEL_KEYS = {
   can_approve_registration: "members.permission.approveRegistration"
 };
 
-function loadMembersSnapshot() {
-  return loadProviderSnapshot("members.json", () =>
-    fetchSnapshot(MEMBERS_SNAPSHOT_URL, "members.json", "home/mock members"));
+async function loadMembersSnapshot() {
+  return resolveLiveQueryOrLegacy({
+    readLive: async () => {
+      if (!TEAM_TASK_RPC_ENABLED) return LIVE_TEAM_TASK_MISS;
+      const [payload, authUser] = await Promise.all([
+        getLiveTeamTaskPage({ completedLimit: null, includeDetail: true }), getAuthCurrentUser()
+      ]);
+      if (payload === LIVE_TEAM_TASK_MISS) return LIVE_TEAM_TASK_MISS;
+      return (await buildTeamTaskSnapshotsFromRows(payload, authUser)).membersSnapshot;
+    },
+    miss: LIVE_TEAM_TASK_MISS,
+    readLegacy: () => loadProviderSnapshot("members.json", () =>
+      fetchSnapshot(MEMBERS_SNAPSHOT_URL, "members.json", "home/mock members"))
+  });
 }
 
 function isR9Member(member) {

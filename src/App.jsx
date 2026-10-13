@@ -1022,7 +1022,7 @@ export default function App() {
 
   // nav 分组结构：4 业务组 + 单项混合（2026-05-21 整合）
   // type='single': 直接 tab；type='group': 折叠组，children 为子 tab
-  const isBizflowMainAllowed = isBfAdmin || (currentEmployee && currentEmployee.bizflow_main_access === true);
+  const isBizflowMainAllowed = currentEmployee?.active !== false && (isBfAdmin || (currentEmployee && currentEmployee.bizflow_main_access === true));
   const navItems = [
     { type: "single", id: "dashboard", label: t("首頁"), icon: "dashboard" },
     { type: "group", id: "g_products", label: t("產品庫存"), icon: "product", children: [
@@ -1688,11 +1688,13 @@ export default function App() {
   useEffect(() => {
     if (shouldBlock) {
       (async () => {
+        const inactive = currentEmployee.active === false;
+        if (inactive) localStorage.setItem("bizflow-account-disabled", "1");
         try { await supabase.auth.signOut(); } catch {}
-        window.location.replace("https://team.honnmono.top");
+        window.location.replace(inactive ? "/login/index.html" : "https://team.honnmono.top");
       })();
     }
-  }, [shouldBlock]);
+  }, [shouldBlock, currentEmployee?.active]);
 
   // 認證載入中（Supabase 正在讀 session）
   if (authLoading) return (
