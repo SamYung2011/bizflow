@@ -22,6 +22,7 @@ import {
   adapterSessionSubPath,
   flashUnbindDisabled,
   flashUnbindRequest,
+  flashLockSourceKeys,
 } from "../root-site/bizflow/app-feedback.js";
 import {
   createDeviceUnbindController,
@@ -356,9 +357,16 @@ for (const language of feedbackLanguages) {
   assert.equal(typeof appFeedbackCopy[language].flashUnbindConfirmText, "string");
   assert.equal(typeof appFeedbackCopy[language].flashUnbindSuccess, "string");
   assert.equal(typeof appFeedbackCopy[language].flashUnbindChargingBlocked, "string");
+  for (const key of ["lockSource", "adminLockSource", "userLostModeSource"]) {
+    assert.equal(typeof appFeedbackCopy[language][key], "string");
+  }
   assert.match(appFeedbackCopy[language].chargeCountLabel, /90/);
   assert.match(appFeedbackCopy[language].chargeCountValue, /\{count\}/);
 }
+
+assert.deepEqual(flashLockSourceKeys({ lockSources: ["app_lost", "admin", "unknown"] }), ["adminLockSource", "userLostModeSource"]);
+assert.deepEqual(flashLockSourceKeys({ lockSources: [] }), []);
+assert.deepEqual(flashLockSourceKeys({ locked: true }), []);
 
 for (const language of ["zh", "en", "fr"]) {
   assert.equal(

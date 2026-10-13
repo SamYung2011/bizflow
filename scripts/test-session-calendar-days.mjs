@@ -6,7 +6,7 @@ import { renderAdapterLocation, renderAdapterOta } from "../root-site/bizflow/ap
 import { createDateRangePanel } from "../root-site/components/date-range-panel.js";
 import { normalizeDateInput } from "../root-site/components/date-value.js";
 import { assertHonnmonoAdminRequest, formatFeedbackTime } from "../root-site/bizflow/app-feedback-api.js";
-import { adapterSessionSubPath, adapterSessionMinDate, flashUnbindDisabled, adapterActionsForKind } from "../root-site/bizflow/app-feedback.js";
+import { adapterSessionSubPath, adapterSessionMinDate, flashUnbindDisabled, flashLockSourceKeys, adapterActionsForKind } from "../root-site/bizflow/app-feedback.js";
 import { legacyCalendarTrace, withCalendar } from "./helpers/date-panel-fixture.mjs";
 
 let checks = 0;
@@ -268,7 +268,7 @@ await check("failed session read exits loading and sends no calendar prefetch", 
 });
 
 await check("cards render missing firmware as a dash and separate count labels from values in three languages", () => {
-  const renderCards = new Function("state", "helpers", "t", "renderAdapterLocation", "renderAdapterOta", "formatFeedbackTime", "flashUnbindDisabled", "adapterActionsForKind", `
+  const renderCards = new Function("state", "helpers", "t", "renderAdapterLocation", "renderAdapterOta", "formatFeedbackTime", "flashUnbindDisabled", "adapterActionsForKind", "flashLockSourceKeys", `
     ${section("function e(", "function pageCount")}
     ${section("function detailRow", "function detailSection")}
     ${section("function adapterDeviceId", "function renderAdapterActionConfirm").replaceAll("export function", "function")}
@@ -278,10 +278,15 @@ await check("cards render missing firmware as a dash and separate count labels f
   for (const lang of ["zh", "en", "fr"]) {
     const t = (key, values) => translateAppFeedback(lang, key, values);
     for (const [kind, firmware, expected] of [["flash", {}, "—"], ["flash", { software: "" }, "—"], ["flash", undefined, "—"], ["flash", { software: "V900.6" }, "V900.6"], ["dc-pro", "v3.20", "v3.20"]]) {
-      const state = { adapters: { kind, rows: [{ certid: "A", firmware, chargeCount: 3 }], ota: {}, otaErrors: {} } };
-      const html = renderCards(state, { lang, escapeHtml }, t, renderAdapterLocation, renderAdapterOta, formatFeedbackTime, flashUnbindDisabled, adapterActionsForKind);
+      const state = { adapters: { kind, rows: [{ certid: "A", firmware, chargeCount: 3, lockSources: ["admin", "app_lost"] }], ota: {}, otaErrors: {} } };
+      const html = renderCards(state, { lang, escapeHtml }, t, renderAdapterLocation, renderAdapterOta, formatFeedbackTime, flashUnbindDisabled, adapterActionsForKind, flashLockSourceKeys);
       assert.ok(html.includes(`<dt>${escapeHtml(t("softwareVersion"))}</dt><dd>${expected}</dd>`));
       assert.ok(html.includes(`<dt>${escapeHtml(t("chargeCountLabel"))}</dt><dd>${escapeHtml(t("chargeCountValue", { count: 3 }))}</dd>`));
+      if (kind === "flash") {
+        assert.ok(html.includes(`<dt>${escapeHtml(t("lockSource"))}</dt><dd>${escapeHtml(t("adminLockSource"))}${lang === "zh" ? "、" : ", "}${escapeHtml(t("userLostModeSource"))}</dd>`));
+      } else {
+        assert.ok(!html.includes(`<dt>${escapeHtml(t("lockSource"))}</dt>`));
+      }
       assert.doesNotMatch(html, /\[object Object\]|\{count\}/);
     }
   }
