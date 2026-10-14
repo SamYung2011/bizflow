@@ -1,4 +1,6 @@
 const zh = {
+  promptsTab: 'APP 提示詞',
+  promptsSubtitle: '編輯 App 助手的提示詞',
   supportTab: "APP 客服",
   supportSubtitle: "回覆 Honnmono APP 使用者的客服訊息",
   northboundTab: "APP 北上",
@@ -165,6 +167,8 @@ const zh = {
 };
 
 const en = {
+  promptsTab: 'APP Prompts',
+  promptsSubtitle: 'Edit App assistant prompts',
   supportTab: "APP Support",
   supportSubtitle: "Reply to Honnmono APP users",
   northboundTab: "APP Northbound",
@@ -331,6 +335,8 @@ const en = {
 };
 
 const fr = {
+  promptsTab: 'Consignes APP',
+  promptsSubtitle: 'Modifier les consignes de l’assistant App',
   supportTab: "Assistance APP",
   supportSubtitle: "Répondre aux utilisateurs de Honnmono APP",
   northboundTab: "Dossiers transfrontaliers",

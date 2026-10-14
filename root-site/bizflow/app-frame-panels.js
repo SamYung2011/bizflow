@@ -1,7 +1,7 @@
 const frames = {
   support: ["appSupport", "supportTab"], northbound: ["appNorthbound", "northboundTab"],
   insurance: ["appInsurance", "insuranceTab"], offers: ["appOffers", "offersTab"],
-  knowledge: ["appKnowledge", "knowledgeTab"]
+  knowledge: ["appKnowledge", "knowledgeTab"], prompts: ["appPrompts", "promptsTab"]
 };
 const observed = new WeakSet();
 

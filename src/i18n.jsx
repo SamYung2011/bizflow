@@ -2,6 +2,8 @@
 // fallback：英文模式下未翻译的中文 key 直接显示原文，便于增量翻译
 import { createContext, useContext, useState, useEffect } from "react";
 
+import { PROMPT_COPY } from "./views/prompts/i18n.js";
+
 const STORAGE_KEY = "bizflow-lang";
 
 const DICT_EN = {
@@ -4280,6 +4282,10 @@ Object.assign(DICT_FR, {
   "App 直接使用，不可改": "Utilisé directement par l’App ; modification interdite",
   "此項目由 App 直接使用，不能改 slug 或停用": "Cet élément est utilisé directement par l’App. Son slug et son activation sont protégés."
 });
+
+for (const [dictionary, additions] of [[DICT_EN, PROMPT_COPY.en], [DICT_FR, PROMPT_COPY.fr]]) {
+  Object.assign(dictionary, { ...additions, ...dictionary });
+}
 
 export function I18nProvider({ children }) {
   const [lang, setLangState] = useState(() => {
