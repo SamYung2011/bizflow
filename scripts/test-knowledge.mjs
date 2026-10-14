@@ -46,7 +46,7 @@ try {
 // Every existing global translation remains byte-identical, including repeated old keys.
 async function dictionaries(source) {
   const output = await build({ stdin: { contents: source + '\nexport { DICT_EN, DICT_FR };',
-    loader: 'jsx', resolveDir: process.cwd(), sourcefile: 'i18n-compat.jsx' },
+    loader: 'jsx', resolveDir: process.cwd() + '/src', sourcefile: 'i18n-compat.jsx' },
     bundle: true, platform: 'node', format: 'esm', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(output.outputFiles[0].text).toString('base64')}`);
 }

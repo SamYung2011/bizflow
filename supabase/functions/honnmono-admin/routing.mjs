@@ -1,4 +1,4 @@
-import { supportUpstreamPath, northboundUpstreamPath, insuranceUpstreamPath, promoUpstreamPath, knowledgeUpstreamPath, isStaffUpstream } from "./support-proxy.mjs";
+import { supportUpstreamPath, northboundUpstreamPath, insuranceUpstreamPath, promoUpstreamPath, knowledgeUpstreamPath, assistantUpstreamPath, isStaffUpstream } from "./support-proxy.mjs";
 
 // Per-route upstream budgets. The defaults are 10 s / 16 KB; three routes need
 // more room, and they are named here so index.ts and its tests read the same
@@ -71,6 +71,7 @@ export function mapHonnmonoAdminPath(pathname, method) {
   if (normalized.startsWith("/insurance/")) return insuranceUpstreamPath(normalized, method);
   if (normalized.startsWith("/promo/")) return promoUpstreamPath(normalized, method);
   if (normalized.startsWith("/knowledge/")) return knowledgeUpstreamPath(normalized, method);
+  if (normalized.startsWith("/assistant/")) return assistantUpstreamPath(normalized, method);
   if (method === "GET" && normalized === "/feedback") {
     return "/internal/admin/feedback";
   }

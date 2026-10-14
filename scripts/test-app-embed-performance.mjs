@@ -18,7 +18,7 @@ function bootstrap(search,visible=true){
  vm.runInNewContext(prefix+'\n}\nAppProvider({});',context);return queries;
 }
 await check('every embed view disables all shared whole-table queries and loads only its employee',async()=>{
- for(const view of ['appSupport','appNorthbound','appInsurance','appOffers','appKnowledge']){
+ for(const view of ['appSupport','appNorthbound','appInsurance','appOffers','appKnowledge','appPrompts']){
   const enabled=bootstrap(`?view=${view}&embed=1`).filter(q=>q.enabled);assert.equal(enabled.length,1);assert.equal(enabled[0].queryKey[1],'employees');
   const employees=await enabled[0].queryFn();assert.equal(employees[0].user_id,'own-test-user');
  }

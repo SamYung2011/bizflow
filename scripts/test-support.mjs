@@ -209,9 +209,9 @@ const rendered = await build({ stdin: { contents: `
       lastSenderRole: 'user', userPhone: '', userEmail: '' }, employees: [], onChange: () => {}, onBack: () => {}
   }));
 `, resolveDir: process.cwd() }, bundle: true, format: 'cjs', platform: 'node', write: false,
-  loader: { '.css': 'empty' }, define: { 'import.meta.env': '{"VITE_SUPPORT_MOCK":"0"}' } });
+  loader: { '.css': 'empty' }, define: { 'import.meta.env': '{"VITE_SUPPORT_MOCK":"0","VITE_SUPABASE_URL":"https://fixture.invalid","VITE_SUPABASE_ANON_KEY":"public-fixture"}' } });
 const compiled = { exports: {} };
-new Function('module', 'exports', 'require', rendered.outputFiles[0].text)(compiled, compiled.exports, createRequire(import.meta.url));
+new Function('module', 'exports', 'require', 'window', rendered.outputFiles[0].text)(compiled, compiled.exports, createRequire(import.meta.url), { location: { search: '' } });
 check('missing session and missing operator email render only the access guard', () => {
   for (const props of [{},
     { isAdmin: true, session: { user: { email: 'a@test' } } }, { isAdmin: true, session: { access_token: 'x', user: {} } }]) {
@@ -230,11 +230,11 @@ check('feedback label appears in list and header; case number stays visible for 
 
 // Render the real App.jsx embed branch through the employee query/hydration sequence.
 const appSource = await readFile('src/App.jsx', 'utf8');
-const embedStart = appSource.indexOf('  if (["appSupport", "appNorthbound", "appInsurance", "appOffers", "appKnowledge"].includes(tab) && new URLSearchParams');
+const embedStart = appSource.indexOf('  if (["appSupport", "appNorthbound", "appInsurance", "appOffers", "appKnowledge", "appPrompts"].includes(tab) && new URLSearchParams');
 assert(embedStart !== -1);
 const embedBranch = appSource.slice(embedStart, appSource.indexOf('\n\n  return (', embedStart));
 const embedCode = await transform(`
-  return ({ qEmployees, currentEmployee, isBizflowMainAllowed = false, tab = 'appSupport' }) => {
+  return ({ qEmployees, currentEmployee, isBizflowMainAllowed = false, tab = 'appSupport', isBfAdmin = false }) => {
     const window = { location: { search: '?embed=1' } };
     const userId = 'staff-id', employees = qEmployees.data || [], session = {}, t = text => text;
     ${embedBranch}
@@ -242,12 +242,13 @@ const embedCode = await transform(`
 `, { loader: 'jsx' });
 const require = createRequire(import.meta.url), React = require('react');
 const { renderToStaticMarkup } = require('react-dom/server');
-const embed = new Function('React', 'Suspense', 'AppSupportView', 'AppNorthboundView', 'AppInsuranceView', 'AppOffersView', 'AppKnowledgeView', embedCode.code)(
+const embed = new Function('React', 'Suspense', 'AppSupportView', 'AppNorthboundView', 'AppInsuranceView', 'AppOffersView', 'AppKnowledgeView', 'AppPromptsView', embedCode.code)(
   React, React.Suspense, () => React.createElement('div', null, 'support-ready'),
   () => React.createElement('div', null, 'northbound-ready'),
   () => React.createElement('div', null, 'insurance-ready'),
   () => React.createElement('div', null, 'offers-ready'),
-  () => React.createElement('div', null, 'knowledge-ready'));
+  () => React.createElement('div', null, 'knowledge-ready'),
+  ({ isAdmin }) => React.createElement('div', { role: isAdmin ? undefined : 'alert' }, isAdmin ? 'prompts-ready' : 'prompts-denied'));
 const renderEmbed = props => renderToStaticMarkup(embed(props));
 const employee = { user_id: 'staff-id', bizflow_main_access: true };
 check('embed shows the same loading fallback during employee fetch and effect hydration', () => {
@@ -280,4 +281,11 @@ check('embed denies access only after the employee lookup confirms no main acces
 check('employee query failure is a load error instead of an access denial', () => {
   assert.equal(renderEmbed({ qEmployees: { isError: true } }), '<div role="alert">資料載入失敗</div>');
 });
+
+check('embed passes administrator permission to the prompt component after employee hydration', () => {
+  const ready = { tab: 'appPrompts', qEmployees: { isSuccess: true, data: [employee] }, currentEmployee: employee, isBizflowMainAllowed: true };
+  assert(renderEmbed({ ...ready, isBfAdmin: true }).includes('prompts-ready'));
+  assert(!renderEmbed({ ...ready, isBfAdmin: false }).includes('prompts-ready'));
+});
+
 console.log(`SUPPORT_SELF_CHECK=${checks}/${checks}`);

@@ -1,3 +1,4 @@
+import { requestPromptLeave } from "./app-prompt-leave.js";
 import { renderAppFramePanel, syncAppFramePanels } from "./app-frame-panels.js";
 import { createBizflowMenu } from "../components/bizflow-menu.js";
 import { createDateRangePanel } from "../components/date-range-panel.js";
@@ -736,7 +737,7 @@ function renderAdapterPanel() {
 
 function renderTabs() {
   const tabs = state.isAdmin
-    ? [["feedback", "feedbackTab"], ["support", "supportTab"], ["northbound", "northboundTab"], ["insurance", "insuranceTab"], ["offers", "offersTab"], ["knowledge", "knowledgeTab"], ["device", "deviceUnbindTab"], ["devices", "deviceListTab"], ["sim", "simCardTab"]]
+    ? [["feedback", "feedbackTab"], ["support", "supportTab"], ["northbound", "northboundTab"], ["insurance", "insuranceTab"], ["offers", "offersTab"], ["knowledge", "knowledgeTab"], ["prompts", "promptsTab"], ["device", "deviceUnbindTab"], ["devices", "deviceListTab"], ["sim", "simCardTab"]]
     : [["support", "supportTab"], ["northbound", "northboundTab"], ["insurance", "insuranceTab"], ["offers", "offersTab"], ["knowledge", "knowledgeTab"], ["device", "deviceUnbindTab"], ["devices", "deviceListTab"]];
   return `<nav class="app-feedback-tabs" aria-label="${rawE(t("honnmonoAppTitle"))}">
     ${tabs.map(([id, label]) => `<button type="button" class="app-feedback-tab${state.activeTab === id ? " is-active" : ""}" data-app-feedback-tab="${id}" aria-selected="${state.activeTab === id}">${rawE(t(label))}</button>`).join("")}
@@ -744,7 +745,7 @@ function renderTabs() {
 }
 
 function renderNativePanel() {
-  if (["support", "northbound", "insurance", "offers", "knowledge"].includes(state.activeTab)) return "";
+  if (["support", "northbound", "insurance", "offers", "knowledge", "prompts"].includes(state.activeTab)) return "";
   return state.activeTab === "feedback" ? renderFeedbackPanel()
         : state.activeTab === "devices"
           ? renderAdapterPanel()
@@ -777,7 +778,7 @@ function renderNativePanel() {
 function render(nextHelpers) {
   helpers = nextHelpers;
   const isFeedback = state.activeTab === "feedback";
-  const subtitleKey = state.activeTab === "support" ? "supportSubtitle" : state.activeTab === "northbound" ? "northboundSubtitle" : state.activeTab === "insurance" ? "insuranceSubtitle" : state.activeTab === "offers" ? "offersSubtitle" : state.activeTab === "knowledge" ? "knowledgeSubtitle" : isFeedback
+  const subtitleKey = state.activeTab === "support" ? "supportSubtitle" : state.activeTab === "northbound" ? "northboundSubtitle" : state.activeTab === "insurance" ? "insuranceSubtitle" : state.activeTab === "offers" ? "offersSubtitle" : state.activeTab === "knowledge" ? "knowledgeSubtitle" : state.activeTab === "prompts" ? "promptsSubtitle" : isFeedback
     ? "subtitle"
     : state.activeTab === "devices"
       ? "deviceListSubtitle"
@@ -791,7 +792,7 @@ function render(nextHelpers) {
     </header>
     ${renderTabs()}</div>
     <div data-app-frame-panels>${renderAppFramePanel(state.activeTab, helpers.lang, t, rawE)}</div>
-    <div data-app-native-panel${["support", "northbound", "insurance", "offers", "knowledge"].includes(state.activeTab) ? " hidden" : ""}>${renderNativePanel()}</div>
+    <div data-app-native-panel${["support", "northbound", "insurance", "offers", "knowledge", "prompts"].includes(state.activeTab) ? " hidden" : ""}>${renderNativePanel()}</div>
   </section>`;
 }
 
@@ -1617,11 +1618,18 @@ async function downloadLog(id) {
   }
 }
 
+function canLeavePrompts() {
+  if (state?.activeTab !== "prompts") return true;
+  const frame = document.querySelector("[data-prompts-frame]");
+  return !frame?.contentWindow || requestPromptLeave(frame.contentWindow);
+}
+
 function switchAppTab(nextTab) {
-  if (!state || !(state.isAdmin ? ["feedback", "support", "northbound", "insurance", "offers", "knowledge", "device", "devices", "sim"] : ["support", "northbound", "insurance", "offers", "knowledge", "device", "devices"]).includes(nextTab)) {
+  if (!state || !(state.isAdmin ? ["feedback", "support", "northbound", "insurance", "offers", "knowledge", "prompts", "device", "devices", "sim"] : ["support", "northbound", "insurance", "offers", "knowledge", "device", "devices"]).includes(nextTab)) {
     return;
   }
   if (state.activeTab === nextTab) return;
+  if (state.activeTab === "prompts" && !canLeavePrompts()) return;
   activeAdapterOtaLoader?.cancel();
   state.activeTab = nextTab;
   state.detailRequest += 1;
@@ -1629,7 +1637,7 @@ function switchAppTab(nextTab) {
   state.detail = null;
   state.detailError = null;
   state.downloadError = null;
-  if (nextTab === "support" || nextTab === "northbound" || nextTab === "insurance" || nextTab === "offers" || nextTab === "knowledge") {
+  if (nextTab === "support" || nextTab === "northbound" || nextTab === "insurance" || nextTab === "offers" || nextTab === "knowledge" || nextTab === "prompts") {
     activePoller?.pause();
     rerender();
     return;
@@ -2041,7 +2049,7 @@ function createState(historyState, currentUser) {
     isAdmin,
     activeTab: !isAdmin
       ? ["northbound", "insurance", "offers", "knowledge", "devices"].includes(saved.activeTab) ? saved.activeTab : "support"
-      : ["support", "northbound", "insurance", "offers", "knowledge", "device", "devices", "sim"].includes(saved.activeTab)
+      : ["support", "northbound", "insurance", "offers", "knowledge", "prompts", "device", "devices", "sim"].includes(saved.activeTab)
         ? saved.activeTab
         : "feedback",
     device: createDeviceUnbindState(saved),
@@ -2182,7 +2190,7 @@ export async function mountPage({
       });
       activePoller = poller;
       if (state.activeTab === "feedback") void loadList();
-      if (!["support", "northbound", "insurance", "offers", "knowledge", "device", "sim"].includes(state.activeTab) && !(state.activeTab === "devices" && state.adapters.kind === "setparam")) poller.start(state.activeTab === "devices" ? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS);
+      if (!["support", "northbound", "insurance", "offers", "knowledge", "prompts", "device", "sim"].includes(state.activeTab) && !(state.activeTab === "devices" && state.adapters.kind === "setparam")) poller.start(state.activeTab === "devices" ? DEVICES_POLL_INTERVAL_MS : FEEDBACK_POLL_INTERVAL_MS);
       if ((state.isAdmin && state.activeTab === "device") || (state.activeTab === "devices" && state.adapters.kind !== "setparam")) void otaController.load({ includeLegacy: state.isAdmin });
       if (state.activeTab === "devices") {
         if (state.adapters.kind === "setparam") void setparamController.read();
@@ -2190,6 +2198,7 @@ export async function mountPage({
       }
       if (state.activeTab === "sim") void simController.loadCards();
     },
+    canLeave: canLeavePrompts,
     captureState: () => ({
       activeTab: state.activeTab,
       deviceImeiInput: state.device.imeiInput,

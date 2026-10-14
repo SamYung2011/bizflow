@@ -41,13 +41,19 @@ export function knowledgeUpstreamPath(path, method) {
   return `/internal/admin${path}`;
 }
 
+export function assistantUpstreamPath(path, method) {
+  const allowed = (method === 'GET' && path === '/assistant/prompts') ||
+    (method === 'PATCH' && /^\/assistant\/prompts\/[a-z][a-z0-9_]*$/.test(path));
+  return allowed ? `/internal/admin${path}` : '';
+}
+
 export function isSupportUpstream(path) {
   return path.startsWith('/internal/admin/support/') || /^\/internal\/cloud-storage\/upload\/[A-Za-z0-9_-]{1,64}$/.test(path);
 }
 
 export function isStaffUpstream(path) {
   return isSupportUpstream(path) || safeSegments(path, '/internal/admin/northbound/') ||
-    safeSegments(path, '/internal/admin/insurance/') || safeSegments(path, '/internal/admin/promo/') || safeSegments(path, '/internal/admin/knowledge/');
+    safeSegments(path, '/internal/admin/insurance/') || safeSegments(path, '/internal/admin/promo/') || safeSegments(path, '/internal/admin/knowledge/') || safeSegments(path, '/internal/admin/assistant/');
 }
 
 async function readLimited(stream, limit) {
