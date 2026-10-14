@@ -248,7 +248,7 @@ const embed = new Function('React', 'Suspense', 'AppSupportView', 'AppNorthbound
   () => React.createElement('div', null, 'insurance-ready'),
   () => React.createElement('div', null, 'offers-ready'),
   () => React.createElement('div', null, 'knowledge-ready'),
-  () => React.createElement('div', null, 'prompts-ready'));
+  ({ isAdmin }) => React.createElement('div', { role: isAdmin ? undefined : 'alert' }, isAdmin ? 'prompts-ready' : 'prompts-denied'));
 const renderEmbed = props => renderToStaticMarkup(embed(props));
 const employee = { user_id: 'staff-id', bizflow_main_access: true };
 check('embed shows the same loading fallback during employee fetch and effect hydration', () => {
@@ -282,7 +282,7 @@ check('employee query failure is a load error instead of an access denial', () =
   assert.equal(renderEmbed({ qEmployees: { isError: true } }), '<div role="alert">資料載入失敗</div>');
 });
 
-check('embed prompts requires administrator permission in addition to employee hydration', () => {
+check('embed passes administrator permission to the prompt component after employee hydration', () => {
   const ready = { tab: 'appPrompts', qEmployees: { isSuccess: true, data: [employee] }, currentEmployee: employee, isBizflowMainAllowed: true };
   assert(renderEmbed({ ...ready, isBfAdmin: true }).includes('prompts-ready'));
   assert(!renderEmbed({ ...ready, isBfAdmin: false }).includes('prompts-ready'));

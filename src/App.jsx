@@ -1794,7 +1794,6 @@ export default function App() {
       if (qEmployees.isPending || qEmployees.data?.some(employee => employee.user_id === userId)) return supportFallback;
       if (qEmployees.isError) return <div role="alert">{t("資料載入失敗")}</div>;
     }
-    if (tab === "appPrompts" && !isBfAdmin) return <div role="alert">{t("僅管理員可編輯提示詞")}</div>;
     return isBizflowMainAllowed ? <Suspense fallback={supportFallback}>
       {tab === "appSupport"
         ? <AppSupportView session={session} employees={employees} embedded />

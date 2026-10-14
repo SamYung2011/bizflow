@@ -4283,9 +4283,8 @@ Object.assign(DICT_FR, {
   "此項目由 App 直接使用，不能改 slug 或停用": "Cet élément est utilisé directement par l’App. Son slug et son activation sont protégés."
 });
 
-for (const [dictionary, additions] of [[DICT_EN, PROMPT_COPY.en], [DICT_FR, PROMPT_COPY.fr]]) {
-  Object.assign(dictionary, { ...additions, ...dictionary });
-}
+Object.assign(DICT_EN, PROMPT_COPY.en);
+Object.assign(DICT_FR, PROMPT_COPY.fr);
 
 export function I18nProvider({ children }) {
   const [lang, setLangState] = useState(() => {

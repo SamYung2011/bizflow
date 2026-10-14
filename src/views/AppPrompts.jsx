@@ -6,34 +6,37 @@ import { formatFeedbackTime } from '../lib/honnmonoAdmin.js';
 import { listPrompts, resetPrompt, savePrompt } from '../api/assistantPromptApi.js';
 import { PROMPT_LEAVE_EVENT, requestPromptLeave } from '../../root-site/bizflow/app-prompt-leave.js';
 import './honnmono/northbound/northbound.css';
-import './honnmono/offers/offers.css';
 import './prompts/prompts.css';
 
 const GROUPS = [['answer', '回答提示'], ['memory', '記憶提示'], ['handoff', '轉人工提示'], ['tool', '工具說明']];
 
-export function PromptEditor({ record, options, onSaved }) {
+export function PromptEditor({ record, options, onSaved, onBusyChange = () => {} }) {
   const { t, lang } = useT();
   const [content, setContent] = useState(record.content), [busy, setBusy] = useState(false);
+  const [baseline, setBaseline] = useState(record.content);
   const [error, setError] = useState(''), [saved, setSaved] = useState(false);
-  const dirty = content !== record.content;
+  const dirty = content !== baseline;
   useEffect(() => {
-    if (!dirty) return;
+    if (!dirty && !busy) return;
     const leaving = event => {
+      if (busy) { event.preventDefault(); return; }
       if (!window.confirm(t('有未儲存修改，放棄並離開？'))) event.preventDefault();
-      else setContent(record.content);
+      else setContent(baseline);
     };
     const unloading = event => { event.preventDefault(); event.returnValue = ''; };
     window.addEventListener(PROMPT_LEAVE_EVENT, leaving);
     window.addEventListener('beforeunload', unloading);
     return () => { window.removeEventListener(PROMPT_LEAVE_EVENT, leaving); window.removeEventListener('beforeunload', unloading); };
-  }, [dirty, record.content, t]);
+  }, [dirty, busy, baseline, t]);
   const submit = async reset => {
-    setBusy(true); setError(''); setSaved(false);
+    setError(''); setSaved(false);
+    if (reset && !record.isCustom) { setContent(baseline); return; }
+    setBusy(true); onBusyChange(true);
     try {
       const value = await (reset ? resetPrompt(record.key, options) : savePrompt(record.key, content, options));
-      onSaved(value); setContent(value.content); setSaved(true);
+      setBaseline(value.content); setContent(value.content); onSaved(value); setSaved(true);
     } catch (problem) { setError(problem.message || t('操作失敗，請重試')); }
-    finally { setBusy(false); }
+    finally { setBusy(false); onBusyChange(false); }
   };
   return <section className="prompt-editor">
     <h2>{t(record.label)}</h2><p>{t(record.description)}</p>
@@ -57,7 +60,7 @@ function Workspace({ session }) {
   const queryKey = ['appPrompts', session.user.email];
   const query = useQuery({ queryKey, queryFn: ({ signal }) => listPrompts({ ...options, signal }), enabled: visible,
     staleTime: Infinity, refetchOnWindowFocus: false });
-  const rows = query.data || [], [selected, setSelected] = useState(null);
+  const rows = query.data || [], [selected, setSelected] = useState(null), [busy, setBusy] = useState(false);
   const record = rows.find(row => row.key === selected) || rows[0];
   const choose = key => {
     if (key === record?.key) return;
@@ -71,7 +74,7 @@ function Workspace({ session }) {
         {GROUPS.map(([kind, label]) => <section className="prompt-group" key={kind}>
           <h2>{t(label)}</h2>
           {rows.filter(row => row.kind === kind).map(row => <button key={row.key} type="button" className={`nb-case ${record?.key === row.key ? 'is-selected' : ''}`}
-            aria-pressed={record?.key === row.key} onClick={() => choose(row.key)}>
+            aria-pressed={record?.key === row.key} disabled={busy} onClick={() => choose(row.key)}>
             <strong>{t(row.label)}</strong>{row.isCustom && <small>{t('已自訂')}</small>}
           </button>)}
         </section>)}
@@ -80,7 +83,7 @@ function Workspace({ session }) {
     <main className="nb-main">
       {query.isPending ? <p className="nb-loading">{t('載入提示詞…')}</p> : query.isError ? <div role="alert" className="nb-error">
         {query.error.message || t('載入失敗，請重試')}<button type="button" onClick={() => query.refetch()}>{t('重試')}</button>
-      </div> : record && <PromptEditor key={record.key} record={record} options={options} onSaved={saved}/>}
+      </div> : record && <PromptEditor key={record.key} record={record} options={options} onSaved={saved} onBusyChange={setBusy}/>}
     </main>
   </div>;
 }

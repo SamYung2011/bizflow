@@ -3,6 +3,6 @@
 .prompt-editor { padding: 24px 32px; }
 .prompt-editor h2 { margin: 0 0 8px; font-size: 22px; }
 .prompt-editor > p { margin: 8px 0 14px; }
-.prompt-workspace .prompt-editor textarea { display: block; width: 100%; min-height: 530px; height: calc(100dvh - 375px); resize: vertical; padding: 16px; border: 1px solid #dfe5ed; border-radius: 8px; background: #fff; color: inherit; font: 13px/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.prompt-workspace .prompt-editor textarea { display: block; width: 100%; min-height: 240px; height: calc(100dvh - 375px); resize: vertical; padding: 16px; border: 1px solid #dfe5ed; border-radius: 8px; background: #fff; color: inherit; font: 13px/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .prompt-actions { display: flex; gap: 12px; margin: 18px 0 10px; }
 @media (max-width: 700px) { .prompt-workspace { grid-template-columns: 1fr; height: auto; max-height: none; overflow: visible; }.prompt-workspace .nb-sidebar { max-height: 280px; border-right: 0; border-bottom: 1px solid #e7ebf1; }.prompt-workspace .nb-main { overflow: visible; }.prompt-editor { padding: 20px; } }

@@ -41,8 +41,6 @@ export function stripFunctionPrefix(pathname) {
 // Only these method/path pairs are available to main-site employees.
 export function isMainAccessRoute(subPath, method) {
   const path = subPath.split("?", 1)[0];
-  // Prompt editing remains administrator-only, including reads.
-  if (path.startsWith("/assistant/")) return false;
   const certid = "[A-Za-z0-9_-]{1,64}";
   return (
     path.startsWith("/support/") ||
