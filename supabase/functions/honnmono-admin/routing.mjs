@@ -1,4 +1,4 @@
-import { supportUpstreamPath, northboundUpstreamPath, insuranceUpstreamPath, promoUpstreamPath, knowledgeUpstreamPath, isStaffUpstream } from "./support-proxy.mjs";
+import { supportUpstreamPath, northboundUpstreamPath, insuranceUpstreamPath, promoUpstreamPath, knowledgeUpstreamPath, assistantUpstreamPath, isStaffUpstream } from "./support-proxy.mjs";
 
 // Per-route upstream budgets. The defaults are 10 s / 16 KB; three routes need
 // more room, and they are named here so index.ts and its tests read the same
@@ -41,6 +41,8 @@ export function stripFunctionPrefix(pathname) {
 // Only these method/path pairs are available to main-site employees.
 export function isMainAccessRoute(subPath, method) {
   const path = subPath.split("?", 1)[0];
+  // Prompt editing remains administrator-only, including reads.
+  if (path.startsWith("/assistant/")) return false;
   const certid = "[A-Za-z0-9_-]{1,64}";
   return (
     path.startsWith("/support/") ||
@@ -71,6 +73,7 @@ export function mapHonnmonoAdminPath(pathname, method) {
   if (normalized.startsWith("/insurance/")) return insuranceUpstreamPath(normalized, method);
   if (normalized.startsWith("/promo/")) return promoUpstreamPath(normalized, method);
   if (normalized.startsWith("/knowledge/")) return knowledgeUpstreamPath(normalized, method);
+  if (normalized.startsWith("/assistant/")) return assistantUpstreamPath(normalized, method);
   if (method === "GET" && normalized === "/feedback") {
     return "/internal/admin/feedback";
   }
