@@ -59,7 +59,17 @@ export const PROMPT_COPY = {
     "讓模型知道可讀取目前使用者的可用、到期及已用優惠券。": "Explains access to the current user’s available, expiring and used coupons.",
     "工具：記住事實": "Tool: remember facts",
     "讓模型知道應記下哪些事實及不能存哪些敏感內容。": "Explains which facts to remember and which sensitive information must not be stored.",
-    "儲存中…": "Saving…"
+    "儲存中…": "Saving…",
+    "模型設定": "Model settings",
+    "接口地址": "API endpoint",
+    "模型": "Model",
+    "API Key": "API Key",
+    "預設：{value}": "Default: {value}",
+    "已設定 {hint}": "Configured {hint}",
+    "預設 key {hint}": "Default key {hint}",
+    "未設定 key": "No key configured",
+    "未設定": "Not configured",
+    "目前生效：{model} · {host} · key {hint}": "In use: {model} · {host} · key {hint}"
   },
   "fr": {
     "APP 提示詞": "Consignes APP",
@@ -121,6 +131,16 @@ export const PROMPT_COPY = {
     "讓模型知道可讀取目前使用者的可用、到期及已用優惠券。": "Explique l’accès aux coupons disponibles, à expiration et utilisés de l’utilisateur.",
     "工具：記住事實": "Outil : mémoriser un fait",
     "讓模型知道應記下哪些事實及不能存哪些敏感內容。": "Explique quels faits mémoriser et quelles informations sensibles ne pas conserver.",
-    "儲存中…": "Enregistrement…"
+    "儲存中…": "Enregistrement…",
+    "模型設定": "Paramètres du modèle",
+    "接口地址": "Adresse API",
+    "模型": "Modèle",
+    "API Key": "Clé API",
+    "預設：{value}": "Par défaut : {value}",
+    "已設定 {hint}": "Configurée {hint}",
+    "預設 key {hint}": "Clé par défaut {hint}",
+    "未設定 key": "Aucune clé configurée",
+    "未設定": "Non configuré",
+    "目前生效：{model} · {host} · key {hint}": "Actif : {model} · {host} · clé {hint}"
   }
 };
