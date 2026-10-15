@@ -43,7 +43,8 @@ export function knowledgeUpstreamPath(path, method) {
 
 export function assistantUpstreamPath(path, method) {
   const allowed = (method === 'GET' && path === '/assistant/prompts') ||
-    (method === 'PATCH' && /^\/assistant\/prompts\/[a-z][a-z0-9_]*$/.test(path));
+    (method === 'PATCH' && /^\/assistant\/prompts\/[a-z][a-z0-9_]*$/.test(path)) ||
+    (['GET', 'PATCH'].includes(method) && path === '/assistant/provider');
   return allowed ? `/internal/admin${path}` : '';
 }
 
@@ -80,6 +81,8 @@ export async function forwardSupport(req, upstreamUrl, { token, operatorEmail, c
   const file = upstreamUrl.pathname.startsWith('/internal/admin/support/files/') ||
     upstreamUrl.pathname.startsWith('/internal/admin/northbound/files/') ||
     upstreamUrl.pathname.startsWith('/internal/admin/insurance/files/');
+  // Provider saves include a model probe (15 s by default) before committing.
+  const providerSave = req.method === 'PATCH' && upstreamUrl.pathname === '/internal/admin/assistant/provider';
   let body;
   if (['POST', 'PATCH', 'DELETE'].includes(req.method)) {
     try { body = await readLimited(req.body, upload ? SUPPORT_UPLOAD_BYTES : JSON_BYTES); }
@@ -97,7 +100,7 @@ export async function forwardSupport(req, upstreamUrl, { token, operatorEmail, c
       method: req.method, redirect: 'error', body: body?.length ? body : undefined,
       headers: { 'X-Internal-Token': token, 'X-Operator-Email': operatorEmail,
         ...(body?.length ? { 'Content-Type': upload ? req.headers.get('content-type') || 'application/octet-stream' : 'application/json' } : {}) },
-      signal: AbortSignal.timeout(upload || file ? 60000 : 10000),
+      signal: AbortSignal.timeout(upload || file || providerSave ? 60000 : 10000),
     });
   } catch { return reply({ error: 'Honnmono support service timeout' }, 504); }
   if ([401, 403].includes(upstream.status)) return reply({ error: 'Honnmono support service unavailable' }, 502);
