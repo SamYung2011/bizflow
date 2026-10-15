@@ -61,6 +61,9 @@ export const PROMPT_COPY = {
     "讓模型知道應記下哪些事實及不能存哪些敏感內容。": "Explains which facts to remember and which sensitive information must not be stored.",
     "儲存中…": "Saving…",
     "模型設定": "Model settings",
+    "思考模式": "Thinking mode",
+    "思考：開": "Thinking: On",
+    "思考：關": "Thinking: Off",
     "接口地址": "API endpoint",
     "模型": "Model",
     "API Key": "API Key",
@@ -70,7 +73,7 @@ export const PROMPT_COPY = {
     "未設定 key": "No key configured",
     "未設定": "Not configured",
     "目前生效：{model} · {host} · key {hint}": "In use: {model} · {host} · key {hint}",
-    "恢復預設會刪除已填的接口地址、模型和 API Key，確定？": "Restore defaults and remove the saved API endpoint, model and API Key?"
+    "恢復預設會刪除已填的接口地址、模型、API Key 和思考模式設定，確定？": "Restore defaults and remove the saved API endpoint, model, API Key and thinking mode settings?"
   },
   "fr": {
     "APP 提示詞": "Consignes APP",
@@ -134,6 +137,9 @@ export const PROMPT_COPY = {
     "讓模型知道應記下哪些事實及不能存哪些敏感內容。": "Explique quels faits mémoriser et quelles informations sensibles ne pas conserver.",
     "儲存中…": "Enregistrement…",
     "模型設定": "Paramètres du modèle",
+    "思考模式": "Mode de réflexion",
+    "思考：開": "Réflexion : activée",
+    "思考：關": "Réflexion : désactivée",
     "接口地址": "Adresse API",
     "模型": "Modèle",
     "API Key": "Clé API",
@@ -143,6 +149,6 @@ export const PROMPT_COPY = {
     "未設定 key": "Aucune clé configurée",
     "未設定": "Non configuré",
     "目前生效：{model} · {host} · key {hint}": "Actif : {model} · {host} · clé {hint}",
-    "恢復預設會刪除已填的接口地址、模型和 API Key，確定？": "Rétablir les valeurs par défaut et supprimer l’adresse API, le modèle et la clé API enregistrés ?"
+    "恢復預設會刪除已填的接口地址、模型、API Key 和思考模式設定，確定？": "Rétablir les valeurs par défaut et supprimer l’adresse API, le modèle, la clé API et les paramètres du mode de réflexion enregistrés ?"
   }
 };

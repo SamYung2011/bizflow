@@ -3,8 +3,8 @@ import { build } from 'esbuild';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 
-const fixture = { baseUrl:'https://api.deepseek.com/chat/completions', model:'deepseek-flash',apiKeyHint:'····1234',
-  custom:{baseUrl:false,model:false,apiKey:false},defaults:{baseUrl:'https://api.deepseek.com/chat/completions',model:'deepseek-flash',apiKeyHint:'····1234'},updatedBy:null,updatedAt:null };
+const fixture = { baseUrl:'https://api.deepseek.com/chat/completions', model:'deepseek-flash',apiKeyHint:'····1234',thinking:false,
+  custom:{baseUrl:false,model:false,apiKey:false,thinking:false},defaults:{baseUrl:'https://api.deepseek.com/chat/completions',model:'deepseek-flash',apiKeyHint:'····1234',thinking:false},updatedBy:null,updatedAt:null };
 const compile = async (contents, format='esm') => (await build({ stdin:{ contents, loader:'jsx', resolveDir:process.cwd() },
   bundle:true,platform:'node',format,write:false,jsx:'automatic',loader:{'.css':'empty'},
   define:{'import.meta.env':JSON.stringify({VITE_SUPABASE_URL:'https://fixture.invalid',VITE_SUPABASE_ANON_KEY:'fixture-public'})} })).outputFiles[0].text;
@@ -16,12 +16,14 @@ try {
   globalThis.fetch=async(url,options)=>{calls.push([new URL(url).pathname,options]);return Response.json({code:0,result:fixture});};
   await check('authenticated provider GET/PATCH/reset use one existing bridge prefix',async()=>{
     assert.deepEqual(await api.getProvider(auth),fixture);
-    await api.saveProvider({model:'custom',apiKey:'fixture-secret'},auth);await api.resetProvider(auth);
+    await api.saveProvider({model:'custom',apiKey:'fixture-secret'},auth);await api.resetProvider(auth);await api.saveProvider({thinking:true},auth);await api.saveProvider({thinking:null},auth);
     assert.deepEqual(calls.map(([path,o])=>[path,o.method]),[
-      ['/functions/v1/honnmono-admin/assistant/provider','GET'],['/functions/v1/honnmono-admin/assistant/provider','PATCH'],['/functions/v1/honnmono-admin/assistant/provider','PATCH']]);
+      ['/functions/v1/honnmono-admin/assistant/provider','GET'],['/functions/v1/honnmono-admin/assistant/provider','PATCH'],['/functions/v1/honnmono-admin/assistant/provider','PATCH'],['/functions/v1/honnmono-admin/assistant/provider','PATCH'],['/functions/v1/honnmono-admin/assistant/provider','PATCH']]);
     assert(calls.every(([,o])=>o.headers.Authorization==='Bearer fixture-token'));
     assert.deepEqual(JSON.parse(calls[1][1].body),{model:'custom',apiKey:'fixture-secret'});
     assert.deepEqual(JSON.parse(calls[2][1].body),{reset:true});
+    assert.deepEqual(JSON.parse(calls[3][1].body),{thinking:true});
+    assert.deepEqual(JSON.parse(calls[4][1].body),{thinking:null});
   });
   await check('400 upstream wording is preserved with no transport prefix',async()=>{
     globalThis.fetch=async()=>Response.json({detail:'連線測試失敗：HTTP 401 fixture upstream 原話'},{status:400});
@@ -42,17 +44,18 @@ const renderCode=await compile(`
 `,'cjs');
 const module={exports:{}};
 new Function('module','exports','require','window',renderCode)(module,module.exports,createRequire(import.meta.url),{location:{search:''}});
-await check('administrator card has exactly three inputs and two buttons above existing columns',()=>{
+await check('administrator card has three text fields, existing checkbox and two buttons above existing columns',()=>{
   const html=module.exports.render(fixture);
   for(const key of ['模型設定','接口地址','模型','API Key','儲存','恢復預設','目前生效：deepseek-flash','api.deepseek.com','尚未修改'])assert(html.includes(key),key);
-  assert.equal((html.match(/<input /g)||[]).length,3);assert.equal((html.match(/<button /g)||[]).length,2);
+  assert.equal((html.match(/<input /g)||[]).length,4);assert.equal((html.match(/<button /g)||[]).length,2);
+  assert(html.includes('type="checkbox"'));assert(!/type="checkbox"[^>]*checked/.test(html));assert(html.includes('思考模式') && html.includes('思考：關'));
   assert(html.includes('type="password"'));assert(html.includes('placeholder="預設：deepseek-flash"'));assert(html.includes('預設 key ····1234'));
   assert(html.indexOf('provider-card')<html.indexOf('nb-workspace'));
   assert(!html.includes('<select')&&!html.includes('<textarea'));
 });
 await check('custom values and hint render without exposing a key value',()=>{
-  const html=module.exports.render({...fixture,model:'custom-model',custom:{baseUrl:false,model:true,apiKey:true},apiKeyHint:'····5678',updatedBy:'mia@example.test',updatedAt:'2026-10-15T08:00:00Z'});
-  assert(html.includes('value="custom-model"'));assert(html.includes('已設定 ····5678'));assert(html.includes('mia@example.test'));
+  const html=module.exports.render({...fixture,thinking:true,model:'custom-model',custom:{baseUrl:false,model:true,apiKey:true},apiKeyHint:'····5678',updatedBy:'mia@example.test',updatedAt:'2026-10-15T08:00:00Z'});
+  assert(html.includes('value="custom-model"'));assert(/type="checkbox"[^>]*checked/.test(html));assert(html.includes('思考：開'));assert(html.includes('已設定 ····5678'));assert(html.includes('mia@example.test'));
   assert(/type="password"[^>]*value=""/.test(html));
   const missing=module.exports.render({...fixture,baseUrl:'https://compatible.example.test/v1/chat/completions',apiKeyHint:null,custom:{baseUrl:true,model:false,apiKey:false}});
   assert(missing.includes('placeholder="未設定 key"'));assert(!missing.includes('預設 key ····1234'));

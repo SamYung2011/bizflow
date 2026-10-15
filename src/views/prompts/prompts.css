@@ -8,6 +8,8 @@
 .provider-fields { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 16px; }
 .provider-fields .nb-field { min-width: 0; }
 .provider-fields input { width: 100%; min-width: 0; }
+.provider-thinking { display: flex; align-items: center; gap: 8px; margin: 8px 0 12px; }
+.provider-thinking .nb-field { margin: 0; }
 .provider-card .prompt-actions { margin: 4px 0 10px; }
 .provider-card p { margin: 4px 0; overflow-wrap: anywhere; }
 .prompt-group h2 { margin: 16px 14px 6px; font-size: 12px; color: inherit; }

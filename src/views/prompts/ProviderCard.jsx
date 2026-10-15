@@ -5,7 +5,7 @@ import { useAppEmbedVisible } from '../../lib/appEmbedVisibility.js';
 import { formatFeedbackTime } from '../../lib/honnmonoAdmin.js';
 import { getProvider, saveProvider, resetProvider } from '../../api/assistantProviderApi.js';
 
-const draftFor = record => ({ baseUrl: record.custom.baseUrl ? record.baseUrl : '', model: record.custom.model ? record.model : '', apiKey: '' });
+const draftFor = record => ({ baseUrl: record.custom.baseUrl ? record.baseUrl : '', model: record.custom.model ? record.model : '', apiKey: '', thinking: record.thinking });
 
 export function ProviderEditor({ record, options, onSaved, leaveRef = null }) {
   const { t, lang } = useT();
@@ -14,7 +14,7 @@ export function ProviderEditor({ record, options, onSaved, leaveRef = null }) {
   const [error, setError] = useState(''), [saved, setSaved] = useState(false);
   const baseline = draftFor(record);
   const hasKeyDraft = keyEdited && Boolean(draft.apiKey.trim());
-  const dirty = draft.baseUrl !== baseline.baseUrl || draft.model !== baseline.model || hasKeyDraft;
+  const dirty = draft.baseUrl !== baseline.baseUrl || draft.model !== baseline.model || hasKeyDraft || draft.thinking !== baseline.thinking;
   const hasSettings = Boolean(record.updatedAt);
   const discard = () => { setDraft(draftFor(record)); setKeyEdited(false); };
   useImperativeHandle(leaveRef, () => ({ dirty, busy, discard }));
@@ -23,7 +23,7 @@ export function ProviderEditor({ record, options, onSaved, leaveRef = null }) {
     if (field === 'apiKey') setKeyEdited(true);
   };
   const submit = async reset => {
-    if (reset && hasSettings && !window.confirm(t('恢復預設會刪除已填的接口地址、模型和 API Key，確定？'))) return;
+    if (reset && hasSettings && !window.confirm(t('恢復預設會刪除已填的接口地址、模型、API Key 和思考模式設定，確定？'))) return;
     setError(''); setSaved(false);
     if (reset && !hasSettings) { discard(); return; }
     setBusy(true);
@@ -32,6 +32,7 @@ export function ProviderEditor({ record, options, onSaved, leaveRef = null }) {
         ...(draft.baseUrl !== baseline.baseUrl ? { baseUrl: draft.baseUrl } : {}),
         ...(draft.model !== baseline.model ? { model: draft.model } : {}),
         ...(hasKeyDraft ? { apiKey: draft.apiKey } : {}),
+        ...(draft.thinking !== baseline.thinking ? { thinking: draft.thinking } : {}),
       };
       const value = await (reset ? resetProvider(options) : saveProvider(body, options));
       setDraft(draftFor(value)); setKeyEdited(false); onSaved(value); setSaved(true);
@@ -47,13 +48,14 @@ export function ProviderEditor({ record, options, onSaved, leaveRef = null }) {
       <label className="nb-field">{t('模型')}<input type="text" value={draft.model} disabled={busy} placeholder={t('預設：{value}', { value: record.defaults.model })} onChange={event => change('model', event.target.value)}/></label>
       <label className="nb-field">{t('API Key')}<input type="password" autoComplete="new-password" value={draft.apiKey} disabled={busy} placeholder={keyPlaceholder} onChange={event => change('apiKey', event.target.value)}/></label>
     </div>
+    <label className="provider-thinking"><span className="nb-field">{t('思考模式')}</span><input type="checkbox" checked={draft.thinking} disabled={busy} onChange={event => change('thinking', event.target.checked)}/></label>
     <div className="nb-row-actions prompt-actions">
       <button type="button" className="nb-primary" disabled={busy || !dirty} onClick={() => submit(false)}>{t(busy ? '儲存中…' : '儲存')}</button>
       <button type="button" disabled={busy || (!dirty && !hasSettings)} onClick={() => submit(true)}>{t('恢復預設')}</button>
     </div>
     {error && <p role="alert" className="nb-error">{error}</p>}
     {saved && <p role="status" className="nb-success">{t('已儲存')}</p>}
-    <p className="nb-muted">{t('目前生效：{model} · {host} · key {hint}', { model: record.model, host, hint: record.apiKeyHint || t('未設定') })}</p>
+    <p className="nb-muted">{t('目前生效：{model} · {host} · key {hint}', { model: record.model, host, hint: record.apiKeyHint || t('未設定') })} · {t(record.thinking ? '思考：開' : '思考：關')}</p>
     <p className="nb-muted">{record.updatedAt ? t('最後修改：{name} · {time}', { name: record.updatedBy, time: formatFeedbackTime(Date.parse(record.updatedAt), lang) }) : t('尚未修改')}</p>
   </>;
 }
