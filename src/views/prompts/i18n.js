@@ -73,7 +73,7 @@ export const PROMPT_COPY = {
     "未設定 key": "No key configured",
     "未設定": "Not configured",
     "目前生效：{model} · {host} · key {hint}": "In use: {model} · {host} · key {hint}",
-    "恢復預設會刪除已填的接口地址、模型和 API Key，確定？": "Restore defaults and remove the saved API endpoint, model and API Key?"
+    "恢復預設會刪除已填的接口地址、模型、API Key 和思考模式設定，確定？": "Restore defaults and remove the saved API endpoint, model, API Key and thinking mode settings?"
   },
   "fr": {
     "APP 提示詞": "Consignes APP",
@@ -149,6 +149,6 @@ export const PROMPT_COPY = {
     "未設定 key": "Aucune clé configurée",
     "未設定": "Non configuré",
     "目前生效：{model} · {host} · key {hint}": "Actif : {model} · {host} · clé {hint}",
-    "恢復預設會刪除已填的接口地址、模型和 API Key，確定？": "Rétablir les valeurs par défaut et supprimer l’adresse API, le modèle et la clé API enregistrés ?"
+    "恢復預設會刪除已填的接口地址、模型、API Key 和思考模式設定，確定？": "Rétablir les valeurs par défaut et supprimer l’adresse API, le modèle, la clé API et les paramètres du mode de réflexion enregistrés ?"
   }
 };

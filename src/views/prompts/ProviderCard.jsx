@@ -23,7 +23,7 @@ export function ProviderEditor({ record, options, onSaved, leaveRef = null }) {
     if (field === 'apiKey') setKeyEdited(true);
   };
   const submit = async reset => {
-    if (reset && hasSettings && !window.confirm(t('恢復預設會刪除已填的接口地址、模型和 API Key，確定？'))) return;
+    if (reset && hasSettings && !window.confirm(t('恢復預設會刪除已填的接口地址、模型、API Key 和思考模式設定，確定？'))) return;
     setError(''); setSaved(false);
     if (reset && !hasSettings) { discard(); return; }
     setBusy(true);
@@ -48,7 +48,7 @@ export function ProviderEditor({ record, options, onSaved, leaveRef = null }) {
       <label className="nb-field">{t('模型')}<input type="text" value={draft.model} disabled={busy} placeholder={t('預設：{value}', { value: record.defaults.model })} onChange={event => change('model', event.target.value)}/></label>
       <label className="nb-field">{t('API Key')}<input type="password" autoComplete="new-password" value={draft.apiKey} disabled={busy} placeholder={keyPlaceholder} onChange={event => change('apiKey', event.target.value)}/></label>
     </div>
-    <label className="provider-thinking">{t('思考模式')}<input type="checkbox" checked={draft.thinking} disabled={busy} onChange={event => change('thinking', event.target.checked)}/></label>
+    <label className="provider-thinking"><span className="nb-field">{t('思考模式')}</span><input type="checkbox" checked={draft.thinking} disabled={busy} onChange={event => change('thinking', event.target.checked)}/></label>
     <div className="nb-row-actions prompt-actions">
       <button type="button" className="nb-primary" disabled={busy || !dirty} onClick={() => submit(false)}>{t(busy ? '儲存中…' : '儲存')}</button>
       <button type="button" disabled={busy || (!dirty && !hasSettings)} onClick={() => submit(true)}>{t('恢復預設')}</button>
