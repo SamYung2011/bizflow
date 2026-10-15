@@ -35,6 +35,7 @@ test('assistant prompts: admin GET/PATCH, employee denied, body and audit header
     });
     assert.equal((await handler(request('/assistant/prompts'))).status, 200);
     assert.equal((await handler(request('/assistant/prompts/system', 'PATCH', { content: 'prompt' }))).status, 200);
+    assert.equal(timeoutBudgets.at(-1), 10000);
     assert.deepEqual(JSON.parse(new TextDecoder().decode(calls[1].options.body)), { content: 'prompt' });
     assert.equal((await handler(request('/assistant/prompts/system', 'PATCH', { reset: true }))).status, 200);
     for (const method of ['POST', 'DELETE', 'PUT']) assert.equal((await handler(request('/assistant/prompts/system', method))).status, 404);

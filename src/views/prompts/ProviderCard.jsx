@@ -1,40 +1,45 @@
-import React, { useState } from 'react';
+import React, { useImperativeHandle, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useT } from '../../i18n.jsx';
 import { useAppEmbedVisible } from '../../lib/appEmbedVisibility.js';
 import { formatFeedbackTime } from '../../lib/honnmonoAdmin.js';
 import { getProvider, saveProvider, resetProvider } from '../../api/assistantProviderApi.js';
-import { usePromptLeave } from './usePromptLeave.js';
 
 const draftFor = record => ({ baseUrl: record.custom.baseUrl ? record.baseUrl : '', model: record.custom.model ? record.model : '', apiKey: '' });
 
-export function ProviderEditor({ record, options, onSaved }) {
+export function ProviderEditor({ record, options, onSaved, leaveRef = null }) {
   const { t, lang } = useT();
   const [draft, setDraft] = useState(() => draftFor(record));
   const [keyEdited, setKeyEdited] = useState(false), [busy, setBusy] = useState(false);
   const [error, setError] = useState(''), [saved, setSaved] = useState(false);
   const baseline = draftFor(record);
-  const dirty = draft.baseUrl !== baseline.baseUrl || draft.model !== baseline.model || keyEdited;
+  const hasKeyDraft = keyEdited && Boolean(draft.apiKey.trim());
+  const dirty = draft.baseUrl !== baseline.baseUrl || draft.model !== baseline.model || hasKeyDraft;
   const hasSettings = Boolean(record.updatedAt);
   const discard = () => { setDraft(draftFor(record)); setKeyEdited(false); };
-  usePromptLeave(dirty, busy, discard);
+  useImperativeHandle(leaveRef, () => ({ dirty, busy, discard }));
   const change = (field, value) => {
     setDraft(previous => ({ ...previous, [field]: value })); setSaved(false);
     if (field === 'apiKey') setKeyEdited(true);
   };
   const submit = async reset => {
+    if (reset && hasSettings && !window.confirm(t('恢復預設會刪除已填的接口地址、模型和 API Key，確定？'))) return;
     setError(''); setSaved(false);
     if (reset && !hasSettings) { discard(); return; }
     setBusy(true);
     try {
-      const body = { baseUrl: draft.baseUrl, model: draft.model, ...(keyEdited ? { apiKey: draft.apiKey } : {}) };
+      const body = {
+        ...(draft.baseUrl !== baseline.baseUrl ? { baseUrl: draft.baseUrl } : {}),
+        ...(draft.model !== baseline.model ? { model: draft.model } : {}),
+        ...(hasKeyDraft ? { apiKey: draft.apiKey } : {}),
+      };
       const value = await (reset ? resetProvider(options) : saveProvider(body, options));
       setDraft(draftFor(value)); setKeyEdited(false); onSaved(value); setSaved(true);
     } catch (problem) { setError(problem.message || t('操作失敗，請重試')); }
     finally { setBusy(false); }
   };
   const keyPlaceholder = record.custom.apiKey ? t('已設定 {hint}', { hint: record.apiKeyHint })
-    : record.defaults.apiKeyHint ? t('預設 key {hint}', { hint: record.defaults.apiKeyHint }) : t('未設定 key');
+    : record.apiKeyHint ? t('預設 key {hint}', { hint: record.apiKeyHint }) : t('未設定 key');
   const host = new URL(record.baseUrl).host;
   return <>
     <div className="provider-fields">
@@ -53,7 +58,7 @@ export function ProviderEditor({ record, options, onSaved }) {
   </>;
 }
 
-export default function ProviderCard({ options, email }) {
+export default function ProviderCard({ options, email, leaveRef }) {
   const { t } = useT(), cache = useQueryClient(), visible = useAppEmbedVisible();
   const queryKey = ['appProvider', email];
   const query = useQuery({ queryKey, queryFn: ({ signal }) => getProvider({ ...options, signal }), enabled: visible,
@@ -61,6 +66,6 @@ export default function ProviderCard({ options, email }) {
   return <section className="nb-card provider-card" aria-label={t('模型設定')}>
     <h2>{t('模型設定')}</h2>
     {query.isPending ? <p className="nb-muted">{t('載入中…')}</p> : query.isError ? <p role="alert" className="nb-error">{query.error.message}</p>
-      : <ProviderEditor record={query.data} options={options} onSaved={value => cache.setQueryData(queryKey, value)}/>}
+      : <ProviderEditor record={query.data} options={options} onSaved={value => cache.setQueryData(queryKey, value)} leaveRef={leaveRef}/>}
   </section>;
 }

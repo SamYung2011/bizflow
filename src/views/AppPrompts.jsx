@@ -1,10 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useT } from '../i18n.jsx';
 import { useAppEmbedVisible } from '../lib/appEmbedVisibility.js';
 import { formatFeedbackTime } from '../lib/honnmonoAdmin.js';
 import { listPrompts, resetPrompt, savePrompt } from '../api/assistantPromptApi.js';
-import { requestPromptLeave } from '../../root-site/bizflow/app-prompt-leave.js';
 import ProviderCard from './prompts/ProviderCard.jsx';
 import { usePromptLeave } from './prompts/usePromptLeave.js';
 import './honnmono/northbound/northbound.css';
@@ -12,13 +11,13 @@ import './prompts/prompts.css';
 
 const GROUPS = [['answer', '回答提示'], ['memory', '記憶提示'], ['handoff', '轉人工提示'], ['tool', '工具說明']];
 
-export function PromptEditor({ record, options, onSaved, onBusyChange = () => {} }) {
+export function PromptEditor({ record, options, onSaved, onBusyChange = () => {}, leaveRef = null }) {
   const { t, lang } = useT();
   const [content, setContent] = useState(record.content), [busy, setBusy] = useState(false);
   const [baseline, setBaseline] = useState(record.content);
   const [error, setError] = useState(''), [saved, setSaved] = useState(false);
   const dirty = content !== baseline;
-  usePromptLeave(dirty, busy, () => setContent(baseline));
+  useImperativeHandle(leaveRef, () => ({ dirty, busy, discard: () => setContent(baseline) }), [dirty, busy, baseline]);
   const submit = async reset => {
     setError(''); setSaved(false);
     if (reset && !record.isCustom) { setContent(baseline); return; }
@@ -47,6 +46,8 @@ export function PromptEditor({ record, options, onSaved, onBusyChange = () => {}
 
 function Workspace({ session }) {
   const { t } = useT(), cache = useQueryClient(), visible = useAppEmbedVisible();
+  const editorRef = useRef(null), providerRef = useRef(null);
+  usePromptLeave(editorRef, providerRef);
   const options = useMemo(() => ({ accessToken: session.access_token }), [session.access_token]);
   const queryKey = ['appPrompts', session.user.email];
   const query = useQuery({ queryKey, queryFn: ({ signal }) => listPrompts({ ...options, signal }), enabled: visible,
@@ -55,11 +56,14 @@ function Workspace({ session }) {
   const record = rows.find(row => row.key === selected) || rows[0];
   const choose = key => {
     if (key === record?.key) return;
-    if (requestPromptLeave()) setSelected(key);
+    if (editorRef.current?.busy) return;
+    if (editorRef.current?.dirty && !window.confirm(t('有未儲存修改，放棄並離開？'))) return;
+    setSelected(key);
   };
   const saved = row => cache.setQueryData(queryKey, previous => previous.map(item => item.key === row.key ? row : item));
-  return <div className="nb-workspace prompt-workspace">
-    <ProviderCard options={options} email={session.user.email}/>
+  return <>
+    <ProviderCard options={options} email={session.user.email} leaveRef={providerRef}/>
+    <div className="nb-workspace prompt-workspace">
     <aside className="nb-sidebar">
       <header><span className="nb-eyebrow">Honnmono APP</span><h1>{t('APP 提示詞')}</h1><p>{t('編輯 App 助手的提示詞')}</p></header>
       <div className="nb-list">
@@ -75,9 +79,10 @@ function Workspace({ session }) {
     <main className="nb-main">
       {query.isPending ? <p className="nb-loading">{t('載入提示詞…')}</p> : query.isError ? <div role="alert" className="nb-error">
         {query.error.message || t('載入失敗，請重試')}<button type="button" onClick={() => query.refetch()}>{t('重試')}</button>
-      </div> : record && <PromptEditor key={record.key} record={record} options={options} onSaved={saved} onBusyChange={setBusy}/>}
+      </div> : record && <PromptEditor key={record.key} record={record} options={options} onSaved={saved} onBusyChange={setBusy} leaveRef={editorRef}/>}
     </main>
-  </div>;
+    </div>
+  </>;
 }
 
 export default function AppPrompts({ session, isAdmin = false, embedded = false }) {

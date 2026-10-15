@@ -47,13 +47,15 @@ await check('administrator card has exactly three inputs and two buttons above e
   for(const key of ['模型設定','接口地址','模型','API Key','儲存','恢復預設','目前生效：deepseek-flash','api.deepseek.com','尚未修改'])assert(html.includes(key),key);
   assert.equal((html.match(/<input /g)||[]).length,3);assert.equal((html.match(/<button /g)||[]).length,2);
   assert(html.includes('type="password"'));assert(html.includes('placeholder="預設：deepseek-flash"'));assert(html.includes('預設 key ····1234'));
-  assert(html.indexOf('provider-card')<html.indexOf('nb-sidebar'));
+  assert(html.indexOf('provider-card')<html.indexOf('nb-workspace'));
   assert(!html.includes('<select')&&!html.includes('<textarea'));
 });
 await check('custom values and hint render without exposing a key value',()=>{
   const html=module.exports.render({...fixture,model:'custom-model',custom:{baseUrl:false,model:true,apiKey:true},apiKeyHint:'····5678',updatedBy:'mia@example.test',updatedAt:'2026-10-15T08:00:00Z'});
   assert(html.includes('value="custom-model"'));assert(html.includes('已設定 ····5678'));assert(html.includes('mia@example.test'));
   assert(/type="password"[^>]*value=""/.test(html));
+  const missing=module.exports.render({...fixture,baseUrl:'https://compatible.example.test/v1/chat/completions',apiKeyHint:null,custom:{baseUrl:true,model:false,apiKey:false}});
+  assert(missing.includes('placeholder="未設定 key"'));assert(!missing.includes('預設 key ····1234'));
 });
 await check('ordinary employee and absent sessions render no card or inputs',()=>{
   for(const props of [{isAdmin:false},{session:null},{session:{access_token:'x',user:{}}}]){
