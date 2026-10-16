@@ -43,6 +43,13 @@ await check('editor copy has three-language keys and no literal Chinese JSX', as
   }
   assert.equal(records.length,22);assert(PROMPT_COPY.en['APP 提示詞']);
   assert(!/>[^<{]*[\u3400-\u9fff][^<{]*</.test(source));
+  let hasBaseline = true;
+  try { execFileSync('git', ['cat-file', '-e', '188d11d^{commit}'], { stdio: 'ignore' }); }
+  catch { hasBaseline = false; }
+  if (!hasBaseline) {
+    console.log('baseline 188d11d not in this clone, dictionary diff skipped');
+    return;
+  }
   const base=await import('data:text/javascript;base64,'+Buffer.from(await compile(execFileSync('git',['show','188d11d:src/i18n.jsx'],{encoding:'utf8'})+'\nexport { DICT_EN, DICT_FR };', 'esm', process.cwd()+'/src')).toString('base64'));
   for(const locale of ['DICT_EN','DICT_FR']) for(const [key,value] of Object.entries(base[locale])) assert.equal(dictionaries[locale][key],value,`${locale}:${key}`);
 });
