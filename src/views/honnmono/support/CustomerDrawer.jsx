@@ -52,13 +52,11 @@ export default function CustomerDrawer({ userId, options, employees, onClose, on
             <Line label={t('車身號碼')} value={car.vin} /><Line label={t('驗車日期')} value={time(car.checkTime)} />
             <Line label={t('牌照到期')} value={time(car.licenseExpireTime)} /><Line label={t('國際牌照到期')} value={time(car.intlPlateExpireTime)} />
           </dl>)}{!data.cars.length && <p>{t('暫無紀錄')}</p>}</Section>
-          <Section title={t('手機與 App')}>{data.appDevices.sessions.map((row, index) => <dl key={index}>
-            <Line label={t('手機型號')} value={row.deviceModel} /><Line label={t('作業系統')} value={[row.osName, row.osVersion].filter(Boolean).join(' ')} />
-            <Line label={t('App 版本')} value={row.appVersion} /><Line label={t('最近上線')} value={time(row.lastSeenAt)} />
-          </dl>)}{data.appDevices.pushRegistrations.map((row, index) => <dl key={`push-${index}`}>
-            <Line label={t('推送平台')} value={`${row.platform} · ${t(row.appVariant === 'cn' ? '國內版' : '港版')}`} />
-            <Line label={t('App 版本')} value={row.appVersion} /><Line label={t('更新時間')} value={time(row.updatedAt)} />
-          </dl>)}{!data.appDevices.sessions.length && !data.appDevices.pushRegistrations.length && <p>{t('暫無紀錄')}</p>}</Section>
+          <Section title={t('手機與 App')}><dl>{[['lastLogin', '最近登入'], ['lastMessage', '最近發訊']].map(([key, label]) => {
+            const row = data.appDevices[key];
+            return <Line key={key} label={t(label)} value={row ? [time(row.at), row.deviceModel,
+              [row.osName, row.osVersion].filter(Boolean).join(' '), row.appVersion && `${t('App 版本')} ${row.appVersion}`].filter(Boolean).join(' · ') : '—'} />;
+          })}</dl></Section>
           <Section title={t('轉插')}>{data.adapters.map((row, index) => <dl key={index}>
             <Line label={t('IMEI')} value={row.imei} /><Line label={t('設備編號')} value={row.certid} /><Line label={t('綁定時間')} value={time(row.bindtime)} />
             <Line label={t('車身號碼')} value={row.vin} /><Line label={t('韌體版本')} value={row.fwversion} /><Line label={t('車款')} value={row.carModel} />

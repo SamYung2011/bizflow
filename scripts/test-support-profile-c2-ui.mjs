@@ -9,6 +9,7 @@ const browser = await chromium.launch({headless:true,channel:'chrome'});
 const page = await browser.newPage({viewport:{width:1440,height:1100}});
 const errors=[],external=[];
 page.on('pageerror', error=>errors.push(error.message));
+await page.addInitScript(()=>localStorage.setItem('bizflow-lang',new URLSearchParams(location.search).get('lang')||'zh'));
 await page.route('**/*', route=>{
   if(new URL(route.request().url()).origin===origin) return route.continue();
   external.push(route.request().url());return route.abort();
@@ -45,10 +46,33 @@ try {
   assert.equal(await rows.count(),5);
   assert.equal(await drawer.getByRole('button',{name:'上一頁',exact:true}).count(),0);
   console.log('PROFILE_C2_UI 2: 45 conversations paginate 20/20/5 without overlap and collapse restores five');
+  const devices=drawer.locator('.customer-section').filter({has:page.getByRole('heading',{name:'手機與 App',exact:true})});
+  assert.equal(await devices.locator('.customer-line').count(),2);
+  assert.deepEqual(await devices.locator('dt').allTextContents(),['最近登入','最近發訊']);
+  const values=await devices.locator('dd').allTextContents();
+  assert(values[0].includes('iPhone 17 Pro') && values[0].includes('26.1') && values[0].includes('2.0.1'));
+  assert(values[1].includes('iPhone 16') && values[1].includes('26.0') && values[1].includes('2.0.0'));
+  assert(!values[1].includes('iPhone 17 Pro'));
+  await devices.scrollIntoViewIfNeeded();
+  await page.screenshot({path:`${output}/c2-device-events.png`});
+  console.log('PROFILE_C2_UI 4: only two event rows with independent historical devices and app versions');
   await rows.filter({hasText:'HM-CS-000006'}).click();
   await drawer.waitFor({state:'detached'});
   await page.getByText('The receipt has been corrected. Thank you, Alex.',{exact:true}).waitFor();
   console.log('PROFILE_C2_UI 3: historical conversation opens in the existing support workspace');
+  for (const [lang,expand] of [['en','Expand'],['fr','Développer']]) {
+    await page.goto(`${origin}/scripts/tg5-c-preview.html?history=1&lang=${lang}`);
+    await page.locator('.support-conversation').filter({hasText:'Alex Chan'}).first().click();
+    await page.locator('.customer-name-button').click();
+    const translated=page.locator('.customer-drawer');
+    await translated.getByRole('button',{name:expand,exact:true}).waitFor();
+    assert(!/[\u3400-\u9fff]/.test(await translated.innerText()));
+    assert.equal(await translated.locator('.customer-section').nth(3).locator('.customer-line').count(),2);
+    await translated.getByRole('button',{name:expand,exact:true}).click();
+    await page.waitForFunction(()=>document.querySelectorAll('.customer-history').length===20);
+    assert(!/[\u3400-\u9fff]/.test(await translated.locator('.customer-history-controls').innerText()));
+    console.log(`PROFILE_C2_UI: ${lang} history controls and both device rows are translated`);
+  }
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
-  console.log('PROFILE_C2_UI_CHECK=3/3');
+  console.log('PROFILE_C2_UI_CHECK=6/6');
 } finally {await browser.close();}

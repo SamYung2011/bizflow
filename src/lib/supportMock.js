@@ -187,8 +187,9 @@ export async function getUserProfile(id) {
   return clone({ basic, conversations: await listConversations({ userId: id, size: 5 }),
     cars: [{ id: 51, brand: 'BYD', series: 'Seal', variant: 'Premium', year: '2025', plate: 'AB 1234', vin: 'DEMO-VIN-000051',
       isPrimary: true, checkTime: baseTime + 86400000 * 100, licenseExpireTime: baseTime + 86400000 * 180, intlPlateExpireTime: 0 }],
-    appDevices: { sessions: [{ deviceModel: 'iPhone 17 Pro', osName: 'iOS', osVersion: '26.1', appVersion: '2.0.1', lastSeenAt: baseTime }],
-      pushRegistrations: [{ platform: 'ios', appVariant: 'hk', appVersion: '2.0.1', updatedAt: baseTime }] },
+    appDevices: {
+      lastLogin: { deviceModel: 'iPhone 17 Pro', osName: 'iOS', osVersion: '26.1', appVersion: '2.0.1', at: baseTime },
+      lastMessage: { deviceModel: 'iPhone 16', osName: 'iOS', osVersion: '26.0', appVersion: '2.0.0', at: baseTime - 3600000 } },
     adapters: [{ imei: '860000000000051', certid: '0D000051', bindtime: baseTime - 86400000 * 10, vin: 'DEMO-VIN-000051',
       fwversion: '1.0.9', carModel: 'Seal', origin: 'flash', lastSeenAt: baseTime }],
     insurance: { overview: null, policies: { hk: { id: 21, policyNo: 'HK-DEMO-0021', insurer: 'Demo Insurance', status: 'ready', coverEnd: '2027-09-17' }, cn: null, history: [] } },

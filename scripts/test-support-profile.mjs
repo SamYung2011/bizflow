@@ -35,4 +35,8 @@ const pages = await Promise.all([1,2,3].map(page => mock.listConversations({user
 assert.deepEqual(pages.map(rows=>rows.length), [20,20,5]);
 assert.equal(new Set(pages.flat().map(row=>row.id)).size, 45);
 assert(pages.flat().every(row=>row.userId===800));
-console.log('SUPPORT_PROFILE_CHECK=9/9');
+assert.deepEqual(Object.keys(profile.appDevices).sort(), ['lastLogin','lastMessage']);
+assert.equal(profile.appDevices.lastLogin.deviceModel, 'iPhone 17 Pro');
+assert.equal(profile.appDevices.lastMessage.deviceModel, 'iPhone 16');
+assert(profile.appDevices.lastMessage.at < profile.appDevices.lastLogin.at);
+console.log('SUPPORT_PROFILE_CHECK=10/10');

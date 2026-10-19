@@ -4461,3 +4461,6 @@ export function register(zh, en) {
 
 Object.assign(DICT_EN, { '展開': 'Expand' });
 Object.assign(DICT_FR, { '展開': 'Développer' });
+
+Object.assign(DICT_EN, { '最近發訊': 'Last message' });
+Object.assign(DICT_FR, { '最近發訊': 'Dernier message' });
