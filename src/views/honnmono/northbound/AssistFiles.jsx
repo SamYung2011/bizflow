@@ -6,20 +6,29 @@ import { KINDS } from './labels.js';
 
 export default function AssistFiles({ record, options, run, busy, onPreview, onSubmit }) {
   const { t } = useT();
+  const [failures, setFailures] = useState([]);
   const [requestId, setRequestId] = useState(record.pendingRequests?.[0]?.requestId || '');
   const pending = record.pendingRequests?.find(row => row.requestId === requestId);
   const kinds = record.status === 'draft' ? KINDS : KINDS.filter(([kind]) => pending?.kinds.includes(kind));
   async function upload(kind, files) {
-    await run(async () => {
+    setFailures([]);
+    await run(async updateRecord => {
       for (const file of files) {
-        const prepared = await prepareImage(file);
-        const stored = await api.uploadDocument(record.id, prepared, options);
-        await api.addDocument(record.id, { cfid: stored.cfid, kind, clientRequestId: crypto.randomUUID(),
-          ...(record.status === 'draft' ? {} : { requestId }) }, options);
+        try {
+          const prepared = await prepareImage(file);
+          const stored = await api.uploadDocument(record.id, prepared, options);
+          const doc = await api.addDocument(record.id, { cfid: stored.cfid, kind, clientRequestId: crypto.randomUUID(),
+            ...(record.status === 'draft' ? {} : { requestId }) }, options);
+          updateRecord(current => ({ ...current, documents: [...(current.documents || []).filter(item => item.id !== doc.id), doc] }));
+        } catch (error) {
+          const reason = t(error.message === 'attachment_too_large' ? '附件超過大小限制' : '操作失敗，請重試');
+          setFailures(current => [...current, { kind, name: file.name, reason }]);
+        }
       }
       return api.getCase(record.id, options);
     });
   }
+
   return <section className="nb-card"><h3>{t('上傳與預覽')}</h3>
     {record.status !== 'draft' && <label className="nb-field">{t('待補件')}<select value={requestId} disabled={busy} onChange={event => setRequestId(event.target.value)}>
       {(record.pendingRequests || []).map(row => <option key={row.requestId} value={row.requestId}>{row.requestId} · {row.note}</option>)}
@@ -30,6 +39,8 @@ export default function AssistFiles({ record, options, run, busy, onPreview, onS
       {(record.documents || []).filter(doc => doc.kind === kind && doc.status !== 'removed' && (record.status === 'draft' || doc.requestId === requestId)).map(doc =>
         <div className="assist-file" key={doc.id}><span>{doc.name}</span><button type="button" disabled={busy} aria-label={t('移除文件：{name}', { name: doc.name })}
           onClick={() => run(async () => { await api.removeDocument(record.id, doc.id, options); return api.getCase(record.id, options); })}>{t('移除')}</button></div>)}
+      {failures.filter(file => file.kind === kind).map((file, index) => <p role="alert" className="nb-error assist-file-failure" key={index}>
+        {t('上傳失敗：{name}（{reason}）', file)}</p>)}
     </div>)}</div>
     <div className="assist-actions"><button type="button" disabled={busy} onClick={onPreview}>{t('預覽申請')}</button>
       {record.status !== 'draft' && <button className="nb-primary" type="button" disabled={busy || !pending} onClick={() => onSubmit(requestId)}>{t('代提交補件')}</button>}

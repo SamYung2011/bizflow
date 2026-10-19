@@ -1,13 +1,18 @@
 import React, { useState } from 'react';
 import { useT } from '../../../i18n.jsx';
 
+const driversForMode = (mode, persons = []) => Array.from({ length: mode === '0+2' ? 2 : 1 }, (_, index) => {
+  const { name = '', role = 'driver', idNo } = persons[index] || {};
+  return { name, role, idNo };
+});
+
 export default function AssistForm({ record, cars, busy, onSave }) {
   const { t } = useT();
   const [applicant, setApplicant] = useState({ name: '', phoneHk: '', addressHk: '', phoneCn: '', ...record.applicant });
   const [vehicle, setVehicle] = useState({ carId: null, plateNo: '', color: '', brand: '', model: '', ...record.vehicle });
   const [driverMode, setDriverMode] = useState(record.driverMode || '1+1');
-  const [persons, setPersons] = useState(record.persons?.length ? record.persons.map(({ name, role, idNo }) => ({ name, role, idNo })) : [{ name: '', role: 'driver' }]);
-  const changeMode = mode => { setDriverMode(mode); setPersons(current => Array.from({ length: mode === '1+1' ? 1 : 2 }, (_, i) => current[i] || { name: '', role: 'driver' })); };
+  const [persons, setPersons] = useState(driversForMode(record.driverMode || '1+1', record.persons));
+  const changeMode = mode => { setDriverMode(mode); setPersons(current => driversForMode(mode, current)); };
   return <form onSubmit={event => { event.preventDefault(); onSave({ applicant, vehicle, driverMode, persons }); }}>
     <fieldset className="assist-fields" disabled={busy}>
       <section className="nb-card"><h3>{t('申請人')}</h3><div className="assist-grid">

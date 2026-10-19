@@ -20,15 +20,19 @@ export default function AssistDraft({ options, onClose, onSubmitted }) {
   const [record, setRecord] = useState(null), [step, setStep] = useState(0);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [missing, setMissing] = useState([]), [notice, setNotice] = useState('');
   const alert = useRef(null);
+  const [activeCase, setActiveCase] = useState(null);
   const profile = useQuery({ queryKey: ['northboundAssist', options.operatorEmail, 'profile', user?.id],
     queryFn: ({ signal }) => getUserProfile(user.id, { ...options, signal }), enabled: visible && !!user });
   const cases = useQuery({ queryKey: ['northboundAssist', options.operatorEmail, 'cases', user?.id],
     queryFn: ({ signal }) => api.listCases(user.id, { ...options, signal }), enabled: visible && !!user });
   async function run(action, next) {
-    setBusy(true); setError(''); setMissing([]);
-    try { const saved = await action(); if (saved) setRecord(saved); if (next != null) setStep(next); return saved; }
+    setBusy(true); setError(''); setMissing([]); setActiveCase(null);
+    try { const saved = await action(setRecord); if (saved) setRecord(saved); if (next != null) setStep(next); return saved; }
     catch (err) {
-      setError(t(err.message === 'attachment_too_large' ? '附件超過大小限制' : '操作失敗，請重試'));
+      if (err.status === 409 && err.result?.id && err.result?.caseNo) {
+        setActiveCase(err.result);
+        setError(t('此使用者已有在辦申請（案號 {caseNo}）', { caseNo: err.result.caseNo }));
+      } else setError(t(err.message === 'attachment_too_large' ? '附件超過大小限制' : '操作失敗，請重試'));
       setMissing(err.result?.missing || []);
       requestAnimationFrame(() => alert.current?.scrollIntoView({ block: 'nearest' }));
       return null;
@@ -55,6 +59,7 @@ export default function AssistDraft({ options, onClose, onSubmitted }) {
     <ol className="assist-steps">{['搜尋使用者','填寫資料','上傳與預覽'].map((label,index) => <li key={label} className={Math.min(step,2)===index?'is-current':''}>
       <span>{index+1}</span>{t(label)}</li>)}</ol>
     <div ref={alert}>{error && <div role="alert" className="nb-alert"><p>{missing.length ? t('請補齊以下項目') : error}</p>
+      {activeCase && <button type="button" disabled={busy} onClick={() => open(activeCase.id)}>{t('開啟申請')}</button>}
       {!!missing.length && <ul>{missing.map(key => <li key={key}>{t(MISSING[key] || '必填資料')}</li>)}</ul>}</div>}
       {notice && <p role="status" className="nb-success">{notice}</p>}</div>
     {step===0 ? <>

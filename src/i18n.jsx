@@ -4413,6 +4413,17 @@ Object.assign(DICT_FR, {
   "申請類型": "Type de demande"
 });
 
+Object.assign(DICT_EN, {
+  "此使用者已有在辦申請（案號 {caseNo}）": "This user has an application in progress (case {caseNo})",
+  "開啟申請": "Open application",
+  "上傳失敗：{name}（{reason}）": "Upload failed: {name} ({reason})"
+});
+Object.assign(DICT_FR, {
+  "此使用者已有在辦申請（案號 {caseNo}）": "Cet utilisateur a une demande en cours (dossier {caseNo})",
+  "開啟申請": "Ouvrir la demande",
+  "上傳失敗：{name}（{reason}）": "Échec de l’envoi : {name} ({reason})"
+});
+
 Object.assign(DICT_EN, PROMPT_COPY.en);
 Object.assign(DICT_FR, PROMPT_COPY.fr);
 
