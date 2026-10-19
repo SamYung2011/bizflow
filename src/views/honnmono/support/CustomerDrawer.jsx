@@ -42,7 +42,7 @@ export default function CustomerDrawer({ userId, options, employees, onClose, on
             <Line label={t('使用者編號')} value={data.basic.id} /><Line label={t('使用者電郵')} value={data.basic.email} />
             <Line label={t('電話')} value={data.basic.phone} /><Line label={t('香港電話')} value={data.basic.phoneHk} />
             <Line label={t('內地電話')} value={data.basic.phoneCn} /><Line label={t('App 版本識別')} value={data.basic.appmodel} />
-            <Line label={t('註冊時間')} value={time(data.basic.registeredAt)} /><Line label={t('最近登入')} value={time(data.basic.lastLoginAt)} />
+            <Line label={t('註冊時間')} value={time(data.basic.registeredAt)} />
           </dl></Section>
           <Section title={t('歷史對話')}><CustomerHistory key={userId} userId={userId} recent={data.conversations}
             options={options} employees={employees} onSelect={onSelect} /></Section>

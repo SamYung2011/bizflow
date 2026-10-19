@@ -39,6 +39,12 @@ export function installAssistFixture() {
       {id:102,cfid:'proof-original',name:'proof.pdf',mime:'application/pdf',size:20480,kind:'hrp'},
       {id:103,cfid:'no-thumb-original',name:'legacy.jpg',mime:'image/jpeg',size:original.size,kind:'driver_doc'});
     sampleDocs.forEach(doc=>Object.assign(doc,{version:1,status:'uploaded',createdAt:now,requestId:'NB-DOC-001'}));
+    if (new URLSearchParams(location.search).has('statuses')) {
+      Object.assign(sampleDocs[0], {version:2,status:'accepted'});
+      Object.assign(sampleDocs[1], {version:3,status:'rejected',staffNote:'Unclear scan'});
+      Object.assign(sampleDocs[2], {version:1,status:'removed',staffNote:'Superseded document'});
+      sampleDocs.push({...sampleDocs[0],id:104,name:'new-version.jpg',version:4,status:'uploaded'});
+    }
     cases[0].documents = structuredClone(sampleDocs);
   }
   const calls = []; window.__assistCalls = calls;
@@ -66,6 +72,7 @@ export function installAssistFixture() {
       const row = cases.find(row=>row.id===Number(match[1])), action = match[2];
       if (!row) return Response.json({code:404},{status:404});
       if (!action) return ok(row);
+      if (/^\/documents\/\d+\/review$/.test(action)) { const doc=row.documents.find(item=>item.id===Number(action.split('/')[2]));Object.assign(doc,{status:body.status,staffNote:body.note});return ok(doc); }
       if (action==='/update') { Object.assign(row,body,{persons:body.persons.map((person,index)=>({...person,id:index+1,sort:index}))}); return ok(row); }
       if (action==='/upload') return ok({filelist:body.filelist.map(item=>{const cfid=`assist-file-${fileId++}`;files.set(cfid,item);return{...item,cfid,cfinfo:{url:`/functions/v1/honnmono-admin/support/upload/${cfid}`,method:'POST'}};})});
       if (action==='/documents') { const file=files.get(body.cfid);const doc={...body,id:docId++,name:file.filename,mime:file.mime,size:file.size,status:'uploaded',version:1,createdAt:now};row.documents.push(doc);return ok(doc); }

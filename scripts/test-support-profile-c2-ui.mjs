@@ -49,6 +49,8 @@ try {
   const devices=drawer.locator('.customer-section').filter({has:page.getByRole('heading',{name:'手機與 App',exact:true})});
   assert.equal(await devices.locator('.customer-line').count(),2);
   assert.deepEqual(await devices.locator('dt').allTextContents(),['最近登入','最近發訊']);
+  assert.equal(await drawer.getByText('最近登入',{exact:true}).count(),1);
+  assert.equal(await drawer.locator('.customer-section').first().getByText('最近登入',{exact:true}).count(),0);
   const values=await devices.locator('dd').allTextContents();
   assert(values[0].includes('iPhone 17 Pro') && values[0].includes('26.1') && values[0].includes('2.0.1'));
   assert(values[1].includes('iPhone 16') && values[1].includes('26.0') && values[1].includes('2.0.0'));

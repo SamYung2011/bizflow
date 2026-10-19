@@ -60,7 +60,7 @@ export default function FilePreview({ document: file, options, onClose }) {
   }, [onClose]);
   const url = original || thumb;
   return <div className="nb-preview-overlay" role="presentation" onClick={onClose}>
-    <div ref={dialog} tabIndex={-1} className={`nb-preview${original ? ' is-original' : ''}`} role="dialog" aria-modal="true"
+    <div ref={dialog} tabIndex={-1} className={`nb-preview nb-file-preview${original ? ' is-original' : ''}`} role="dialog" aria-modal="true"
       aria-label={t('查看文件')} onClick={event => event.stopPropagation()}>
       <header><strong>{file.name}</strong><button type="button" onClick={onClose}>{t('關閉')}</button></header>
       <DocumentMetadata document={file} />
