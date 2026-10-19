@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { build } from 'esbuild';
+const bundle = await build({ entryPoints:['src/views/honnmono/knowledge/SaveNotice.jsx'], bundle:true, write:false, format:'esm', platform:'node' });
+const { revealNotice } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
+let scrolled = [];
+globalThis.window = { innerWidth:1000, innerHeight:800, getComputedStyle:node=>node.style };
+const parent = { parentElement:null, style:{overflowY:'auto',overflowX:'hidden'}, getBoundingClientRect:()=>({top:100,bottom:600,left:100,right:900}) };
+const notice = rect => ({ parentElement:parent, getBoundingClientRect:()=>({left:120,right:880,...rect}), scrollIntoView:options=>scrolled.push(options) });
+revealNotice(null); revealNotice(notice({top:200,bottom:240})); assert.equal(scrolled.length,0);
+revealNotice(notice({top:610,bottom:650})); assert.deepEqual(scrolled.pop(),{block:'nearest',inline:'nearest',behavior:'smooth'});
+revealNotice(notice({top:70,bottom:110})); assert.equal(scrolled.length,1);scrolled=[];
+revealNotice(notice({top:200,bottom:240,right:950})); assert.equal(scrolled.length,1);scrolled=[];
+parent.style={overflowY:'visible',overflowX:'visible'};
+revealNotice(notice({top:810,bottom:850})); assert.equal(scrolled.length,1);
+const locale=await readFile('src/i18n.jsx','utf8');assert(!/^\s*"停用":/m.test(locale));
+const independent=await readFile('team/src/i18n.jsx','utf8');assert(/^\s*"停用":/m.test(independent));
+console.log('KNOWLEDGE_SAVE_NOTICE_CHECK=6/6');
