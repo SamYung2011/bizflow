@@ -1,6 +1,7 @@
 // Isolated local acceptance preview: no project .env files or business endpoints.
 import { fileURLToPath } from 'node:url';
 export default {
+  cacheDir: '/tmp/codex-support-profile-r1-1019-vite',
   envDir: fileURLToPath(new URL('./fixtures/tg5-empty-env', import.meta.url)),
   esbuild: { jsx: 'automatic' },
   define: {

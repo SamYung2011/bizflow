@@ -20,7 +20,7 @@ export default function CustomerDrawer({ userId, options, employees, onClose, on
     queryFn: ({ signal }) => getUserProfile(userId, { ...options, signal }), enabled: visible && !!userId, gcTime: 0 });
   useEffect(() => {
     const previous = document.activeElement;
-    dialog.current?.querySelector('button')?.focus();
+    dialog.current?.focus();
     return () => previous?.isConnected && previous.focus();
   }, []);
   function keyDown(event) {
@@ -28,7 +28,9 @@ export default function CustomerDrawer({ userId, options, employees, onClose, on
     if (event.key !== 'Tab') return;
     const nodes = [...dialog.current.querySelectorAll('button:not(:disabled),a[href],input,select,[tabindex="0"]')];
     const target = event.shiftKey ? nodes.at(-1) : nodes[0];
-    if (document.activeElement === (event.shiftKey ? nodes[0] : nodes.at(-1))) { event.preventDefault(); target?.focus(); }
+    if (!nodes.includes(document.activeElement) || document.activeElement === (event.shiftKey ? nodes[0] : nodes.at(-1))) {
+      event.preventDefault(); (target || dialog.current)?.focus();
+    }
   }
   async function more() {
     setBusy(true); setFailed(false);
@@ -40,7 +42,7 @@ export default function CustomerDrawer({ userId, options, employees, onClose, on
   const data = query.data, time = value => value ? formatFeedbackTime(value, lang) : '—';
   const policies = data ? [data.insurance.policies.hk, data.insurance.policies.cn, ...data.insurance.policies.history].filter(Boolean) : [];
   return <div className="customer-overlay" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <aside className="customer-drawer" role="dialog" aria-modal="true" aria-label={t('客戶檔案')} ref={dialog} onKeyDown={keyDown}>
+    <aside className="customer-drawer" role="dialog" aria-modal="true" aria-label={t('客戶檔案')} ref={dialog} tabIndex={-1} onKeyDown={keyDown}>
       <header><div><span>{t('客戶檔案')}</span><h2>{data?.basic.nickname || data?.basic.email || t('使用者')}</h2></div>
         <button className="support-button" onClick={onClose}>{t('關閉')}</button></header>
       <div className="customer-content">

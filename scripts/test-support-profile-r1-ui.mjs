@@ -1,0 +1,52 @@
+import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : 'playwright');
+const origin = process.env.PREVIEW_ORIGIN || 'http://127.0.0.1:5199';
+const output = process.env.EVIDENCE_DIR || '/tmp/support-profile-r1-1019';
+await mkdir(output, { recursive: true });
+const browser = await chromium.launch({ headless: true, channel: 'chrome' });
+const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+const errors = [], external = [];
+page.on('pageerror', error => errors.push(error.message));
+await page.route('**/*', route => {
+  if (new URL(route.request().url()).origin === origin) return route.continue();
+  external.push(route.request().url()); return route.abort();
+});
+try {
+  await page.goto(`${origin}/scripts/tg5-c-preview.html`);
+  await page.locator('.support-conversation').filter({ hasText: 'Alex Chan' }).click();
+  const entry = page.locator('.customer-name-button');
+  await entry.click();
+  const drawer = page.getByRole('dialog', { name: '客戶檔案' });
+  await drawer.getByText('HM-CS-000006', { exact: false }).waitFor();
+  assert(await drawer.evaluate(node => document.activeElement === node));
+  await drawer.getByText('基本資料', { exact: true }).click();
+  await page.keyboard.press('Escape');
+  await drawer.waitFor({ state: 'detached' });
+  assert(await entry.evaluate(node => document.activeElement === node));
+  console.log('PROFILE_R1_UI 1: clicking non-interactive text still allows Escape and restores entry focus');
+  await entry.click(); await drawer.waitFor();
+  await page.keyboard.press('Shift+Tab');
+  const buttons = drawer.locator('button:not(:disabled)');
+  assert(await buttons.last().evaluate(node => document.activeElement === node));
+  await page.keyboard.press('Tab');
+  assert(await buttons.first().evaluate(node => document.activeElement === node));
+  await page.keyboard.press('Shift+Tab');
+  assert(await buttons.last().evaluate(node => document.activeElement === node));
+  await drawer.getByText('基本資料', { exact: true }).click();
+  await page.keyboard.press('Tab');
+  assert(await drawer.evaluate(node => node.contains(document.activeElement)));
+  await page.screenshot({ path: `${output}/fm2-keyboard-focus.png` });
+  console.log('PROFILE_R1_UI 2: Tab and Shift+Tab wrap within the drawer, including from its container');
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 720, height: 900 });
+  const size = await page.locator('.support-header-main .support-avatar').evaluate(node => {
+    const box = node.getBoundingClientRect(); return [box.width, box.height, getComputedStyle(node).fontSize];
+  });
+  assert.deepEqual(size, [35, 35, '15px']);
+  await page.screenshot({ path: `${output}/fm3-header-720.png` });
+  assert.deepEqual(errors, []); assert.deepEqual(external, []);
+  console.log('PROFILE_R1_UI 3: 720px viewport retains 35px avatar and 15px font');
+  console.log('PROFILE_R1_UI_CHECK=3/3');
+} finally { await browser.close(); }
