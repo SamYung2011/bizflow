@@ -3,9 +3,12 @@ import { useT } from '../../../i18n.jsx';
 import { prepareImage } from '../../../lib/prepareImage.js';
 import * as api from '../../../lib/northboundAssistApi.js';
 import { KINDS } from './labels.js';
+import DocumentLink from './DocumentLink.jsx';
+import FilePreview from './FilePreview.jsx';
 
 export default function AssistFiles({ record, options, run, busy, onPreview, onSubmit }) {
   const { t } = useT();
+  const [preview, setPreview] = useState(null);
   const [failures, setFailures] = useState([]);
   const [requestId, setRequestId] = useState(record.pendingRequests?.[0]?.requestId || '');
   const pending = record.pendingRequests?.find(row => row.requestId === requestId);
@@ -37,7 +40,7 @@ export default function AssistFiles({ record, options, run, busy, onPreview, onS
       <label><strong>{t(label)}</strong><input aria-label={t(label)} type="file" accept="image/*,.pdf" multiple disabled={busy}
         onChange={event => { const files = [...event.target.files]; event.target.value = ''; if (files.length) upload(kind, files); }} /></label>
       {(record.documents || []).filter(doc => doc.kind === kind && doc.status !== 'removed' && (record.status === 'draft' || doc.requestId === requestId)).map(doc =>
-        <div className="assist-file" key={doc.id}><span>{doc.name}</span><button type="button" disabled={busy} aria-label={t('移除文件：{name}', { name: doc.name })}
+        <div className="assist-file" key={doc.id}><DocumentLink document={doc} onPreview={setPreview} /><button type="button" disabled={busy} aria-label={t('移除文件：{name}', { name: doc.name })}
           onClick={() => run(async () => { await api.removeDocument(record.id, doc.id, options); return api.getCase(record.id, options); })}>{t('移除')}</button></div>)}
       {failures.filter(file => file.kind === kind).map((file, index) => <p role="alert" className="nb-error assist-file-failure" key={index}>
         {t('上傳失敗：{name}（{reason}）', file)}</p>)}
@@ -45,5 +48,6 @@ export default function AssistFiles({ record, options, run, busy, onPreview, onS
     <div className="assist-actions"><button type="button" disabled={busy} onClick={onPreview}>{t('預覽申請')}</button>
       {record.status !== 'draft' && <button className="nb-primary" type="button" disabled={busy || !pending} onClick={() => onSubmit(requestId)}>{t('代提交補件')}</button>}
     </div>
+    {preview && <FilePreview key={preview.cfid} document={preview} options={options} onClose={() => setPreview(null)} />}
   </section>;
 }

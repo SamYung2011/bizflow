@@ -70,7 +70,7 @@ try {
   await page.getByLabel('車輛牌簿', { exact: true }).setInputFiles([pdf('first.pdf'), bad, pdf('third.pdf')]);
   await page.locator('.assist-file').getByText('third.pdf', { exact: true }).waitFor();
   await page.waitForFunction(() => !document.querySelector('.assist-upload-kind input').disabled);
-  assert.deepEqual(await page.locator('.assist-file > span').allTextContents(), ['first.pdf', 'third.pdf']);
+  assert.deepEqual(await page.locator('.assist-file .nb-doc-open strong').allTextContents(), ['first.pdf', 'third.pdf']);
   assert.match(await page.locator('.assist-file-failure').innerText(), /上傳失敗：broken.png/);
   assert.equal(await page.locator('.assist-file-failure').count(), 1);
   const attaches = (await page.evaluate(() => window.__assistCalls)).filter(call => call.path.endsWith('/documents'));
