@@ -14,8 +14,8 @@ export function revealNotice(node) {
   }
 }
 
-export default function SaveNotice({ message }) {
+export default function SaveNotice({ message, sequence }) {
   const ref = useRef(null);
-  useEffect(() => { if (message) revealNotice(ref.current); }, [message]);
+  useEffect(() => { if (message) revealNotice(ref.current); }, [message, sequence]);
   return message ? <p ref={ref} role="status" className="knowledge-notice">{message}</p> : null;
 }

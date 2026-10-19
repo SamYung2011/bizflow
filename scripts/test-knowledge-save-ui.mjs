@@ -40,6 +40,28 @@ try {
   const state=await page.evaluate(()=>window.__P11_STATE());
   assert.equal(state.articles.find(row=>row.id===11).title['zh-Hant'],'如何查看充電紀錄');
   console.log('KNOWLEDGE_SAVE_UI 2: article save preserves content and reveals feedback');
+  // Two identical synchronous validation errors must each reveal the notice.
+  await page.locator('.knowledge-article-editor .knowledge-languages input').first().fill('');
+  const save = page.locator('.knowledge-article-editor').getByRole('button', { name: '儲存', exact: true });
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    await save.evaluate(button => {
+      const container = document.querySelector('.nb-main');
+      const bottom = Math.min(innerHeight, container.getBoundingClientRect().bottom);
+      container.scrollTop += button.getBoundingClientRect().bottom - bottom + 2;
+    });
+    const previous = await page.evaluate(() => window.__noticeScroll.length);
+    await save.click();
+    await page.locator('.knowledge-notice').getByText('請填妥繁體標題與摘要', { exact: true }).waitFor();
+    await page.waitForFunction(count => window.__noticeScroll.length === count + 1, previous);
+    await page.waitForFunction(() => {
+      const node = document.querySelector('.knowledge-notice'), container = document.querySelector('.nb-main');
+      const a = node.getBoundingClientRect(), b = container.getBoundingClientRect();
+      return a.top >= Math.max(0, b.top) && a.bottom <= Math.min(innerHeight, b.bottom) + 1;
+    });
+    assert.equal((await page.evaluate(() => window.__noticeScroll.at(-1))).text, '請填妥繁體標題與摘要');
+    await page.screenshot({ path: `${output}/fm4-repeat-validation-${attempt}.png` });
+    console.log(`KNOWLEDGE_SAVE_UI ${attempt + 2}: identical validation attempt ${attempt} scrolls feedback into view`);
+  }
   assert.deepEqual(external,[]);assert.deepEqual(errors,[]);
-  console.log('KNOWLEDGE_SAVE_UI_CHECK=2/2');
+  console.log('KNOWLEDGE_SAVE_UI_CHECK=4/4');
 } finally {await browser.close();}
