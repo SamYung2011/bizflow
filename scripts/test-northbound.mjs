@@ -55,8 +55,8 @@ function dictionaryParts(name) {
   const marker = `const DICT_${name} = `;
   const start = i18n.indexOf(marker) + marker.length;
   const base = vm.runInNewContext(`(${i18n.slice(start, i18n.indexOf('\n};', start) + 2)})`);
-  const extension = i18n.match(new RegExp(`Object\\.assign\\(DICT_${name}, (\\{[\\s\\S]*?\\})\\);`));
-  return [base, vm.runInNewContext(`(${extension[1]})`)];
+  const extensions = [...i18n.matchAll(new RegExp(`Object\\.assign\\(DICT_${name}, (\\{[\\s\\S]*?\\})\\);`, 'g'))];
+  return [base, Object.assign({}, ...extensions.map(match => vm.runInNewContext(`(${match[1]})`)))];
 }
 const [enBase, enExtension] = dictionaryParts('EN');
 const [frBase, frExtension] = dictionaryParts('FR');

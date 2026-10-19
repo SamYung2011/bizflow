@@ -4355,6 +4355,66 @@ Object.assign(DICT_FR, {
   "案號": "Numéro de dossier"
 });
 
+Object.assign(DICT_EN, {
+  "代客建檔": "Assist a customer",
+  "搜尋使用者": "Find a user",
+  "搜尋暱稱、電郵、電話或使用者編號": "Search name, email, phone or user ID",
+  "找不到使用者": "No users found",
+  "使用者名下車輛": "User’s vehicles",
+  "此使用者尚未新增車輛": "This user has no vehicles yet",
+  "司機模式": "Driver arrangement",
+  "儲存並上傳文件": "Save and upload documents",
+  "上傳與預覽": "Upload and preview",
+  "移除文件：{name}": "Remove document: {name}",
+  "預覽申請": "Preview application",
+  "代提交補件": "Submit documents for user",
+  "附件超過大小限制": "Attachment exceeds the size limit",
+  "此使用者已有草稿": "This user already has a draft",
+  "返回案件列表": "Back to cases",
+  "填寫資料": "Fill in details",
+  "請補齊以下項目": "Complete the following items",
+  "必填資料": "Required information",
+  "使用者須已有 App 帳號。": "The user must already have an App account.",
+  "上一宗申請": "Previous application",
+  "不帶入": "Do not copy",
+  "建立草稿": "Create draft",
+  "返回搜尋": "Back to search",
+  "返回填寫資料": "Back to details",
+  "返回文件上傳": "Back to uploads",
+  "代提交申請": "Submit application for user",
+  "申請類型": "Application type"
+});
+
+Object.assign(DICT_FR, {
+  "代客建檔": "Créer un dossier pour un client",
+  "搜尋使用者": "Rechercher un utilisateur",
+  "搜尋暱稱、電郵、電話或使用者編號": "Rechercher nom, e-mail, téléphone ou identifiant",
+  "找不到使用者": "Aucun utilisateur trouvé",
+  "使用者名下車輛": "Véhicules de l’utilisateur",
+  "此使用者尚未新增車輛": "Cet utilisateur n’a pas encore de véhicule",
+  "司機模式": "Configuration des conducteurs",
+  "儲存並上傳文件": "Enregistrer et ajouter les documents",
+  "上傳與預覽": "Documents et aperçu",
+  "移除文件：{name}": "Retirer le document : {name}",
+  "預覽申請": "Aperçu de la demande",
+  "代提交補件": "Envoyer les pièces pour l’utilisateur",
+  "附件超過大小限制": "La pièce jointe dépasse la taille limite",
+  "此使用者已有草稿": "Cet utilisateur a déjà un brouillon",
+  "返回案件列表": "Retour aux dossiers",
+  "填寫資料": "Renseigner les informations",
+  "請補齊以下項目": "Complétez les éléments suivants",
+  "必填資料": "Informations obligatoires",
+  "使用者須已有 App 帳號。": "L’utilisateur doit déjà posséder un compte App.",
+  "上一宗申請": "Demande précédente",
+  "不帶入": "Ne pas reprendre",
+  "建立草稿": "Créer un brouillon",
+  "返回搜尋": "Retour à la recherche",
+  "返回填寫資料": "Retour aux informations",
+  "返回文件上傳": "Retour aux documents",
+  "代提交申請": "Envoyer la demande pour l’utilisateur",
+  "申請類型": "Type de demande"
+});
+
 Object.assign(DICT_EN, PROMPT_COPY.en);
 Object.assign(DICT_FR, PROMPT_COPY.fr);
 
