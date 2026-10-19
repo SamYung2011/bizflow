@@ -5,6 +5,7 @@ import { useSupportList, useSupportThread, useSupportStaff } from './support/use
 import ConversationList from './support/ConversationList.jsx';
 import ConversationHeader from './support/ConversationHeader.jsx';
 import MessageThread from './support/MessageThread.jsx';
+import CustomerDrawer from './support/CustomerDrawer.jsx';
 import Composer from './support/Composer.jsx';
 import SupportIcon from './support/SupportIcon.jsx';
 import SupportSkeleton from './support/SupportSkeleton.jsx';
@@ -13,6 +14,7 @@ import './support/support.css';
 function Workspace({ session, employees, embedded }) {
   const { t } = useT();
   const [selectedId, setSelectedId] = useState(null);
+  const [profileUserId, setProfileUserId] = useState(null);
   const [filters, setFilters] = useState({ state: 'waiting', category: '', search: '' });
   const options = useMemo(() => ({ accessToken: session.access_token, operatorEmail: session.user.email }), [session.access_token, session.user.email]);
   const directory = useSupportStaff(options, embedded);
@@ -29,11 +31,13 @@ function Workspace({ session, employees, embedded }) {
       </div> : data.detail.isPending ? <SupportSkeleton /> : data.detail.isError ? <div className="support-error" role="alert">
         {t('載入失敗，請重試')} <button onClick={() => data.detail.refetch()}>{t('重試')}</button><button onClick={() => setSelectedId(null)}>{t('返回會話列表')}</button>
       </div> : <>
-        <ConversationHeader key={selectedId} conversation={conversation} employees={staff} onChange={data.change} onBack={() => setSelectedId(null)} />
+        <ConversationHeader key={selectedId} conversation={conversation} employees={staff} onProfile={() => setProfileUserId(conversation.userId)} onChange={data.change} onBack={() => setSelectedId(null)} />
         <MessageThread key={`thread-${selectedId}`} conversation={conversation} data={data} employees={staff} options={options} />
         <Composer key={`composer-${selectedId}`} closed={conversation.status === 'closed'} limits={conversation.limits || SUPPORT_LIMITS} onSend={data.send} />
       </>}
     </section>
+    {profileUserId && <CustomerDrawer key={profileUserId} userId={profileUserId} options={options} employees={staff}
+      onClose={() => setProfileUserId(null)} onSelect={id => { setSelectedId(id); setProfileUserId(null); }} />}
   </div>;
 }
 

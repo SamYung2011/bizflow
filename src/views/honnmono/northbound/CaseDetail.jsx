@@ -38,7 +38,7 @@ function Timeline({ record, t, lang }) {
   </section>;
 }
 
-export default function CaseDetail({ record, options, reload, lang }) {
+export default function CaseDetail({ record, options, reload, lang, readOnly = false }) {
   const { t } = useT();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -102,9 +102,9 @@ export default function CaseDetail({ record, options, reload, lang }) {
     <Timeline record={record} t={t} lang={lang} />
     <section className="nb-card"><h3>{t('申請文件')}</h3>
       <Files documents={record.documents} options={options} onPreview={openFile} busy={busy}
-        onReview={record.submittedAt ? (docId, status, note) => run(() => api.reviewDocument(record.id, docId, { status, note }, options)) : null} />
+        onReview={record.submittedAt && !readOnly ? (docId, status, note) => run(() => api.reviewDocument(record.id, docId, { status, note }, options)) : null} />
     </section>
-    {!!record.submittedAt && <div className="nb-detail-grid nb-actions">
+    {!!record.submittedAt && !readOnly && <div className="nb-detail-grid nb-actions">
       <section className="nb-card"><h3>{t('更新辦理階段')}</h3>
         <label className="nb-field">{t('階段')}<select value={stage} onChange={event => setStage(event.target.value)}>
           {STAGES.map(([code, label]) => <option key={code} value={code}>{t(label)}</option>)}

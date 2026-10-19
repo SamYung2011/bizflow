@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useT } from '../../i18n.jsx';
 import { getArticle, getTopic, listArticles, listTopics } from '../../lib/knowledgeApi.js';
+import SaveNotice from './knowledge/SaveNotice.jsx';
 import TopicEditor from './knowledge/TopicEditor.jsx';
 import ArticleEditor from './knowledge/ArticleEditor.jsx';
 import ArticleList from './knowledge/ArticleList.jsx';
@@ -17,7 +18,8 @@ function Workspace({ session }) {
   const options = useMemo(() => ({ accessToken: session.access_token }), [session.access_token]);
   const [topicId, setTopicId] = useState(null), [newTopic, setNewTopic] = useState(false);
   const [articleId, setArticleId] = useState(null), [newArticle, setNewArticle] = useState(false);
-  const [message, setMessage] = useState('');
+  const [noticeState, setNoticeState] = useState({ text: '', sequence: 0 });
+  const setMessage = text => setNoticeState(current => ({ text, sequence: current.sequence + 1 }));
   const [filters, setFilters] = useState({ q: '', enabled: '', page: 1 });
   const key = ['appKnowledge', session.user.email];
   const topics = useQuery({ queryKey: [...key, 'topics'], queryFn: ({ signal }) => listTopics({ ...options, signal }), staleTime: 10000, enabled: visible });
@@ -38,7 +40,7 @@ function Workspace({ session }) {
     await cache.invalidateQueries({ queryKey: key }); };
   const loadError = query => <div role="alert" className="nb-error">{t('載入失敗，請重試')}
     <button type="button" onClick={() => query.refetch()}>{t('重試')}</button></div>;
-  const notice = message && <p role="status" className="knowledge-notice">{message}</p>;
+  const notice = <SaveNotice message={noticeState.text} sequence={noticeState.sequence} />;
   return <div className="nb-workspace knowledge-workspace">
     <aside className="nb-sidebar">
       <header><span className="nb-eyebrow">Honnmono APP</span><h1>{t('APP 知識庫')}</h1><p>{t('編輯 App 助手的知識庫內容')}</p></header>

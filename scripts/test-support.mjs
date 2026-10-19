@@ -25,8 +25,8 @@ check('P6 categories, reopened system text and case number use the shared suppor
 });
 mock.configureMock({ delay: 0, sendDelay: 0 });
 const conversations = await mock.listConversations();
-check('five fixtures cover manual, AI, feedback, claimed, closed and unread states', () => {
-  assert.equal(conversations.length, 5);
+check('six fixtures cover manual, AI, feedback, claimed, closed and unread states', () => {
+  assert.equal(conversations.length, 6);
   assert(conversations.some(item => item.source === 'ai_handoff' && item.summary && item.unreadCount));
   assert(conversations.some(item => item.source === 'manual' && !item.summary));
   assert(conversations.some(item => item.source === 'feedback'));
@@ -190,7 +190,7 @@ check(`all ${keys.size} support copy keys exist in English and French; no litera
 const mockApi = await moduleFor('src/lib/supportApi.js', '1');
 const mockRows = await mockApi.listConversations({ q: 'Alex' });
 check('VITE_SUPPORT_MOCK=1 swaps the transport without changing the return shape', () => {
-  assert.equal(mockRows.length, 1); assert.equal(mockRows[0].userNickname, 'Alex Chan');
+  assert.equal(mockRows.length, 2); assert.equal(mockRows[0].userNickname, 'Alex Chan');
 });
 const rendered = await build({ stdin: { contents: `
   import React from 'react';

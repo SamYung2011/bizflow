@@ -7,6 +7,8 @@ globalThis.__supportThreadFixture = fixture;
 const bundle = await build({entryPoints:['src/views/honnmono/support/useSupportData.js'],bundle:true,format:'esm',platform:'node',write:false,
  define:{'import.meta.env':JSON.stringify({VITE_SUPABASE_URL:'https://bridge.example.test',VITE_SUPABASE_ANON_KEY:'fixture'})},
  plugins:[{name:'hooks',setup(b){
+  b.onResolve({filter:/appEmbedVisibility\.js$/},()=>({path:'visibility',namespace:'visibility'}));
+  b.onLoad({filter:/.*/,namespace:'visibility'},()=>({contents:'export const useAppEmbedVisible=()=>true;',loader:'js'}));
   b.onResolve({filter:/^(react|@tanstack\/react-query)$/},a=>({path:a.path,namespace:'hooks'}));
   b.onLoad({filter:/.*/,namespace:'hooks'},a=>({contents:a.path==='react'?`
    const f=globalThis.__supportThreadFixture;

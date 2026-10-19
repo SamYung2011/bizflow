@@ -52,6 +52,12 @@ const conversations = people.map(([userNickname, userPhone, source, category, st
   lastMessagePreview: '', unreadCount: index === 2 || index === 4 ? 0 : index === 0 ? 3 : 1,
 }));
 
+conversations.push({ ...conversations[0], id: 6, status: 'closed', source: 'manual', summary: null,
+  category: SUPPORT_CATEGORIES[1], lastMessageAt: baseTime - 86400000 * 7, unreadCount: 0,
+  assigneeEmail: 'mia@example.test', lastSenderRole: 'staff' });
+threads.set(6, [message(6, 'user', 'My previous charging receipt is now correct.'),
+  message(6, 'staff', 'The receipt has been corrected. Thank you, Alex.')]);
+
 threads.set(1, [
   message(1, 'user', 'The charger stopped after two minutes. What should I do?', { createdAt: baseTime - 300000 }),
   message(1, 'ai', 'Please check the connector and restart the APP. If charging still does not resume, I can connect you with our support team.', { createdAt: baseTime - 270000 }),
@@ -91,9 +97,10 @@ conversations.forEach(conversation => {
 });
 
 export function configureMock(options) { settings = { ...settings, ...options }; }
-export async function listConversations({ status = 'all', filter, page = 1, size = 30, q = '' } = {}) {
+export async function listConversations({ status = 'all', filter, userId, page = 1, size = 30, q = '' } = {}) {
   await wait();
   return clone(conversations.filter(item => (status === 'all' || item.status === status)
+    && (!userId || item.userId === Number(userId))
     && (filter !== 'waiting_staff' || conversationState(item) === 'waiting')
     && `${item.userNickname} ${item.userPhone}`.toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => b.lastMessageAt - a.lastMessageAt).slice((page - 1) * size, page * size));
@@ -154,4 +161,26 @@ export async function uploadAttachment(id, file) {
 }
 export function receiveMockMessage(id) {
   return append(id, message(id, 'user', 'One more update: I’m available if you need anything else.', { createdAt: Date.now() }));
+}
+
+export async function searchUsers({ q = '', page = 1, size = 30 } = {}) {
+  await wait();
+  const users = [...new Map(conversations.map(row => [row.userId, { id: row.userId, nickname: row.userNickname,
+    email: row.userEmail, phone: row.userPhone, phoneHk: row.userPhone.replace('+852 ', ''), phoneCn: '13800138000',
+    appmodel: 'honnmono-hk', registeredAt: baseTime - 86400000 * 365, lastLoginAt: baseTime }])).values()];
+  const matches = users.filter(row => Object.values(row).join(' ').toLowerCase().includes(q.trim().toLowerCase()));
+  return clone({ items: matches.slice((page - 1) * size, page * size), page, size, total: matches.length });
+}
+export async function getUserProfile(id) {
+  const basic = (await searchUsers()).items.find(row => row.id === Number(id));
+  if (!basic) throw new Error('User not found');
+  return clone({ basic, conversations: await listConversations({ userId: id, size: 20 }),
+    cars: [{ id: 51, brand: 'BYD', series: 'Seal', variant: 'Premium', year: '2025', plate: 'AB 1234', vin: 'DEMO-VIN-000051',
+      isPrimary: true, checkTime: baseTime + 86400000 * 100, licenseExpireTime: baseTime + 86400000 * 180, intlPlateExpireTime: 0 }],
+    appDevices: { sessions: [{ deviceModel: 'iPhone 17 Pro', osName: 'iOS', osVersion: '26.1', appVersion: '2.0.1', lastSeenAt: baseTime }],
+      pushRegistrations: [{ platform: 'ios', appVariant: 'hk', appVersion: '2.0.1', updatedAt: baseTime }] },
+    adapters: [{ imei: '860000000000051', certid: '0D000051', bindtime: baseTime - 86400000 * 10, vin: 'DEMO-VIN-000051',
+      fwversion: '1.0.9', carModel: 'Seal', origin: 'flash', lastSeenAt: baseTime }],
+    insurance: { overview: null, policies: { hk: { id: 21, policyNo: 'HK-DEMO-0021', insurer: 'Demo Insurance', status: 'ready', coverEnd: '2027-09-17' }, cn: null, history: [] } },
+    northbound: { overview: null, cases: [{ id: 71, caseNo: 'HM-NB-000071', status: 'checking' }] } });
 }

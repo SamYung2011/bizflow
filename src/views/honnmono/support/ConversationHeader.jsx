@@ -4,7 +4,7 @@ import { SUPPORT_CATEGORIES, conversationState, staffName, supportCaseId } from 
 import SupportIcon from './SupportIcon.jsx';
 import { promoSummary } from './format.js';
 
-export default function ConversationHeader({ conversation, employees, onChange, onBack }) {
+export default function ConversationHeader({ conversation, employees, onChange, onBack, onProfile }) {
   const { t } = useT();
   const [busy, setBusy] = useState(false), [error, setError] = useState(false);
   const state = conversationState(conversation);
@@ -16,8 +16,8 @@ export default function ConversationHeader({ conversation, employees, onChange, 
   return <header className="support-header">
     <div className="support-header-main">
       <button className="support-icon-button support-back" aria-label={t('返回會話列表')} onClick={onBack}><SupportIcon name="back" /></button>
-      <span className={`support-avatar tone-${conversation.id % 5}`}>{conversation.userNickname?.slice(0, 1).toUpperCase()}</span>
-      <div className="support-contact"><div><h2>{conversation.userNickname}</h2>
+      <button className="customer-avatar-button" onClick={onProfile} aria-label={t('客戶檔案')}><span className={`support-avatar tone-${conversation.id % 5}`}>{conversation.userNickname?.slice(0, 1).toUpperCase()}</span></button>
+      <div className="support-contact"><div><h2><button className="customer-name-button" onClick={onProfile}>{conversation.userNickname}</button></h2>
         {conversation.source === 'feedback' && <span className="support-category">{t('意見反饋')}</span>}
         {conversation.source === 'northbound' && <span className="support-category">{t('港車北上')}</span>}
         {conversation.source === 'insurance' && <span className="support-category">{t('車保')}</span>}

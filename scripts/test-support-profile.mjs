@@ -1,0 +1,32 @@
+import assert from 'node:assert/strict';
+import { build } from 'esbuild';
+const load = async (entry, mock = '') => {
+  const result = await build({ entryPoints: [entry], bundle: true, platform: 'node', format: 'esm', write: false,
+    define: { 'import.meta.env': JSON.stringify({ VITE_SUPPORT_MOCK: mock, VITE_SUPABASE_URL: 'https://fixture.invalid', VITE_SUPABASE_ANON_KEY: 'fixture' }) } });
+  return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
+};
+const api = await load('src/lib/supportApi.js'), mock = await load('src/lib/supportMock.js');
+mock.configureMock({ delay: 0 });
+const calls = []; globalThis.fetch = async (url, options) => { calls.push({ url, options }); return Response.json({ code: 0, result: { fixture: true } }); };
+const options = { accessToken: 'fixture-token' };
+assert.deepEqual(await api.searchUsers({ q: 'Alex + %', page: 2, size: 20 }, options), { fixture: true });
+assert.equal(new URL(calls[0].url).searchParams.get('q'), 'Alex + %');
+assert.equal(new URL(calls[0].url).pathname, '/functions/v1/honnmono-admin/support/users');
+assert.equal(new URL(calls[0].url).searchParams.get('page'), '2');
+await api.getUserProfile(800, options);
+assert(calls[1].url.endsWith('/support/users/800/profile'));
+assert.equal(calls[1].options.headers.Authorization, 'Bearer fixture-token');
+await api.listConversations({ userId: 800, page: 2, size: 20 }, options);
+assert.equal(new URL(calls[2].url).searchParams.get('userId'), '800');
+const search = await mock.searchUsers({ q: 'Alex' });
+assert.equal(search.items.length, 1); assert.equal(search.items[0].appmodel, 'honnmono-hk');
+const profile = await mock.getUserProfile(800);
+assert.deepEqual(profile.conversations.map(row => row.id), [1, 6]);
+assert.equal(profile.conversations[1].status, 'closed');
+assert.equal(profile.cars[0].plate, 'AB 1234'); assert.equal(profile.adapters[0].lastSeenAt, profile.basic.lastLoginAt);
+assert.equal(profile.northbound.cases[0].caseNo, 'HM-NB-000071');
+assert(!JSON.stringify(profile).includes('token'));
+assert.equal((await mock.listMessages(6)).at(-1).content, 'The receipt has been corrected. Thank you, Alex.');
+assert.deepEqual((await mock.listConversations({ userId: 800 })).map(row => row.id), [1, 6]);
+await assert.rejects(mock.getUserProfile(999));
+console.log('SUPPORT_PROFILE_CHECK=8/8');

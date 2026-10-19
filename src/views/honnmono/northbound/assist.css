@@ -1,0 +1,31 @@
+.nb-assist { padding: 24px; max-width: 1180px; margin: 0 auto; }
+.assist-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.assist-head h2 { margin: 4px 0 18px; }
+.nb-assist button:not(.nb-primary), .nb-assist input, .nb-assist select { border: 1px solid #dbe1ea; border-radius: 8px; background: #fff; color: #405271; padding: 8px 10px; }
+.assist-steps { display: flex; list-style: none; margin: 0 0 24px; padding: 0; gap: 8px; }
+.assist-steps li { flex: 1; padding: 12px; border-radius: 10px; background: #f3f5f8; color: #8792a4; font-size: 12px; }
+.assist-steps li.is-current { background: #edf1ff; color: #334777; font-weight: 600; }
+.assist-steps li span { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #fff; margin-right: 8px; }
+.assist-search { display: flex; gap: 8px; }
+.assist-search input { min-width: 0; flex: 1; }
+.assist-users { display: grid; gap: 8px; margin-top: 16px; }
+.assist-users button { text-align: left; display: grid; gap: 4px; }
+.assist-users button.is-selected { border-color: #486ee8; background: #f0f4ff; }
+.assist-users small, .assist-users span { color: #78849a; font-size: 12px; }
+.assist-grid, .assist-upload-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
+.assist-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.assist-context, .assist-actions { display: flex; align-items: center; gap: 12px; margin: 16px 0; flex-wrap: wrap; }
+.assist-context span { color: #78849a; font-size: 12px; }
+.assist-context button { margin-left: auto; }
+.assist-existing { display: grid; gap: 8px; margin-bottom: 16px; }
+.assist-existing button { text-align: left; }
+.assist-upload-kind { padding: 12px; background: #f6f8fb; border-radius: 10px; min-width: 0; }
+.assist-upload-kind label { display: grid; gap: 12px; }
+.assist-upload-kind input { width: 100%; min-width: 0; font-size: 11px; }
+.assist-file { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.assist-file span { overflow-wrap: anywhere; font-size: 12px; min-width: 0; }
+.nb-assist .nb-detail { padding: 0; }
+.nb-assist .nb-card { margin-bottom: 18px; }
+.nb-assist-launch { margin: 0 16px 16px; }
+@media (max-width: 1100px) { .assist-grid, .assist-upload-grid { grid-template-columns: 1fr; } }
+@media (max-width: 720px) { .nb-assist { padding: 16px; } .assist-head { align-items: flex-start; } .assist-steps { gap: 4px; } .assist-steps li { padding: 10px 6px; } .assist-steps li span { display: grid; margin-bottom: 6px; } }
