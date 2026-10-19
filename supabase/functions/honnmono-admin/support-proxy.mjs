@@ -116,7 +116,8 @@ export async function forwardSupport(req, upstreamUrl, { token, operatorEmail, c
   let payload;
   try { payload = JSON.parse(new TextDecoder().decode(bytes)); }
   catch { return reply({ error: 'Invalid support response' }, 502); }
-  if (upstreamUrl.pathname === '/internal/admin/support/upload' && upstream.ok) {
+  if ((upstreamUrl.pathname === '/internal/admin/support/upload' ||
+       /^\/internal\/admin\/northbound\/assist\/cases\/[1-9]\d*\/upload$/.test(upstreamUrl.pathname)) && upstream.ok) {
     for (const item of payload.result?.filelist || []) {
       item.cfinfo.url = `/functions/v1/honnmono-admin/support/upload/${encodeURIComponent(item.cfid)}`;
     }

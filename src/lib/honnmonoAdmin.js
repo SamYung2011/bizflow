@@ -50,10 +50,15 @@ export async function callHonnmonoAdmin(
   }
   if (!response.ok) {
     const detail = parsed && typeof parsed === "object"
-      ? ((subPath.startsWith('/insurance/') || subPath.startsWith('/promo/') || subPath.startsWith('/knowledge/') || subPath.startsWith('/assistant/')) ? insuranceErrorDetail(parsed)
+      ? ((subPath.startsWith('/northbound/') || subPath.startsWith('/insurance/') || subPath.startsWith('/promo/') || subPath.startsWith('/knowledge/') || subPath.startsWith('/assistant/')) ? insuranceErrorDetail(parsed)
         : (parsed.error ?? parsed.detail ?? parsed.msg))
       : parsed;
-    throw new Error(`HTTP ${response.status}: ${detail ?? "Unknown error"}`);
+    const error = new Error(`HTTP ${response.status}: ${detail ?? "Unknown error"}`);
+    if (subPath.startsWith('/northbound/')) {
+      error.status = response.status;
+      error.result = parsed?.result ?? parsed?.detail?.result;
+    }
+    throw error;
   }
   return parsed;
 }
