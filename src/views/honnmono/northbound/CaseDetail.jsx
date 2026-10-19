@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useT } from '../../../i18n.jsx';
 import { formatFeedbackTime } from '../../../lib/honnmonoAdmin.js';
 import * as api from '../../../lib/northboundApi.js';
 import Files from './Files.jsx';
+import FilePreview from './FilePreview.jsx';
 import { KINDS, RESULT_LABELS, STAGES, STAGE_LABELS, TYPE_LABELS } from './labels.js';
 
 const display = value => value == null || value === '' ? '—' : String(value);
@@ -57,7 +58,6 @@ export default function CaseDetail({ record, options, reload, lang, readOnly = f
     renewalEmailOk: triValue(record.renewalEmailOk), renewalDataSame: triValue(record.renewalDataSame),
     qualifiedUntil: record.qualifiedUntil || '', ...flagEdits,
   };
-  useEffect(() => () => { if (preview?.url) URL.revokeObjectURL(preview.url); }, [preview]);
 
   async function run(action) {
     setBusy(true); setError(''); setSuccess('');
@@ -65,13 +65,7 @@ export default function CaseDetail({ record, options, reload, lang, readOnly = f
     catch { setError(t('操作失敗，請重試')); }
     finally { setBusy(false); }
   }
-  async function openFile(document) {
-    setError('');
-    try {
-      const blob = await api.fileBlob(document, options);
-      setPreview({ name: document.name, mime: document.mime, url: URL.createObjectURL(blob) });
-    } catch { setError(t('無法讀取附件，請重試。')); }
-  }
+  function openFile(document) { setPreview(document); }
   const updateFlag = (key, value) => setFlagEdits(current => ({ ...current, [key]: value }));
   const toggleKind = kind => setWanted(current => current.includes(kind) ? current.filter(value => value !== kind) : [...current, kind]);
 
@@ -101,7 +95,7 @@ export default function CaseDetail({ record, options, reload, lang, readOnly = f
     </div>
     <Timeline record={record} t={t} lang={lang} />
     <section className="nb-card"><h3>{t('申請文件')}</h3>
-      <Files documents={record.documents} options={options} onPreview={openFile} busy={busy}
+      <Files documents={record.documents} onPreview={openFile} busy={busy}
         onReview={record.submittedAt && !readOnly ? (docId, status, note) => run(() => api.reviewDocument(record.id, docId, { status, note }, options)) : null} />
     </section>
     {!!record.submittedAt && !readOnly && <div className="nb-detail-grid nb-actions">
@@ -148,12 +142,6 @@ export default function CaseDetail({ record, options, reload, lang, readOnly = f
           })}>{t('儲存核對')}</button>
       </section>
     </div>}
-    {preview && <div className="nb-preview-overlay" role="presentation" onClick={() => setPreview(null)}>
-      <div className="nb-preview" role="dialog" aria-modal="true" aria-label={t('查看文件')} onClick={event => event.stopPropagation()}>
-        <header><strong>{preview.name}</strong><button type="button" onClick={() => setPreview(null)}>{t('關閉')}</button></header>
-        {preview.mime?.startsWith('image/') ? <img src={preview.url} alt={preview.name} /> :
-          <a href={preview.url} download={preview.name}>{t('下載文件')}</a>}
-      </div>
-    </div>}
+    {preview && <FilePreview key={preview.cfid} document={preview} options={options} onClose={() => setPreview(null)} />}
   </div>;
 }

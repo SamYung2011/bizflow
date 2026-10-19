@@ -51,7 +51,11 @@ await check('editor copy has three-language keys and no literal Chinese JSX', as
     return;
   }
   const base=await import('data:text/javascript;base64,'+Buffer.from(await compile(execFileSync('git',['show','188d11d:src/i18n.jsx'],{encoding:'utf8'})+'\nexport { DICT_EN, DICT_FR };', 'esm', process.cwd()+'/src')).toString('base64'));
-  for(const locale of ['DICT_EN','DICT_FR']) for(const [key,value] of Object.entries(base[locale])) assert.equal(dictionaries[locale][key],value,`${locale}:${key}`);
+  for(const locale of ['DICT_EN','DICT_FR']) for(const [key,value] of Object.entries(base[locale])) {
+    // #871 removed this unused entry; every remaining baseline translation stays unchanged.
+    if (key === '停用') assert.equal(Object.hasOwn(dictionaries[locale], key), false, `${locale}:${key} retired`);
+    else assert.equal(dictionaries[locale][key],value,`${locale}:${key}`);
+  }
 });
 const renderSource = await compile(`
   import React from 'react'; import { renderToStaticMarkup } from 'react-dom/server';

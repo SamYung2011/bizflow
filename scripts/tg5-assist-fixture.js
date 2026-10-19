@@ -10,6 +10,43 @@ export function installAssistFixture() {
   const cases = [Object.assign(record(71), { status:'checking', submittedAt:now-86400000,
     pendingRequests:[{requestId:'NB-DOC-001',kinds:['hrp'],note:'Clear photo'}],pendingRequestCount:1 })];
   let next = 900, fileId = 1, docId = 1; const files = new Map();
+  const sampleDocs = [];
+  if (new URLSearchParams(location.search).has('files')) {
+    function photo(width, height) {
+      const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d'); ctx.fillStyle = '#edf2fb'; ctx.fillRect(0,0,width,height);
+      ctx.fillStyle = '#fff'; ctx.fillRect(width*.06,height*.08,width*.88,height*.84);
+      ctx.fillStyle = '#334777'; ctx.font = `${width*.055}px sans-serif`;
+      ctx.fillText('VEHICLE REGISTRATION',width*.13,height*.3);
+      ctx.font = `${width*.09}px sans-serif`; ctx.fillText('AB 1234',width*.13,height*.57);
+      ctx.fillStyle = '#7a889e'; ctx.font = `${width*.033}px sans-serif`;
+      ctx.fillText('LOCAL TEST DOCUMENT',width*.13,height*.76);
+      return new Blob([Uint8Array.from(atob(canvas.toDataURL('image/jpeg').split(',')[1]),c=>c.charCodeAt(0))],{type:'image/jpeg'});
+    }
+    const original = photo(2400,1500), thumb = photo(480,300);
+    files.set('vehicle-original',{blob:original}); files.set('vehicle-thumb',{blob:thumb});
+    const stream = 'BT /F1 18 Tf 40 200 Td (LOCAL TEST DOCUMENT) Tj ET';
+    const objects = ['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 300] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+      `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
+    let pdf = '%PDF-1.4\n'; const offsets = [0];
+    objects.forEach((object,index)=>{offsets.push(pdf.length);pdf+=`${index+1} 0 obj\n${object}\nendobj\n`;});
+    const xref = pdf.length;
+    pdf+=`xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map(offset=>`${String(offset).padStart(10,'0')} 00000 n \n`).join('')}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+    files.set('proof-original',{blob:new Blob([pdf],{type:'application/pdf'})});
+    files.set('no-thumb-original',{blob:original});
+    sampleDocs.push({id:101,cfid:'vehicle-original',thumbCfid:'vehicle-thumb',name:'vehicle.jpg',mime:'image/jpeg',size:original.size,kind:'vehicle_license'},
+      {id:102,cfid:'proof-original',name:'proof.pdf',mime:'application/pdf',size:20480,kind:'hrp'},
+      {id:103,cfid:'no-thumb-original',name:'legacy.jpg',mime:'image/jpeg',size:original.size,kind:'driver_doc'});
+    sampleDocs.forEach(doc=>Object.assign(doc,{version:1,status:'uploaded',createdAt:now,requestId:'NB-DOC-001'}));
+    if (new URLSearchParams(location.search).has('statuses')) {
+      Object.assign(sampleDocs[0], {version:2,status:'accepted'});
+      Object.assign(sampleDocs[1], {version:3,status:'rejected',staffNote:'Unclear scan'});
+      Object.assign(sampleDocs[2], {version:1,status:'removed',staffNote:'Superseded document'});
+      sampleDocs.push({...sampleDocs[0],id:104,name:'new-version.jpg',version:4,status:'uploaded'});
+    }
+    cases[0].documents = structuredClone(sampleDocs);
+  }
   const calls = []; window.__assistCalls = calls;
   window.fetch = async (input, init = {}) => {
     const url = new URL(String(input), location.origin), method = init.method || 'GET';
@@ -28,13 +65,14 @@ export function installAssistFixture() {
       const previous = cases.find(row=>row.user.id===userid && row.status==='draft');
       if (previous) return ok({...previous,existing:true});
       const customer = {id:userid,nickname:'Alex Chan',email:'alex@example.test',phoneHk:'66001001',phoneCn:'13800138000'};
-      const row = { ...record(next++,customer), kind:body.kind };cases.push(row);return ok({...row,existing:false});
+      const row = { ...record(next++,customer), kind:body.kind, documents:structuredClone(sampleDocs) };cases.push(row);return ok({...row,existing:false});
     }
     match = path.match(/^\/northbound\/(?:assist\/)?cases\/(\d+)(.*)$/);
     if (match) {
       const row = cases.find(row=>row.id===Number(match[1])), action = match[2];
       if (!row) return Response.json({code:404},{status:404});
       if (!action) return ok(row);
+      if (/^\/documents\/\d+\/review$/.test(action)) { const doc=row.documents.find(item=>item.id===Number(action.split('/')[2]));Object.assign(doc,{status:body.status,staffNote:body.note});return ok(doc); }
       if (action==='/update') { Object.assign(row,body,{persons:body.persons.map((person,index)=>({...person,id:index+1,sort:index}))}); return ok(row); }
       if (action==='/upload') return ok({filelist:body.filelist.map(item=>{const cfid=`assist-file-${fileId++}`;files.set(cfid,item);return{...item,cfid,cfinfo:{url:`/functions/v1/honnmono-admin/support/upload/${cfid}`,method:'POST'}};})});
       if (action==='/documents') { const file=files.get(body.cfid);const doc={...body,id:docId++,name:file.filename,mime:file.mime,size:file.size,status:'uploaded',version:1,createdAt:now};row.documents.push(doc);return ok(doc); }

@@ -90,6 +90,7 @@ try {
   assert.equal(await page.getByRole('button',{name:'儲存階段'}).count(),0);
   await screenshot('c5-upload-preview');
   await page.getByRole('button',{name:'查看文件：vehicle.jpg'}).click();
+  await page.getByRole('dialog',{name:'查看文件'}).getByRole('button',{name:'開啟原檔',exact:true}).click();
   await page.locator('.nb-preview img').waitFor();
   const dimensions = await page.locator('.nb-preview img').evaluate(img=>[img.naturalWidth,img.naturalHeight]);
   check('shared prepareImage converts a 3200px photo into 1600px JPEG and preview reads bridge bytes',()=>assert.deepEqual(dimensions,[1600,900]));

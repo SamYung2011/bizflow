@@ -4458,3 +4458,12 @@ export function useT() {
 export function register(zh, en) {
   DICT_EN[zh] = en;
 }
+
+Object.assign(DICT_EN, { '展開': 'Expand' });
+Object.assign(DICT_FR, { '展開': 'Développer' });
+
+Object.assign(DICT_EN, { '最近發訊': 'Last message' });
+Object.assign(DICT_FR, { '最近發訊': 'Dernier message' });
+
+Object.assign(DICT_EN, { '開啟原檔': 'Open original' });
+Object.assign(DICT_FR, { '開啟原檔': 'Ouvrir l’original' });

@@ -96,7 +96,17 @@ conversations.forEach(conversation => {
   conversation.staffReadMsgId = messages[Math.max(0, messages.length - conversation.unreadCount - 1)].id;
 });
 
-export function configureMock(options) { settings = { ...settings, ...options }; }
+export function configureMock(options) {
+  settings = { ...settings, ...options };
+  if (options.historyCount) {
+    for (let index = 2; index < options.historyCount; index++) {
+      const id = 100 + index;
+      if (conversations.some(row => row.id === id)) continue;
+      conversations.push({ ...conversations[5], id, lastMessageAt: baseTime - 86400000 * (index + 6) });
+      threads.set(id, [message(id, 'user', `Previous conversation ${index + 1}`)]);
+    }
+  }
+}
 export async function listConversations({ status = 'all', filter, userId, page = 1, size = 30, q = '' } = {}) {
   await wait();
   return clone(conversations.filter(item => (status === 'all' || item.status === status)
@@ -174,11 +184,12 @@ export async function searchUsers({ q = '', page = 1, size = 30 } = {}) {
 export async function getUserProfile(id) {
   const basic = (await searchUsers()).items.find(row => row.id === Number(id));
   if (!basic) throw new Error('User not found');
-  return clone({ basic, conversations: await listConversations({ userId: id, size: 20 }),
+  return clone({ basic, conversations: await listConversations({ userId: id, size: 5 }),
     cars: [{ id: 51, brand: 'BYD', series: 'Seal', variant: 'Premium', year: '2025', plate: 'AB 1234', vin: 'DEMO-VIN-000051',
       isPrimary: true, checkTime: baseTime + 86400000 * 100, licenseExpireTime: baseTime + 86400000 * 180, intlPlateExpireTime: 0 }],
-    appDevices: { sessions: [{ deviceModel: 'iPhone 17 Pro', osName: 'iOS', osVersion: '26.1', appVersion: '2.0.1', lastSeenAt: baseTime }],
-      pushRegistrations: [{ platform: 'ios', appVariant: 'hk', appVersion: '2.0.1', updatedAt: baseTime }] },
+    appDevices: {
+      lastLogin: { deviceModel: 'iPhone 17 Pro', osName: 'iOS', osVersion: '26.1', appVersion: '2.0.1', at: baseTime },
+      lastMessage: { deviceModel: 'iPhone 16', osName: 'iOS', osVersion: '26.0', appVersion: '2.0.0', at: baseTime - 3600000 } },
     adapters: [{ imei: '860000000000051', certid: '0D000051', bindtime: baseTime - 86400000 * 10, vin: 'DEMO-VIN-000051',
       fwversion: '1.0.9', carModel: 'Seal', origin: 'flash', lastSeenAt: baseTime }],
     insurance: { overview: null, policies: { hk: { id: 21, policyNo: 'HK-DEMO-0021', insurer: 'Demo Insurance', status: 'ready', coverEnd: '2027-09-17' }, cn: null, history: [] } },

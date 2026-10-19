@@ -17,6 +17,16 @@ const type = scenario.split('-')[0];
 const lists = { policy: structuredClone(policyList), claim: structuredClone(claimList), enquiry: structuredClone(enquiryList) };
 const details = { policy: structuredClone(policyDetail), claim: structuredClone(claimDetail), enquiry: structuredClone(enquiryDetail) };
 const record = details[type].result;
+let previewScan;
+if (scenario === 'claim-preview') {
+  const canvas = document.createElement('canvas'); canvas.width=2400; canvas.height=1500;
+  const ctx=canvas.getContext('2d');ctx.fillStyle='#f1f4fa';ctx.fillRect(0,0,2400,1500);
+  ctx.fillStyle='#fff';ctx.fillRect(120,100,2160,1300);ctx.fillStyle='#334777';ctx.font='110px sans-serif';
+  ctx.fillText('POLICY SCAN',280,400);ctx.font='70px sans-serif';ctx.fillText('AB 1234 / LOCAL FIXTURE',280,670);
+  ctx.font='42px sans-serif';ctx.fillText('Insurance document preview size regression',280,1000);
+  previewScan=new Blob([Uint8Array.from(atob(canvas.toDataURL('image/jpeg').split(',')[1]),c=>c.charCodeAt(0))],{type:'image/jpeg'});
+  Object.assign(record.documents[0],{name:'policy-scan.jpg',mime:'image/jpeg',size:previewScan.size});
+}
 const now = Date.now();
 const event = (kind, stage, text = '') => ({ id: now, type: kind, stage, text, actor: 'staff', createdAt: now });
 
@@ -58,7 +68,7 @@ window.fetch = async (input, options) => {
   const url = new URL(typeof input === 'string' ? input : input.url, location.href);
   if (!url.pathname.includes('/functions/v1/honnmono-admin/insurance/')) return originalFetch(input, options);
   const route = url.pathname.split('/insurance/')[1];
-  if (route.startsWith('files/')) return new Response(new Blob([]), { status: 200 });
+  if (route.startsWith('files/')) return new Response(previewScan || new Blob([]), { status: 200 });
   if (options?.method === 'POST') {
     if (scenario === 'policy-validation') return new Response(JSON.stringify({
       detail: [{ loc: ['body', 'ncd'], msg: 'too long' }],
