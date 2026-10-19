@@ -176,3 +176,8 @@
 @media (max-width: 720px) { .customer-drawer { width: 100vw; } .customer-content { padding: 0 18px 18px; } .customer-drawer > header { padding: 18px; } .customer-line { grid-template-columns: 100px 1fr; gap: 10px; } }
 
 .customer-drawer:focus { outline: none; }
+
+.customer-history-list.is-expanded { max-height: 360px; overflow-y: auto; overscroll-behavior: contain; }
+.customer-history-controls { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.customer-history-controls button { border: 1px solid var(--support-border, #dde3ed); border-radius: 6px; background: white; padding: 6px 12px; cursor: pointer; }
+.customer-history-controls button:disabled { opacity: .45; cursor: default; }

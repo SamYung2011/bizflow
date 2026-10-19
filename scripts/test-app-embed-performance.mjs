@@ -61,7 +61,7 @@ await check('support keeps other staff names with a paged id/email/name-only dir
  const staff=await listSupportStaff(client);assert.equal(staff.length,1001);assert.deepEqual(reads,[[0,999],[1000,1999]]);
  assert.equal(staffName('staff1000@own.invalid',staff),'Own Staff 1000');
  const support=readFileSync(file('src/views/honnmono/AppSupport.jsx'),'utf8');assert.match(support,/useSupportStaff\(options, embedded\)/);
- assert.equal((support.match(/employees={staff}/g)||[]).length,2);
+ for(const component of ['ConversationHeader','MessageThread','CustomerDrawer']) assert.match(support,new RegExp(`<${component}\\b[^>]*employees={staff}`));
 });
 await check('embed skips realtime and task cleanup; non-embed support uses context staff',()=>{
  const source=readFileSync(file('src/App.jsx'),'utf8');

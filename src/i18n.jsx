@@ -4458,3 +4458,6 @@ export function useT() {
 export function register(zh, en) {
   DICT_EN[zh] = en;
 }
+
+Object.assign(DICT_EN, { '展開': 'Expand' });
+Object.assign(DICT_FR, { '展開': 'Développer' });

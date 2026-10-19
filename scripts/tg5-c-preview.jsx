@@ -7,7 +7,7 @@ import AppNorthbound from '../src/views/honnmono/AppNorthbound.jsx';
 import { configureMock } from '../src/lib/supportMock.js';
 import { installAssistFixture } from './tg5-assist-fixture.js';
 if (!import.meta.env.DEV || import.meta.env.VITE_SUPPORT_MOCK!=='1' || import.meta.env.VITE_SUPABASE_URL!=='https://fixture.invalid') throw new Error('Local mock preview only');
-configureMock({delay:20,sendDelay:20}); installAssistFixture();
+configureMock({delay:20,sendDelay:20,historyCount:new URLSearchParams(location.search).has('history')?45:0}); installAssistFixture();
 const session={access_token:'local-only',user:{id:'fixture-staff',email:'mia@example.test'}};
 const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
 const view=new URLSearchParams(location.search).get('view');
