@@ -62,3 +62,8 @@ export async function uploadAttachment(id, file, options = {}) {
   return { cfid: signed.cfid, url: signed.url, thumbUrl: signed.thumbUrl,
     name: file.name, size: file.size, mime: file.type };
 }
+
+export const searchUsers = (params = {}, options = {}) =>
+  request('searchUsers', `/users?${query(params)}`, options, [params]);
+export const getUserProfile = (id, options = {}) =>
+  request('getUserProfile', `/users/${encodeURIComponent(id)}/profile`, options, [id]);

@@ -4283,6 +4283,78 @@ Object.assign(DICT_FR, {
   "此項目由 App 直接使用，不能改 slug 或停用": "Cet élément est utilisé directement par l’App. Son slug et son activation sont protégés."
 });
 
+Object.assign(DICT_EN, {
+  "客戶檔案": "Customer profile",
+  "使用者編號": "User ID",
+  "App 版本識別": "App identifier",
+  "最近登入": "Latest login",
+  "歷史對話": "Conversation history",
+  "未讀 {count}": "{count} unread",
+  "載入更多對話": "Load more conversations",
+  "暫無紀錄": "No records yet",
+  "主車": "Primary vehicle",
+  "車身號碼": "VIN",
+  "驗車日期": "Inspection date",
+  "牌照到期": "Licence expiry",
+  "國際牌照到期": "International licence expiry",
+  "手機與 App": "Phone and App",
+  "手機型號": "Phone model",
+  "作業系統": "Operating system",
+  "最近上線": "Last seen",
+  "推送平台": "Push platform",
+  "國內版": "Mainland edition",
+  "港版": "Hong Kong edition",
+  "轉插": "Adapter",
+  "綁定時間": "Bound at",
+  "自家轉插": "Honnmono adapter",
+  "閃充": "Flash charger",
+  "路風者": "Lufengzhe"
+});
+
+Object.assign(DICT_FR, {
+  "客戶檔案": "Dossier client",
+  "使用者編號": "Identifiant utilisateur",
+  "App 版本識別": "Identifiant de l’App",
+  "最近登入": "Dernière connexion",
+  "歷史對話": "Historique des conversations",
+  "未讀 {count}": "{count} non lus",
+  "載入更多對話": "Charger d’autres conversations",
+  "暫無紀錄": "Aucun enregistrement",
+  "主車": "Véhicule principal",
+  "車身號碼": "Numéro VIN",
+  "驗車日期": "Date de contrôle",
+  "牌照到期": "Expiration de la licence",
+  "國際牌照到期": "Expiration de la licence internationale",
+  "手機與 App": "Téléphone et App",
+  "手機型號": "Modèle du téléphone",
+  "作業系統": "Système d’exploitation",
+  "最近上線": "Dernière activité",
+  "推送平台": "Plateforme de notifications",
+  "國內版": "Version Chine continentale",
+  "港版": "Version Hong Kong",
+  "轉插": "Adaptateur",
+  "綁定時間": "Date d’association",
+  "自家轉插": "Adaptateur Honnmono",
+  "閃充": "Chargeur Flash",
+  "路風者": "Lufengzhe"
+});
+
+Object.assign(DICT_EN, {
+  "基本資料": "Basic details",
+  "設備編號": "Device ID",
+  "車款": "Vehicle model",
+  "保險": "Insurance",
+  "案號": "Case number"
+});
+
+Object.assign(DICT_FR, {
+  "基本資料": "Informations de base",
+  "設備編號": "Identifiant de l’appareil",
+  "車款": "Modèle du véhicule",
+  "保險": "Assurance",
+  "案號": "Numéro de dossier"
+});
+
 Object.assign(DICT_EN, PROMPT_COPY.en);
 Object.assign(DICT_FR, PROMPT_COPY.fr);
 

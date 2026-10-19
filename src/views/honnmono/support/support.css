@@ -152,3 +152,25 @@
 @media (prefers-reduced-motion: reduce) { .support-skeleton i, .support-spinner { animation: none; } }
 
 .support-embedded .support-workspace { height: 100dvh; min-height: 0; max-height: none; box-shadow: none; }
+
+.customer-avatar-button, .customer-name-button { border: 0; padding: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; text-align: left; }
+.customer-name-button:hover { color: #486ee8; text-decoration: underline; }
+.customer-overlay { position: fixed; inset: 0; z-index: 1000; background: #15243d66; display: flex; justify-content: flex-end; }
+.customer-drawer { width: min(600px, 90vw); height: 100dvh; background: #fff; display: flex; flex-direction: column; box-shadow: -12px 0 40px #15243d22; }
+.customer-drawer > header { display: flex; justify-content: space-between; align-items: center; padding: 24px 28px; border-bottom: 1px solid #e7ebf1; }
+.customer-drawer > header span { color: #71809a; font-size: 12px; }
+.customer-drawer h2 { margin: 5px 0 0; font-size: 22px; }
+.customer-content { overflow-y: auto; padding: 0 28px 28px; }
+.customer-section { padding: 20px 0; border-bottom: 1px solid #e7ebf1; }
+.customer-section h3 { margin: 0 0 12px; color: #334777; font-size: 15px; }
+.customer-section dl { margin: 0 0 12px; padding: 12px; border-radius: 10px; background: #f6f8fb; }
+.customer-section p { color: #78849a; }
+.customer-line { display: grid; grid-template-columns: 115px 1fr; gap: 16px; padding: 4px 0; font-size: 12px; }
+.customer-line dt { color: #78849a; }
+.customer-line dd { margin: 0; overflow-wrap: anywhere; color: #253047; }
+.customer-history { display: grid; gap: 5px; text-align: left; width: 100%; padding: 12px; margin: 6px 0; background: #f6f8fb; border: 1px solid transparent; border-radius: 10px; color: #405271; cursor: pointer; }
+.customer-history:hover { border-color: #486ee8; }
+.customer-history strong { display: flex; justify-content: space-between; }
+.customer-history small { color: #78849a; }
+@media (max-width: 1100px) { .customer-drawer { width: min(540px, 94vw); } }
+@media (max-width: 720px) { .customer-drawer { width: 100vw; } .customer-content { padding: 0 18px 18px; } .customer-drawer > header { padding: 18px; } .customer-line { grid-template-columns: 100px 1fr; gap: 10px; } }
