@@ -23,16 +23,22 @@ export function installAssistFixture() {
       ctx.fillText('LOCAL TEST DOCUMENT',width*.13,height*.76);
       return new Blob([Uint8Array.from(atob(canvas.toDataURL('image/jpeg').split(',')[1]),c=>c.charCodeAt(0))],{type:'image/jpeg'});
     }
-    const original = photo(2400,1500), thumb = photo(480,300);
+    const portrait = new URLSearchParams(location.search).has('portrait');
+    const original = portrait ? photo(1500,2400) : photo(2400,1500), thumb = portrait ? photo(300,480) : photo(480,300);
     files.set('vehicle-original',{blob:original}); files.set('vehicle-thumb',{blob:thumb});
-    const stream = 'BT /F1 18 Tf 40 200 Td (LOCAL TEST DOCUMENT) Tj ET';
-    const objects = ['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    const streams = [
+      '0.93 0.96 1 rg 0 0 400 300 re f 0.15 0.27 0.45 rg BT /F1 18 Tf 28 255 Td (NORTHBOUND PERMIT) Tj 0 -36 Td /F1 13 Tf (PAGE 1 - VEHICLE DETAILS) Tj 0 -44 Td (Registration: AB 1234) Tj 0 -30 Td (Applicant: Sophie Wong) Tj 0 -30 Td (Vehicle: BYD Seal) Tj 0 -55 Td /F1 10 Tf (LOCAL TEST DOCUMENT - FIRST PAGE) Tj ET',
+      '1 0.2 0.7 rg 0 0 400 300 re f 0 0 0 rg BT /F1 18 Tf 28 220 Td (PAGE 2 - FULL DOCUMENT ONLY) Tj ET',
+    ];
+    const objects = ['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 2 >>',
       '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 300] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
-      `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
+      `<< /Length ${streams[0].length} >>\nstream\n${streams[0]}\nendstream`, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 300] /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>',
+      `<< /Length ${streams[1].length} >>\nstream\n${streams[1]}\nendstream`];
     let pdf = '%PDF-1.4\n'; const offsets = [0];
     objects.forEach((object,index)=>{offsets.push(pdf.length);pdf+=`${index+1} 0 obj\n${object}\nendobj\n`;});
     const xref = pdf.length;
-    pdf+=`xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map(offset=>`${String(offset).padStart(10,'0')} 00000 n \n`).join('')}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+    pdf+=`xref\n0 ${objects.length+1}\n0000000000 65535 f \n${offsets.slice(1).map(offset=>`${String(offset).padStart(10,'0')} 00000 n \n`).join('')}trailer\n<< /Size ${objects.length+1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
     files.set('proof-original',{blob:new Blob([pdf],{type:'application/pdf'})});
     files.set('no-thumb-original',{blob:original});
     sampleDocs.push({id:101,cfid:'vehicle-original',thumbCfid:'vehicle-thumb',name:'vehicle.jpg',mime:'image/jpeg',size:original.size,kind:'vehicle_license'},
