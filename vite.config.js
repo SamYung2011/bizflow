@@ -15,6 +15,7 @@ export default defineConfig({
         // 拆开后浏览器能分开缓存，改业务代码不再连带重新下载整包
         manualChunks(id) {
           if (id.includes('node_modules')) {
+            if (id.includes('pdfjs-dist')) return 'pdf-preview'
             if (id.includes('@supabase')) return 'supabase'
             if (id.includes('@tanstack')) return 'query'
             return 'vendor'

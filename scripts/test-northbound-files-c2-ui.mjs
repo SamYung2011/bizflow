@@ -67,13 +67,14 @@ try {
     check(`${location}: thumbnail then original only after explicit click; both URLs revoked on close`);
     await reset();
     await page.locator('.nb-doc-open').filter({hasText:'proof.pdf'}).click();await modal.waitFor();
-    assert.deepEqual(await calls(),[]);assert.equal(await modal.locator('iframe,img').count(),0);
+    await modal.locator('.nb-pdf-first-page[aria-busy=false] canvas:not([hidden])').waitFor();
+    assert.deepEqual(await calls(),['proof-original']);assert.equal(await modal.locator('img').count(),0);
     assert((await modal.innerText()).includes('20 KB'));
-    await page.screenshot({path:`${output}/c2-file-${assist?'assist':'case'}-pdf-icon.png`});
-    await modal.getByRole('button',{name:'開啟原檔',exact:true}).click();await modal.locator('iframe').waitFor();
+    await page.screenshot({path:`${output}/c2-file-${assist?'assist':'case'}-pdf-preview.png`});
+    await modal.getByRole('button',{name:'開啟原檔',exact:true}).click();await modal.locator('iframe:not(.nb-pdf-first-page)').waitFor();
     assert.deepEqual(await calls(),['proof-original']);
     await modal.getByRole('button',{name:'關閉',exact:true}).click();
-    check(`${location}: PDF icon and size use zero bytes; original click alone fetches PDF`);
+    check(`${location}: PDF preview fetches once on click; full viewer reuses the same bytes`);
     await reset();
     await page.locator('.nb-doc-open').filter({hasText:'legacy.jpg'}).click();await modal.waitFor();
     assert.deepEqual(await calls(),[]);
