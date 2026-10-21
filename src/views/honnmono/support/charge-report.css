@@ -1,0 +1,16 @@
+.support-charge-report { width: 360px; max-width: 100%; font-size: 12px; line-height: 1.6; }
+.support-charge-report h3 { margin: 2px 0 8px; color: #334777; font-size: 15px; }
+.support-charge-result { margin: 0 0 12px; color: #4a566d; }
+.support-charge-report dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; margin: 0; }
+.support-charge-report dt { font-size: 11px; color: #7c879d; }
+.support-charge-report dd { margin: 2px 0 0; font-weight: 600; overflow-wrap: anywhere; }
+.support-charge-notes { color: #7c879d; font-size: 11px; padding-left: 16px; margin: 12px 0; }
+.support-charge-advice { border-top: 1px solid #e6e0f1; padding-top: 10px; margin-top: 12px; }
+.support-charge-advice h4 { color: #596c94; font-size: 12px; margin: 0 0 6px; }
+.support-charge-advice ol { padding-left: 18px; margin: 0; }
+.support-charge-advice li + li { margin-top: 6px; }
+.support-technical-details { font-size: 11px; color: #7c879d; margin-top: 8px; }
+.support-technical-details summary { cursor: pointer; }
+.support-technical-details div { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 6px; max-height: 180px; overflow-y: auto; }
+.support-summary > .support-message-text { margin-top: 7px; font-size: 12px; color: #7c879d; }
+@media (max-width: 760px) { .support-summary > .support-message-text { max-height: 80px; overflow-y: auto; } }

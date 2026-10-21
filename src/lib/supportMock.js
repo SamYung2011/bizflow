@@ -1,3 +1,4 @@
+import chargeReportFixture from '../../scripts/fixtures/support-charge-report.json';
 import { SUPPORT_CATEGORIES, SUPPORT_LIMITS, conversationState } from './supportConfig.js';
 
 const baseTime = new Date('2026-09-17T09:42:00+08:00').getTime();
@@ -45,7 +46,7 @@ const conversations = people.map(([userNickname, userPhone, source, category, st
   id: index + 1, userId: 800 + index, userNickname, userPhone: `+852 ${userPhone}`,
   userEmail: `${userNickname.split(' ')[0].toLowerCase()}@example.test`, source, status,
   category: SUPPORT_CATEGORIES[category], summary: index === 0
-    ? 'Charging stopped after 2 minutes at Harbour Station. Order HM202609170028. The user has checked the connector and restarted the APP. Please verify the session and the pending payment.' : null,
+    ? 'The car stopped charging at 42%. The customer expected 80%. Please check the car’s charging limit and any on-screen messages.' : null,
   assigneeEmail: index === 2 ? 'mia@example.test' : '', staffReadMsgId: 0,
   userReadMsgId: 0, createdAt: baseTime - 86400000, closedAt: status === 'closed' ? baseTime : null,
   lastMessageAt: baseTime - index * 60000, lastSenderRole: index === 4 ? 'system' : index === 2 ? 'staff' : 'user',
@@ -59,13 +60,11 @@ threads.set(6, [message(6, 'user', 'My previous charging receipt is now correct.
   message(6, 'staff', 'The receipt has been corrected. Thank you, Alex.')]);
 
 threads.set(1, [
-  message(1, 'user', 'The charger stopped after two minutes. What should I do?', { createdAt: baseTime - 300000 }),
-  message(1, 'ai', 'Please check the connector and restart the APP. If charging still does not resume, I can connect you with our support team.', { createdAt: baseTime - 270000 }),
-  message(1, 'user', 'I have tried both. The payment is still pending.', { createdAt: baseTime - 240000 }),
+  message(1, 'user', 'Why did charging stop before 80%?', { createdAt: baseTime - 300000 }),
+  message(1, 'ai', 'The car stopped charging at 42%. Please check the charging limit set in your car.', { createdAt: baseTime - 270000 }),
+  message(1, 'user', 'Please connect me with support.', { createdAt: baseTime - 240000 }),
   message(1, 'system', '已轉人工客服', { msgType: 'system', createdAt: baseTime - 180000 }),
-  message(1, 'user', 'HM202609170028', { msgType: 'order', createdAt: baseTime - 120000 }),
-  message(1, 'staff', 'Hi Alex, I’m Mia. I’ll check this charging session for you.', { createdAt: baseTime - 60000 }),
-  message(1, 'user', 'Thank you. I’m still at Harbour Station.'),
+  message(1, 'ai', 'Charging session report', { msgType: 'charge_report', chargeReport: chargeReportFixture.full }),
 ]);
 threads.set(2, [
   message(2, 'user', 'Here are the photos and receipt from the station.', { createdAt: baseTime - 180000 }),
