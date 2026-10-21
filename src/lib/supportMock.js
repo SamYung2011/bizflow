@@ -64,6 +64,7 @@ threads.set(1, [
   message(1, 'ai', 'The car stopped charging at 42%. Please check the charging limit set in your car.', { createdAt: baseTime - 270000 }),
   message(1, 'user', 'Please connect me with support.', { createdAt: baseTime - 240000 }),
   message(1, 'system', '已轉人工客服', { msgType: 'system', createdAt: baseTime - 180000 }),
+  message(1, 'user', 'Customer submitted a northbound application HM-NB-000124', { msgType: 'customer_action', supportAction: { version: 1, kind: 'northbound', action: 'submitted', reference: 'HM-NB-000124', occurredAt: baseTime - 600000, staffAdvice: ['請到相應業務頁面核對已提交資料，告知客戶下一步及是否需要補件。'] } }),
   message(1, 'ai', 'Charging session report', { msgType: 'charge_report', chargeReport: chargeReportFixture.full }),
 ]);
 threads.set(2, [

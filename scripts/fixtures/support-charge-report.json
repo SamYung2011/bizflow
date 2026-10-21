@@ -6,7 +6,7 @@
     "facts": [
       {
         "label": "充電時間",
-        "value": 1790229300000,
+        "value": 1790228200000,
         "unit": "datetime"
       },
       {
@@ -40,7 +40,90 @@
       "先確認客戶遇到甚麼問題，以及是否在預期電量前停止。",
       "詢問車輛是否達到充電上限、是否有人手動停止，以及車內有沒有提示。",
       "如果反覆發生，記下車款、充電站及畫面提示，連同這張紀錄交技術同事跟進。"
-    ]
+    ],
+    "insights": {
+      "version": 1,
+      "summary": "本次由車輛停止充電。可以先查看是否已達到車內設定的充電上限。",
+      "comparison": {
+        "status": "slower",
+        "scope": "nearby",
+        "sampleCount": 3,
+        "baselineAvgPowerKw": 30,
+        "changePercent": -50,
+        "socMatched": true
+      },
+      "sections": [
+        {
+          "kind": "speed",
+          "title": "充電速度對比",
+          "text": "本次平均 15 kW，相當於以這個速度充一小時約充入 15 度。 對比同一充電位置附近之前 3 次完整充電，過往速度通常約 30 kW；本次低約 50%。 已選起止電量相近的紀錄作比較。 比較的是同一台轉插，可能用於不同車輛；速度差異本身不代表轉插故障。"
+        },
+        {
+          "kind": "place",
+          "title": "充電地點",
+          "text": "紀錄位置：海旁附近。這是定位附近地址。"
+        }
+      ],
+      "nextSteps": [
+        "先比較充電站顯示的速度與本報告，再確認車內是否有充電限制或提示；若同一地點反覆變慢，可帶本報告請站方及客服核對。"
+      ]
+    },
+    "insightsByLanguage": {
+      "en": {
+        "version": 1,
+        "summary": "The car stopped this session. Check whether it reached the charging limit set in the car.",
+        "comparison": {
+          "status": "slower",
+          "scope": "nearby",
+          "sampleCount": 3,
+          "baselineAvgPowerKw": 30,
+          "changePercent": -50,
+          "socMatched": true
+        },
+        "sections": [
+          {
+            "kind": "speed",
+            "title": "Charging speed comparison",
+            "text": "The average was 15 kW, equivalent to about 15 kWh in one hour at that rate. Compared with 3 earlier complete sessions from near this charging location, the usual rate was about 30 kW; this session was about 50% lower. The comparison uses sessions with similar starting and ending battery levels. These sessions used the same adapter, possibly with different cars. A speed difference alone does not indicate an adapter fault."
+          },
+          {
+            "kind": "place",
+            "title": "Charging location",
+            "text": "Recorded location: 海旁附近. This is an address near the reported fix."
+          }
+        ],
+        "nextSteps": [
+          "Compare the station's displayed rate with this report, then check charging limits or messages in the car. If the same location is repeatedly slower, share this report with the station and support."
+        ]
+      },
+      "zh-Hans": {
+        "version": 1,
+        "summary": "本次由车辆停止充电。可以先查看是否已达到车内设定的充电上限。",
+        "comparison": {
+          "status": "slower",
+          "scope": "nearby",
+          "sampleCount": 3,
+          "baselineAvgPowerKw": 30,
+          "changePercent": -50,
+          "socMatched": true
+        },
+        "sections": [
+          {
+            "kind": "speed",
+            "title": "充电速度对比",
+            "text": "本次平均 15 kW，相当于以这个速度充一小时约充入 15 度。 对比同一充电位置附近之前 3 次完整充电，过往速度通常约 30 kW；本次低约 50%。 已选起止电量相近的纪录作比较。 比较的是同一台转插，可能用于不同车辆；速度差异本身不代表转插故障。"
+          },
+          {
+            "kind": "place",
+            "title": "充电地点",
+            "text": "纪录位置：海旁附近。这是定位附近地址。"
+          }
+        ],
+        "nextSteps": [
+          "先比较充电站显示的速度与本报告，再确认车内是否有充电限制或提示；若同一地点反复变慢，可带本报告请站方及客服核对。"
+        ]
+      }
+    }
   },
   "unavailable": {
     "version": 1,

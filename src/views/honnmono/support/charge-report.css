@@ -14,3 +14,10 @@
 .support-technical-details div { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 6px; max-height: 180px; overflow-y: auto; }
 .support-summary > .support-message-text { margin-top: 7px; font-size: 12px; color: #7c879d; }
 @media (max-width: 760px) { .support-summary > .support-message-text { max-height: 80px; overflow-y: auto; } }
+
+.support-operation-label { display: inline-block; color: #246a56; background: #e4f3eb; border-radius: 6px; padding: 2px 7px; margin-bottom: 8px; font-size: 11px; font-weight: 600; }
+.support-customer-action h3 { color: #315c50; }
+.support-customer-action dl { grid-template-columns: 1fr; }
+.support-charge-insights { margin-top: 12px; }
+.support-charge-insights h4 { margin: 10px 0 4px; color: #596c94; font-size: 12px; }
+.support-charge-insights p { margin: 0; }
