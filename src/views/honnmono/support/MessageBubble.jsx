@@ -6,6 +6,7 @@ import Attachment from './Attachment.jsx';
 import SupportIcon from './SupportIcon.jsx';
 import ChargeReportCard from './ChargeReportCard.jsx';
 import SupportText from './SupportText.jsx';
+import CustomerActionCard, { isCustomerAction } from './CustomerActionCard.jsx';
 
 export default function MessageBubble({ message, employees, options, onRetry, onImage }) {
   const { t, lang } = useT();
@@ -13,8 +14,9 @@ export default function MessageBubble({ message, employees, options, onRetry, on
   if (message.senderRole === 'system' || message.msgType === 'system') return <div className="support-system">{t(systemMessageKey(message.content))}</div>;
   return <div className={`support-message-row ${staff ? 'is-staff' : ''}`} data-message-id={message.id}>
     <div className={`support-bubble ${message.senderRole === 'ai' ? 'is-ai' : ''} ${message.state === 'failed' ? 'is-failed' : ''}`}>
-      {message.senderRole === 'ai' && <span className="support-ai-name">{t('AI 助手')}</span>}
-      {message.msgType === 'charge_report' && message.senderRole === 'ai' && message.chargeReport?.version === 1
+      {message.senderRole === 'ai' && message.msgType !== 'charge_report' && <span className="support-ai-name">{t('AI 助手')}</span>}
+      {isCustomerAction(message) ? <CustomerActionCard action={message.supportAction} />
+        : message.msgType === 'charge_report' && message.senderRole === 'ai' && message.chargeReport?.version === 1
         ? <ChargeReportCard report={message.chargeReport} />
         : message.msgType === 'order' ? <a className="support-order" href={`/bizflow/orders.html?q=${encodeURIComponent(systemMessageKey(message.content))}`} target="_blank" rel="noreferrer">
         <SupportIcon name="file" /><span><small>{t('關聯訂單')}</small><strong>{message.content} ↗</strong></span></a>

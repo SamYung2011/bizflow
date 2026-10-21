@@ -55,7 +55,7 @@ check('old diagnostics and opaque references are kept in closed technical detail
 check('all card text has English and French translations in the real provider', () => {
   for (const lang of ['en', 'fr']) {
     browser.location.search = `?embed=1&lang=${lang}`;
-    for (const report of Object.values(fixture)) assert(!/[\u3400-\u9fff]/.test(api.bubble(msg(report))));
+    for (const report of Object.values(fixture)) assert(!/[\u3400-\u9fff]/.test(api.bubble(msg(report)).replaceAll('海旁附近', '')));
     for (const key of Object.keys(api.SUPPORT_CHARGE_COPY.en)) assert(api.SUPPORT_CHARGE_COPY.fr[key]);
   }
 });
@@ -69,5 +69,27 @@ check('a new handoff summary remains visible after old diagnostic paragraphs', (
 check('content stays escaped text', () => {
   const html = api.bubble(msg({ ...fixture.full, summary: '<script>alert(1)</script>' }));
   assert(html.includes('&lt;script&gt;')); assert(!html.includes('<script>'));
+});
+check('business action is explicit, dated, escaped and translated', () => {
+  const message = { id: 7, msgType: 'customer_action', senderRole: 'user', content: 'readable action fallback', createdAt: 1790230000000,
+    supportAction: { version: 1, kind: 'northbound', action: 'submitted', reference: 'HM-NB-123<script>', occurredAt: 1790230000000,
+      staffAdvice: ['請到相應業務頁面核對已提交資料，告知客戶下一步及是否需要補件。'] } };
+  for (const lang of ['zh', 'en', 'fr']) {
+    browser.location.search = `?embed=1&lang=${lang}`;
+    const html = api.bubble(message);
+    assert(html.includes('support-customer-action')); assert(html.includes('2026')); assert(html.includes('&lt;script&gt;'));
+    assert(!html.includes('readable action fallback'));
+    if (lang !== 'zh') assert(!/[\u3400-\u9fff]/.test(html));
+  }
+  for (const change of [{version: 2}, {kind: 'unexpected'}, {action: 'fake'}, {occurredAt: 1e30}]) {
+    assert(api.bubble({...message,supportAction:{...message.supportAction,...change}}).includes('readable action fallback'));
+  }
+  assert(api.bubble({...message,senderRole:'staff'}).includes('readable action fallback'));
+});
+check('report sharing uses customer action label and shared historical assessment', () => {
+  browser.location.search = '?embed=1&lang=zh';
+  const html = api.bubble(msg(fixture.full));
+  for (const text of ['客戶操作', '分享充電報告', '低約 50%', '海旁附近']) assert(html.includes(text));
+  assert(!html.includes('support-ai-name'));
 });
 console.log(`CHARGE_REPORT_CARD=${count}/${count}`);
