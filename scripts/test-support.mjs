@@ -173,7 +173,8 @@ function dictionary(name) {
     .map(match => vm.runInNewContext(`(${match[1]})`));
   return Object.assign(base, ...additions);
 }
-const en = dictionary('EN'), fr = dictionary('FR');
+const { SUPPORT_CHARGE_COPY } = await moduleFor('src/lib/supportChargeCopy.js');
+const en = Object.assign(dictionary('EN'), SUPPORT_CHARGE_COPY.en), fr = Object.assign(dictionary('FR'), SUPPORT_CHARGE_COPY.fr);
 const sources = ['src/views/honnmono/AppSupport.jsx', 'src/lib/supportConfig.js', 'src/lib/supportMock.js',
   ...(await readdir('src/views/honnmono/support')).filter(name => /\.(jsx|js)$/.test(name)).map(name => `src/views/honnmono/support/${name}`)];
 const keys = new Set();

@@ -2,6 +2,7 @@
 // fallback：英文模式下未翻译的中文 key 直接显示原文，便于增量翻译
 import { createContext, useContext, useState, useEffect } from "react";
 
+import { SUPPORT_CHARGE_COPY } from "./lib/supportChargeCopy.js";
 import { PROMPT_COPY } from "./views/prompts/i18n.js";
 
 const STORAGE_KEY = "bizflow-lang";
@@ -4424,8 +4425,8 @@ Object.assign(DICT_FR, {
   "上傳失敗：{name}（{reason}）": "Échec de l’envoi : {name} ({reason})"
 });
 
-Object.assign(DICT_EN, PROMPT_COPY.en);
-Object.assign(DICT_FR, PROMPT_COPY.fr);
+Object.assign(DICT_EN, PROMPT_COPY.en, SUPPORT_CHARGE_COPY.en);
+Object.assign(DICT_FR, PROMPT_COPY.fr, SUPPORT_CHARGE_COPY.fr);
 
 export function I18nProvider({ children }) {
   const [lang, setLangState] = useState(() => {

@@ -4,6 +4,8 @@ import { staffName, systemMessageKey } from '../../../lib/supportConfig.js';
 import { formatTime, fileSize } from './format.js';
 import Attachment from './Attachment.jsx';
 import SupportIcon from './SupportIcon.jsx';
+import ChargeReportCard from './ChargeReportCard.jsx';
+import SupportText from './SupportText.jsx';
 
 export default function MessageBubble({ message, employees, options, onRetry, onImage }) {
   const { t, lang } = useT();
@@ -12,9 +14,11 @@ export default function MessageBubble({ message, employees, options, onRetry, on
   return <div className={`support-message-row ${staff ? 'is-staff' : ''}`} data-message-id={message.id}>
     <div className={`support-bubble ${message.senderRole === 'ai' ? 'is-ai' : ''} ${message.state === 'failed' ? 'is-failed' : ''}`}>
       {message.senderRole === 'ai' && <span className="support-ai-name">{t('AI 助手')}</span>}
-      {message.msgType === 'order' ? <a className="support-order" href={`/bizflow/orders.html?q=${encodeURIComponent(systemMessageKey(message.content))}`} target="_blank" rel="noreferrer">
+      {message.msgType === 'charge_report' && message.senderRole === 'ai' && message.chargeReport?.version === 1
+        ? <ChargeReportCard report={message.chargeReport} />
+        : message.msgType === 'order' ? <a className="support-order" href={`/bizflow/orders.html?q=${encodeURIComponent(systemMessageKey(message.content))}`} target="_blank" rel="noreferrer">
         <SupportIcon name="file" /><span><small>{t('關聯訂單')}</small><strong>{message.content} ↗</strong></span></a>
-        : message.content && <div className="support-message-text">{message.content}</div>}
+        : message.content && <SupportText text={message.content} />}
       {!!message.attachments?.length && !message.files && <div className={message.msgType === 'image' ? 'support-image-grid' : 'support-attachments'}>
         {message.attachments.map(attachment => <Attachment key={attachment.cfid} attachment={attachment} type={message.msgType} options={options} onImage={onImage} />)}
       </div>}

@@ -1,3 +1,4 @@
+import { readableSupportText } from './chargeReport.js';
 import React from 'react';
 import { useT } from '../../../i18n.jsx';
 import { SUPPORT_CATEGORIES, conversationState, systemMessageKey } from '../../../lib/supportConfig.js';
@@ -37,7 +38,7 @@ export default function ConversationList({ query, selectedId, onSelect, filters,
           {item.source === 'northbound' && <span className="support-category">{t('港車北上')}</span>}
           {item.source === 'insurance' && <span className="support-category">{t('車保')}</span>}
           {item.source === 'promo' && <span className="support-category">{t('優惠')}</span>}</span>
-          <span className="support-preview">{item.lastMessagePreview === '[attachment]' ? t('附件') : item.lastSenderRole === 'system' ? t(systemMessageKey(item.lastMessagePreview)) : item.lastMessagePreview}</span>
+          <span className="support-preview">{item.lastMessagePreview === '[attachment]' ? t('附件') : item.lastSenderRole === 'system' ? t(systemMessageKey(item.lastMessagePreview)) : readableSupportText(item.lastMessagePreview, t)}</span>
           <span className="support-conversation-source">{t(item.source === 'ai_handoff' ? 'AI 轉人工' : '使用者發起')}
             {item.assigneeEmail && <span> · {t('已認領')}</span>}</span>
         </span>
