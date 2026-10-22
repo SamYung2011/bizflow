@@ -4468,3 +4468,36 @@ Object.assign(DICT_FR, { '最近發訊': 'Dernier message' });
 
 Object.assign(DICT_EN, { '開啟原檔': 'Open original' });
 Object.assign(DICT_FR, { '開啟原檔': 'Ouvrir l’original' });
+
+Object.assign(DICT_EN, {
+  "搜尋姓名、電郵、電話、編號或備註": "Search name, email, phone, ID or notes",
+  "搜尋姓名、電郵、電話、編號、車牌或備註": "Search name, email, phone, ID, plate or notes",
+  "APP 使用者": "APP users",
+  "請輸入至少兩個字元": "Enter at least two characters",
+  "客戶檔案及備註": "Customer profile and notes",
+  "客戶備註": "Customer notes",
+  "僅供客服內部查看，北上與車保共用": "Internal staff notes, shared with northbound and insurance",
+  "儲存備註": "Save notes",
+  "重新載入備註": "Reload notes",
+  "備註已儲存": "Notes saved",
+  "備註已被其他同事更新，請重新載入後再修改": "Another colleague updated these notes. Reload before editing.",
+  "儲存失敗，請重試": "Could not save. Please retry."
+});
+
+Object.assign(DICT_FR, {
+  "搜尋姓名、電郵、電話、編號或備註": "Rechercher nom, e-mail, téléphone, identifiant ou notes",
+  "搜尋姓名、電郵、電話、編號、車牌或備註": "Rechercher nom, e-mail, téléphone, identifiant, plaque ou notes",
+  "APP 使用者": "Utilisateurs de l’APP",
+  "請輸入至少兩個字元": "Saisissez au moins deux caractères",
+  "客戶檔案及備註": "Dossier client et notes",
+  "客戶備註": "Notes client",
+  "僅供客服內部查看，北上與車保共用": "Notes internes partagées avec les dossiers de circulation et d’assurance",
+  "儲存備註": "Enregistrer les notes",
+  "重新載入備註": "Recharger les notes",
+  "備註已儲存": "Notes enregistrées",
+  "備註已被其他同事更新，請重新載入後再修改": "Un collègue a modifié les notes. Rechargez-les avant de les modifier.",
+  "儲存失敗，請重試": "Échec de l’enregistrement. Veuillez réessayer."
+});
+
+Object.assign(DICT_EN, { "儲存中…": "Saving…" });
+Object.assign(DICT_FR, { "儲存中…": "Enregistrement…" });

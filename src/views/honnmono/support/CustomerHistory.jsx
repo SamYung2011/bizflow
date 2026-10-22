@@ -19,7 +19,7 @@ export default function CustomerHistory({ userId, recent, options, employees, on
     <div ref={list} className={`customer-history-list${expanded ? ' is-expanded' : ''}`}>
       {expanded && query.isPending ? <p>{t('載入中…')}</p> : expanded && query.isError ? <p role="alert">
         {t('載入失敗，請重試')} <button onClick={() => query.refetch()}>{t('重試')}</button></p> : <>
-        {rows.map(row => <button className="customer-history" key={row.id} onClick={() => onSelect(row.id)}>
+        {rows.map(row => <button className="customer-history" key={row.id} disabled={!onSelect} onClick={() => onSelect?.(row.id)}>
           <strong>{supportCaseId(row.id)} <span>{t(row.status === 'closed' ? '已結束' : '處理中')}</span></strong>
           <span>{t(row.category || '未分類')} · {t(({ manual: '使用者發起', ai_handoff: 'AI 轉人工', feedback: '意見反饋', northbound: '港車北上', insurance: '車保', promo: '優惠' })[row.source] || '使用者發起')}</span>
           <small>{row.lastMessageAt ? formatFeedbackTime(row.lastMessageAt, lang) : '—'} · {row.assigneeEmail ? staffName(row.assigneeEmail, employees) : t('尚未認領')} · {t('未讀 {count}', { count: row.unreadCount })}</small>

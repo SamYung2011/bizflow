@@ -112,7 +112,7 @@ export async function listConversations({ status = 'all', filter, userId, page =
   return clone(conversations.filter(item => (status === 'all' || item.status === status)
     && (!userId || item.userId === Number(userId))
     && (filter !== 'waiting_staff' || conversationState(item) === 'waiting')
-    && `${item.userNickname} ${item.userPhone}`.toLowerCase().includes(q.toLowerCase()))
+    && `${item.userNickname} ${item.userPhone} ${item.userEmail} ${customerNotes.get(item.userId)?.text || ""}`.toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => b.lastMessageAt - a.lastMessageAt).slice((page - 1) * size, page * size));
 }
 export async function getConversation(id) {
@@ -173,18 +173,24 @@ export function receiveMockMessage(id) {
   return append(id, message(id, 'user', 'One more update: I’m available if you need anything else.', { createdAt: Date.now() }));
 }
 
+const customerNotes = new Map();
+const emptyNote = () => ({ text: '', revision: 0, updatedAt: null, updatedBy: '' });
 export async function searchUsers({ q = '', page = 1, size = 30 } = {}) {
   await wait();
   const users = [...new Map(conversations.map(row => [row.userId, { id: row.userId, nickname: row.userNickname,
     email: row.userEmail, phone: row.userPhone, phoneHk: row.userPhone.replace('+852 ', ''), phoneCn: '13800138000',
     appmodel: 'honnmono-hk', registeredAt: baseTime - 86400000 * 365, lastLoginAt: baseTime }])).values()];
-  const matches = users.filter(row => Object.values(row).join(' ').toLowerCase().includes(q.trim().toLowerCase()));
+  users.push({ id: 99001, nickname: 'Registered User', email: 'registered@example.test', phone: '', appmodel: 'honnmono', registeredAt: baseTime });
+  users.forEach(user => { user.staffNote = customerNotes.get(user.id) || emptyNote(); });
+  const matches = users.filter(row => [row.nickname, row.email, row.phone, row.phoneHk, row.phoneCn, row.id, row.staffNote.text].join(' ').toLowerCase().includes(q.trim().toLowerCase()));
   return clone({ items: matches.slice((page - 1) * size, page * size), page, size, total: matches.length });
 }
 export async function getUserProfile(id) {
   const basic = (await searchUsers()).items.find(row => row.id === Number(id));
   if (!basic) throw new Error('User not found');
-  return clone({ basic, conversations: await listConversations({ userId: id, size: 5 }),
+  if (Number(id) === 99001) return clone({ basic, staffNote: customerNotes.get(Number(id)) || emptyNote(), conversations: [], cars: [], adapters: [],
+    appDevices: { lastLogin: null, lastMessage: null }, insurance: { overview: null, policies: { hk: null, cn: null, history: [] } }, northbound: { overview: null, cases: [] } });
+  return clone({ basic, staffNote: customerNotes.get(Number(id)) || emptyNote(), conversations: await listConversations({ userId: id, size: 5 }),
     cars: [{ id: 51, brand: 'BYD', series: 'Seal', variant: 'Premium', year: '2025', plate: 'AB 1234', vin: 'DEMO-VIN-000051',
       isPrimary: true, checkTime: baseTime + 86400000 * 100, licenseExpireTime: baseTime + 86400000 * 180, intlPlateExpireTime: 0 }],
     appDevices: {
@@ -194,4 +200,14 @@ export async function getUserProfile(id) {
       fwversion: '1.0.9', carModel: 'Seal', origin: 'flash', lastSeenAt: baseTime }],
     insurance: { overview: null, policies: { hk: { id: 21, policyNo: 'HK-DEMO-0021', insurer: 'Demo Insurance', status: 'ready', coverEnd: '2027-09-17' }, cn: null, history: [] } },
     northbound: { overview: null, cases: [{ id: 71, caseNo: 'HM-NB-000071', status: 'checking' }] } });
+}
+
+export async function updateUserProfile(id, body, options = {}) {
+  await wait();
+  await getUserProfile(id);
+  const previous = customerNotes.get(Number(id)) || emptyNote();
+  if (body.revision !== previous.revision) { const error = new Error('Conflict'); error.status = 409; throw error; }
+  const staffNote = { text: body.note.trim(), revision: previous.revision + 1, updatedAt: Date.now(), updatedBy: options.operatorEmail || 'staff@example.test' };
+  customerNotes.set(Number(id), staffNote);
+  return clone({ staffNote });
 }

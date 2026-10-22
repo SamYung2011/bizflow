@@ -54,3 +54,6 @@ export const searchUsers = (params = {}, options = {}) =>
   request('searchUsers', `/users?${query(params)}`, options, [params]);
 export const getUserProfile = (id, options = {}) =>
   request('getUserProfile', `/users/${encodeURIComponent(id)}/profile`, options, [id]);
+
+export const updateUserProfile = (id, body, options = {}) =>
+  request('updateUserProfile', `/users/${encodeURIComponent(id)}/profile`, options, [id, body], body);

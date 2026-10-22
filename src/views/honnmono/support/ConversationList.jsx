@@ -1,12 +1,13 @@
 import { readableSupportText } from './chargeReport.js';
 import React from 'react';
+import AssistUserSearch from '../northbound/AssistUserSearch.jsx';
 import { useT } from '../../../i18n.jsx';
 import { SUPPORT_CATEGORIES, conversationState, systemMessageKey } from '../../../lib/supportConfig.js';
 import SupportIcon from './SupportIcon.jsx';
 import SupportSkeleton from './SupportSkeleton.jsx';
 import { formatTime } from './format.js';
 
-export default function ConversationList({ query, selectedId, onSelect, filters, setFilters }) {
+export default function ConversationList({ query, selectedId, onSelect, filters, setFilters, options, onProfile }) {
   const { t, lang } = useT();
   const rows = (query.data?.pages.flat() || []).filter(item =>
     (filters.state !== 'active' || conversationState(item) === 'active')
@@ -15,10 +16,8 @@ export default function ConversationList({ query, selectedId, onSelect, filters,
     <div className="support-list-heading"><div className="support-brand-icon"><SupportIcon name="chat" size={23} /></div>
       <div><h1>{t('APP 客服')}</h1><span>{t('Honnmono 使用者服務')}</span></div>
     </div>
-    <div className="support-search"><SupportIcon name="search" size={18} />
-      <input aria-label={t('搜尋暱稱或手機')} placeholder={t('搜尋暱稱或手機')} value={filters.search}
-        onChange={event => setFilters(current => ({ ...current, search: event.target.value }))} />
-    </div>
+    <AssistUserSearch compact options={options} value={filters.search}
+      onSearch={search => setFilters(current => ({ ...current, search }))} onSelect={user => onProfile(user.id)} />
     <div className="support-tabs" role="tablist" aria-label={t('會話狀態')}>
       {[['waiting', '待回覆'], ['active', '處理中'], ['closed', '已結束']].map(([value, label]) =>
         <button type="button" key={value} role="tab" aria-selected={filters.state === value}

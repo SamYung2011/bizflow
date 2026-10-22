@@ -1,8 +1,8 @@
-import React, { useEffect, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import React, { useEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useT } from '../../../i18n.jsx';
 import { useAppEmbedVisible } from '../../../lib/appEmbedVisibility.js';
-import { getUserProfile } from '../../../lib/supportApi.js';
+import { getUserProfile, updateUserProfile } from '../../../lib/supportApi.js';
 import { formatFeedbackTime } from '../../../lib/honnmonoAdmin.js';
 import CustomerHistory from './CustomerHistory.jsx';
 import { STAGE_LABELS } from '../northbound/labels.js';
@@ -13,7 +13,9 @@ const Section = ({ title, children }) => <section className="customer-section"><
 
 export default function CustomerDrawer({ userId, options, employees, onClose, onSelect }) {
   const { t, lang } = useT(), visible = useAppEmbedVisible();
-  const dialog = useRef(null);
+  const dialog = useRef(null), client = useQueryClient();
+  const [draft, setDraft] = useState(null), [saving, setSaving] = useState(false), [saveError, setSaveError] = useState('');
+  const [saved, setSaved] = useState(false);
   const query = useQuery({ queryKey: ['support', options.operatorEmail, 'profile', userId],
     queryFn: ({ signal }) => getUserProfile(userId, { ...options, signal }), enabled: visible && !!userId, gcTime: 0 });
   useEffect(() => {
@@ -24,13 +26,26 @@ export default function CustomerDrawer({ userId, options, employees, onClose, on
   function keyDown(event) {
     if (event.key === 'Escape') { event.stopPropagation(); onClose(); }
     if (event.key !== 'Tab') return;
-    const nodes = [...dialog.current.querySelectorAll('button:not(:disabled),a[href],input,select,[tabindex="0"]')];
+    const nodes = [...dialog.current.querySelectorAll('button:not(:disabled),a[href],input,textarea,select,[tabindex="0"]')];
     const target = event.shiftKey ? nodes.at(-1) : nodes[0];
     if (!nodes.includes(document.activeElement) || document.activeElement === (event.shiftKey ? nodes[0] : nodes.at(-1))) {
       event.preventDefault(); (target || dialog.current)?.focus();
     }
   }
   const data = query.data, time = value => value ? formatFeedbackTime(value, lang) : '—';
+  const note = data?.staffNote || { text: '', revision: 0 };
+  async function saveNote(event) {
+    event.preventDefault(); if (!draft || saving) return;
+    setSaving(true); setSaveError(''); setSaved(false);
+    try {
+      const result = await updateUserProfile(userId, { note: draft.text, revision: draft.revision }, options);
+      client.setQueryData(['support', options.operatorEmail, 'profile', userId], current => current && ({ ...current, staffNote: result.staffNote }));
+      setDraft(null); setSaved(true);
+      for (const key of ['appUsers', 'support', 'appNorthbound', 'appInsurance']) client.invalidateQueries({ queryKey: [key, options.operatorEmail] });
+    } catch (error) {
+      setSaveError(error.status === 409 ? '備註已被其他同事更新，請重新載入後再修改' : '儲存失敗，請重試');
+    } finally { setSaving(false); }
+  }
   const policies = data ? [data.insurance.policies.hk, data.insurance.policies.cn, ...data.insurance.policies.history].filter(Boolean) : [];
   return <div className="customer-overlay" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
     <aside className="customer-drawer" role="dialog" aria-modal="true" aria-label={t('客戶檔案')} ref={dialog} tabIndex={-1} onKeyDown={keyDown}>
@@ -44,6 +59,15 @@ export default function CustomerDrawer({ userId, options, employees, onClose, on
             <Line label={t('內地電話')} value={data.basic.phoneCn} /><Line label={t('App 版本識別')} value={data.basic.appmodel} />
             <Line label={t('註冊時間')} value={time(data.basic.registeredAt)} />
           </dl></Section>
+          <Section title={t('客戶備註')}><form className="customer-note-form" onSubmit={saveNote}>
+            <p>{t('僅供客服內部查看，北上與車保共用')}</p>
+            <textarea aria-label={t('客戶備註')} maxLength={2000} disabled={saving} value={draft?.text ?? note.text}
+              onChange={event => { setDraft({ text: event.target.value, revision: draft?.revision ?? note.revision }); setSaved(false); setSaveError(''); }} />
+            <div><button type="submit" className="support-button" disabled={!draft || saving}>{t(saving ? '儲存中…' : '儲存備註')}</button>
+              <button type="button" disabled={saving || !draft} onClick={() => { setDraft(null); setSaveError(''); setSaved(false); query.refetch(); }}>{t('重新載入備註')}</button></div>
+            {saveError && <p role="alert">{t(saveError)}</p>}{saved && <p role="status">{t('備註已儲存')}</p>}
+            {note.updatedAt && <small>{time(note.updatedAt)} · {note.updatedBy}</small>}
+          </form></Section>
           <Section title={t('歷史對話')}><CustomerHistory key={userId} userId={userId} recent={data.conversations}
             options={options} employees={employees} onSelect={onSelect} /></Section>
           <Section title={t('車輛')}>{data.cars.map(car => <dl key={car.id}>
