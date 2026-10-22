@@ -197,14 +197,16 @@ const rendered = await build({ stdin: { contents: `
   import React from 'react';
   import { renderToStaticMarkup } from 'react-dom/server';
   import AppSupport from './src/views/honnmono/AppSupport.jsx';
+  import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
   import ConversationList from './src/views/honnmono/support/ConversationList.jsx';
   import ConversationHeader from './src/views/honnmono/support/ConversationHeader.jsx';
   export const deny = props => renderToStaticMarkup(React.createElement(AppSupport, props));
-  export const feedbackList = source => renderToStaticMarkup(React.createElement(ConversationList, {
+  export const feedbackList = source => renderToStaticMarkup(React.createElement(QueryClientProvider, { client: new QueryClient() }, React.createElement(ConversationList, {
+    options: { operatorEmail: "fixture@example.test" },
     query: { data: { pages: [[{ id: 123, userNickname: 'Sample', source, category: 'APP 使用',
       status: 'open', lastSenderRole: 'user', lastMessageAt: Date.now(), unreadCount: 0 }]] } },
     selectedId: null, onSelect: () => {}, filters: { state: 'waiting', category: '', search: '' }, setFilters: () => {}
-  }));
+  })));
   export const feedbackHeader = source => renderToStaticMarkup(React.createElement(ConversationHeader, {
     conversation: { id: 123, userNickname: 'Sample', source, category: 'APP 使用', status: 'open',
       lastSenderRole: 'user', userPhone: '', userEmail: '' }, employees: [], onChange: () => {}, onBack: () => {}

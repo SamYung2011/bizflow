@@ -1,5 +1,8 @@
 import { useAppEmbedVisible } from '../../lib/appEmbedVisibility.js';
 import React, { useMemo, useState } from 'react';
+import AssistUserSearch from './northbound/AssistUserSearch.jsx';
+import CustomerDrawer from './support/CustomerDrawer.jsx';
+import './support/support.css';
 import { useQuery } from '@tanstack/react-query';
 import { useT } from '../../i18n.jsx';
 import { formatFeedbackTime } from '../../lib/honnmonoAdmin.js';
@@ -17,7 +20,7 @@ function Workspace({ session }) {
   const { t, lang } = useT();
   const options = useMemo(() => ({ accessToken: session.access_token, operatorEmail: session.user.email }), [session.access_token, session.user.email]);
   const [status, setStatus] = useState('open');
-  const [searchDraft, setSearchDraft] = useState('');
+  const [profileUserId, setProfileUserId] = useState(null);
   const [q, setQ] = useState('');
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState(null);
@@ -45,11 +48,8 @@ function Workspace({ session }) {
         {FILTERS.map(([value, label]) => <button key={value} type="button"
           aria-selected={status === value} onClick={() => { setStatus(value); setPage(1); }}>{t(label)}</button>)}
       </nav>
-      <form className="nb-search" onSubmit={event => { event.preventDefault(); setQ(searchDraft.trim()); setPage(1); }}>
-        <input value={searchDraft} onChange={event => setSearchDraft(event.target.value)}
-          aria-label={t('搜尋案號、姓名、車牌或電郵')} placeholder={t('搜尋案號、姓名、車牌或電郵')} />
-        <button type="submit">{t('搜尋')}</button>
-      </form>
+      <AssistUserSearch compact options={options} value={q} onSearch={value => { setQ(value); setPage(1); }}
+        onSelect={user => setProfileUserId(user.id)} placeholder="搜尋姓名、電郵、電話、編號、車牌或備註" />
       <div className="nb-list">
         {list.isPending ? <p className="nb-muted">{t('載入北上案件…')}</p>
           : list.isError ? <div role="alert" className="nb-error">{t('載入失敗，請重試')}
@@ -71,14 +71,18 @@ function Workspace({ session }) {
       </footer>
     </aside>
     <main className="nb-main">
+      {!assisting && !detail.isError && detail.data?.user?.id && <button className="support-button customer-profile-launch" type="button"
+        onClick={() => setProfileUserId(detail.data.user.id)}>{t('客戶檔案及備註')}</button>}
       {assisting ? <AssistDraft options={options} onClose={() => setAssisting(false)} onSubmitted={id => {
-        setAssisting(false); setSelectedId(id); setStatus('open'); setQ(''); setSearchDraft(''); setPage(1); list.refetch();
+        setAssisting(false); setSelectedId(id); setStatus('open'); setQ(''); setPage(1); list.refetch();
       }} /> : !selectedId ? <div className="nb-welcome"><h2>{t('選擇案件')}</h2><p>{t('從左側選擇一宗申請。')}</p></div>
         : detail.isPending ? <p className="nb-loading">{t('載入案件詳情…')}</p>
           : detail.isError ? <div role="alert" className="nb-error">{t('載入失敗，請重試')}
             <button type="button" onClick={() => detail.refetch()}>{t('重試')}</button></div>
             : <CaseDetail key={selectedId} record={detail.data} options={options} reload={reload} lang={lang} />}
     </main>
+    {profileUserId && <CustomerDrawer key={profileUserId} userId={profileUserId} options={options} employees={[]}
+      onClose={() => setProfileUserId(null)} />}
   </div>;
 }
 

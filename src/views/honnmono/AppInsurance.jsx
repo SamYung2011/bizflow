@@ -1,5 +1,8 @@
 import { useAppEmbedVisible } from '../../lib/appEmbedVisibility.js';
 import React, { useMemo, useState } from 'react';
+import AssistUserSearch from './northbound/AssistUserSearch.jsx';
+import CustomerDrawer from './support/CustomerDrawer.jsx';
+import './support/support.css';
 import { useQuery } from '@tanstack/react-query';
 import { useT } from '../../i18n.jsx';
 import { formatFeedbackTime } from '../../lib/honnmonoAdmin.js';
@@ -19,10 +22,10 @@ const views = { policy: PolicyDetail, claim: ClaimDetail, enquiry: EnquiryDetail
 function Workspace({ session }) {
   const visible = useAppEmbedVisible();
   const { t, lang } = useT();
-  const options = useMemo(() => ({ accessToken: session.access_token }), [session.access_token]);
+  const options = useMemo(() => ({ accessToken: session.access_token, operatorEmail: session.user.email }), [session.access_token, session.user.email]);
   const [type, setType] = useState('policy');
   const [status, setStatus] = useState('');
-  const [searchDraft, setSearchDraft] = useState('');
+  const [profileUserId, setProfileUserId] = useState(null);
   const [q, setQ] = useState('');
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState(null);
@@ -55,11 +58,8 @@ function Workspace({ session }) {
         {Object.entries(statusByType[type]).filter(([code]) => code !== 'draft').map(([code, label]) =>
           <option key={code} value={code}>{t(label)}</option>)}
       </select></label>
-      <form className="nb-search" onSubmit={event => { event.preventDefault(); setQ(searchDraft.trim()); setPage(1); }}>
-        <input value={searchDraft} onChange={event => setSearchDraft(event.target.value)}
-          aria-label={t('搜尋編號、姓名、車牌或電郵')} placeholder={t('搜尋編號、姓名、車牌或電郵')}/>
-        <button type="submit">{t('搜尋')}</button>
-      </form>
+      <AssistUserSearch compact options={options} value={q} onSearch={value => { setQ(value); setPage(1); }}
+        onSelect={user => setProfileUserId(user.id)} placeholder="搜尋姓名、電郵、電話、編號、車牌或備註" />
       <div className="nb-list">
         {list.isPending ? <p className="nb-muted">{t('載入車保資料…')}</p>
           : list.isError ? <div role="alert" className="nb-error">{t('載入失敗，請重試')}
@@ -81,6 +81,8 @@ function Workspace({ session }) {
       </footer>
     </aside>
     <main className="nb-main">
+      {!detail.isError && detail.data?.user?.id && <button className="support-button customer-profile-launch" type="button"
+        onClick={() => setProfileUserId(detail.data.user.id)}>{t('客戶檔案及備註')}</button>}
       {selectedId == null ? <div className="nb-welcome"><h2>{t('選擇紀錄')}</h2>
         <p>{t('從左側選擇一筆車保資料。')}</p></div>
         : detail.isPending ? <p className="nb-loading">{t('載入車保詳情…')}</p>
@@ -88,6 +90,8 @@ function Workspace({ session }) {
             <button type="button" onClick={() => detail.refetch()}>{t('重試')}</button></div>
             : <Detail key={`${type}-${selectedId}`} record={detail.data} options={options} reload={reload} lang={lang}/>}
     </main>
+    {profileUserId && <CustomerDrawer key={profileUserId} userId={profileUserId} options={options} employees={[]}
+      onClose={() => setProfileUserId(null)} />}
   </div>;
 }
 

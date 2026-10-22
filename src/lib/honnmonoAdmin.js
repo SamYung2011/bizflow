@@ -54,8 +54,8 @@ export async function callHonnmonoAdmin(
         : (parsed.error ?? parsed.detail ?? parsed.msg))
       : parsed;
     const error = new Error(`HTTP ${response.status}: ${detail ?? "Unknown error"}`);
+    error.status = response.status;
     if (subPath.startsWith('/northbound/')) {
-      error.status = response.status;
       error.result = parsed?.result ?? parsed?.detail?.result;
     }
     throw error;

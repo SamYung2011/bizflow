@@ -23,7 +23,7 @@ function Workspace({ session, employees, embedded }) {
   const data = useSupportThread(selectedId, options);
   const conversation = data.detail.data;
   return <div className={`support-workspace ${selectedId ? 'has-conversation' : ''}`}>
-    <ConversationList query={list} filters={filters} setFilters={setFilters} selectedId={selectedId} onSelect={setSelectedId} />
+    <ConversationList query={list} filters={filters} setFilters={setFilters} selectedId={selectedId} onSelect={setSelectedId} options={options} onProfile={setProfileUserId} />
     <section className="support-main" aria-label={t('客服工作台')}>
       {!selectedId ? <div className="support-welcome"><div className="support-welcome-icon"><SupportIcon name="chat" size={38} /></div>
         <span className="support-eyebrow">{t('Honnmono 使用者服務')}</span><h2>{t('每一個問題，都有回應')}</h2><p>{t('選擇左側會話，開始協助使用者。')}</p>
