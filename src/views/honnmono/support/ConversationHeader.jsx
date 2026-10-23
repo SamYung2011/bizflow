@@ -2,13 +2,15 @@ import React, { useState } from 'react';
 import { useT } from '../../../i18n.jsx';
 import { SUPPORT_CATEGORIES, conversationState, staffName, supportCaseId } from '../../../lib/supportConfig.js';
 import SupportIcon from './SupportIcon.jsx';
-import { promoSummary } from './format.js';
+import { customerDisplayName, promoSummary } from './format.js';
 import SupportText from './SupportText.jsx';
 
 export default function ConversationHeader({ conversation, employees, onChange, onBack, onProfile }) {
   const { t } = useT();
   const [busy, setBusy] = useState(false), [error, setError] = useState(false);
   const state = conversationState(conversation);
+  const name = customerDisplayName(conversation);
+  const hasNote = !!conversation.staffNote?.text?.trim();
   async function change(value) {
     setBusy(true); setError(false);
     try { await onChange(value); } catch { setError(true); }
@@ -18,13 +20,14 @@ export default function ConversationHeader({ conversation, employees, onChange, 
     <div className="support-header-main">
       <button className="support-icon-button support-back" aria-label={t('返回會話列表')} onClick={onBack}><SupportIcon name="back" /></button>
       <button className="customer-avatar-button" onClick={onProfile} aria-label={t('客戶檔案')}><span className={`support-avatar tone-${conversation.id % 5}`}>{conversation.userNickname?.slice(0, 1).toUpperCase()}</span></button>
-      <div className="support-contact"><div><h2><button className="customer-name-button" onClick={onProfile}>{conversation.userNickname}</button></h2>
+      <div className="support-contact"><div><h2><button className="customer-name-button" onClick={onProfile} title={name}>{name}</button></h2>
         {conversation.source === 'feedback' && <span className="support-category">{t('意見反饋')}</span>}
         {conversation.source === 'northbound' && <span className="support-category">{t('港車北上')}</span>}
         {conversation.source === 'insurance' && <span className="support-category">{t('車保')}</span>}
         {conversation.source === 'promo' && <span className="support-category">{t('優惠')}</span>}
         <span className={`support-status ${state}`}>
         <i />{t(state === 'closed' ? '已結束' : state === 'waiting' ? '待回覆' : '處理中')}</span></div>
+        {hasNote && conversation.userNickname && <p className="support-original-name" title={conversation.userNickname}>{t('APP 暱稱：{name}', { name: conversation.userNickname })}</p>}
         <p>{conversation.userPhone || '—'}<span> · </span>{conversation.userEmail || '—'}</p></div>
       <div className="support-header-actions">
         {conversation.status !== 'closed' && <button className="support-button" disabled={busy} onClick={() => change('close')}>

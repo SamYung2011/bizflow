@@ -1,5 +1,13 @@
 # APP 客服工作台（2026-09-17）
 
+## 2026-10-23 客户备注显示
+
+聊天标题及会话列表优先显示现有 `staffNote.text`，原 APP 昵称保留供核对。点击名称继续打开原 CustomerDrawer 编辑；保存或清空后同步已缓存的该用户会话，再重新查询。长备注单行省略，可查看完整内容。
+
+沿用原 `/support/conversations`、详情、update、close 响应，补充与用户 profile 相同的 `staffNote={text,revision,updatedAt,updatedBy}`；不增加路由。保存仍调用原 `POST /support/users/{id}/profile`，不增加备注字段或组件。后台按页批量读取备注，只有管理员响应包含该字段。旧后台缺少字段时仍显示原昵称。
+
+以下为 2026-09-17 初始交付记录，部署状态以最新发布记录为准。
+
 本单为前端及假数据演示。页面遵照 `honnmono_app_v2/docs/03-人工客服接口文档_2026-09-17.md` §4.3；后台与 Edge 桥未改、未部署。
 
 ## 本地启动

@@ -9,6 +9,7 @@ import AppInsurance from '../src/views/honnmono/AppInsurance.jsx';
 import { configureMock, updateUserProfile } from '../src/lib/supportMock.js';
 if (!import.meta.env.DEV || import.meta.env.VITE_SUPPORT_MOCK !== '1' || import.meta.env.VITE_SUPABASE_URL !== 'https://fixture.invalid') throw new Error('Local mock only');
 configureMock({ delay: 10, sendDelay: 10 });
+window.fixtureConfigureMock = configureMock;
 window.fixtureConcurrentNote = (revision) => updateUserProfile(99001, { note:'另一位同事更新', revision });
 window.fixtureQueries=[];
 window.fetch = async (input) => {
