@@ -223,7 +223,8 @@ function renderAvatarMenu() {
 
 function renderDrawerButton() {
   const anyMenuUnread = menuItems.some((item) => item.update);
-  return `<button type="button" class="tp-component btn-toggle-sidebar shell-icon-button btn-toggle-sidebar--open ${anyMenuUnread ? "btn-toggle-sidebar--update" : ""}" data-action="open-drawer" data-shell-drawer-unread aria-expanded="${state.drawerOpen}" aria-label="${escapeHtml(t("shell.menu"))}">
+  const label = t(state.drawerOpen ? "shell.collapseSidebar" : "shell.expandSidebar");
+  return `<button type="button" class="tp-component btn-toggle-sidebar shell-icon-button btn-toggle-sidebar--${state.drawerOpen ? "close" : "open"} ${anyMenuUnread ? "btn-toggle-sidebar--update" : ""}" data-action="open-drawer" data-shell-drawer-unread aria-expanded="${state.drawerOpen}" aria-controls="shell-mobile-drawer" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
     ${anyMenuUnread ? redDot() : ""}
   </button>`;
 }
@@ -289,7 +290,7 @@ function renderSidebar() {
 
 function renderDrawer() {
   return `<div class="shell-mobile-overlay" data-action="close-drawer"></div>
-  <aside class="shell-mobile-drawer" aria-hidden="${!state.drawerOpen}" aria-label="${escapeHtml(t("shell.menu"))}">
+  <aside id="shell-mobile-drawer" class="shell-mobile-drawer" ${state.drawerOpen ? "" : "inert"} aria-hidden="${!state.drawerOpen}" aria-label="${escapeHtml(t("shell.menu"))}">
     ${renderLanguageSelect()}
     ${renderNav()}
     ${renderAddRow()}
@@ -396,8 +397,20 @@ function syncShellState() {
     toggle.setAttribute("aria-label", label);
     toggle.title = label;
   }
-  app.querySelector('[data-action="open-drawer"]')?.setAttribute("aria-expanded", String(state.drawerOpen));
-  app.querySelector(".shell-mobile-drawer")?.setAttribute("aria-hidden", String(!state.drawerOpen));
+  const drawerButton = app.querySelector('[data-action="open-drawer"]');
+  if (drawerButton) {
+    drawerButton.classList.toggle("btn-toggle-sidebar--open", !state.drawerOpen);
+    drawerButton.classList.toggle("btn-toggle-sidebar--close", state.drawerOpen);
+    drawerButton.setAttribute("aria-expanded", String(state.drawerOpen));
+    const label = t(state.drawerOpen ? "shell.collapseSidebar" : "shell.expandSidebar");
+    drawerButton.setAttribute("aria-label", label);
+    drawerButton.title = label;
+  }
+  const drawer = app.querySelector(".shell-mobile-drawer");
+  if (drawer) {
+    drawer.inert = !state.drawerOpen;
+    drawer.setAttribute("aria-hidden", String(!state.drawerOpen));
+  }
 }
 
 function syncDirectDot(element, visible) {
@@ -490,7 +503,7 @@ document.addEventListener("click", async (event) => {
     syncShellState();
   }
   if (action === "open-drawer") {
-    state.drawerOpen = true;
+    state.drawerOpen = !state.drawerOpen;
     syncShellState();
   }
   if (action === "close-drawer") {
