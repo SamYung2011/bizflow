@@ -907,6 +907,11 @@ button.order-card__phone:focus-visible {
   min-height: 40px;
 }
 
+.orders-figma-table--editable .orders-figma-line-row {
+  grid-template-columns: minmax(0, 1fr) 100px 160px 40px;
+  gap: var(--space-10);
+}
+
 .orders-line-product {
   display: flex;
   min-width: 0;
@@ -2031,6 +2036,27 @@ button.order-card__phone:focus-visible {
     min-width: var(--orders-detail-mobile-quantity-column);
   }
 
+  .orders-workspace[data-orders-detail-page] .orders-figma-table--editable .orders-figma-line-row {
+    grid-template-columns: minmax(0, 1fr) var(--orders-detail-mobile-quantity-column) var(--orders-detail-mobile-price-column) 40px;
+  }
+
+  .orders-figma-table--editable .orders-figma-line-row:not(.orders-figma-line-row--head) {
+    padding: var(--space-10) 0;
+  }
+
+  .orders-figma-table--editable .orders-line-product {
+    grid-column: 1 / -1;
+  }
+
+  .orders-figma-table--editable .orders-line-name {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .orders-figma-table--editable .orders-qty-box {
+    grid-column: 2;
+  }
+
   .orders-workspace[data-orders-detail-page] .orders-payment-line,
   .orders-workspace[data-orders-detail-page] .orders-payment-check-row {
     grid-template-columns: minmax(0, 1fr) minmax(var(--orders-detail-mobile-select-column), auto) var(--orders-detail-mobile-price-column);
@@ -2172,4 +2198,19 @@ button.order-card__phone:focus-visible {
   background: var(--gray-15);
   color: var(--gray-40);
   cursor: not-allowed;
+}
+
+.orders-line-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.orders-line-remove:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
 }

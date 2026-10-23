@@ -53,16 +53,18 @@ function hongKongDate() {
   }).format(new Date());
 }
 
-export function normalizedItems(items) {
+export function normalizedItems(items, { allowZeroQuantity = false } = {}) {
   return (Array.isArray(items) ? items : []).map((item) => {
     const name = String(item?.name ?? "").trim();
-    const qty = positiveNumber(item?.quantity ?? item?.qty);
+    const qty = Number(item?.quantity ?? item?.qty);
     const price = moneyNumber(item?.price);
     const productId = item?.productId ?? item?.product_id;
     const warehouseId = item?.warehouseId ?? item?.warehouse_id;
     const warrantyMonths = item?.warrantyMonths ?? item?.warranty_months;
     const imeiCode = textOrNull(item?.imeiCode ?? item?.imei_code);
-    if (!name || qty <= 0) throw new Error("Order item requires a name and positive quantity");
+    if (!name || !Number.isFinite(qty) || qty < 0 || (!allowZeroQuantity && qty === 0)) {
+      throw new Error("Order item requires a name and valid quantity");
+    }
     return {
       id: item?.id || invoiceLineId(),
       name,
@@ -76,8 +78,8 @@ export function normalizedItems(items) {
   });
 }
 
-function finalInvoiceItems(items, fees = {}) {
-  const rows = normalizedItems(items);
+function finalInvoiceItems(items, fees = {}, options) {
+  const rows = normalizedItems(items, options);
   const extras = [
     ["運費", moneyNumber(fees.shipping)],
     ["押金", moneyNumber(fees.deposit)],
@@ -623,7 +625,9 @@ export async function updateLiveOrder(invoiceId, { items, fees, salespersonId, t
   const invoiceResult = await client.from("invoices").select("*").eq("id", invoiceId).single();
   throwIfError(invoiceResult.error);
   const invoice = invoiceResult.data;
-  const invoiceItems = finalInvoiceItems(items, fees);
+  // Imported form orders can contain unselected, zero-quantity product lines.
+  // Editing one line must not reject or change the other imported quantities.
+  const invoiceItems = finalInvoiceItems(items, fees, { allowZeroQuantity: true });
   if (!invoiceItems.some((item) => !EXTRA_ITEM_NAMES.has(item.name))) {
     throw new Error("Order requires at least one product");
   }

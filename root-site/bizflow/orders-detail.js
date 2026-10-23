@@ -44,6 +44,8 @@ const dict = {
     "orders.source.manual": "Manual",
     "orders.orderTime": "下單時間",
     "orders.addProduct": "新增商品",
+    "orders.removeProduct": "刪除商品：{name}",
+    "orders.productRemoved": "商品已移除，請存儲修改",
     "orders.product": "商品",
     "orders.quantity": "數量",
     "orders.price": "單價",
@@ -148,6 +150,8 @@ const dict = {
     "orders.source.manual": "Manual",
     "orders.orderTime": "Order time",
     "orders.addProduct": "Add product",
+    "orders.removeProduct": "Remove product: {name}",
+    "orders.productRemoved": "Product removed. Save changes to apply.",
     "orders.product": "Product",
     "orders.quantity": "Qty",
     "orders.price": "Unit price",
@@ -252,6 +256,8 @@ const dict = {
     "orders.source.manual": "Manual",
     "orders.orderTime": "Heure de commande",
     "orders.addProduct": "Ajouter produit",
+    "orders.removeProduct": "Supprimer le produit : {name}",
+    "orders.productRemoved": "Produit retiré. Enregistrez les modifications pour appliquer.",
     "orders.product": "Produit",
     "orders.quantity": "Qté",
     "orders.price": "Prix unitaire",
@@ -437,19 +443,24 @@ function itemLabel(item, lang) {
 }
 
 function renderLineRows(helpers) {
-  const { escapeHtml, lang } = helpers;
-  const rows = state.items.map((item) => `<div class="orders-figma-line-row">
+  const { escapeHtml, icon, lang } = helpers;
+  const editable = liveWritable && editReady;
+  const rows = state.items.map((item, index) => `<div class="orders-figma-line-row">
     <span class="orders-line-product">
       <span class="orders-line-thumb" aria-hidden="true"></span>
       <span class="orders-line-name" title="${escapeHtml(itemLabel(item, lang))}">${escapeHtml(itemLabel(item, lang))}</span>
     </span>
-    ${liveWritable && editReady
-      ? `<input class="orders-qty-box orders-line-number" type="number" min="1" step="1" data-line-quantity="${escapeHtml(item.id)}" data-orders-write value="${escapeHtml(String(item.quantity))}">
+    ${editable
+      ? `<input class="orders-qty-box orders-line-number" type="number" min="0" step="1" data-line-quantity="${escapeHtml(item.id)}" data-orders-write value="${escapeHtml(String(item.quantity))}">
         <input class="orders-line-price orders-line-number" type="number" min="0" step="0.01" data-line-price="${escapeHtml(item.id)}" data-orders-write value="${escapeHtml(String(item.price))}">`
       : `<span class="orders-qty-box">${escapeHtml(String(item.quantity))}</span>
         <span class="orders-line-price">${escapeHtml(formatMoney(item.price))}</span>`}
+    ${editable ? `<button type="button" class="orders-delete orders-line-remove" data-line-remove="${index}" data-orders-write
+      aria-label="${escapeHtml(pageT(lang, "orders.removeProduct").replace("{name}", itemLabel(item, lang)))}"
+      title="${escapeHtml(state.items.length <= 1 ? pageT(lang, "orders.validation.items") : pageT(lang, "orders.removeProduct").replace("{name}", itemLabel(item, lang)))}"${state.busy || state.items.length <= 1 ? ' disabled aria-disabled="true"' : ""}>
+      ${icon("icon-add-line-delete", "icon icon--sm")}</button>` : ""}
   </div>`).join("");
-  return `<div class="orders-figma-table">
+  return `<div class="orders-figma-table${editable ? " orders-figma-table--editable" : ""}">
     <div class="orders-figma-line-row orders-figma-line-row--head">
       <span>${escapeHtml(pageT(lang, "orders.product"))}</span>
       <span class="orders-line-qty">${escapeHtml(pageT(lang, "orders.quantity"))}</span>
@@ -558,7 +569,7 @@ function renderPrintCard(titleKey, subKey, actionKey, mode, disabled, helpers) {
 function currentTotals() {
   const { detail } = detailData;
   const subtotal = state.items.reduce(
-    (sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1),
+    (sum, item) => sum + Number(item.price || 0) * Number(item.quantity ?? 1),
     0
   );
   const feeTotal = ["deposit", "discount", "service"].reduce(
@@ -838,7 +849,7 @@ function syncLiveFormInputs() {
   let changedInput = false;
   document.querySelectorAll("[data-line-quantity]").forEach((input) => {
     const item = state.items.find((row) => row.id === input.getAttribute("data-line-quantity"));
-    const next = Math.max(1, Math.floor(Number(input.value) || 1));
+    const next = Math.max(0, Math.floor(Number(input.value) || 0));
     if (item && item.quantity !== next) {
       item.quantity = next;
       changedInput = true;
@@ -868,7 +879,7 @@ function syncLiveNumberInput(target) {
   const quantity = target.closest("[data-line-quantity]");
   if (quantity) {
     const item = state.items.find((row) => row.id === quantity.getAttribute("data-line-quantity"));
-    if (item) item.quantity = Math.max(1, Math.floor(Number(quantity.value) || 1));
+    if (item) item.quantity = Math.max(0, Math.floor(Number(quantity.value) || 0));
     state.feesTouched = true;
     return true;
   }
@@ -911,6 +922,20 @@ function resetOrderChanges() {
   state.salespersonId = state.savedSalespersonId;
   state.feesTouched = false;
   setNotice("");
+  rerender();
+}
+
+function removeOrderItem(index) {
+  if (!liveWritable || !editReady || state.busy || !Number.isInteger(index) || !state.items[index]) return;
+  if (state.items.length <= 1) {
+    setNotice(pageT(currentHelpers?.lang ?? "zh", "orders.validation.items"));
+    rerender();
+    return;
+  }
+  syncLiveFormInputs();
+  state.items.splice(index, 1);
+  state.feesTouched = true;
+  setNotice(pageT(currentHelpers?.lang ?? "zh", "orders.productRemoved"), "success");
   rerender();
 }
 
@@ -1196,6 +1221,11 @@ async function onOrderDetailClick(event) {
   }
   if (liveReadOnly && event.target.closest("[data-orders-write]")) return;
   if (state.busy && event.target.closest("[data-orders-write]")) return;
+  const removeLine = event.target.closest("[data-line-remove]");
+  if (removeLine) {
+    removeOrderItem(Number(removeLine.getAttribute("data-line-remove")));
+    return;
+  }
   if (event.target.closest("[data-order-delete]")) {
     if (liveWritable) await deleteOrder();
     return;
