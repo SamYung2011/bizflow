@@ -7,5 +7,6 @@ export const formatDate = (value, lang) => new Intl.DateTimeFormat(locale(lang),
 }).format(value);
 export const dayKey = value => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Hong_Kong' }).format(value);
 export const fileSize = bytes => bytes < 1024 * 1024 ? `${Math.ceil(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+export const customerDisplayName = conversation => conversation.staffNote?.text?.trim() || conversation.userNickname || conversation.userEmail || '—';
 export const promoSummary = value => [...new Set(value.split('\n').map(line =>
   line.trim().replace(/^(\S+)\s+·\s+/, '$1 ')).filter(Boolean))].join('\n');

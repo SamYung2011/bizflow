@@ -6,6 +6,20 @@ import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-quer
 import * as api from '../../../lib/supportApi.js';
 import { mergeMessages, SUPPORT_PAGE_SIZE } from '../../../lib/supportConfig.js';
 
+export async function cacheCustomerNote(client, operatorEmail, userId, staffNote) {
+  const prefix = ['support', operatorEmail];
+  // Stop pre-save reads from restoring the old remark after this cache update.
+  await client.cancelQueries({ queryKey: prefix,
+    predicate: query => ['list', 'detail', 'profile', 'customer-history'].includes(query.queryKey[2]) });
+  const update = row => row?.userId === userId ? { ...row, staffNote } : row;
+  client.setQueryData([...prefix, 'profile', userId], current => current && ({ ...current, staffNote,
+    conversations: current.conversations.map(update) }));
+  client.setQueriesData({ queryKey: [...prefix, 'detail'] }, update);
+  client.setQueriesData({ queryKey: [...prefix, 'list'] }, current => current && ({ ...current,
+    pages: current.pages.map(page => page.map(update)) }));
+  client.setQueriesData({ queryKey: [...prefix, 'customer-history', userId] }, current => current?.map(update));
+}
+
 export function useSupportStaff(options, embedded) {
   const visible = useAppEmbedVisible();
   return useQuery({

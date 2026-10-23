@@ -113,10 +113,11 @@ export async function listConversations({ status = 'all', filter, userId, page =
     && (!userId || item.userId === Number(userId))
     && (filter !== 'waiting_staff' || conversationState(item) === 'waiting')
     && `${item.userNickname} ${item.userPhone} ${item.userEmail} ${customerNotes.get(item.userId)?.text || ""}`.toLowerCase().includes(q.toLowerCase()))
-    .sort((a, b) => b.lastMessageAt - a.lastMessageAt).slice((page - 1) * size, page * size));
+    .sort((a, b) => b.lastMessageAt - a.lastMessageAt).slice((page - 1) * size, page * size).map(withCustomerNote));
 }
+const withCustomerNote = row => ({ ...row, staffNote: customerNotes.get(row.userId) || emptyNote() });
 export async function getConversation(id) {
-  await wait(); return { ...clone(conversations.find(item => item.id === id)), limits: SUPPORT_LIMITS };
+  await wait(); return { ...clone(withCustomerNote(conversations.find(item => item.id === id))), limits: SUPPORT_LIMITS };
 }
 export async function listMessages(id, { afterId = 0, beforeId, limit = 30 } = {}) {
   await wait();
@@ -150,12 +151,12 @@ export async function sendMessage(id, body, options = {}) {
 export async function updateConversation(id, { category } = {}) {
   await wait(); const conversation = conversations.find(item => item.id === id);
   if (category !== undefined) conversation.category = category;
-  return clone(conversation);
+  return clone(withCustomerNote(conversation));
 }
 export async function closeConversation(id) {
   await wait(); const conversation = conversations.find(item => item.id === id);
   if (conversation.status !== 'closed') append(id, message(id, 'system', '客服已結束本次服務', { msgType: 'system', createdAt: Date.now() }));
-  Object.assign(conversation, { status: 'closed', closedAt: Date.now() }); return clone(conversation);
+  Object.assign(conversation, { status: 'closed', closedAt: Date.now() }); return clone(withCustomerNote(conversation));
 }
 export async function fileUrl(attachment) {
   await wait(100);

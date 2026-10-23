@@ -5,7 +5,7 @@ import { useT } from '../../../i18n.jsx';
 import { SUPPORT_CATEGORIES, conversationState, systemMessageKey } from '../../../lib/supportConfig.js';
 import SupportIcon from './SupportIcon.jsx';
 import SupportSkeleton from './SupportSkeleton.jsx';
-import { formatTime } from './format.js';
+import { customerDisplayName, formatTime } from './format.js';
 
 export default function ConversationList({ query, selectedId, onSelect, filters, setFilters, options, onProfile }) {
   const { t, lang } = useT();
@@ -31,12 +31,13 @@ export default function ConversationList({ query, selectedId, onSelect, filters,
       {query.isPending ? <SupportSkeleton list /> : rows.map(item => <button type="button" className={`support-conversation ${selectedId === item.id ? 'is-selected' : ''}`}
         key={item.id} onClick={() => onSelect(item.id)} aria-current={selectedId === item.id ? 'true' : undefined}>
         <span className={`support-avatar tone-${item.id % 5}`}>{item.userNickname?.slice(0, 1).toUpperCase()}</span>
-        <span className="support-conversation-copy"><span className="support-conversation-title"><strong>{item.userNickname}</strong>
+        <span className="support-conversation-copy"><span className="support-conversation-title"><strong title={customerDisplayName(item)}>{customerDisplayName(item)}</strong>
           {item.category && <span className="support-category">{t(item.category)}</span>}
           {item.source === 'feedback' && <span className="support-category">{t('意見反饋')}</span>}
           {item.source === 'northbound' && <span className="support-category">{t('港車北上')}</span>}
           {item.source === 'insurance' && <span className="support-category">{t('車保')}</span>}
           {item.source === 'promo' && <span className="support-category">{t('優惠')}</span>}</span>
+          {!!item.staffNote?.text?.trim() && item.userNickname && <span className="support-original-name" title={item.userNickname}>{t('APP 暱稱：{name}', { name: item.userNickname })}</span>}
           <span className="support-preview">{item.lastMessagePreview === '[attachment]' ? t('附件') : item.lastSenderRole === 'system' ? t(systemMessageKey(item.lastMessagePreview)) : readableSupportText(item.lastMessagePreview, t)}</span>
           <span className="support-conversation-source">{t(item.source === 'ai_handoff' ? 'AI 轉人工' : '使用者發起')}
             {item.assigneeEmail && <span> · {t('已認領')}</span>}</span>

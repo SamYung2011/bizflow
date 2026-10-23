@@ -5,6 +5,7 @@ import { useAppEmbedVisible } from '../../../lib/appEmbedVisibility.js';
 import { getUserProfile, updateUserProfile } from '../../../lib/supportApi.js';
 import { formatFeedbackTime } from '../../../lib/honnmonoAdmin.js';
 import CustomerHistory from './CustomerHistory.jsx';
+import { cacheCustomerNote } from './useSupportData.js';
 import { STAGE_LABELS } from '../northbound/labels.js';
 import { CLAIM_STATUS, ENQUIRY_STATUS, POLICY_STATUS } from '../insurance/labels.js';
 
@@ -39,7 +40,7 @@ export default function CustomerDrawer({ userId, options, employees, onClose, on
     setSaving(true); setSaveError(''); setSaved(false);
     try {
       const result = await updateUserProfile(userId, { note: draft.text, revision: draft.revision }, options);
-      client.setQueryData(['support', options.operatorEmail, 'profile', userId], current => current && ({ ...current, staffNote: result.staffNote }));
+      await cacheCustomerNote(client, options.operatorEmail, userId, result.staffNote);
       setDraft(null); setSaved(true);
       for (const key of ['appUsers', 'support', 'appNorthbound', 'appInsurance']) client.invalidateQueries({ queryKey: [key, options.operatorEmail] });
     } catch (error) {
