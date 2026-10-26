@@ -355,4 +355,38 @@ await check("polling clears withdrawn cached detail and errors without another O
   await f.tick();
   assert.deepEqual(f.calls.slice(calls), ["/devices/flash?page=1&pageSize=20"]);
 }));
+await check("different task IDs discard old success even with identical timestamps and packages", () => {
+  for (const oldState of ["installed", "untasked", "failed"]) {
+    const html = renderAdapterOta({ certid: "A", ota: { taskId: "B", state: "delivered", pending: true, updatedAt: time } },
+      { taskId: "A", state: oldState, task: { ...task, taskId: "A" }, installedAt: time + 60_000, stillPending: false }, helpers);
+    assert.match(html, /data-ota-state="delivered"/);
+    assert.match(html, button);
+    assert.doesNotMatch(html, /test\.bin/);
+  }
+});
+await check("ambiguous success stays pending and has localized verification copy", () => {
+  for (const lang of ["zh", "en", "fr"]) {
+    const html = renderAdapterOta({ certid: "A", ota: { taskId: "B", state: "confirmation_required", pending: true } },
+      { taskId: "B", state: "confirmation_required", task, progress: { status: 5 }, stillPending: true },
+      { ...helpers, t: (key, args) => translateAppFeedback(lang, key, args) });
+    assert.match(html, /data-ota-state="confirmation_required"/);
+    assert.match(html, button);
+    assert.ok(html.includes(translateAppFeedback(lang, "otaConfirmationRequired")));
+    assert.doesNotMatch(html, /class="is-complete"/);
+  }
+});
+await check("task ID alone invalidates the list signature", () => {
+  const device = { certid: "A", ota: { taskId: "A", state: "armed", pending: true, updatedAt: time } };
+  assert.notEqual(adapterListSignature([device], 1), adapterListSignature([{ ...device, ota: { ...device.ota, taskId: "B" } }], 1));
+});
+await check("unconfirmed failure remains visible with attribution notice", () => {
+  for (const lang of ["zh", "en", "fr"]) {
+    const html = renderAdapterOta({ certid: "A", ota: { taskId: "B", state: "failed", pending: true } },
+      { taskId: "B", state: "failed", task, confirmationRequired: true, progress: { status: 3, load: 34694, size: 602284 }, stillPending: true },
+      { ...helpers, t: (key, args) => translateAppFeedback(lang, key, args) });
+    assert.match(html, /data-ota-state="failed"/);
+    assert.ok(html.includes(translateAppFeedback(lang, "otaUnconfirmedProgress")));
+    assert.match(html, button);
+  }
+});
 console.log(`DEVICE_PAGE_R2_R3_R4=${checks}/${checks}`);

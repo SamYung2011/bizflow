@@ -1,6 +1,6 @@
 import { wgs84ToGcj02 } from "./geo-coords.js";
 
-const OTA_STATES = new Set(["none", "armed", "delivered", "downloading", "downloaded", "failed", "installing", "installed", "expired", "untasked"]);
+const OTA_STATES = new Set(["none", "armed", "delivered", "downloading", "downloaded", "failed", "installing", "installed", "expired", "untasked", "confirmation_required"]);
 
 export function renderAdapterLocation(location, { t, escapeHtml: e }) {
   const lat = location?.latitude;
@@ -16,10 +16,13 @@ export function renderAdapterLocation(location, { t, escapeHtml: e }) {
 
 export function renderAdapterOta(device, details, { t, escapeHtml: e, formatTime, actionBusy = false, error = false }) {
   const summaryState = device?.ota?.state;
+  const summaryTaskId = device?.ota?.taskId;
+  const detailTaskId = details?.taskId || details?.task?.taskId;
+  if (summaryTaskId && summaryTaskId !== detailTaskId) details = undefined;
   const withdrawn = summaryState === "untasked" || details?.state === "untasked";
-  const staleCompletion = details?.state === "installed" && device?.ota?.pending === true
+  const staleCompletion = !summaryTaskId && details?.state === "installed" && device?.ota?.pending === true
     && device.ota.updatedAt > (details.installedAt || details.versionChangedAt || details.task?.armedAt);
-  if (summaryState === "none" || staleCompletion || (summaryState === "armed" && device.ota.updatedAt > details?.task?.armedAt)) details = undefined;
+  if (summaryState === "none" || staleCompletion || (!summaryTaskId && summaryState === "armed" && device.ota.updatedAt > details?.task?.armedAt)) details = undefined;
   const completed = details?.state === "installed" && details?.stillPending === false;
   const stillPending = !completed && (device?.ota?.pending === true || details?.stillPending === true);
   const canUntask = stillPending;
@@ -54,6 +57,7 @@ export function renderAdapterOta(device, details, { t, escapeHtml: e, formatTime
     ${error ? `<p>${e(t("otaDetailsUnavailable"))}</p>` : details === undefined ? `<p>${e(t("otaDetailsPending"))}</p>` : ""}
     <ol class="app-feedback-ota-timeline">${steps.map(([key, done, value]) => `<li class="${done ? "is-complete" : ""}"><strong>${e(t(key))}</strong><span>${e(value)}</span></li>`).join("")}</ol>
     ${stillPending && ["installed", "expired"].includes(state) ? `<p>${e(t(state === "installed" ? "otaStillPending" : "otaExpiredStillPending"))}</p>` : ""}
+    ${state === "confirmation_required" ? `<p>${e(t("otaConfirmationRequired"))}</p>` : details?.confirmationRequired && progress ? `<p>${e(t("otaUnconfirmedProgress"))}</p>` : ""}
     ${untaskButton}
   </section>`;
 }

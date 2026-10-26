@@ -1035,6 +1035,7 @@ export function adapterListSignature(rows, total) {
       row?.location?.latitude ?? null,
       row?.location?.longitude ?? null,
       row?.location?.starnum ?? null,
+      row?.ota?.taskId ?? null,
       row?.ota?.state ?? null,
       row?.ota?.updatedAt ?? null,
       row?.ota?.pending ?? null,
