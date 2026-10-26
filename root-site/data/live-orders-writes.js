@@ -53,16 +53,18 @@ function hongKongDate() {
   }).format(new Date());
 }
 
-export function normalizedItems(items) {
+export function normalizedItems(items, { allowZeroQuantity = false } = {}) {
   return (Array.isArray(items) ? items : []).map((item) => {
     const name = String(item?.name ?? "").trim();
-    const qty = positiveNumber(item?.quantity ?? item?.qty);
+    const qty = Number(item?.quantity ?? item?.qty);
     const price = moneyNumber(item?.price);
     const productId = item?.productId ?? item?.product_id;
     const warehouseId = item?.warehouseId ?? item?.warehouse_id;
     const warrantyMonths = item?.warrantyMonths ?? item?.warranty_months;
     const imeiCode = textOrNull(item?.imeiCode ?? item?.imei_code);
-    if (!name || qty <= 0) throw new Error("Order item requires a name and positive quantity");
+    if (!name || !Number.isFinite(qty) || qty < 0 || (!allowZeroQuantity && qty === 0)) {
+      throw new Error("Order item requires a name and valid quantity");
+    }
     return {
       id: item?.id || invoiceLineId(),
       name,
@@ -76,8 +78,8 @@ export function normalizedItems(items) {
   });
 }
 
-function finalInvoiceItems(items, fees = {}) {
-  const rows = normalizedItems(items);
+function finalInvoiceItems(items, fees = {}, options) {
+  const rows = normalizedItems(items, options);
   const extras = [
     ["運費", moneyNumber(fees.shipping)],
     ["押金", moneyNumber(fees.deposit)],
@@ -100,6 +102,7 @@ function validImei(value) {
 
 function itemImeis(items) {
   return [...new Set((items ?? [])
+    .filter((item) => positiveNumber(item?.qty) > 0)
     .map((item) => String(item?.imei_code || "").replace(/[\s-]+/g, ""))
     .filter(validImei))];
 }
@@ -287,7 +290,7 @@ function shippingPayload(shipping, canShip) {
 }
 
 async function buildOrderPaymentPlan(client, invoiceItems) {
-  const productItems = invoiceItems.filter((item) => !EXTRA_ITEM_NAMES.has(item.name));
+  const productItems = invoiceItems.filter((item) => !EXTRA_ITEM_NAMES.has(item.name) && positiveNumber(item.qty) > 0);
   if (!productItems.length) throw new Error("Order requires at least one product");
   if (productItems.some((item) => !item.product_id)) {
     throw new Error("Order product selection is incomplete");
@@ -427,7 +430,7 @@ async function payLiveOrderRecord(context, invoice, { deleteInvoiceOnFailure = f
   };
   try {
     if (!invoice?.id) throw new Error("Order invoice is required");
-    const invoiceItems = normalizedItems(invoice.items);
+    const invoiceItems = normalizedItems(invoice.items, { allowZeroQuantity: true });
     if (invoiceTotal(invoiceItems) <= 0 || Number(invoice.total) <= 0) {
       throw new Error("Order total must be greater than zero");
     }
@@ -623,8 +626,10 @@ export async function updateLiveOrder(invoiceId, { items, fees, salespersonId, t
   const invoiceResult = await client.from("invoices").select("*").eq("id", invoiceId).single();
   throwIfError(invoiceResult.error);
   const invoice = invoiceResult.data;
-  const invoiceItems = finalInvoiceItems(items, fees);
-  if (!invoiceItems.some((item) => !EXTRA_ITEM_NAMES.has(item.name))) {
+  // Imported form orders can contain unselected, zero-quantity product lines.
+  // Editing one line must not reject or change the other imported quantities.
+  const invoiceItems = finalInvoiceItems(items, fees, { allowZeroQuantity: true });
+  if (!invoiceItems.some((item) => !EXTRA_ITEM_NAMES.has(item.name) && item.qty > 0)) {
     throw new Error("Order requires at least one product");
   }
   const updates = {
