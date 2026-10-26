@@ -2121,7 +2121,7 @@ await liveCheck("location address, coordinate fallback and missing location rend
   assert.doesNotMatch(fallback, /Non-satellite/);
   assert.match(renderAdapterLocation(null, liveHelpers), /No heartbeat location/);
 });
-for (const state of ["none", "armed", "delivered", "downloading", "downloaded", "installed", "expired", "untasked"]) {
+for (const state of ["none", "armed", "delivered", "downloading", "downloaded", "failed", "installing", "installed", "expired", "untasked"]) {
   await liveCheck(`OTA ${state} renders its task and timeline`, () => {
     const details = { state, task: state === "none" ? null : { package: "test.bin", mainver: 1, subver: 2, force: 1, armedAt: 1000, expiresAt: Date.now() + (state === "expired" ? -60_000 : 60_000) }, downloads: [{ status: 200, bytes: 300, at: 1500 }], versionNow: { software: "v1.2" }, versionChangedAt: state === "installed" ? 1600 : null, stillPending: !["none", "untasked"].includes(state) };
     const html = renderAdapterOta({ certid: "CERT_1" }, details, liveHelpers);
@@ -2139,6 +2139,31 @@ for (const state of ["none", "armed", "delivered", "downloading", "downloaded", 
     }
   });
 }
+await liveCheck("OTA failed device progress is visible and confirmed completion clears stale pending UI", () => {
+  const task = { package: "gbccs2.bin", armedAt: 1000 };
+  const failure = renderAdapterOta({ certid: "A", ota: { state: "delivered", pending: true } }, {
+    task, state: "failed", stillPending: true, progress: { status: 3, load: 34694, size: 602284 },
+    downloads: [{ status: 200, bytes: 602284 }],
+  }, liveHelpers);
+  assert.match(failure, /Download or verification failed/);
+  assert.match(failure, /Device received 34694 \/ 602284 bytes/);
+  assert.doesNotMatch(failure, /<li class="is-complete"><strong>Download/);
+  const success = renderAdapterOta({ certid: "A", ota: { state: "delivered", pending: true } }, {
+    task, state: "installed", stillPending: false, installedAt: 3000, versionChangedAt: null,
+  }, liveHelpers);
+  assert.match(success, /Install<\/strong><span>3000/);
+  assert.doesNotMatch(success, /data-adapter-action="untask"|still pending/);
+  const newTask = renderAdapterOta({ certid: "A", ota: { state: "delivered", pending: true, updatedAt: 4000 } }, {
+    task, state: "installed", stillPending: false, installedAt: 3000,
+  }, liveHelpers);
+  assert.match(newTask, /data-ota-state="delivered"/);
+  assert.match(newTask, /data-adapter-action="untask"/);
+  for (const locale of ["zh-TW", "en", "fr"]) {
+    for (const key of ["otaState.failed", "otaState.installing", "otaDeviceProgress"]) {
+      assert.notEqual(translateAppFeedback(locale, key, { loaded: 1, total: 2 }), key);
+    }
+  }
+});
 await liveCheck("OTA remote text is escaped and summary errors stay visible", () => {
   const html = renderAdapterOta({ certid: "CERT_1" }, { state: "armed", task: { package: '<img src=x onerror="x">' }, versionNow: { software: "<script>x</script>" } }, liveHelpers);
   assert.doesNotMatch(html, /<img|<script>/);

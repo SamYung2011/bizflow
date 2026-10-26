@@ -1,6 +1,6 @@
 import { wgs84ToGcj02 } from "./geo-coords.js";
 
-const OTA_STATES = new Set(["none", "armed", "delivered", "downloading", "downloaded", "installed", "expired", "untasked"]);
+const OTA_STATES = new Set(["none", "armed", "delivered", "downloading", "downloaded", "failed", "installing", "installed", "expired", "untasked"]);
 
 export function renderAdapterLocation(location, { t, escapeHtml: e }) {
   const lat = location?.latitude;
@@ -15,26 +15,33 @@ export function renderAdapterLocation(location, { t, escapeHtml: e }) {
 }
 
 export function renderAdapterOta(device, details, { t, escapeHtml: e, formatTime, actionBusy = false, error = false }) {
-  const stillPending = device?.ota?.pending === true || details?.stillPending === true;
-  const canUntask = stillPending;
-  const untaskButton = canUntask ? `<button type="button" class="app-feedback-button app-feedback-button--danger" data-adapter-action="untask" data-adapter-id="${e(device.certid)}"${actionBusy ? " disabled" : ""}>${e(t("otaUntask"))}</button>` : "";
   const summaryState = device?.ota?.state;
   const withdrawn = summaryState === "untasked" || details?.state === "untasked";
-  if (summaryState === "none" || (summaryState === "armed" && device.ota.updatedAt > details?.task?.armedAt)) details = undefined;
+  const staleCompletion = details?.state === "installed" && device?.ota?.pending === true
+    && device.ota.updatedAt > (details.installedAt || details.versionChangedAt || details.task?.armedAt);
+  if (summaryState === "none" || staleCompletion || (summaryState === "armed" && device.ota.updatedAt > details?.task?.armedAt)) details = undefined;
+  const completed = details?.state === "installed" && details?.stillPending === false;
+  const stillPending = !completed && (device?.ota?.pending === true || details?.stillPending === true);
+  const canUntask = stillPending;
+  const untaskButton = canUntask ? `<button type="button" class="app-feedback-button app-feedback-button--danger" data-adapter-action="untask" data-adapter-id="${e(device.certid)}"${actionBusy ? " disabled" : ""}>${e(t("otaUntask"))}</button>` : "";
   const state = withdrawn ? "none" : OTA_STATES.has(details?.state) ? details.state : OTA_STATES.has(summaryState) ? summaryState : "none";
   if (state === "none") return `<section class="app-feedback-adapter-ota" data-ota-state="none"><strong>${e(t("ota"))}</strong> ${e(t("otaNoTask"))}${untaskButton}</section>`;
   const task = details?.task;
   const historical = ["installed", "expired", "untasked"].includes(state);
-  const updatedAt = device?.ota?.updatedAt || details?.updatedAt || details?.versionChangedAt;
+  const updatedAt = (state === "installed" && details?.installedAt) || device?.ota?.updatedAt || details?.updatedAt || details?.versionChangedAt;
   const downloads = Array.isArray(details?.downloads) ? details.downloads : [];
   const bytes = downloads.reduce((total, row) => total + (Number(row.bytes) || 0), 0);
   const version = details?.versionNow?.software || device?.firmware?.software || "—";
   const target = task?.mainver != null && task?.subver != null ? `${task.mainver}.${task.subver}` : "—";
+  const installedAt = state === "installed" ? details?.installedAt || details?.versionChangedAt : null;
+  const progress = details?.progress;
+  const deviceDownload = Number.isFinite(progress?.load) && Number.isFinite(progress?.size)
+    ? t("otaDeviceProgress", { loaded: progress.load, total: progress.size }) : null;
   const steps = [
     ["otaReceived", Boolean(details?.deliveredAt), details?.deliveredAt ? formatTime(details.deliveredAt) : "—"],
-    ["otaDownload", downloads.length > 0, t("otaDownloads", { count: downloads.length, bytes })],
-    ["otaInstalled", Boolean(details?.versionChangedAt), details?.versionChangedAt ? formatTime(details.versionChangedAt) : "—"],
-    ["softwareVersion", Boolean(details?.versionChangedAt), version],
+    ["otaDownload", ["downloaded", "installing", "installed"].includes(state), deviceDownload || t("otaDownloads", { count: downloads.length, bytes })],
+    ["otaInstalled", Boolean(installedAt), installedAt ? formatTime(installedAt) : "—"],
+    ["softwareVersion", Boolean(installedAt), version],
   ];
   return `<section class="app-feedback-adapter-ota" data-ota-state="${state}">
     <header><strong>${e(t("ota"))}</strong><span>${e(t(`otaState.${state}`))}${historical ? ` · ${e(formatTime(updatedAt))}` : ""}</span></header>
