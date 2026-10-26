@@ -96,6 +96,15 @@ await check('pending input is preserved and untouched zero quantities stay zero'
   assert.equal(page.currentTotals().paymentTotal, 4500);
   page.resetOrderChanges();
 });
+await check('removing the only positive-quantity product cannot save just zero lines and fees', async () => {
+  const n = saved.length;
+  page.getState().fees.shipping = 500;
+  await remove(1);
+  await page.saveOrderChanges();
+  assert.match(page.getState().notice, /至少保留/);
+  assert.equal(saved.length, n);
+  page.resetOrderChanges();
+});
 await check('busy operations block removal and disable row actions', async () => {
   page.getState().busy = 'order';
   await remove(0);
@@ -199,7 +208,8 @@ await check('paid order editing recalculates commission from the remaining produ
 await check('empty order, nonpositive total and invalid quantities still cannot save', async () => {
   const n = updates.length;
   await assert.rejects(writes.updateLiveOrder('order', { items: [], fees: { shipping: 100 } }), /at least one product/);
-  await assert.rejects(writes.updateLiveOrder('order', { items: [fixture().detail.items[0]], fees: {} }), /total must be greater/);
+  await assert.rejects(writes.updateLiveOrder('order', { items: [fixture().detail.items[0]], fees: { shipping: 100 } }), /at least one product/);
+  await assert.rejects(writes.updateLiveOrder('order', { items: [{ ...fixture().detail.items[1], price: 0 }], fees: {} }), /total must be greater/);
   for (const quantity of [-1, NaN, Infinity]) {
     assert.throws(() => writes.normalizedItems([{ name: 'Product', quantity }], { allowZeroQuantity: true }), /valid quantity/);
   }

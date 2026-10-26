@@ -944,7 +944,7 @@ async function saveOrderChanges() {
   const scope = activeScope;
   syncLiveFormInputs();
   const lang = currentHelpers?.lang ?? "zh";
-  if (!state.items.length) {
+  if (!state.items.some((item) => Number(item.quantity) > 0)) {
     setNotice(pageT(lang, "orders.validation.items"));
     rerender();
     return;
