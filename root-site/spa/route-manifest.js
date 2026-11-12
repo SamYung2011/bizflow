@@ -1,4 +1,4 @@
-// P6 completed the original 16 routes; Honnmono APP feedback extends the live SPA to 17.
+// Includes the standalone-task redirect and the newer task UI kept off the menus.
 import { createRouteFrame, routeMenuKey } from "./route-menu.js";
 import { rootSiteUrl } from "../components/root-site-url.js";
 
@@ -23,6 +23,7 @@ export const spaRouteAllowlist = Object.freeze([
   "/bizflow/expense.html",
   "/bizflow/whatsapp.html",
   "/team/index.html",
+  "/team/new.html",
   "/team/members.html"
 ]);
 
@@ -94,6 +95,8 @@ const routes = [
     "../bizflow/app-feedback.css"
   ], () => import("../bizflow/app-feedback.js")),
   route("/team/index.html", "team", "../team/legacy-tasks.js", [], () => import("../team/legacy-tasks.js")),
+  route("/team/new.html", "team", "../team/tasks.js", ["../components/date-range-panel.css", "../team/tasks.css", "../team/tasks-domain.css"], () => import("../team/tasks.js"),
+    () => import("../data/live-team-task-query.js").then((module) => module.prefetchTeamTaskPage())),
   route("/team/members.html", "team", "../team/members.js", ["../team/members.css", "../team/members-domain.css"], () => import("../team/members.js"))
 ];
 

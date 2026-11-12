@@ -33,7 +33,7 @@ async function assetBytes(outputRoot, url) {
 }
 
 async function assertProductionOutput(outputRoot, result) {
-  assert.equal(result.pages.length, 17, "all current SPA business pages must be rewritten");
+  assert.equal(result.pages.length, 18, "all current SPA business pages must be rewritten");
   assert.deepEqual(result.pages, businessPages);
   assert.deepEqual(result.moduleRequests, { initial: 1, spaNavigation: 0 },
     "the atomic SPA bundle must take one initial module request and none on route changes");
@@ -128,4 +128,4 @@ try {
   await rm(tempRoot, { recursive: true, force: true });
 }
 
-console.log("PERF-build-1 root-site contracts: PASS (17 pages, 1+0 modules, reproducible hashes, immutable boundary)");
+console.log("PERF-build-1 root-site contracts: PASS (18 pages, 1+0 modules, reproducible hashes, immutable boundary)");

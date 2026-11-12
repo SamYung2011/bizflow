@@ -85,7 +85,7 @@ function rewriteBusinessHtml(outputRoot, spaUrl, apiOrigin) {
     }
   }
   pages.sort();
-  if (pages.length !== 17) throw new Error(`Expected 17 SPA HTML pages; rewrote ${pages.length}`);
+  if (pages.length !== 18) throw new Error(`Expected 18 SPA HTML pages; rewrote ${pages.length}`);
   return pages;
 }
 

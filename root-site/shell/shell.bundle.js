@@ -1063,6 +1063,7 @@
     "/bizflow/ocpp-finance.html": { section: "bizflow", menuKey: "ocpp-finance", title: "OCPP \u8CA1\u52D9", skeleton: skeleton("dashboard", 4) },
     "/bizflow/app-feedback.html": { section: "bizflow", menuKey: "app-feedback", title: "Honnmono APP \xB7 \u7528\u6236\u53CD\u994B", skeleton: skeleton("table") },
     "/team/index.html": { section: "team", menuKey: "tasks", title: "Honnmono \xB7 Tasks", skeleton: skeleton("board", 3) },
+    "/team/new.html": { section: "team", menuKey: "tasks", title: "Honnmono \xB7 Tasks", skeleton: skeleton("board", 3) },
     "/team/members.html": { section: "team", menuKey: "team", title: "Honnmono \xB7 Team", skeleton: skeleton("dashboard", 4) }
   });
   function createRouteMenu(pathname) {

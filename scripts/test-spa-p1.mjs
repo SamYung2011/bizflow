@@ -38,6 +38,7 @@ const expectedSpaRoutes = [
   "/bizflow/expense.html",
   "/bizflow/whatsapp.html",
   "/team/index.html",
+  "/team/new.html",
   "/team/members.html"
 ];
 
@@ -71,10 +72,10 @@ async function verifyManifest() {
   assert.match(spaEntry, /url\.searchParams\.get\("tpSpa"\)\s*===\s*"0"/, "SPA entry must recognize one-shot document fallback mode");
   assert.match(spaEntry, /mountWithoutRouter\(\)/, "SPA entry must preserve a no-router MPA fallback");
   const routes = Object.values(routeManifest);
-  assert.equal(routes.length, 17, "manifest must enumerate the 17 approved pages");
+  assert.equal(routes.length, 18, "manifest must enumerate the 18 approved pages");
   assert.equal(spaNavigation, true, "SPA master switch must stay enabled");
   assert.equal(spaCrossSectionNavigation, true, "P6 must enable same-document Bizflow/Team navigation");
-  assert.deepEqual([...spaRouteAllowlist], expectedSpaRoutes, "SPA allowlist must contain all 17 routes");
+  assert.deepEqual([...spaRouteAllowlist], expectedSpaRoutes, "SPA allowlist must contain all 18 routes");
   const bizflowFallbackMenu = createRouteMenu("/bizflow/orders-detail.html");
   assert.equal(bizflowFallbackMenu.length, 12, "Bizflow loading shell must expose the complete formal menu including tasks");
   assert.equal(bizflowFallbackMenu.find((item) => item.active)?.key, "nav.orders", "detail routes must highlight their owning domain");
@@ -1043,4 +1044,4 @@ await verifyDataRaceGuards();
 await verifyWriteInvalidateRemount();
 await verifyShellAdapter();
 await verifyTransitions();
-console.log("SPA rollout contracts: PASS (17 migrated routes, cross-section navigation, 30-cycle lifecycle, fallback, shell adapter)");
+console.log("SPA rollout contracts: PASS (18 migrated routes, cross-section navigation, 30-cycle lifecycle, fallback, shell adapter)");
