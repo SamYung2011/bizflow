@@ -35,8 +35,8 @@ run("npx vite build", repoRoot);
 const teamDir = join(repoRoot, "team");
 if (!existsSync(join(teamDir, "node_modules"))) run("npm ci", teamDir);
 run("npx vite build --base=/task-platform/team/ --outDir dist-swap", teamDir, {
-  // 副本挂在旧入口下,「返回 bizflow 主端」应回 /task-platform/ 而非站根
-  VITE_BIZFLOW_URL: "../",
+  // 任务管理恢复使用 Team 整页，返回入口连接当前 BizFlow 首页。
+  VITE_BIZFLOW_URL: "/bizflow/home.html",
 });
 cpSync(join(teamDir, "dist-swap"), join(dist, "task-platform", "team"), { recursive: true });
 

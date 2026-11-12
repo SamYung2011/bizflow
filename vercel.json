@@ -1,6 +1,21 @@
 {
   "redirects": [
     {
+      "source": "/team",
+      "destination": "/task-platform/team/",
+      "permanent": false
+    },
+    {
+      "source": "/team/",
+      "destination": "/task-platform/team/",
+      "permanent": false
+    },
+    {
+      "source": "/team/index.html",
+      "destination": "/task-platform/team/",
+      "permanent": false
+    },
+    {
       "source": "/task-platform/login",
       "destination": "/login/",
       "permanent": false

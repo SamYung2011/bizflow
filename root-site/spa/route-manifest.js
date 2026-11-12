@@ -93,8 +93,7 @@ const routes = [
     "../components/date-range-panel.css",
     "../bizflow/app-feedback.css"
   ], () => import("../bizflow/app-feedback.js")),
-  route("/team/index.html", "team", "../team/tasks.js", ["../components/date-range-panel.css", "../team/tasks.css", "../team/tasks-domain.css"], () => import("../team/tasks.js"),
-    () => import("../data/live-team-task-query.js").then((module) => module.prefetchTeamTaskPage())),
+  route("/team/index.html", "team", "../team/legacy-tasks.js", [], () => import("../team/legacy-tasks.js")),
   route("/team/members.html", "team", "../team/members.js", ["../team/members.css", "../team/members-domain.css"], () => import("../team/members.js"))
 ];
 
