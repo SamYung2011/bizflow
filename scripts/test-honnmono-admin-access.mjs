@@ -38,6 +38,7 @@ runInNewContext(bundle.outputFiles[0].text, {
       return Response.json(rows, { status: employeeStatus });
     }
     upstream.push({ url, options });
+    if (url.pathname === '/package/inspect') return Response.json({ version: { mainver: 1, subver: 20 } });
     return Response.json(upstreamStatus === 404 ? { detail: 'Device not found' } : { ok: true }, { status: upstreamStatus });
   },
 });
@@ -53,7 +54,7 @@ async function request(path, method = 'GET', token = 'fixture-jwt') {
 const adminRoutes = [
   ['/feedback', 'GET'], ['/feedback/1', 'GET'], ['/feedback/1/log-link', 'POST'],
   ['/devices/flash/A/unbind', 'POST'],
-  ['/ota/package', 'POST'], ['/ota/legacy-packages', 'GET'],
+  ['/ota/package', 'POST'], ['/ota/package/inspect', 'POST'], ['/ota/legacy-packages', 'GET'],
   ['/ota/legacy-packages/150001', 'POST'], ['/sim/lookup', 'GET'], ['/sim/cards', 'GET'],
   ['/sim/cards', 'POST'], ['/sim/cards/import', 'POST'], ['/sim/refresh', 'POST'],
 ];
@@ -196,6 +197,21 @@ await check('missing/invalid JWT and employee lookup failure never forward', asy
   assert.equal((await request('/device/binding')).status, 500);
   assert.equal(upstream.length, 0);
   employeeStatus = 200;
+});
+await check('firmware preview forwards only to the OTA inspection handler', async () => {
+  rows = [{ is_admin: true, active: true }];
+  upstream.length = 0;
+  const body = { filename: 'flash.bin', content_base64: 'AQIDBA==' };
+  const response = await handler(new Request('https://edge.fixture.invalid/honnmono-admin/ota/package/inspect', {
+    method: 'POST', headers: { Authorization: 'Bearer fixture-jwt', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { version: { mainver: 1, subver: 20 } });
+  assert.equal(upstream.length, 1);
+  assert.equal(upstream[0].url.href, env.OTA_ADMIN_URL + '/package/inspect');
+  assert.equal(upstream[0].options.headers['X-Internal-Token'], env.OTA_ADMIN_TOKEN);
+  assert.deepEqual(JSON.parse(upstream[0].options.body), body);
 });
 await check('plain-string backend 404 remains available to the localized frontend error handler', async () => {
   rows = [employee]; upstreamStatus = 404;

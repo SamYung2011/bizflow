@@ -56,6 +56,8 @@ check('all card text has English and French translations in the real provider', 
   for (const lang of ['en', 'fr']) {
     browser.location.search = `?embed=1&lang=${lang}`;
     for (const report of Object.values(fixture)) assert(!/[\u3400-\u9fff]/.test(api.bubble(msg(report)).replaceAll('海旁附近', '')));
+    const duration = lang === 'en' ? 'Duration' : 'Durée';
+    assert(api.bubble(msg(fixture.full)).includes(`<dt>${duration}</dt>`));
     for (const key of Object.keys(api.SUPPORT_CHARGE_COPY.en)) assert(api.SUPPORT_CHARGE_COPY.fr[key]);
   }
 });
@@ -77,6 +79,8 @@ check('business action is explicit, dated, escaped and translated', () => {
   for (const lang of ['zh', 'en', 'fr']) {
     browser.location.search = `?embed=1&lang=${lang}`;
     const html = api.bubble(message);
+    const claim = api.bubble({ ...message, supportAction: { ...message.supportAction, kind: 'claim' } });
+    assert(claim.includes(`<h3>${{ zh: '出險個案', en: 'Insurance claim', fr: 'Sinistre' }[lang]} · `));
     assert(html.includes('support-customer-action')); assert(html.includes('2026')); assert(html.includes('&lt;script&gt;'));
     assert(!html.includes('readable action fallback'));
     if (lang !== 'zh') assert(!/[\u3400-\u9fff]/.test(html));

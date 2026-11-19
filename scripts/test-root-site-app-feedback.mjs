@@ -846,6 +846,7 @@ const otaController = createOtaPackageController({
   encodeFile: async () => "AQIDBA==",
   request: async (path, options = {}) => {
     otaCalls.push([path, options]);
+    if (path === "/ota/package/inspect") return { version: null };
     if (path === "/ota/legacy-packages") {
       return {
         items: [
@@ -902,12 +903,12 @@ const otaController = createOtaPackageController({
 });
 await otaController.load();
 assert.equal(otaState.packageInfo.current.filename, "gbccs24.bin");
-otaController.selectFile(otaFile);
+await otaController.selectFile(otaFile);
 otaController.setVersionInput("1");
 otaController.openConfirm();
 assert.equal(otaState.confirmOpen, false);
 assert.equal(otaState.versionError.code, "otaVersionFormat");
-assert.equal(otaCalls.length, 2);
+assert.equal(otaCalls.length, 3);
 otaController.setVersionInput("1.20");
 otaController.openConfirm();
 assert.equal(otaState.confirmOpen, true);
@@ -915,10 +916,11 @@ await otaController.submit();
 assert.deepEqual(otaCalls.map(([path, options]) => [path, options.method || "GET"]), [
   ["/ota/package", "GET"],
   ["/ota/legacy-packages", "GET"],
+  ["/ota/package/inspect", "POST"],
   ["/ota/package", "POST"],
   ["/ota/package", "GET"],
 ]);
-assert.deepEqual(otaCalls[2][1].body, {
+assert.deepEqual(otaCalls[3][1].body, {
   filename: "gbccs25.bin",
   content_base64: "AQIDBA==",
   mainver: 1,
@@ -1005,6 +1007,7 @@ const racingController = createOtaPackageController({
   encodeFile: async () => "AQIDBA==",
   request: async (path, options = {}) => {
     if (path === "/ota/legacy-packages") return { items: [] };
+    if (path === "/ota/package/inspect") return { version: null };
     if (options.method === "POST") {
       assert.equal("mainver" in options.body, false);
       assert.equal("subver" in options.body, false);
@@ -1022,7 +1025,7 @@ const racingController = createOtaPackageController({
   },
 });
 const racingLoad = racingController.load();
-racingController.selectFile(otaFile);
+await racingController.selectFile(otaFile);
 racingController.openConfirm();
 const racingSubmit = racingController.submit();
 await Promise.resolve();
@@ -2277,6 +2280,7 @@ await liveCheck("all live-device copy is present in three languages", () => {
 console.log(`DEVICE_PAGE_LIVE=${deviceLiveChecks}/${deviceLiveChecks}`);
 
 await import("./test-app-feedback-live-r2.mjs");
+await import("./test-app-feedback-firmware-version.mjs");
 await import("./test-session-calendar-days.mjs");
 
 console.log(

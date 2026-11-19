@@ -1,5 +1,6 @@
 import React from 'react';
 import { useT } from '../../../i18n.jsx';
+import { SUPPORT_CHARGE_COPY } from '../../../lib/supportChargeCopy.js';
 import './charge-report.css';
 
 const KINDS = { northbound: '港車北上申請', claim: '出險個案', enquiry: '車保報價資料', policy: '保單' };
@@ -14,9 +15,11 @@ export function isCustomerAction(message) {
 
 export default function CustomerActionCard({ action }) {
   const { t, lang } = useT();
+  const kind = KINDS[action.kind];
+  const title = SUPPORT_CHARGE_COPY[lang]?.[kind] ?? t(kind);
   return <section className="support-charge-report support-customer-action" aria-label={t('客戶操作')}>
     <span className="support-operation-label">{t('客戶操作')}</span>
-    <h3>{t(KINDS[action.kind])} · {t(ACTIONS[action.action])}</h3>
+    <h3>{title} · {t(ACTIONS[action.action])}</h3>
     <dl><div><dt>{t('業務編號')}</dt><dd>{action.reference}</dd></div>
       <div><dt>{t('操作時間')}</dt><dd>{new Intl.DateTimeFormat(lang === 'zh' ? 'zh-HK' : lang === 'fr' ? 'fr-FR' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Hong_Kong' }).format(action.occurredAt)}</dd></div></dl>
     {Array.isArray(action.staffAdvice) && action.staffAdvice.length > 0 && <div className="support-charge-advice">

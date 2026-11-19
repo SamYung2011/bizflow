@@ -125,6 +125,9 @@ export function mapOtaAdminPath(pathname, method) {
   if (["GET", "POST"].includes(method) && normalized === "/ota/package") {
     return "/package";
   }
+  if (method === "POST" && normalized === "/ota/package/inspect") {
+    return "/package/inspect";
+  }
   if (method === "GET" && normalized === "/devices/flash") {
     return "/devices/flash";
   }

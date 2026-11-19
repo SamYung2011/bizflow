@@ -301,6 +301,9 @@ test("maps only the OTA package read and replace routes", () => {
   assert.equal(mapOtaAdminPath("/ota/package", "GET"), "/package");
   assert.equal(mapOtaAdminPath("/ota/package/", "POST"), "/package");
   assert.equal(mapOtaAdminPath("/ota/package", "DELETE"), "");
+  assert.equal(mapOtaAdminPath("/ota/package/inspect", "POST"), "/package/inspect");
+  assert.equal(mapOtaAdminPath("/ota/package/inspect", "GET"), "");
+  assert.equal(isMainAccessRoute("/ota/package/inspect", "POST"), false);
   assert.equal(mapOtaAdminPath("/ota/backups", "GET"), "");
   assert.equal(mapOtaAdminPath("/package", "GET"), "");
 });

@@ -18,6 +18,7 @@ export function createOtaPackageState() {
     selectedFile: null,
     selectError: null,
     versionInput: "",
+    versionStatus: "idle",
     versionError: null,
     uploadLoading: false,
     uploadError: null,
@@ -148,6 +149,8 @@ export function createOtaPackageController({
 }) {
   const isCurrent = (sequence) =>
     isActive() && sequence === otaState.requestSequence;
+  let selectionSequence = 0;
+  let selectedContent = null;
 
   async function load({ includeLegacy = true } = {}) {
     if (otaState.loading || otaState.uploadLoading) return;
@@ -181,16 +184,49 @@ export function createOtaPackageController({
     }
   }
 
-  function selectFile(file) {
+  async function selectFile(file) {
+    if (otaState.uploadLoading) return;
+    const selection = ++selectionSequence;
+    const isSelected = () => isActive() && selection === selectionSequence;
+    selectedContent = null;
     otaState.uploadError = null;
     otaState.uploadResult = null;
     otaState.confirmOpen = false;
     otaState.selectedFile = file || null;
     otaState.selectError = file ? validateOtaFile(file) : null;
+    otaState.versionInput = "";
+    otaState.versionError = null;
+    otaState.versionStatus = file && !otaState.selectError ? "reading" : "idle";
     rerender();
+    if (otaState.versionStatus !== "reading") return;
+    try {
+      const content = await encodeFile(file);
+      if (!isSelected()) return;
+      selectedContent = content;
+      const result = await request("/ota/package/inspect", {
+        method: "POST",
+        signal: scope.signal,
+        body: { filename: file.name, content_base64: content },
+      });
+      if (!isSelected()) return;
+      if (result?.version === null) {
+        otaState.versionStatus = "manual";
+      } else {
+        const version = otaVersionText(result?.version);
+        if (!version) throw new Error("Invalid firmware version response");
+        otaState.versionInput = version;
+        otaState.versionStatus = "firmware";
+      }
+    } catch (_) {
+      if (!isSelected()) return;
+      otaState.versionStatus = "error";
+      if (selectedContent === null) otaState.selectError = new HonnmonoAdminError("otaFileReadError");
+    }
+    if (isDeviceTab()) rerender();
   }
 
   function setVersionInput(value) {
+    if (["reading", "firmware"].includes(otaState.versionStatus)) return null;
     otaState.versionInput = typeof value === "string" ? value : "";
     otaState.versionError = validateOtaVersion(otaState.versionInput);
     otaState.uploadError = null;
@@ -199,12 +235,12 @@ export function createOtaPackageController({
   }
 
   function openConfirm() {
-    const fileError = validateOtaFile(otaState.selectedFile);
+    const fileError = otaState.selectError || validateOtaFile(otaState.selectedFile);
     const versionError = validateOtaVersion(otaState.versionInput);
     otaState.selectError = fileError;
     otaState.versionError = versionError;
     otaState.uploadError = null;
-    if (fileError || versionError || otaState.uploadLoading) {
+    if (fileError || versionError || otaState.uploadLoading || otaState.versionStatus === "reading") {
       rerender();
       return;
     }
@@ -254,6 +290,7 @@ export function createOtaPackageController({
   }
 
   async function submit() {
+    if (!otaState.confirmOpen || otaState.versionStatus === "reading" || selectedContent === null) return;
     const file = otaState.selectedFile;
     const fileError = validateOtaFile(file);
     const versionError = validateOtaVersion(otaState.versionInput);
@@ -272,24 +309,20 @@ export function createOtaPackageController({
     otaState.loadError = null;
     rerender();
     try {
-      let contentBase64;
-      try {
-        contentBase64 = await encodeFile(file);
-      } catch (_) {
-        throw new HonnmonoAdminError("otaFileReadError");
-      }
       const result = await request("/ota/package", {
         method: "POST",
         signal: scope.signal,
         body: {
           filename: file.name,
-          content_base64: contentBase64,
+          content_base64: selectedContent,
           ...(version || {}),
         },
       });
       if (!isCurrent(sequence)) return;
       otaState.uploadResult = result;
       otaState.selectedFile = null;
+      selectedContent = null;
+      otaState.versionStatus = "idle";
       otaState.selectError = null;
       otaState.versionInput = "";
       otaState.versionError = null;
@@ -399,7 +432,7 @@ function formatSize(size, t) {
   return t("otaSizeMb", { size: (bytes / (1024 * 1024)).toFixed(2) });
 }
 
-function formatVersion(version, t) {
+export function otaVersionText(version) {
   const mainver = version?.mainver;
   const subver = version?.subver;
   if (
@@ -410,7 +443,7 @@ function formatVersion(version, t) {
     !Number.isSafeInteger(subver) ||
     subver < 0
   ) {
-    return t("otaVersionNotRecorded");
+    return "";
   }
   return `${mainver}.${subver}`;
 }
@@ -432,6 +465,12 @@ export function renderOtaPackage({
     ? otaState.legacyPackages
     : [];
   const selected = otaState.selectedFile;
+  const readingVersion = otaState.versionStatus === "reading";
+  const detectedVersion = otaState.versionStatus === "firmware";
+  const formatVersion = (version) => {
+    const value = otaVersionText(version);
+    return value ? `V${value}` : t("otaVersionNotRecorded");
+  };
   const detailRow = (labelKey, value, { mono = false } = {}) =>
     `<div class="app-feedback-device-detail${mono ? " app-feedback-device-detail--mono" : ""}"><dt>${rawE(t(labelKey))}</dt><dd>${e(value)}</dd></div>`;
 
@@ -440,7 +479,7 @@ export function renderOtaPackage({
     : current
       ? `<dl class="app-feedback-device-details app-feedback-ota-current">
           ${detailRow("otaFilename", current.filename, { mono: true })}
-          ${detailRow("otaVersion", formatVersion(current.version, t), { mono: true })}
+          ${detailRow("otaVersion", formatVersion(current.version), { mono: true })}
           ${detailRow("otaFileSize", formatSize(current.size, t))}
           ${detailRow("otaMd5", current.md5, { mono: true })}
           ${detailRow("otaChangedAt", formatTime(current.mtime))}
@@ -450,7 +489,7 @@ export function renderOtaPackage({
   const backupList = backups.length
     ? `<ul class="app-feedback-ota-backups">${backups
         .map(
-          (backup) => `<li><span>${e(backup.filename)}</span><time>${e(formatTime(backup.mtime))}</time></li>`,
+          (backup) => `<li><span>${e(backup.filename)} · ${e(formatVersion(backup.version))}</span><time>${e(formatTime(backup.mtime))}</time></li>`,
         )
         .join("")}</ul>`
     : `<p class="app-feedback-ota-muted">${rawE(t("otaNoBackups"))}</p>`;
@@ -462,7 +501,7 @@ export function renderOtaPackage({
           <p>${rawE(t("otaConfirmText"))}</p>
           <dl class="app-feedback-device-confirm__details">
             ${detailRow("otaFilename", selected.name, { mono: true })}
-            ${detailRow("otaVersion", formatVersion(parseOtaVersion(otaState.versionInput), t), { mono: true })}
+            ${detailRow("otaVersion", formatVersion(parseOtaVersion(otaState.versionInput)), { mono: true })}
             ${detailRow("otaFileSize", formatSize(selected.size, t))}
           </dl>
           <div class="app-feedback-device-confirm__actions">
@@ -559,14 +598,16 @@ export function renderOtaPackage({
         <input id="app-feedback-ota-file" type="file" accept=".bin" data-ota-file${otaState.uploadLoading ? " disabled" : ""}>
       </label>
       <div class="app-feedback-ota-selection">${selected ? `${e(selected.name)} · ${e(formatSize(selected.size, t))}` : rawE(t("otaNoFileSelected"))}</div>
-      <label class="app-feedback-ota-version" for="app-feedback-ota-version">
-        <span>${rawE(t("otaVersion"))}</span>
-        <input id="app-feedback-ota-version" type="text" inputmode="numeric" autocomplete="off" pattern="[0-9]+[.][0-9]+" value="${rawE(otaState.versionInput)}" placeholder="${rawE(t("otaVersionPlaceholder"))}" data-ota-version${otaState.uploadLoading ? " disabled" : ""}>
-      </label>
+      ${readingVersion ? `<p role="status">${rawE(t("otaVersionReading"))}</p>` : ""}
+      ${otaState.versionStatus === "error" ? `<p role="status">${otaState.selectError ? "" : rawE(t("otaVersionPreviewError"))} <button type="button" class="app-feedback-button" data-ota-inspect-retry${otaState.uploadLoading ? " disabled" : ""}>${rawE(t("otaVersionRetry"))}</button></p>` : ""}
+      ${selected && !otaState.selectError && !readingVersion ? `<label class="app-feedback-ota-version" for="app-feedback-ota-version">
+        <span>${rawE(t(detectedVersion ? "otaVersionDetected" : "otaVersionManual"))}</span>
+        <input id="app-feedback-ota-version" type="text" inputmode="decimal" autocomplete="off" value="${rawE(detectedVersion ? "V" + otaState.versionInput : otaState.versionInput)}" placeholder="${rawE(t("otaVersionPlaceholder"))}" data-ota-version${detectedVersion ? " readonly" : ' pattern="[0-9]+[.][0-9]+"'}${otaState.uploadLoading ? " disabled" : ""}>
+      </label>` : ""}
       ${otaState.selectError ? `<div class="app-feedback-alert">${rawE(errorCopy(otaState.selectError))}</div>` : ""}
       ${otaState.versionError ? `<div class="app-feedback-alert">${rawE(errorCopy(otaState.versionError))}</div>` : ""}
       ${otaState.uploadError ? `<div class="app-feedback-alert">${rawE(t("otaReplaceError", { message: errorCopy(otaState.uploadError) }))}</div>` : ""}
-      <button type="button" class="app-feedback-button app-feedback-button--primary" data-ota-replace${!selected || otaState.selectError || otaState.uploadLoading ? " disabled" : ""}>${rawE(t(otaState.uploadLoading ? "otaReplacing" : "otaReplacePackage"))}</button>
+      <button type="button" class="app-feedback-button app-feedback-button--primary" data-ota-replace${!selected || readingVersion || otaState.selectError || otaState.uploadLoading ? " disabled" : ""}>${rawE(t(otaState.uploadLoading ? "otaReplacing" : "otaReplacePackage"))}</button>
       ${otaState.uploadResult ? `<div class="app-feedback-ota-success" aria-live="polite"><strong>${rawE(t("otaReplaceSuccess"))}</strong><span>${rawE(t("otaServerMd5"))}: <code>${e(otaState.uploadResult.md5)}</code></span><p>${rawE(t("otaMd5Hint"))}</p></div>` : ""}
     </section>
     <section class="app-feedback-ota-section">

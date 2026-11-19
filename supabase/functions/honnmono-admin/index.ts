@@ -10,6 +10,7 @@
 //   POST /honnmono-admin/device/unbind
 //   GET  /honnmono-admin/ota/package
 //   POST /honnmono-admin/ota/package
+//   POST /honnmono-admin/ota/package/inspect
 //   GET  /honnmono-admin/devices/{flash|dc-pro}
 //   GET  /honnmono-admin/devices/{kind}/{certid}/sessions
 //   GET  /honnmono-admin/devices/flash/{certid}/uploads/{id}
@@ -194,6 +195,7 @@ Deno.serve(async (req) => {
     /^\/devices\/flash\/[A-Za-z0-9_-]{1,64}\/unbind\/?$/.test(subPath);
   const isOtaRequest =
     subPath === "/ota/package" ||
+    subPath === "/ota/package/inspect" ||
     (subPath.startsWith("/devices/flash") && !isFlashAdminRequest) ||
     isLegacyPackageWrite;
   const needsHonnmonoEnv =

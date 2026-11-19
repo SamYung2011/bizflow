@@ -22,6 +22,8 @@ import {
 import {
   createOtaPackageController,
   createOtaPackageState,
+  otaVersionText,
+  parseOtaVersion,
   renderOtaPackage,
 } from "./app-feedback-ota.js";
 import {
@@ -192,6 +194,12 @@ export function adapterOtaPackages(packageInfo) {
   return [packageInfo?.current, ...(packageInfo?.backups || [])]
     .filter((item) => item?.filename)
     .map((item) => ({ ...item }));
+}
+
+export function selectAdapterOtaPackage(confirm, filename) {
+  const item = confirm.packages.find((entry) => entry.filename === filename);
+  confirm.package = item?.filename || "";
+  confirm.versionInput = otaVersionText(item?.version);
 }
 
 export function canUseDeviceUnbind(currentUser, session) {
@@ -610,6 +618,7 @@ function renderAdapterActionConfirm() {
   if (!confirm) return "";
   const device = confirm.device;
   const packages = Array.isArray(confirm.packages) ? confirm.packages : [];
+  const detectedVersion = packages.find((item) => item.filename === confirm.package)?.versionSource === "firmware";
   const actionKey = {
     unbind: state.adapters.kind === "flash" ? "flashUnbindDevice" : "unbindDevice",
     force_ota: "forceOta",
@@ -630,12 +639,15 @@ function renderAdapterActionConfirm() {
       ${confirm.action === "force_ota" ? `<label class="app-feedback-ota-file">
         <span>${rawE(t("chooseOtaPackage"))}</span>
         <select class="app-feedback-control" data-adapter-action-package>
-          ${packages.map((item) => `<option value="${rawE(item.filename)}"${item.filename === confirm.package ? " selected" : ""}>${e(item.filename)}</option>`).join("")}
+          ${packages.map((item) => {
+            const version = otaVersionText(item.version);
+            return `<option value="${rawE(item.filename)}"${item.filename === confirm.package ? " selected" : ""}>${e(item.filename)}${version ? " · V" + version : ""}</option>`;
+          }).join("")}
         </select>
       </label>
       <label class="app-feedback-ota-version">
-        <span>${rawE(t("otaVersionOverride"))}</span>
-        <input type="text" class="app-feedback-control" value="${rawE(confirm.versionInput || "")}" placeholder="${rawE(t("otaVersionPlaceholder"))}" data-adapter-action-version>
+        <span>${rawE(t(detectedVersion ? "otaVersionDetected" : "otaVersionOverride"))}</span>
+        <input type="text" class="app-feedback-control" value="${rawE(detectedVersion ? "V" + confirm.versionInput : confirm.versionInput || "")}" placeholder="${rawE(t("otaVersionPlaceholder"))}" data-adapter-action-version${detectedVersion ? " readonly" : ""}>
       </label>` : ""}
       ${state.adapters.actionError ? `<div class="app-feedback-alert">${rawE(t("deviceActionError", { message: deviceErrorCopy(state.adapters.actionError) }))}</div>` : ""}
       <div class="app-feedback-device-confirm__actions">
@@ -1400,9 +1412,10 @@ async function beginAdapterAction(action, id) {
     action,
     device,
     packages,
-    package: action === "force_ota" ? packages[0]?.filename || "" : "",
+    package: "",
     versionInput: "",
   };
+  if (action === "force_ota") selectAdapterOtaPackage(state.adapters.actionConfirm, packages[0]?.filename);
   rerender();
 }
 
@@ -1447,16 +1460,12 @@ async function submitAdapterAction() {
         return;
       }
       body.package = confirm.package;
-      const version = String(confirm.versionInput || "").trim();
-      if (version) {
-        const match = version.match(/^(\d+)\.(\d+)$/);
-        if (!match) {
-          state.adapters.actionError = new HonnmonoAdminError("otaVersionFormat");
-          rerender();
-          return;
-        }
-        body.mainver = Number(match[1]);
-        body.subver = Number(match[2]);
+      try {
+        Object.assign(body, parseOtaVersion(confirm.versionInput));
+      } catch (error) {
+        state.adapters.actionError = error;
+        rerender();
+        return;
       }
     }
   }
@@ -1826,6 +1835,10 @@ function onFeedbackClick(event) {
     activeOtaController?.openConfirm();
     return;
   }
+  if (event.target.closest?.("[data-ota-inspect-retry]")) {
+    void activeOtaController?.selectFile(state.ota.selectedFile);
+    return;
+  }
   if (
     event.target.matches?.("[data-ota-confirm-overlay]") ||
     event.target.closest?.("[data-ota-confirm-cancel]")
@@ -1953,7 +1966,9 @@ function onFeedbackChange(event) {
   }
   if (event.target.matches("[data-adapter-action-package]")) {
     if (state.adapters.actionConfirm) {
-      state.adapters.actionConfirm.package = event.target.value;
+      selectAdapterOtaPackage(state.adapters.actionConfirm, event.target.value);
+      state.adapters.actionError = null;
+      rerender();
     }
     return;
   }

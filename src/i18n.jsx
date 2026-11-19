@@ -4425,8 +4425,11 @@ Object.assign(DICT_FR, {
   "上傳失敗：{name}（{reason}）": "Échec de l’envoi : {name} ({reason})"
 });
 
-Object.assign(DICT_EN, PROMPT_COPY.en, SUPPORT_CHARGE_COPY.en);
-Object.assign(DICT_FR, PROMPT_COPY.fr, SUPPORT_CHARGE_COPY.fr);
+Object.assign(DICT_EN, PROMPT_COPY.en);
+Object.assign(DICT_FR, PROMPT_COPY.fr);
+for (const [dictionary, supportCopy] of [[DICT_EN, SUPPORT_CHARGE_COPY.en], [DICT_FR, SUPPORT_CHARGE_COPY.fr]]) {
+  for (const [key, label] of Object.entries(supportCopy)) dictionary[key] ??= label;
+}
 
 export function I18nProvider({ children }) {
   const [lang, setLangState] = useState(() => {
